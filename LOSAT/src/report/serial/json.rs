@@ -56,6 +56,11 @@ impl<'b> JsonEncoder<'b> {
         encoder
     }
 
+    /// The length of the output written so far (`XmlEncoder::written`).
+    pub fn written(&self) -> usize {
+        self.out.len()
+    }
+
     /// `COStreamBuffer::PutEol` with its flag true (`asn_text::AsnTextEncoder::eol`).
     fn eol(&mut self) {
         self.out.push(b'\n');

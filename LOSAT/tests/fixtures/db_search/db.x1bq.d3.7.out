@@ -1,0 +1,13 @@
+# BLASTN 2.17.0+
+# Query: qA
+# Database: tests/db_search/x1bp/d3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qA	s_minus3	100.000	200	0	0	1	200	200	1	6.42e-105	367
+qA	s_plus3	100.000	200	0	0	801	1000	1	200	6.42e-105	367
+# BLASTN 2.17.0+
+# Query: qB
+# Database: tests/db_search/x1bp/d3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+qB	s_minus3	100.000	200	0	0	603	802	200	1	1.88e-105	367

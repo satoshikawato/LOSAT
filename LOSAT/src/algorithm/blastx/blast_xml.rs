@@ -1074,6 +1074,8 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
+/// `labelled`: no written result shows the query's names (`query_batch::names_unshown_in`), so it
+/// has its message alone (`names::labelled_query_text`).
 fn query_text(
     program: &str,
     query: &FastaRecord,
@@ -1081,6 +1083,7 @@ fn query_text(
     filtered_empty: bool,
     has_hits: bool,
     merged_volumes: bool,
+    labelled: bool,
 ) -> Result<QueryText> {
     // RPSTBLASTN's results of several volumes keep no warning (`report::query_warning`).
     let messages = if merged_volumes {
@@ -1088,6 +1091,14 @@ fn query_text(
     } else {
         query_messages(query, search_skipped, filtered_empty)
     };
+    if labelled {
+        return Ok(names::labelled_query_text(
+            query.warning_id(),
+            &query.title,
+            &messages,
+            has_hits,
+        ));
+    }
     names::query_text(
         program,
         query.internal_id.as_bytes(),
@@ -1138,7 +1149,7 @@ pub(super) struct QueryScan {
 pub(super) fn prescan_queries(
     file: crate::blastinput::input_files::InputFile,
     query: &std::path::Path,
-    settings: &super::input::QueryStreamSettings,
+    settings: &super::input_source::QueryStreamSettings,
     options: &ResolvedOptions,
     lowercase: bool,
     batch_size: usize,
@@ -1176,7 +1187,7 @@ pub(super) fn prescan_queries(
 /// The read of `prescan_queries` on its stream of the query file.
 #[allow(clippy::too_many_arguments)]
 fn scan_query_stream<R: std::io::Read>(
-    stream: &mut super::input::FastaStream<R>,
+    stream: &mut super::input_source::QueryStream<R>,
     options: &ResolvedOptions,
     lowercase: bool,
     batch_size: usize,
@@ -1190,18 +1201,7 @@ fn scan_query_stream<R: std::io::Read>(
         holds_back,
         checks_titles,
         query_scopes,
-        &mut |deliver| {
-            super::input::read_fasta_stream_batches(
-                stream,
-                false,
-                lowercase,
-                batch_size,
-                false,
-                range,
-                deliver,
-                &mut |_| Ok(()),
-            )
-        },
+        &mut |deliver| stream.read_batches(lowercase, batch_size, range, deliver, &mut |_| Ok(())),
     )
 }
 
@@ -1237,10 +1237,11 @@ pub(super) fn scan_queries(
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
-    // The queries of the batches that the run writes, and the check of the last of them while
-    // the document holds its report back.
+    // The queries of the batches that the run writes, and the checks of the queries of the report
+    // that the document holds back (the last query's, with those before it whose results it
+    // joins, `XmlShow::joins_held`), made when that report is written.
     let mut written = 0usize;
-    let mut held: Option<Result<()>> = None;
+    let mut held: Vec<Result<()>> = Vec::new();
     // The batches added to the scopes, and the refusals of the batches: those that the run's XML
     // failure for its matrix name may take (`ScopeRefusal::xml_takes`), after which the read goes
     // on, and the one that ends it.
@@ -1273,25 +1274,38 @@ pub(super) fn scan_queries(
             written += batch.len();
             return Ok(());
         }
-        // The next batch is written: so is the report held before it.
-        if let Some(check) = held.take() {
-            check?;
-        }
         for (index, query) in batch.iter().enumerate() {
-            let check = query_text(
-                options.program().upper,
-                query,
-                false,
-                false,
-                true,
-                options.merged_volumes(),
-            )
-            .map(drop);
-            if holds_back && index + 1 == batch.len() {
-                held = Some(check);
+            let show = crate::blastinput::query_batch::QueryScopes::xml_show(
+                query_scopes.as_ref(),
+                written + index,
+            );
+            // Check the record whose title this result actually shows: a result that joins a held
+            // report shows the held report's lead, not its own record; one with a batch label
+            // shows that earlier record of the batch when this result is written.
+            let check = if holds_back && show.joins_held {
+                Ok(())
             } else {
+                let shown = show.label.map_or(query, |label| &batch[label - written]);
+                query_text(
+                    options.program().upper,
+                    shown,
+                    false,
+                    false,
+                    true,
+                    options.merged_volumes(),
+                    false,
+                )
+                .map(drop)
+            };
+            if !holds_back {
                 check?;
+                continue;
             }
+            // A query whose result does not join the held report makes it written.
+            if !show.joins_held {
+                held.drain(..).try_for_each(|check| check)?;
+            }
+            held.push(check);
         }
         written += batch.len();
         Ok(())
@@ -1301,9 +1315,7 @@ pub(super) fn scan_queries(
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
         Ok(()) => {
-            if let Some(check) = held {
-                check?;
-            }
+            held.into_iter().try_for_each(|check| check)?;
             Ok(scan)
         }
         Err(_) => {
@@ -1400,8 +1412,9 @@ pub(super) fn xml2_writer(
         cbs: i32::from(options.composition),
         query_gencode: Some(i32::from(options.query_gencode)),
         db_gencode: None,
+        program_type: options.program_type(),
     };
-    let delayed = params.target.holds_back();
+    let delayed = params.holds_back();
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
@@ -1441,7 +1454,9 @@ pub(super) fn xml_matrix_failure(
 /// other byte NCBI's stream writes or fails at by itself (`report::serial::xml`). A run that stops after
 /// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
 /// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
-/// the first `Hit` that needs them, those of the batch's prefetch where it begins.
+/// the first `Hit` that needs them, those of the batch's prefetch where it begins. Under
+/// `-parse_deflines`, `query_scopes` are the run's scopes of the call's queries, how NCBI shows
+/// each query's result (`QueryScopesFrom::xml_show`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
     writer: &mut impl crate::report::ostream::ReportWrite,
@@ -1455,6 +1470,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     queries_before: usize,
     stops: bool,
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
@@ -1513,10 +1529,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     };
     // The definition line and message of every query, and the names of the subjects with hits,
     // made (and refused) before the first byte, for the written reports.
+    let shows = |query: usize| crate::blastinput::query_batch::xml_show_of(query_scopes, query);
+    let call_queries: usize = batches.iter().map(|batch| batch.queries.len()).sum();
     let reports = written_queries(
-        batches.iter().map(|batch| batch.queries.len()).sum(),
+        call_queries,
         stops,
         document.holds_back(),
+        crate::blastinput::query_batch::held_start_of(query_scopes, call_queries),
     );
     // The refusal of the database counts that the written reports would print, before any byte
     // of the batch (`StructuredXml::start`; the XML2 and JSON documents' start came with the
@@ -1546,10 +1565,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // (`TrimSeqAlign` counts following Seq-aligns of matching subject ids as one, as
     // `PruneSeqalign`): RPSTBLASTN's merged lists of several volumes, cut once per query
     // (`BatchResults::shown_lists`); every list otherwise.
-    for batch in batches {
+    'batches: for batch in batches {
         for qidx in 0..batch.queries.len() {
             if texts.len() == reports {
-                break;
+                break 'batches;
             }
             let lists = batch.shown_lists(qidx, options);
             if let Some(scopes) = &generated_scopes {
@@ -1572,6 +1591,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 options.filtered_empty,
                 has_hits,
                 options.merged_volumes(),
+                crate::blastinput::query_batch::names_unshown_in(
+                    query_scopes,
+                    reports,
+                    document.holds_back(),
+                    batch.query_ordinal + qidx,
+                ),
             )?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if let std::collections::hash_map::Entry::Vacant(slot) =
@@ -1603,16 +1628,19 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     .printer();
     // The rows of one HSP at a time, reused.
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
-    let mut texts = texts.iter();
-    for batch in batches {
+    // The queries written so far, by their texts.
+    let mut written = 0usize;
+    'batches: for batch in batches {
         for qidx in 0..batch.queries.len() {
             // The lists that the cut keeps, as above.
             let lists = batch.shown_lists(qidx, options);
-            let query = &queries[batch.query_ordinal + qidx];
-            let Some(text) = texts.next() else {
+            let ordinal = batch.query_ordinal + qidx;
+            let query = &queries[ordinal];
+            let show = shows(ordinal);
+            let Some(text) = texts.get(written) else {
                 // The held report that is never written (`written_queries`); the one held before
                 // it is written, or fails (`CaughtException`: its message follows).
-                let post = match document.unwritten(&mut buf) {
+                let post = match document.unwritten(&mut buf, show.joins_held) {
                     Ok(()) => None,
                     Err(error) => match error.downcast::<CaughtException>() {
                         Ok(CaughtException(exception)) => {
@@ -1632,7 +1660,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     diagnostics.write_all(&post)?;
                     diagnostics.flush()?;
                 }
-                break;
+                break 'batches;
             };
             // NCBI's prefetch of the batch, where it begins (`TaxdbPrinter::batch_texts`).
             let prefetch = taxdb_printer.batch_texts(batch.query_ordinal + qidx);
@@ -1641,21 +1669,26 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 diagnostics.write_all(&prefetch)?;
                 diagnostics.flush()?;
             }
-            let length = query.sequence.len();
+            // The query whose id, title and length the result shows (`XmlShow::label`; its text
+            // is that many texts back, the texts being in the order of the queries).
+            let label = show.label.unwrap_or(ordinal);
+            let label_text = &texts[written - (ordinal - label)];
+            written += 1;
             // A record cut to `-query_loc`: `query-len` is the interval's, the coordinates and
             // frames the record's (`RemapToQueryLoc`, `report::alignment`).
             let place = query.placement();
             let masks = query_masks(batch, qidx, query);
             let xml_query = XmlQuery {
-                id: text.query_id(query.internal_id.as_bytes()),
-                title: &text.title,
-                len: i32::try_from(length)?,
+                id: label_text.query_id(queries[label].internal_id.as_bytes()),
+                title: &label_text.title,
+                len: i32::try_from(queries[label].sequence.len())?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
                 // Read by XML2 and JSON alone: a query without NCBI's alignment set
                 // (`BatchResults::has_alignment_set`).
                 searched: batch.has_alignment_set(options),
                 masks: &masks,
+                joins_held: show.joins_held,
             };
             // The texts of the subjects that the query's report reads one by one, written where
             // NCBI loads the subject of each `Hit` (`HitSink::position`, `ReadCursor`).
@@ -1844,7 +1877,7 @@ pub(super) fn write_xml_epilog(
         Some(xml2) => {
             let finished = xml2.finish(&mut buf).map_err(|error| {
                 // The held report of a `-subject` run that fails (`CaughtException`): its
-                // message, then the end of the document.
+                // message, then the end of the document (`DocumentPosts::place_caught`).
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
                         None,
@@ -1863,9 +1896,10 @@ pub(super) fn write_xml_epilog(
             (finished, document.take_posts())
         }
     };
+    let mut posts = posts;
     let post = match finished {
         Ok(()) => None,
-        Err(Ok(post)) => Some(post),
+        Err(Ok(post)) => posts.place_caught(post),
         Err(Err(error)) => return Err(error),
     };
     if let Some(post) = post {

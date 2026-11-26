@@ -1,0 +1,13 @@
+Seq-entry ::= seq {
+  id { local str "dnodata" },
+  descr { title "delta nodata" },
+  inst {
+    repr delta,
+    mol dna,
+    length 6,
+    ext delta {
+      literal { length 4, seq-data ncbi2na '1B'H },
+      literal { length 2 }
+    }
+  }
+}

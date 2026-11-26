@@ -82,6 +82,19 @@ pub(super) fn check(
     } else {
         Err(no_mode())
     };
+    let checked = checked.and_then(|()| {
+        let out = args.os_value("out").unwrap_or_default();
+        let to_stdout = out == "-"
+            || (out.is_empty()
+                && (args.flag("mk_counts") || args.flag("convert"))
+                && args.value("sformat") == Some("ascii"));
+        if !to_stdout {
+            if let Some(reason) = args.files().refused_output(out) {
+                return Err(Failure::Refused(unsupported(&reason)));
+            }
+        }
+        Ok(())
+    });
     match checked {
         Ok(()) => 0,
         Err(failure) => report(failure, diag),

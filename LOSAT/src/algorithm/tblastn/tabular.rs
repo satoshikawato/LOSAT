@@ -132,6 +132,9 @@ pub(super) struct TblastnTabular<'a> {
     pub matrix: ScoringMatrix,
     /// The program line of outfmt 7 (`program_version`).
     pub program_version: &'static str,
+    /// A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the first row
+    /// whose fields read the query's letters throws (`report::tabular::query_sequence_end`).
+    pub query_other_coding: Option<i32>,
 }
 
 /// The custom tabular report of a checked `-outfmt` value (`TabularSpec::of_app`, tblastn's
@@ -414,6 +417,11 @@ pub(super) fn write_tblastn_tabular(
             );
             let mut translation = None;
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer, &buf, coding,
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // A row that reads the subject (`TabularSpec::subject_fetch`, by the Seq-align's
                 // identities for `nident` alone, `database::reads_subject`) loads it first where

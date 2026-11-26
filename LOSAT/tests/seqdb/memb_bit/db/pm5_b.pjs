@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "pm5_b",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pm5_b",
+  "number-of-letters": 120,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-26T02:40:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49757,
+  "bytes-to-cache": 227,
+  "files": [
+    "pm5_b.pdb",
+    "pm5_b.phr",
+    "pm5_b.pin",
+    "pm5_b.pnd",
+    "pm5_b.pni",
+    "pm5_b.pog",
+    "pm5_b.pos",
+    "pm5_b.pot",
+    "pm5_b.psq",
+    "pm5_b.ptf",
+    "pm5_b.pto"
+  ]
+}

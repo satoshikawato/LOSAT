@@ -1,0 +1,12 @@
+# PSITBLASTN 2.17.0+
+# Query: t
+# Database: tests/db_search/tslice
+# Fields: query id, subject id, s. start, s. end
+# 6 hits found
+t	v_slice	2175	2104
+t	v_slice	7924	7880
+t	v_slice	2672	2622
+t	m_minus	357	223
+t	v_mut_8pct	592	639
+t	v_far_22pct	1978	1949
+# BLAST processed 1 queries

@@ -614,6 +614,14 @@ fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
     report.bytes.extend_from_slice(b"more\n");
     write_html_post(&mut report, &mut posts, b"").unwrap();
     assert_eq!(report.flushed, 5);
+    // The diagnostics as a writer that flushes the report before each post (BLASTX's posts before
+    // a batch's reports; review 1 of line DBID pf7, H2).
+    let mut after = PostsAfterReport::new(&mut report, &mut posts);
+    after
+        .write_all(b"Warning: [blastx] Error pre-fetching sequence data\n")
+        .unwrap();
+    assert_eq!(report.flushed, 10);
+    assert!(posts.ends_with(b"post\nWarning: [blastx] Error pre-fetching sequence data\n"));
     let (mut apart, mut diagnostics) = (Vec::new(), Vec::new());
     html_posts_sink(
         Some(&mut apart as &mut dyn Write),

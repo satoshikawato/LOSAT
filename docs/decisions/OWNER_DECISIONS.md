@@ -349,7 +349,7 @@ entry's number in that log. 137 entries: 22 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| OQ-1126 | 2026-11-26 | Owner | 「承認 A」 | The Owner approved option A for `blastn -task megablast` gap costs above 32767 (PR #1643, line RG item G1): accept `-gapopen` and `-gapextend` up to 2147483647 (matching NCBI BLAST+ 2.17.0 bytes wherever NCBI completes and completing in 64-bit arithmetic over non-empty distances where NCBI's 32-bit arithmetic overflows or dense tables exhaust memory) as approved exception 32 of `PD-LOSAT-NCBI-DEFECTS` (version 1.114). Not taken: option C (refusing values above NCBI's input-length-dependent 32-bit overflow point). | `blastn -task megablast` gap costs > 32767 (G1) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md`, `changelog.d/feature-agy-rg-d-g1.md` |
+| OQ-1126 | 2026-11-26 | Owner | 「承認 A」 | The Owner approved option A for `blastn -task megablast` gap costs above 32767 (PR #1643, line RG item G1): accept `-gapopen` and `-gapextend` up to 2147483647 (matching NCBI BLAST+ 2.17.0 bytes wherever NCBI completes and completing in 64-bit arithmetic over non-empty distances where NCBI's 32-bit arithmetic overflows or dense tables exhaust memory) as approved exception 32 of `PD-LOSAT-NCBI-DEFECTS` (version 1.115). Not taken: option C (refusing values above NCBI's input-length-dependent 32-bit overflow point). | `blastn -task megablast` gap costs > 32767 (G1) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md`, `changelog.d/feature-agy-rg-d-g1.md` |
 
 ### `sf-e2h-20261008`: LOSAT Web stage E2h (the TBLASTX and BLASTP engine entries)
 

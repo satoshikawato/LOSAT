@@ -71,7 +71,8 @@ impl ThrowSite {
     /// source tree, so LOSAT has neither their names and lines nor the function, and leaves
     /// them out (an empty file, line 0, no function). Only the reports that print no place are
     /// made of such an exception ([`NcbiException::report_default_ex`]); its `what()` would not
-    /// name the place that NCBI's names.
+    /// name the place that NCBI's names. A place that a report of BLAST+ 2.17.0 was seen to name
+    /// is a site of its own (`seqdb::isam::OBJECT_ID_GET_ID`).
     pub const fn generated(kind: &'static str) -> ThrowSite {
         ThrowSite {
             file: "",

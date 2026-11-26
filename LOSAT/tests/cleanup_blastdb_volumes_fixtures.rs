@@ -692,20 +692,22 @@ fn unlink_failure_flushes_stdout_before_stderr_and_matches_closed_pipe_exit_stat
         (300, 1, false),
     ] {
         let dir = make_db(&format!("unlink-pipe-{nvol}"), nvol);
-        let out = Command::new("/bin/bash")
-            .arg("-c")
-            .arg("\"$1\" cleanup-blastdb-volumes.py -db db -dbtype prot 2> err.txt | (exec 0<&-; sleep 0.3); exit \"${PIPESTATUS[0]}\"")
-            .arg("bash")
-            .arg(bin)
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let err_file = fs::File::create(dir.join("err.txt")).unwrap();
+        let status = Command::new(bin)
+            .args(["cleanup-blastdb-volumes.py", "-db", "db", "-dbtype", "prot"])
             .current_dir(&dir)
             .env("HOME", &dir)
             .env_remove("BLASTDB")
             .env_remove("NCBI")
-            .output()
+            .stdout(writer)
+            .stderr(err_file)
+            .status()
             .unwrap();
         let err_text = fs::read_to_string(dir.join("err.txt")).unwrap();
         assert_eq!(
-            out.status.code(),
+            status.code(),
             Some(want_rc),
             "nvol={nvol}, err={err_text:?}"
         );

@@ -4517,6 +4517,9 @@ fn run_batch_loop(
                                     &titles,
                                     pairwise.filter(|_| pairwise_first),
                                     &loads,
+                                    first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                    ),
                                 );
                                 let texts = super::super::database::subject_read_texts(
                                     database,

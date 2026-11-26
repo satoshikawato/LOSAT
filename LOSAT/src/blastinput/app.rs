@@ -543,6 +543,16 @@ impl ReportFormat {
                 | CommaSeparatedValuesWithHeader
         )
     }
+
+    /// Whether NCBI's report writer joins adjacent hits whose Seq-align ids match into one `Hit`
+    /// (`Xml`, `Xml2`, `Json`, `Xml2S`, `JsonS`), reading only the first copy's subject Bioseq.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:478-487
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
+    pub fn joins_adjacent_copies(self) -> bool {
+        use ReportFormat::*;
+        matches!(self, Xml | Xml2 | Json | Xml2S | JsonS)
+    }
 }
 
 /// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.

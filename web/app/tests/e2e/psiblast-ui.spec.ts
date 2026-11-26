@@ -101,20 +101,22 @@ test.describe('PSIBLAST and TBLASTN -in_pssm UI', () => {
     await expect(roundSelect).toHaveValue('2');
 
     if (BUILD_HAS_ENGINE) {
+      const checkRound = async (round: string, s0Evalue: string, s0Order?: string) => {
+        await expect(roundSelect).toHaveValue(round);
+        await expect(page.getByTestId('subject-count')).toHaveText('8 shown');
+        const row0 = page.getByTestId('subject-row-0');
+        await expect(row0).toContainText(s0Evalue);
+        await expect(row0.locator('[data-field="hsps"]')).toHaveText('1');
+        if (s0Order !== undefined) await expect(row0).toHaveAttribute('data-order', s0Order);
+      };
       // Round 2: 8 subjects x 1 HSP each; NP_000549.1 (sIdx 0) has E-value 8.24e-18 (rank #2 behind gnl|db|tag7 5.59e-18).
-      await expect(page.getByTestId('subject-count')).toHaveText('8 shown');
-      await expect(page.getByTestId('subject-row-0')).toContainText('8.24e-18');
-      await expect(page.getByTestId('subject-row-0').locator('[data-field="hsps"]')).toHaveText('1');
+      await checkRound('2', '8.24e-18');
       await expect(page.getByTestId('subject-row-3')).toContainText('5.59e-18');
       await expect(page.getByTestId('subject-row-3').locator('[data-field="hsps"]')).toHaveText('1');
 
       // Switch to Round 1: 8 subjects x 1 HSP each; NP_000549.1 (sIdx 0) is #1 with E-value 1.35e-19.
       await roundSelect.selectOption('1');
-      await expect(roundSelect).toHaveValue('1');
-      await expect(page.getByTestId('subject-count')).toHaveText('8 shown');
-      await expect(page.getByTestId('subject-row-0')).toContainText('1.35e-19');
-      await expect(page.getByTestId('subject-row-0').locator('[data-field="hsps"]')).toHaveText('1');
-      await expect(page.getByTestId('subject-row-0')).toHaveAttribute('data-order', '1');
+      await checkRound('1', '1.35e-19', '1');
     } else {
       await roundSelect.selectOption('1');
       await expect(roundSelect).toHaveValue('1');

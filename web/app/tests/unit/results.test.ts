@@ -1064,8 +1064,10 @@ describe('ResultsBrowser', () => {
     const reads = rangeReads();
     expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  ACGT  50\n');
     expect(rangeReads()).toBe(reads);
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    const secondHsp = { runId: 'r1', qIdx: 0, round: 0, rank: 1 };
+    for (let i = 0; i < 2; i++) {
+      expect(await results.readSection(secondHsp)).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    }
     expect(rangeReads()).toBe(reads + 1);
     expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 3 })).toBeUndefined();
     expect(await results.readSection({ runId: 'r2', qIdx: 0, round: 0, rank: 1 })).toBeUndefined();
@@ -1124,33 +1126,32 @@ describe('ResultsBrowser', () => {
     expect(q0.subjects.map((s) => s.sIdx)).toEqual([1, 0]);
     expect(q0.hspCount).toBe(2);
 
+    const expectRound = (
+      round: number,
+      subjects: [number, number, string][],
+      section: string,
+    ) => {
+      const state = results.state.get();
+      expect(state.round).toBe(round);
+      expect(state.queryTotals).toEqual({ subjects: 2, hsps: 2 });
+      expect(state.subjects.map((s) => [s.sIdx, s.hspCount, s.first.evalue])).toEqual(subjects);
+      expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round, rank: 0 });
+      expect(state.detail?.section).toBe(section);
+    };
+
     const { results } = setup({ specs: multiRoundSpecs, argv: ['psiblast', '-query', 'q.fa', '-subject', 's.fa', '-num_iterations', '2'] });
     await results.open('r1');
     await settle();
-    let state = results.state.get();
-    expect(state.rounds).toEqual([1, 2]);
-    expect(state.round).toBe(2);
-    expect(state.queryTotals).toEqual({ subjects: 2, hsps: 2 });
-    expect(state.subjects.map((s) => [s.sIdx, s.hspCount, s.first.evalue])).toEqual([
-      [1, 1, '5.59e-18'],
-      [0, 1, '8.24e-18'],
-    ]);
-    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round: 2, rank: 0 });
-    expect(state.detail?.section).toBe(' Score = 59.7 bits (R2 s1)\n');
+    expect(results.state.get().rounds).toEqual([1, 2]);
+    expectRound(2, [[1, 1, '5.59e-18'], [0, 1, '8.24e-18']], ' Score = 59.7 bits (R2 s1)\n');
 
     results.selectRound(1);
     await settle();
-    state = results.state.get();
-    expect(state.round).toBe(1);
-    expect(state.queryTotals).toEqual({ subjects: 2, hsps: 2 });
-    expect(state.subjects.map((s) => [s.sIdx, s.hspCount, s.first.evalue])).toEqual([
-      [0, 1, '1.35e-19'],
-      [1, 1, '2.76e-18'],
-    ]);
-    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round: 1, rank: 0 });
-    expect(state.detail?.section).toBe(' Score = 63.9 bits (R1 s0)\n');
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 2, rank: 0 })).toBe(' Score = 59.7 bits (R2 s1)\n');
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 1, rank: 0 })).toBe(' Score = 63.9 bits (R1 s0)\n');
+    expectRound(1, [[0, 1, '1.35e-19'], [1, 1, '2.76e-18']], ' Score = 63.9 bits (R1 s0)\n');
+    expect(await Promise.all([
+      results.readSection({ runId: 'r1', qIdx: 0, round: 2, rank: 0 }),
+      results.readSection({ runId: 'r1', qIdx: 0, round: 1, rank: 0 }),
+    ])).toEqual([' Score = 59.7 bits (R2 s1)\n', ' Score = 63.9 bits (R1 s0)\n']);
   });
 
   describe('outfmt 0 of a run made with -html', () => {

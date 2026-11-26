@@ -737,8 +737,9 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await expect(page.getByTestId('run-losat')).toBeEnabled();
 });
 
-// A mode that reads a role with the other FASTA reader kind reads the source again; coming back to the mode that the
-// source was set up in shows its table as it was left (WA-IN-01).
+// A mode that reads a role with the other FASTA reader kind reads the source again while keeping
+// the records left out excluded (line WQA's D16, Owner Q2=B); coming back restores the subrange
+// of the original kind as well (WA-IN-01).
 test("records left out and a subrange stay through a mode that reads the role with the other kind", async ({ page }) => {
   await program(page, 'blastn');
   const records = '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n>q3\nACGTACGTACGTAAACCCGGGTTC\n';
@@ -751,10 +752,17 @@ test("records left out and a subrange stay through a mode that reads the role wi
   await page.getByTestId('query-region-start').fill('2');
   await page.getByTestId('query-region-stop').fill('12');
 
-  // BLASTP reads the query with the protein flags: another table, with nothing left out.
+  // BLASTP reads the query with the protein flags: the exclusions persist (D16), while the
+  // nucleotide subrange does not apply to the protein table.
   await program(page, 'blastp');
   await settled(page, 'query');
-  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await showRecords(page, 'query');
+  await expect(page.getByTestId('query-source-0-record-0')).toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-1')).not.toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-2')).not.toBeChecked();
+  await expect(page.getByTestId('query-region-start')).toHaveValue('');
+  await expect(page.getByTestId('query-region-stop')).toHaveValue('');
   await program(page, 'blastn');
   await settled(page, 'query');
   await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');

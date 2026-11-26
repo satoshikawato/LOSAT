@@ -49,8 +49,7 @@ These are on the list for a later release:
 
 - the program `blast_formatter`, and `makeprofiledb -dbtype cobalt`;
 - `psiblast -phi_pattern`;
-- the `psiblast` output formats `13` to `16`;
-- `-html` in `psiblast`.
+- the `psiblast` output formats `13` to `16`.
 
 Not yet supported in `deltablast`: `-show_domain_hits`, `-query_loc`, `-html`, `-export_search_strategy`, and output formats other than `0`, `6` and `7` (see [deltablast](programs/deltablast.md)).
 

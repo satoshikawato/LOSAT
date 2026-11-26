@@ -1622,6 +1622,7 @@ fn write_round_epilogs(
             &mut writer,
             &report,
             pairwise_database.as_ref(),
+            args.html.is_some(),
         )?;
     }
     Ok(())

@@ -1703,35 +1703,43 @@ fn show_gis_is_a_flag_of_every_search_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+// `-html` is a flag of all eight search programs (items T4a2, T4c1 and T4c2 of line RG).
 #[test]
-fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
-        assert!(parse(program, &["-html"]).is_ok(), "{program}");
-        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
-        let given = match parse(program, &["-html"]).unwrap().command {
+fn html_is_a_flag_of_the_search_programs() {
+    for (program, target) in [
+        ("blastn", ["-subject", "s.fa"]),
+        ("blastp", ["-subject", "s.fa"]),
+        ("blastx", ["-subject", "s.fa"]),
+        ("tblastn", ["-subject", "s.fa"]),
+        ("tblastx", ["-subject", "s.fa"]),
+        ("psiblast", ["-subject", "s.fa"]),
+        ("rpsblast", ["-db", "d"]),
+        ("rpstblastn", ["-db", "d"]),
+    ] {
+        let parse_with = |extra: &[&str]| {
+            let mut argv = vec!["losat", program, "-query", "q.fa", target[0], target[1]];
+            argv.extend_from_slice(extra);
+            try_parse_from(argv)
+        };
+        assert!(parse_with(&["-html"]).is_ok(), "{program}");
+        assert!(parse_with(&["-html", "true"]).is_err(), "{program}");
+        let html_of = |command: Commands| match command {
             Commands::Blastn(args) => args.html,
             Commands::Blastp(args) => args.html,
             Commands::Blastx(args) => args.html,
             Commands::Tblastn(args) => args.html,
             Commands::Tblastx(args) => args.html,
+            Commands::Psiblast(args) => args.html,
+            Commands::Rpsblast(args) => args.html,
+            Commands::Rpstblastn(args) => args.html,
             _ => panic!("{program}"),
         };
-        let absent = match parse(program, &[]).unwrap().command {
-            Commands::Blastn(args) => args.html,
-            Commands::Blastp(args) => args.html,
-            Commands::Blastx(args) => args.html,
-            Commands::Tblastn(args) => args.html,
-            Commands::Tblastx(args) => args.html,
-            _ => panic!("{program}"),
-        };
-        assert!(given && !absent, "{program}");
+        assert!(
+            html_of(parse_with(&["-html"]).unwrap().command),
+            "{program}"
+        );
+        assert!(!html_of(parse_with(&[]).unwrap().command), "{program}");
     }
-    let error = parse("psiblast", &["-html"]).unwrap_err().to_string();
-    assert!(
-        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
-        "{error}"
-    );
 }
 
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++

@@ -585,7 +585,7 @@ pub struct ResolvedBlastpArgs {
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for psiblast, which has no `-html`.
+    /// without `-html` or any of those formats.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).

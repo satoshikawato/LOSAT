@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.114
+- Version: 1.116
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -818,9 +818,35 @@
   NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
-  1.114 2026-11-24 (DELTABLAST, the order of tied domain hits, psiblast line item PS13a: an
-  approved difference decided by the Owner; numbered after dev's 1.113; first 1.95, then 1.109,
-  1.110, 1.111, 1.113)
+  1.114 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
+  not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
+  batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
+  the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
+  1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
+  at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.113 (psiblast line item PS14); first 1.101, then 1.103 at the
+  merge of dev that brought line RG item KC-11d's 1.100, exception 30's 1.101 and psiblast line
+  item PS10e's 1.102, then 1.104 at the merge of dev that brought line RG item K10a's 1.103, then
+  1.106 at the merge of dev that brought line NP item M4b-T3's 1.104 and psiblast line item PS10b's
+  1.105, then 1.107 at the merge of dev that brought line NP item M4b-3c part 2's 1.106, then 1.108
+  at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
+  brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
+  1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
+  1.115 2026-11-24 (DELTABLAST, the order of tied domain hits, psiblast line item PS13a: an
+  approved difference decided by the Owner; numbered after dev's 1.114; first 1.95, then 1.109,
+  1.110, 1.111, 1.113, 1.114);
+  1.116 2026-11-26 (rule-3 rejections of `losat deltablast` for damaged `.wcounts`/`.obsr` files
+  and a zero-count `.wcounts` column aligned to a non-`X` query residue, psiblast line item PS13a:
+  files shorter than 4 bytes at open where NCBI crashes on an empty file or reads past EOF,
+  truncated headers/offsets/columns on hit where NCBI reads past its mapping, and zero-count
+  `.wcounts` columns aligned to non-`X` residues where NCBI divides 0 by 0 and converts `log(NaN)`
+  to `long` in `BLAST_Nint` with C99 6.3.1.4p1 undefined behaviour; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2170,7 +2196,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 `tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
 `rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
 
-## Approved difference (DELTABLAST, the order of tied domain hits, version 1.114)
+## Approved difference (DELTABLAST, the order of tied domain hits, version 1.115)
 
 Decided by the Owner on 2026-11-24 (question Q-DL-TIE, answer B; psiblast line `DECISIONS.md` 103;
 the Owner's words are in [`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat deltablast`
@@ -4241,6 +4267,34 @@ file would differ, and NCBI's programs still could not open the database).
   punctuation-only Bioseq title that `CDeflineGenerator::x_CleanAndCompress` reads past the end of
   and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
   partial build (`erase_after_refusal`).
+- `losat deltablast` damaged `.wcounts`/`.obsr` files and zero-count `.wcounts` columns (version
+  1.116, 2026-11-26, psiblast line item PS13a, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07):
+  (a) At open (`CRpsFreqsFile` / `CRpsObsrFile`, `rps_aux.cpp:386-449`), NCBI maps the file and
+  reads only the 4-byte `magic_number`. An empty file (0 bytes) crashes NCBI (`SIGSEGV`), and a
+  1-to-3-byte file reads past EOF into the zero-padded mmap tail. A 4-byte or longer file with a
+  wrong magic number produces NCBI's corrupt-profile error (exit 3), and one with a valid magic
+  number opens cleanly so a query with no domain hits exits 0. LOSAT refuses `< 4` bytes at open,
+  reproduces NCBI's corrupt-profile error for wrong 4-byte magic, opens valid-magic files cleanly,
+  and defers reading `num_profiles` and the offset table until a domain hit reads the file
+  (`seqdb::rps::cd_data::CdFile`).
+  (b) On a domain hit, a `.wcounts` or `.obsr` file shorter than its header, offset table, or
+  profile data, or whose profile holds fewer columns than the hit covers, causes NCBI to read past
+  its memory mapping (`cdd_pssm_input.cpp:804-889`, release builds drop `ASSERT`). LOSAT refuses
+  with exit status 1.
+  (c) A `.wcounts` column whose residue counts sum to 0 (`cdd_pssm_input.cpp:837-847`) yields
+  `0.0 / 0.0 = NaN` frequencies, which pass `_PSIValidateCdMSA` (`blast_psi_priv.c:895-903`).
+  When aligned to a query `X` residue (NCBISTDAA 21), `_PSIComputeFreqRatiosFromCDs`
+  (`blast_psi_priv.c:2245-2248`) sets every frequency ratio to 0 without reading `wfreqs`
+  (defined); LOSAT reproduces NCBI there. When aligned to any non-`X` query residue, `NaN`
+  propagates through `_PSIComputeFrequenciesFromCDs` (`blast_psi_priv.c:1709-1734`) and
+  `_PSIComputeFreqRatiosFromCDs` into `_PSIConvertFreqRatiosToPSSM`
+  (`blast_psi_priv.c:2438-2440`), which calls `BLAST_Nint(kPSIScaleFactor * log(NaN) / ideal_lambda)`
+  (`ncbi_math.c:437-441`, `(long)(NaN - 0.5)` — C99 6.3.1.4p1 undefined behaviour; on x86-64
+  `CVTTSD2SI` yields `LONG_MIN`, truncated to `(int)0`). LOSAT validates the CD MSA first (so
+  NCBI's own `BadProfile` errors come first) and then refuses a zero-count `.wcounts` column
+  aligned to a non-`X` query residue with exit status 1 (`blast_engine::delta_hooks::cdd_pssm`,
+  unit and integration tests in `cd_data_tests.rs` and `deltablast_refusals.rs`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

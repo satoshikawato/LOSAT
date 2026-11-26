@@ -37,6 +37,9 @@ pub struct PsiblastArgs {
     pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224).
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1961-1962
     // (`CQueryOptionsArgs`, psiblast_args.cpp:86)
     pub parse_deflines: bool,
@@ -190,6 +193,7 @@ impl PsiblastArgs {
             db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
             parse_deflines: args.flag("parse_deflines"),
             searchsp: args.given_option("searchsp")?,
             sum_stats: args.given_option("sum_stats")?,
@@ -281,8 +285,7 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // LOSAT refuses psiblast's `-html` (`cli::reader::named_refusal`).
-            html: false,
+            html: self.html,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,

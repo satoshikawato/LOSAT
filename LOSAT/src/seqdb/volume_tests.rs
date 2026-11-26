@@ -833,25 +833,29 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
         SeqType::Nucleotide,
         4,
         4,
-        &[0, 100_000, 100_002],
-        Some(&[2, 2, 100_002]),
+        &[100_000, 2, 4],
+        Some(&[2, 4, 4]),
     );
     std::fs::write(root.join("npast.nsq"), [0u8; 4]).unwrap();
     std::fs::write(root.join("npast.nhr"), b"").unwrap();
     let mut npast = SeqDb::open_search_in(b"npast", SeqType::Nucleotide, &path).unwrap();
-    // whole_bytes = (2 - 100_000 - 1) = -99_999; last_pos = 100_000 + (-99_999) = 1 (in-file).
-    assert_eq!(npast.nucleotide_length_i32(1).unwrap(), -399_996);
+    // OID 0: whole_bytes = (2 - 100_000 - 1) = -99_999; last_pos = 100_000 + (-99_999) = 1.
+    assert_eq!(npast.nucleotide_length_i32(0).unwrap(), -399_996);
+    let npast_range = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 2,
+        first_ordinal: 0,
+    };
+    let npast_1t = npast.read_nucleotide_search_block(npast_range).unwrap();
+    assert!(!npast_1t.stopped_at_negative());
+    assert_eq!(npast_1t.len(), 2);
+    assert_eq!(npast_1t.nucleotide_len(0).unwrap(), 0);
+    assert_eq!(npast_1t.nucleotide_len(1).unwrap(), 4);
     npast.set_mt_stop_at_negative(true);
-    let npast_mt = npast
-        .read_nucleotide_search_block(BlockRange {
-            volume: 0,
-            first: 0,
-            end: 2,
-            first_ordinal: 0,
-        })
-        .unwrap();
+    let npast_mt = npast.read_nucleotide_search_block(npast_range).unwrap();
     assert!(npast_mt.stopped_at_negative());
-    assert_eq!(npast_mt.len(), 1);
+    assert_eq!(npast_mt.len(), 0);
 
     // 3. Nucleotide volume with amb[0] == 0 -> reads before mmap -> NcbiCrashes refusal.
     write_v4_index(

@@ -807,14 +807,28 @@ impl Volume {
         );
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
-        let all_positive = seq_offsets[0] >= 1
-            && seq_offsets.windows(2).all(|pair| {
-                pair[1]
-                    .checked_sub(pair[0])
-                    .and_then(|bytes| bytes.checked_sub(1))
-                    .is_some_and(|residues| ncbi_protein_length(residues) > 0)
-            });
-        if all_positive {
+        let mut all_positive = seq_offsets[0] >= 1;
+        let mut all_non_negative = all_positive;
+        for pair in seq_offsets.windows(2) {
+            let len = pair[1]
+                .checked_sub(pair[0])
+                .and_then(|bytes| bytes.checked_sub(1))
+                .map(ncbi_protein_length);
+            match len {
+                Some(n) if n > 0 => {}
+                Some(0) => all_positive = false,
+                _ => {
+                    all_positive = false;
+                    all_non_negative = false;
+                    break;
+                }
+            }
+        }
+        if all_positive
+            || (all_non_negative
+                && u64::from(seq_offsets[seq_offsets.len() - 1])
+                    <= self.seq_file()?.readable_len())
+        {
             return self.read_checked_block_with_offsets(
                 first_ordinal,
                 first_oid,

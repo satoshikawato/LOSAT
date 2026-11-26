@@ -131,7 +131,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_bytes(),
                 refusal: FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut stdout),
             }],

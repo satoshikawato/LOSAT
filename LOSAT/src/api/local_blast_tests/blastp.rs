@@ -160,12 +160,12 @@ fn unsupported_formats_fail_before_searching() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
@@ -210,7 +210,7 @@ fn the_words_after_a_pairwise_format_are_dropped() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_bytes(),
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut report),
             }],
@@ -273,7 +273,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -359,7 +359,7 @@ fn run_local_outputs(
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -761,12 +761,12 @@ fn several_file_outputs_are_written_one_after_the_other() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(first),
                 },
                 FormatOutput {
-                    outfmt: "7",
+                    outfmt: b"7",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(second),
                 },
@@ -851,12 +851,12 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut rows),
                 },
                 FormatOutput {
-                    outfmt: "7",
+                    outfmt: b"7",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::File(&file),
                 },
@@ -952,12 +952,12 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     sink: OutputSink::Writer(&mut six),
                     refusal: FormatRefusal::FailsCall,
                 },
                 FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     sink: OutputSink::Writer(&mut zero),
                     refusal: if fails_alone {
                         FormatRefusal::FailsAlone

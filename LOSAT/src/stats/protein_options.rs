@@ -15,7 +15,11 @@ pub fn blast_nint(x: f64) -> i64 {
 /// `standard_only` is false.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3593-3605
-pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinMatrixTable> {
+pub fn matrix_table(
+    name: impl AsRef<[u8]>,
+    standard_only: bool,
+) -> Option<&'static ProteinMatrixTable> {
+    let name = name.as_ref();
     let tables = if standard_only {
         &PROTEIN_MATRIX_TABLES[..PROTEIN_MATRIX_TABLES.len() - 1]
     } else {
@@ -23,7 +27,7 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
     };
     tables
         .iter()
-        .find(|table| table.name.eq_ignore_ascii_case(name))
+        .find(|table| table.name.as_bytes().eq_ignore_ascii_case(name))
 }
 
 /// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
@@ -72,7 +76,7 @@ pub enum TableStatus {
 pub fn karlin_blk_gapped_load_from_tables(
     gap_open: i32,
     gap_extend: i32,
-    name: &str,
+    name: impl AsRef<[u8]>,
     standard_only: bool,
 ) -> Result<&'static ProteinTableRow, TableStatus> {
     let table = matrix_table(name, standard_only).ok_or(TableStatus::UnknownMatrix)?;
@@ -81,10 +85,10 @@ pub fn karlin_blk_gapped_load_from_tables(
 
 /// `snprintf` into what is left of a fixed buffer: at most `size - 1` bytes are written
 /// (none when `size` is 0), and the would-be length is returned.
-fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &str) -> i32 {
+fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &[u8]) -> i32 {
     if size > 0 {
         let room = (size - 1) as usize;
-        buffer.extend_from_slice(&text.as_bytes()[..text.len().min(room)]);
+        buffer.extend_from_slice(&text[..text.len().min(room)]);
     }
     text.len() as i32
 }
@@ -92,14 +96,15 @@ fn snprintf(buffer: &mut Vec<u8>, size: i32, text: &str) -> i32 {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3760-3788
 /// The message's bytes: the buffer can end inside a character of the name (NCBI BLAST+ 2.17.0,
 /// probe R9 of line LIB-B: 1,000 `a` and 30 `é` end with the byte 0xC3).
-pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> Vec<u8> {
+pub fn print_matrix_message(matrix_name: impl AsRef<[u8]>, standard_only: bool) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 1024;
-    let out_sz = snprintf(
-        &mut buffer,
-        buffer_sz,
-        &format!("{matrix_name} is not a supported matrix, supported matrices are:\n"),
-    );
+    let first = [
+        matrix_name.as_ref(),
+        b" is not a supported matrix, supported matrices are:\n",
+    ]
+    .concat();
+    let out_sz = snprintf(&mut buffer, buffer_sz, &first);
     buffer_sz = (buffer_sz - (1 + out_sz)).max(0);
     let count = if standard_only {
         PROTEIN_MATRIX_TABLES.len() - 1
@@ -107,7 +112,8 @@ pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> Vec<u8> {
         PROTEIN_MATRIX_TABLES.len()
     };
     for table in &PROTEIN_MATRIX_TABLES[..count] {
-        let out_sz = snprintf(&mut buffer, buffer_sz, &format!("{} \n", table.name));
+        let line = format!("{} \n", table.name);
+        let out_sz = snprintf(&mut buffer, buffer_sz, line.as_bytes());
         buffer_sz = (buffer_sz - out_sz).max(0);
     }
     buffer
@@ -115,16 +121,24 @@ pub fn print_matrix_message(matrix_name: &str, standard_only: bool) -> Vec<u8> {
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3792-3839
 /// The message's bytes ([`print_matrix_message`]).
-pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -> Vec<u8> {
+pub fn print_allowed_values(
+    matrix_name: impl AsRef<[u8]>,
+    gap_open: i32,
+    gap_extend: i32,
+) -> Vec<u8> {
+    let matrix_name = matrix_name.as_ref();
     let mut buffer = Vec::new();
     let mut buffer_sz: i32 = 2048;
-    let out_sz = snprintf(
-        &mut buffer,
-        buffer_sz,
-        &format!(
-            "Gap existence and extension values of {gap_open} and {gap_extend} not supported for {matrix_name}\nsupported values are:\n"
-        ),
-    );
+    let first = [
+        format!(
+            "Gap existence and extension values of {gap_open} and {gap_extend} not supported for "
+        )
+        .as_bytes(),
+        matrix_name,
+        b"\nsupported values are:\n",
+    ]
+    .concat();
+    let out_sz = snprintf(&mut buffer, buffer_sz, &first);
     buffer_sz = (buffer_sz - (1 + out_sz)).max(0);
     if let Some(table) = matrix_table(matrix_name, false) {
         for row in table.values {
@@ -138,7 +152,7 @@ pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -
                     blast_nint(row.0[2])
                 )
             };
-            let out_sz = snprintf(&mut buffer, buffer_sz, &line);
+            let out_sz = snprintf(&mut buffer, buffer_sz, line.as_bytes());
             buffer_sz = (buffer_sz - out_sz).max(0);
         }
     }
@@ -151,7 +165,7 @@ pub fn print_allowed_values(matrix_name: &str, gap_open: i32, gap_extend: i32) -
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3374-3396
 /// `Blast_GetMatrixValues` converts the costs with `(Int4)` (blast_stat.c:3068-3070).
-pub fn protein_gap_existence_extend_params(name: &str) -> Option<(i32, i32)> {
+pub fn protein_gap_existence_extend_params(name: impl AsRef<[u8]>) -> Option<(i32, i32)> {
     let table = matrix_table(name, false)?;
     let mut costs = None;
     for (row, &pref) in table.values.iter().zip(table.prefs).skip(1) {
@@ -175,8 +189,9 @@ pub enum SuggestionProgram {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1174-1209
-pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64 {
-    let is = |name: &str| matrix_name.eq_ignore_ascii_case(name);
+pub fn suggested_threshold(program: SuggestionProgram, matrix_name: impl AsRef<[u8]>) -> f64 {
+    let matrix_name = matrix_name.as_ref();
+    let is = |name: &str| matrix_name.eq_ignore_ascii_case(name.as_bytes());
     let mut threshold = if is("BLOSUM62") {
         11.0
     } else if is("BLOSUM45") {
@@ -203,8 +218,9 @@ pub fn suggested_threshold(program: SuggestionProgram, matrix_name: &str) -> f64
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1211-1236
-pub fn suggested_window_size(matrix_name: &str) -> i32 {
-    let is = |name: &str| matrix_name.eq_ignore_ascii_case(name);
+pub fn suggested_window_size(matrix_name: impl AsRef<[u8]>) -> i32 {
+    let matrix_name = matrix_name.as_ref();
+    let is = |name: &str| matrix_name.eq_ignore_ascii_case(name.as_bytes());
     if is("BLOSUM45") {
         60
     } else if is("BLOSUM80") {

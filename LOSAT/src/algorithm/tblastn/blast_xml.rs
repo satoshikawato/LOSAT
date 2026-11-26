@@ -92,7 +92,7 @@ pub(super) struct PreparedXml {
     matrix_name: String,
     gap_open: i32,
     gap_extend: i32,
-    db_name: String,
+    db_name: Vec<u8>,
     db_num: i64,
     db_len: i64,
     db_len_overflow: bool,
@@ -333,9 +333,9 @@ pub(super) fn prepare(
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,

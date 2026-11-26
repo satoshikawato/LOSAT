@@ -3,11 +3,11 @@ use super::*;
 #[test]
 fn search_args_are_the_repeat_options() {
     let filter = RepeatFilter::new(
-        "rpt".to_string(),
+        std::ffi::OsString::from("rpt"),
         crate::blastinput::ncbi_environment::ApplicationSettings::default(),
     );
     let args = filter.search_args("plus", 4).expect("valid arguments");
-    assert_eq!(args.db.as_deref(), Some("rpt"));
+    assert_eq!(args.db.as_deref(), Some(std::ffi::OsStr::new("rpt")));
     assert_eq!(args.task, "blastn");
     assert_eq!((args.reward, args.penalty), (Some(1), Some(-1)));
     assert_eq!((args.gap_open, args.gap_extend), (Some(2), Some(1)));

@@ -7041,3 +7041,18 @@ pub(crate) fn scan_mode_definition(tag: &str) -> String {
         format!("User specified sequence set (Input: {tag})")
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
+/// Byte-preserving form of [`scan_mode_definition`] for subject tags that may not be UTF-8.
+pub(crate) fn scan_mode_definition_bytes(tag: &[u8]) -> Vec<u8> {
+    if tag.is_empty() {
+        b"User specified sequence set".to_vec()
+    } else {
+        [
+            b"User specified sequence set (Input: ".as_slice(),
+            tag,
+            b")",
+        ]
+        .concat()
+    }
+}

@@ -42,19 +42,20 @@ impl DustSpec {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:195-198
 /// `NStr::Split` keeps the empty fields between adjacent spaces; `NStr::StringToInt` (flags 0)
 /// is `ncbi_str::string_to_int`.
-pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
+pub fn parse_dust_filtering(value: impl AsRef<[u8]>) -> Result<DustSpec, String> {
+    let value = value.as_ref();
     match value {
-        "no" => return Ok(DustSpec::No),
-        "yes" => return Ok(DustSpec::Yes),
+        b"no" => return Ok(DustSpec::No),
+        b"yes" => return Ok(DustSpec::Yes),
         _ => {}
     }
-    let tokens: Vec<_> = value.split(' ').collect();
+    let tokens: Vec<&[u8]> = value.split(|&b| b == b' ').collect();
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option".into());
     }
     // `NStr::StringToInt` of each token, flags 0.
-    let number = |token: &str| {
-        crate::ncbi_str::string_to_int(token.as_bytes(), 0)
+    let number = |token: &[u8]| {
+        crate::ncbi_str::string_to_int(token, 0)
             .map_err(|_| "Invalid input for filtering parameters".to_string())
     };
     let (level, window, linker) = (number(tokens[0])?, number(tokens[1])?, number(tokens[2])?);

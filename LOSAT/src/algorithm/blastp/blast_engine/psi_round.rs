@@ -853,16 +853,18 @@ fn search_delta_batch(
                     searched.expect("a round's call is not of the preliminary stage only")
                 }
                 Err(error) => {
-                    let error = round_call_error(
-                        error,
-                        args,
-                        *calls,
-                        1,
-                        &[],
-                        subject_source,
-                        subject_label,
-                        outputs,
-                    )?;
+                    if error.is::<ErrorAfterBatchReports>() {
+                        return Err(round_call_error(
+                            error,
+                            args,
+                            *calls,
+                            1,
+                            &[],
+                            subject_source,
+                            subject_label,
+                            outputs,
+                        )?);
+                    }
                     return Err(with_prolog(error, outputs)?);
                 }
             };
@@ -907,16 +909,18 @@ fn search_delta_batch(
         match done {
             Ok((searched, done)) => prefetched.push((call, searched, done)),
             Err(error) => {
-                let error = round_call_error(
-                    error,
-                    args,
-                    *calls,
-                    1,
-                    &[],
-                    subject_source,
-                    subject_label,
-                    outputs,
-                )?;
+                if error.is::<ErrorAfterBatchReports>() {
+                    return Err(round_call_error(
+                        error,
+                        args,
+                        *calls,
+                        1,
+                        &[],
+                        subject_source,
+                        subject_label,
+                        outputs,
+                    )?);
+                }
                 return Err(with_prolog(error, outputs)?);
             }
         }

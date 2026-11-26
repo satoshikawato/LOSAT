@@ -1,0 +1,122 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/tn_s_sp.fa).
+           1 sequences; 541 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P99986.1 protein-named tblastn subject                                132     1e-44
+
+
+>P99986.1 protein-named tblastn subject
+Length=541
+
+ Score = 132 bits (331),  Expect = 1e-44, Method: Compositional matrix adjust.
+ Identities = 63/70 (90%), Positives = 64/70 (91%), Gaps = 0/70 (0%)
+ Frame = +1
+
+Query  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+            AYTHGMRFCPKVKQQCTFYCMEQDNVT+VMV  FKTEDFSTHGT WKHCMWKCWD SF T
+Sbjct  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTEVMVXPFKTEDFSTHGTFWKHCMWKCWDXSFKT  180
+
+Query  61   SKSHCVTCTS  70
+            SKSH VTCTS
+Sbjct  181  SKSHXVTCTS  210
+
+
+ Score = 128 bits (322),  Expect = 3e-43, Method: Compositional matrix adjust.
+ Identities = 67/90 (74%), Positives = 69/90 (77%), Gaps = 0/90 (0%)
+ Frame = -1
+
+Query  61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+            SKS C TCTS +         Q+   EQFSANDWFCRWR CF GWLINP VPC TKV VD
+Sbjct  541  SKSRCXTCTSSKTLPGDHHHLQRIAVEQFSANDWFCRWRGCFXGWLINPXVPCRTKVXVD  362
+
+Query  121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+            TYLNCGCCEVWDKEITE DAQNYIHEANAE
+Sbjct  361  TYLNCGCCEVWDKEITEVDAQNYIHEANAE  272
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 21384
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P99986.1 protein-named tblastn subject                                116     5e-39
+
+
+>P99986.1 protein-named tblastn subject
+Length=541
+
+ Score = 116 bits (290),  Expect = 5e-39, Method: Compositional matrix adjust.
+ Identities = 60/80 (75%), Positives = 60/80 (75%), Gaps = 0/80 (0%)
+ Frame = -1
+
+Query  31   SKSHCATCTSEKTLYGDHIILQRIAVSVFSANDWRCRWRFCFKSWLINPYVPCPTKVRVD  90
+            SKS C TCTS KTL GDH  LQRIAV  FSANDW CRWR CF  WLINP VPC TKV VD
+Sbjct  541  SKSRCXTCTSSKTLPGDHHHLQRIAVEQFSANDWFCRWRGCFXGWLINPXVPCRTKVXVD  362
+
+Query  91   TYLNCGCCEVTGKVITESKA  110
+            TYLNCGCCEV  K ITE  A
+Sbjct  361  TYLNCGCCEVWDKEITEVDA  302
+
+
+ Score = 77.4 bits (189),  Expect = 7e-24, Method: Compositional matrix adjust.
+ Identities = 38/49 (78%), Positives = 38/49 (78%), Gaps = 0/49 (0%)
+ Frame = +1
+
+Query  1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHI  49
+            V  FKTEDFST GT WKHCMWKCWD SF TSKSH  TCTS KTL  DHI
+Sbjct  91   VXPFKTEDFSTHGTFWKHCMWKCWDXSFKTSKSHXVTCTSSKTLPXDHI  237
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 15675
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/tn_s_sp.fa).
+    Posted date:  Unknown
+  Number of letters in database: 541
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

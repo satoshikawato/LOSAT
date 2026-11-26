@@ -32,8 +32,8 @@ interface Corpus {
 const KINDS: readonly FastaParserKind[] = [1, 2];
 /** A reader of each kind: BLASTN's query (kind 1) and BLASTP's subject (kind 2), with NCBI's data loaders on. */
 const READERS: Readonly<Record<FastaParserKind, FastaReader>> = {
-  1: { program: 'blastn', role: 'query', dataLoaders: true },
-  2: { program: 'blastp', role: 'subject', dataLoaders: true },
+  1: { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false },
+  2: { program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: false },
 };
 const encoder = new TextEncoder();
 const text = (value: string) => () => encoder.encode(value);

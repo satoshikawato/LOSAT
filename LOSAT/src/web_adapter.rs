@@ -544,8 +544,11 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 // The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
-// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
-// the refusal of a record longer than LOSAT reads.
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line,
+// the refusal of a record longer than LOSAT reads, and the `-parse_deflines` molecule and letter
+// rules (`defline_named_molecule`, `DataLineAlphabet`).
+pub use crate::blastinput::fasta_reader::believed::defline_named_molecule;
+pub use crate::blastinput::fasta_reader::reader::DataLineAlphabet;
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 
 /// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the

@@ -416,21 +416,20 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
         b"TITLE m\nDBLIST v1\nOIDLIST mask.msk\nSEQIDLIST ids.txt\n",
     )
     .unwrap();
-    let got_m = database_lookup_files(
-        mask_dir.join("m").as_os_str().as_encoded_bytes(),
-        SeqType::Nucleotide,
-        Some(vol_dir.as_os_str().as_encoded_bytes()),
-    );
+    let lookup_mask = |alias_name: &str| {
+        database_lookup_files(
+            mask_dir.join(alias_name).as_os_str().as_encoded_bytes(),
+            SeqType::Nucleotide,
+            Some(vol_dir.as_os_str().as_encoded_bytes()),
+        )
+    };
+    let got_m = lookup_mask("m");
     assert!(has(&got_m, &mask_dir.join("mask.msk")), "{got_m:?}");
     assert!(has(&got_m, &vol_dir.join("mask.msk")), "{got_m:?}");
     assert!(has(&got_m, &mask_dir.join("ids.txt")), "{got_m:?}");
     // When primary OIDLIST already exists, `compute_masks` does not consult the volume fallback.
     std::fs::write(mask_dir.join("mask.msk"), b"x").unwrap();
-    let got_m_present = database_lookup_files(
-        mask_dir.join("m").as_os_str().as_encoded_bytes(),
-        SeqType::Nucleotide,
-        Some(vol_dir.as_os_str().as_encoded_bytes()),
-    );
+    let got_m_present = lookup_mask("m");
     assert!(has(&got_m_present, &mask_dir.join("mask.msk")));
     assert!(
         !has(&got_m_present, &vol_dir.join("mask.msk")),
@@ -443,11 +442,7 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
             b"TITLE bs\nDBLIST v1\nOIDLIST sub\\mask.msk\nSEQIDLIST sub\\ids.txt\n",
         )
         .unwrap();
-        let got_bs = database_lookup_files(
-            mask_dir.join("bs").as_os_str().as_encoded_bytes(),
-            SeqType::Nucleotide,
-            Some(vol_dir.as_os_str().as_encoded_bytes()),
-        );
+        let got_bs = lookup_mask("bs");
         assert!(has(&got_bs, &mask_dir.join(r"sub\mask.msk")), "{got_bs:?}");
         assert!(has(&got_bs, &vol_dir.join(r"sub\mask.msk")), "{got_bs:?}");
         assert!(has(&got_bs, &mask_dir.join(r"sub\ids.txt")), "{got_bs:?}");

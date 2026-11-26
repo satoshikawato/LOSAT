@@ -626,7 +626,7 @@ fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
     // chunk's starts before its overlap ends.
     let mut combined = vec![prelim_hit(0, 1, 900, 1050, 100, 250, 150)];
     let incoming = vec![prelim_hit(0, 1, 1000, 1200, 200, 400, 200)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 1);
     assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (900, 1200));
     // The score density of the two (350 / 350) over the merged 300 residues.
@@ -634,15 +634,58 @@ fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
     // Minus strand: the later chunk comes first on the strand, so the tests swap.
     let mut combined = vec![prelim_hit(1, -1, 4950, 5200, 1000, 1250, 150)];
     let incoming = vec![prelim_hit(1, -1, 4800, 5050, 850, 1100, 150)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 1);
     assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (4800, 5200));
     // The same pair on the plus strand is not in the strips (the earlier HSP does not
     // end after the split point): both stay.
     let mut combined = vec![prelim_hit(0, 1, 800, 950, 1000, 1150, 150)];
     let incoming = vec![prelim_hit(0, 1, 700, 850, 900, 1050, 150)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 2);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526,2991-2995
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.122 (rule 3): merging two HSPs whose density-scaled score leaves
+// `Int4` must return `ChunkMergeUndefined` (and a typed `ShortChunkSeedRefusal` naming the OID in
+// `merge_prelim_hit_list`) instead of panicking.
+#[test]
+fn merge_prelim_hit_lists_refuses_scaled_score_outside_int4() {
+    let mut combined = vec![prelim_hit(0, 1, 0, 1_100, 0, 1_100, 1_500_000_000)];
+    let incoming = vec![prelim_hit(0, 1, 1_000, 2_100, 1_000, 2_100, 1_500_000_000)];
+    let split = HspListSplit::Subject { offset: 1_000 };
+    assert!(matches!(
+        merge_prelim_hit_lists(&mut combined, incoming, split, 100, true),
+        Err(crate::core::blast_hits::ChunkMergeUndefined)
+    ));
+
+    // Query-chunk merge surfaces a typed `ShortChunkSeedRefusal` naming the mapped database OID
+    // rather than the internal ordinal id (`PrelimHspList::oid`).
+    let mut hitlist1 = HitList::new(3);
+    hitlist1.update(PrelimHspList {
+        oid: 42,
+        hsps: vec![prelim_hit(0, 1, 1_000, 2_100, 1_000, 2_100, 1_500_000_000)],
+        best_evalue: 0.0,
+    });
+    let mut combined_hl = HitList::new(3);
+    combined_hl.update(PrelimHspList {
+        oid: 42,
+        hsps: vec![prelim_hit(0, 1, 0, 1_100, 0, 1_100, 1_500_000_000)],
+        best_evalue: 0.0,
+    });
+    let mut combined_opt = Some(combined_hl);
+    let error = merge_prelim_hit_list(hitlist1, &mut combined_opt, [1_000, -1], 100, |ordinal| {
+        ordinal + 100
+    })
+    .expect_err("scaled score > Int4::MAX must be refused");
+    assert!(
+        error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+        "expected ShortChunkSeedRefusal, got {error:?}"
+    );
+    let text = error.to_string();
+    assert!(text.contains("BLASTN: sequence of OID 142"), "{text}");
+    assert!(!text.contains("OID 42"), "{text}");
+    assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1355
@@ -1070,7 +1113,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     combined.update(list(2, &[60]));
     combined.update(list(7, &[40]));
     let mut combined = Some(combined);
-    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100);
+    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100, |ordinal| ordinal).unwrap();
     let mut merged = combined.unwrap();
     assert_eq!(merged.hsplist_max, 3);
     merged.sort_by_evalue();
@@ -1081,7 +1124,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     let mut empty = None;
     let mut single = HitList::new(3);
     single.update(list(5, &[10]));
-    merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
+    merge_prelim_hit_list(single, &mut empty, [0, 0], 100, |ordinal| ordinal).unwrap();
     assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
 }
 

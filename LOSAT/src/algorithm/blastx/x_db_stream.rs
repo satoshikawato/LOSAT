@@ -10,11 +10,12 @@
 //!
 //! The stream:
 //!
-//! - Before the first query batch the run reads no sequence (`BlastxDatabase::x_open_stream`): the
+//! - Before the first query batch the run reads no sequence (`BlastxDatabase::x_open_stream_with_long`): the
 //!   length of the longest sequence comes from the index's offsets, and the empty database, an
-//!   index that cannot be read and a longest above 5,000,000 residues give the error of the check (`x_check_stores`, which
-//!   reads the database once in blocks of `PROTEIN_STORE_BLOCK_BYTES` with the checks of the copy
-//!   in its order: the empty database, `check_protein_sequence`, the 5,000,000-residue limit), which
+//!   index that cannot be read and (outside `-db_hard_mask`) a longest above 5,000,000 residues
+//!   give the error of the check (`x_check_stores`, which reads the database once in blocks of
+//!   `PROTEIN_STORE_BLOCK_BYTES` with the checks of the copy in its order: the empty database,
+//!   `check_protein_sequence`, and outside `-db_hard_mask` the 5,000,000-residue limit), which
 //!   fails the first query batch with a valid context. The reads of the search check each block
 //!   they read the same way (`XStreamDb::x_check`) until they have checked every sequence once.
 //! - The preliminary search reads the sequences of each pass over the database in ascending order
@@ -116,6 +117,8 @@ pub(crate) struct XStreamDb<'a> {
     count: usize,
     /// The residues of the longest sequence (`BlastxDatabase::x_open_stream`).
     longest: usize,
+    /// Whether subjects longer than `MAX_DBSEQ_LEN` are allowed (`-db_hard_mask`).
+    allow_long: bool,
     block_bytes: u64,
     /// Whether the reads have checked every sequence (`x_check`).
     x_checked: std::sync::atomic::AtomicBool,
@@ -134,16 +137,34 @@ pub(crate) struct XStreamDb<'a> {
 impl<'a> XStreamDb<'a> {
     /// The database `db` with the longest of `BlastxDatabase::x_open_stream` (or of the check,
     /// `x_check_stores`).
+    #[cfg(test)]
     pub(crate) fn new(db: &'a SeqDb, longest: usize) -> Self {
-        Self::with_block_bytes(db, longest, BLOCK_BYTES)
+        Self::new_with_long(db, longest, false)
+    }
+
+    /// The database `db` with the longest of `BlastxDatabase::x_open_stream_with_long`, allowing
+    /// subjects longer than `MAX_DBSEQ_LEN` when `allow_long` is true (`-db_hard_mask`).
+    pub(crate) fn new_with_long(db: &'a SeqDb, longest: usize, allow_long: bool) -> Self {
+        Self::with_block_bytes_long(db, longest, BLOCK_BYTES, allow_long)
     }
 
     /// As `new`, with blocks of `block_bytes` (the unit tests read blocks of a few sequences).
+    #[cfg(test)]
     fn with_block_bytes(db: &'a SeqDb, longest: usize, block_bytes: u64) -> Self {
+        Self::with_block_bytes_long(db, longest, block_bytes, false)
+    }
+
+    fn with_block_bytes_long(
+        db: &'a SeqDb,
+        longest: usize,
+        block_bytes: u64,
+        allow_long: bool,
+    ) -> Self {
         Self {
             db,
             count: db.num_seqs() as usize,
             longest,
+            allow_long,
             block_bytes,
             x_checked: std::sync::atomic::AtomicBool::new(false),
             x_covered: std::sync::Mutex::new(Vec::new()),
@@ -181,7 +202,7 @@ impl<'a> XStreamDb<'a> {
             check_protein_sequence(with_sentinels, || self.db.oid(ordinal), PROGRAM)
                 .map_err(XReadError)?;
             let length = with_sentinels.len() - 2;
-            if length > MAX_DBSEQ_LEN {
+            if !self.allow_long && length > MAX_DBSEQ_LEN {
                 return Err(XReadError(too_long(
                     format_args!("database sequence {}", self.db.oid(ordinal)),
                     length,
@@ -259,16 +280,18 @@ impl<'a> XStreamDb<'a> {
     /// ordinal order, which the check before the first query batch gave), run at most once for the
     /// stream; its error is kept for `x_first_error`.
     pub(crate) fn x_damaged(&self) -> bool {
-        *self.x_damaged.get_or_init(|| match x_check_whole(self.db) {
-            Ok(_) => false,
-            Err(error) => {
-                *self
-                    .x_first
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
-                true
-            }
-        })
+        *self
+            .x_damaged
+            .get_or_init(|| match x_check_whole(self.db, self.allow_long) {
+                Ok(_) => false,
+                Err(error) => {
+                    *self
+                        .x_first
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                    true
+                }
+            })
     }
 
     /// The whole check's first error (`x_damaged`), `None` where it finds none.
@@ -281,7 +304,7 @@ impl<'a> XStreamDb<'a> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        kept.or_else(|| x_check_whole(self.db).err())
+        kept.or_else(|| x_check_whole(self.db, self.allow_long).err())
     }
 
     /// `CSeqDB::GetMinLength` (`SeqDb::min_length`).

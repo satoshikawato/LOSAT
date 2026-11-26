@@ -216,6 +216,236 @@ pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow:
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1533-1537
+/// Maximum diagonal separation between an earlier HSP's end and an incoming HSP's start for
+/// `Blast_HSPListsMerge` to attempt a merge across a subject-chunk overlap (`OVERLAP_DIAG_CLOSE`).
+const OVERLAP_DIAG_CLOSE: i64 = 10;
+
+/// Returned by [`merge_two_chunk_hsps`] and [`merge_subject_chunk_hsps`] when two HSPs in a chunk
+/// overlap have query lengths summing to 0 or a density-scaled merged score outside NCBI's `Int4`,
+/// where NCBI's `s_BlastMergeTwoHSPs` divides by zero or converts an out-of-range float to `Int4`
+/// (undefined behavior: zero length sum is reachable with `-ungapped -window_size 0` one-hit HSPs
+/// of length 0 or less; out-of-range scaled score is reachable when merging very long high-scoring
+/// alignments whose summed score exceeds `Int4::MAX`, e.g. in BLASTN).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChunkMergeUndefined;
+
+/// The fields of a preliminary HSP read and updated by NCBI's split-subject
+/// `Blast_HSPListsMerge` and `s_BlastMergeTwoHSPs`.
+///
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-143
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+pub(crate) trait ChunkMergeHsp {
+    fn merge_context(&self) -> i32;
+    fn merge_subject_frame(&self) -> i32;
+    fn merge_q_start(&self) -> i32;
+    fn merge_q_end(&self) -> i32;
+    fn merge_s_start(&self) -> i32;
+    fn merge_s_end(&self) -> i32;
+    fn merge_score(&self) -> i32;
+    fn merge_q_gapped_start(&self) -> i32;
+    fn merge_s_gapped_start(&self) -> i32;
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32);
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32);
+    fn set_merge_score(&mut self, score: i32);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// `s_BlastMergeTwoHSPs`: for an ungapped merge requires equal diagonals; always requires equal
+// subject frames and that either endpoint of `new` lies within the closed rectangle of `old`.
+// Expands `old`'s endpoints, adopts `new`'s gapped start if `new` has strictly higher score, and
+// sets `old`'s score to the larger of its score and the truncated density-scaled query span.
+pub(crate) fn merge_two_chunk_hsps<H: ChunkMergeHsp>(
+    old: &mut H,
+    new: &H,
+    allow_gap: bool,
+) -> Result<bool, ChunkMergeUndefined> {
+    let (q_off1, q_end1) = (old.merge_q_start(), old.merge_q_end());
+    let (s_off1, s_end1) = (old.merge_s_start(), old.merge_s_end());
+    let (q_off2, q_end2) = (new.merge_q_start(), new.merge_q_end());
+    let (s_off2, s_end2) = (new.merge_s_start(), new.merge_s_end());
+    if !allow_gap
+        && i64::from(s_off1) - i64::from(s_off2) - i64::from(q_off1) + i64::from(q_off2) != 0
+    {
+        return Ok(false);
+    }
+    if old.merge_subject_frame() != new.merge_subject_frame() {
+        return Ok(false);
+    }
+    let inside = |q: i32, s: i32| q >= q_off1 && q <= q_end1 && s >= s_off1 && s <= s_end1;
+    if !inside(q_off2, s_off2) && !inside(q_end2, s_end2) {
+        return Ok(false);
+    }
+    let length_sum =
+        (i64::from(q_end1) - i64::from(q_off1)) + (i64::from(q_end2) - i64::from(q_off2));
+    if length_sum == 0 {
+        return Err(ChunkMergeUndefined);
+    }
+    let score_sum = i64::from(old.merge_score()) + i64::from(new.merge_score());
+    let score_density = (score_sum as f64) / (length_sum as f64);
+    let q_start = q_off1.min(q_off2);
+    let s_start = s_off1.min(s_off2);
+    let q_end = q_end1.max(q_end2);
+    let s_end = s_end1.max(s_end2);
+    let scaled = score_density * ((i64::from(q_end) - i64::from(q_start)) as f64);
+    let truncated = scaled.trunc();
+    if !truncated.is_finite() || truncated < f64::from(i32::MIN) || truncated > f64::from(i32::MAX)
+    {
+        return Err(ChunkMergeUndefined);
+    }
+    old.set_merge_bounds(q_start, q_end, s_start, s_end);
+    if new.merge_score() > old.merge_score() {
+        old.set_merge_gapped_start(new.merge_q_gapped_start(), new.merge_s_gapped_start());
+        old.set_merge_score(new.merge_score());
+    }
+    old.set_merge_score((scaled as i32).max(old.merge_score()));
+    Ok(true)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2749-2807,2857-3035
+// Split-subject `Blast_HSPListsMerge` (`contexts_per_query` < 0) followed by
+// `s_BlastHSPListsCombineByScore`: partitions `combined` by `s_end > split_offset` and `incoming`
+// by `s_start < split_offset + overlap` using NCBI's swap displacement order, merges compatible
+// pairs whose end/start diagonals differ by less than `OVERLAP_DIAG_CLOSE`, removes consumed
+// incoming HSPs preserving order, and combines the two lists in `ScoreCompareHSPs` order (stable
+// sort when out of order, matching glibc's `qsort` in pinned NCBI BLAST+ 2.17.0).
+/// Merges `incoming` (already offset-adjusted by `Blast_HSPListAdjustOffsets`) into `combined`
+/// across a subject chunk split at `split_offset` with overlap `overlap` (`Blast_HSPListsMerge`),
+/// draining `incoming` so callers can reuse its allocation across chunks.
+pub(crate) fn merge_subject_chunk_hsps<H: ChunkMergeHsp>(
+    combined: &mut Vec<H>,
+    incoming: &mut Vec<H>,
+    split_offset: i32,
+    overlap: i32,
+    hsp_num_max: usize,
+    allow_gap: bool,
+    compare_score: impl Fn(&H, &H) -> std::cmp::Ordering,
+) -> Result<(), ChunkMergeUndefined> {
+    merge_subject_chunk_hsps_with_sort(
+        combined,
+        incoming,
+        split_offset,
+        overlap,
+        hsp_num_max,
+        allow_gap,
+        &compare_score,
+        |hsps| {
+            if hsps
+                .windows(2)
+                .any(|pair| compare_score(&pair[0], &pair[1]).is_gt())
+            {
+                hsps.sort_by(&compare_score);
+            }
+        },
+    )
+}
+
+/// [`merge_subject_chunk_hsps`] with a caller-supplied stable score sorter (`sort_by_score`,
+/// used by TBLASTX's in-place index-replay sort).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
+    combined: &mut Vec<H>,
+    incoming: &mut Vec<H>,
+    split_offset: i32,
+    overlap: i32,
+    hsp_num_max: usize,
+    allow_gap: bool,
+    compare: impl Fn(&H, &H) -> std::cmp::Ordering,
+    sort_by_score: impl Fn(&mut [H]),
+) -> Result<(), ChunkMergeUndefined> {
+    if incoming.is_empty() {
+        return Ok(());
+    }
+    if combined.is_empty() {
+        std::mem::swap(combined, incoming);
+        return Ok(());
+    }
+    let split = i64::from(split_offset);
+    let strip_end = split + i64::from(overlap);
+
+    let mut hspcnt1 = 0usize;
+    for index1 in 0..combined.len() {
+        if i64::from(combined[index1].merge_s_end()) > split {
+            combined.swap(hspcnt1, index1);
+            hspcnt1 += 1;
+        }
+    }
+    let mut hspcnt2 = 0usize;
+    for index2 in 0..incoming.len() {
+        if i64::from(incoming[index2].merge_s_start()) < strip_end {
+            incoming.swap(hspcnt2, index2);
+            hspcnt2 += 1;
+        }
+    }
+
+    let mut result = Ok(());
+    if hspcnt1 > 0 && hspcnt2 > 0 {
+        let mut deleted = vec![false; hspcnt2];
+        'merge: for index1 in 0..hspcnt1 {
+            for index2 in 0..hspcnt2 {
+                if deleted[index2]
+                    || incoming[index2].merge_context() != combined[index1].merge_context()
+                {
+                    continue;
+                }
+                let end_diag = i64::from(combined[index1].merge_q_end())
+                    - i64::from(combined[index1].merge_s_end());
+                let start_diag = i64::from(incoming[index2].merge_q_start())
+                    - i64::from(incoming[index2].merge_s_start());
+                if (end_diag - start_diag).abs() < OVERLAP_DIAG_CLOSE {
+                    match merge_two_chunk_hsps(&mut combined[index1], &incoming[index2], allow_gap)
+                    {
+                        Ok(true) => deleted[index2] = true,
+                        Ok(false) => {}
+                        Err(undefined) => {
+                            result = Err(undefined);
+                            break 'merge;
+                        }
+                    }
+                }
+            }
+        }
+        let mut index2 = 0usize;
+        incoming.retain(|_| {
+            let keep = index2 >= hspcnt2 || !deleted[index2];
+            index2 += 1;
+            keep
+        });
+    }
+
+    let retained = combined
+        .len()
+        .saturating_add(incoming.len())
+        .min(hsp_num_max);
+    if retained == combined.len() + incoming.len() {
+        combined.append(incoming);
+        sort_by_score(combined);
+        return result;
+    }
+    sort_by_score(combined);
+    sort_by_score(incoming);
+    let mut left = combined.drain(..).peekable();
+    let mut right = incoming.drain(..).peekable();
+    let mut selected = Vec::with_capacity(retained);
+    while selected.len() < retained {
+        let take_left = match (left.peek(), right.peek()) {
+            (Some(a), Some(b)) => compare(a, b).is_le(),
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if take_left {
+            selected.push(left.next().expect("peeked combined HSP"));
+        } else {
+            selected.push(right.next().expect("peeked incoming HSP"));
+        }
+    }
+    drop(left);
+    drop(right);
+    *combined = selected;
+    result
+}
+
 #[cfg(test)]
 #[path = "blast_hits_tests.rs"]
 mod tests;

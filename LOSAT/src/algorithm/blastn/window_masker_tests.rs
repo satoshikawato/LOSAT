@@ -18,7 +18,12 @@ fn the_masks_are_windowmaskers_of_the_strand_read() {
     ))
     .unwrap();
     let first: String = fasta.split('>').nth(1).unwrap().lines().skip(1).collect();
-    let masker = open(counts_path("mg1655_u9.obinary").as_bytes(), &FileCounts).unwrap();
+    let masker = open(
+        counts_path("mg1655_u9.obinary").as_bytes(),
+        &FileCounts,
+        "blastn",
+    )
+    .unwrap();
     let plus = masker.masks(first.as_bytes(), false).unwrap();
     assert_eq!(
         plus[..3],
@@ -44,7 +49,7 @@ fn the_masks_are_windowmaskers_of_the_strand_read() {
 
 #[test]
 fn the_checks_of_the_file_are_ncbis() {
-    let missing = open(b"nosuch.obinary", &FileCounts).unwrap_err();
+    let missing = open(b"nosuch.obinary", &FileCounts, "blastn").unwrap_err();
     assert_eq!(missing.exit, 255);
     assert_eq!(
         missing.message,
@@ -54,7 +59,7 @@ fn the_checks_of_the_file_are_ncbis() {
     // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
     // cannot open a directory as a file, so the open fails first there: the "could not open"
     // exception.
-    let directory = open(env!("CARGO_MANIFEST_DIR").as_bytes(), &FileCounts).unwrap_err();
+    let directory = open(env!("CARGO_MANIFEST_DIR").as_bytes(), &FileCounts, "blastn").unwrap_err();
     if cfg!(any(unix, target_os = "wasi")) {
         assert_eq!(directory.exit, 1);
         assert_eq!(
@@ -71,7 +76,12 @@ fn the_checks_of_the_file_are_ncbis() {
             String::from_utf8_lossy(&directory.message)
         );
     }
-    let binary = open(counts_path("dm2L_u9.binary").as_bytes(), &FileCounts).unwrap();
+    let binary = open(
+        counts_path("dm2L_u9.binary").as_bytes(),
+        &FileCounts,
+        "blastn",
+    )
+    .unwrap();
     assert!(binary.build_error().is_none());
     assert_eq!(binary.name, counts_path("dm2L_u9.binary").as_bytes());
 }
@@ -103,7 +113,7 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         ..WindowMaskerRegistry::default()
     };
     let root = &root;
-    let found = open_taxid(562, root, &FileCounts).unwrap();
+    let found = open_taxid(562, root, &FileCounts, "blastn").unwrap();
     assert_eq!(found.taxid, Some(562));
     assert!(
         found.name.ends_with(b"wmasker.obinary"),
@@ -122,23 +132,25 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
             posts_once: once,
             ..root.clone()
         };
-        let masker = open_taxid(562, &registry, &FileCounts).unwrap();
+        let masker = open_taxid(562, &registry, &FileCounts, "blastn").unwrap();
         assert_eq!(masker.load_posts(true), &posted);
         assert_eq!(masker.load_posts(false), &later);
     }
     // A binary counts file under the optimized binary's name.
-    assert!(open_taxid(7227, root, &FileCounts)
+    assert!(open_taxid(7227, root, &FileCounts, "blastn")
         .unwrap()
         .build_error()
         .is_none());
-    let missing = open_taxid(9606, root, &FileCounts).unwrap();
+    let missing = open_taxid(9606, root, &FileCounts, "blastn").unwrap();
     assert_eq!(missing.name, b"");
     let none = &Posts::new();
-    let (warnings, error) = batch_error(missing.build_error().unwrap(), 2, none, none).unwrap();
+    let (warnings, error) =
+        batch_error(missing.build_error().unwrap(), 2, none, none, "blastn").unwrap();
     assert!(warnings.is_empty());
     // Each query's read of the file comes after a load of the registry.
     let (first, later) = (Posts::of_lines(b"first\n".to_vec()), posted);
-    let (posts, _) = batch_error(missing.build_error().unwrap(), 3, &first, &later).unwrap();
+    let (posts, _) =
+        batch_error(missing.build_error().unwrap(), 3, &first, &later, "blastn").unwrap();
     assert_eq!(posts.text(), b"first\nposted\nposted\n");
     let one = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open \n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n ");
     assert_eq!(error.exit, 3);
@@ -148,7 +160,7 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n")).as_bytes()
     );
     // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
-    let ascii = open_taxid(10, root, &FileCounts).unwrap();
+    let ascii = open_taxid(10, root, &FileCounts, "blastn").unwrap();
     let report = ascii.build_error().unwrap().create_report().unwrap();
     let report = String::from_utf8(report).unwrap();
     assert!(
@@ -171,7 +183,7 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
             posts_once: once,
             ..root.clone()
         };
-        let masker = open_taxid(15, &registry, &FileCounts).unwrap();
+        let masker = open_taxid(15, &registry, &FileCounts, "blastn").unwrap();
         assert!(masker.build_error().is_none());
         assert_eq!(masker.load_posts(true), &both);
         assert_eq!(masker.load_posts(false), later);
@@ -187,8 +199,14 @@ fn a_counts_file_that_fails_stops_the_batch_with_one_message_per_query() {
     let none = &Posts::new();
     let factory = format!("    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container\n");
     let unit = format!("Warning: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_obinary.cpp\", line 114: Error: (Exception::bad parameter) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - unit size must be in [1,16]\n{factory} ");
-    let (warnings, error) =
-        batch_error(&WinMaskError::format(FormatSite::UnitSize), 2, none, none).unwrap();
+    let (warnings, error) = batch_error(
+        &WinMaskError::format(FormatSite::UnitSize),
+        2,
+        none,
+        none,
+        "blastn",
+    )
+    .unwrap();
     assert!(warnings.is_empty());
     assert_eq!(error.exit, 3);
     // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
@@ -200,7 +218,7 @@ fn a_counts_file_that_fails_stops_the_batch_with_one_message_per_query() {
         site: FormatSite::HashTable,
         warnings: vec!["file read failed: bit array optimizations are not used.".into()],
     };
-    let (warnings, _) = batch_error(&short, 2, none, none).unwrap();
+    let (warnings, _) = batch_error(&short, 2, none, none, "blastn").unwrap();
     assert_eq!(
         warnings.text(),
         b"Warning: [blastn] file read failed: bit array optimizations are not used.\nWarning: [blastn] file read failed: bit array optimizations are not used.\n"
@@ -213,11 +231,19 @@ fn a_counts_file_that_fails_stops_the_batch_with_one_message_per_query() {
         1,
         none,
         none,
+        "blastn",
     )
     .unwrap();
     assert_eq!(
         bad_index.message,
         b"LOSAT engine error: Warning: bad index at key 8764 : 14779 \n"
     );
-    assert!(batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none());
+    assert!(batch_error(
+        &WinMaskError::EmptyCacheBitArray { unit: 2 },
+        1,
+        none,
+        none,
+        "blastn"
+    )
+    .is_none());
 }

@@ -94,9 +94,10 @@ fn render(params: &[crate::report::archive::options::Param]) -> String {
                 ParamValue::Real(value) => format!("real:{}", posix(*value)),
                 ParamValue::Str(value) => format!("string:{}", String::from_utf8_lossy(value)),
                 ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
+                ParamValue::StrandType(value) => format!("strand-type:{value}"),
                 ParamValue::BigIntegerList(values) => format!("big-integer-list:{values:?}"),
             };
-            format!("{}={value}", param.name)
+            format!("{}={value}", param.name())
         })
         .collect::<Vec<_>>()
         .join(" ")

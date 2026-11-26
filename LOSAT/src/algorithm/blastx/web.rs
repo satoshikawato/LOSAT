@@ -140,7 +140,11 @@ pub(crate) fn run_pair(
             crate::blastinput::query_batch::QueryScopes::xml_failing_query(None, failure)
         });
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
-    super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
+    super::native::write_empty_subject_warnings(
+        &subjects,
+        options.app_name,
+        &mut *diagnostics.borrow_mut(),
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     report::write_prolog(
         &mut output,

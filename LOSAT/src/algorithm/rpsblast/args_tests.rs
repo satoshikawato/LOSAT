@@ -160,6 +160,7 @@ fn the_options_of_ps11c_1_reach_blastps_arguments() {
             line_length: Some(1),
             sort_hits: Some(4),
             sort_hsps: Some(0),
+            hitlist_start: None,
         }
     );
     let rps = args.rps.as_ref().unwrap();

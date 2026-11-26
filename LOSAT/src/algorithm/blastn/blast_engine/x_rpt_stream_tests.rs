@@ -112,7 +112,7 @@ fn checked_as(
         packed: Vec::new(),
     };
     let batching = QueryBatching {
-        fixed_batch_size: batch_size as i32,
+        fixed: Some(batch_size),
         batch_size,
         split,
     };
@@ -241,7 +241,7 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
     )
     .is_ok_and(|ready| !ready.one_batch));
     // A negative CHUNK_SIZE streams: its refusals come after the reports of the batches before in
-    // both paths (line RG item X-short-bat-2).
+    // both paths (line RG items X-short-bat-2 and X-chunk).
     assert!(checked(
         true,
         &[],
@@ -251,7 +251,7 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         SplitSizes::new(false, Some(-5), Some(-10)),
         &mut outputs
     )
-    .is_ok());
+    .is_ok_and(|ready| !ready.one_batch));
     // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
     // (20,000 letters) or several.
     for batch_size in [20_000, 4000] {

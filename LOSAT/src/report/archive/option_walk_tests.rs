@@ -59,9 +59,9 @@ fn render(inputs: &OptionInputs, database: Option<&[u8]>) -> Vec<String> {
         .iter()
         .map(|param| match &param.value {
             super::options::ParamValue::Str(bytes) => {
-                format!("{}=Str({:?})", param.name, String::from_utf8_lossy(bytes))
+                format!("{}=Str({:?})", param.name(), String::from_utf8_lossy(bytes))
             }
-            other => format!("{}={:?}", param.name, other),
+            other => format!("{}={:?}", param.name(), other),
         })
         .collect();
     if let Some(step) = request.step_number {
@@ -811,6 +811,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
         (
             "export_search_strategy",
             &["-export_search_strategy", "s.asn"],
+            &[],
+        ),
+        // An imported strategy is read by the run (`import::apply`), not recorded.
+        (
+            "import_search_strategy",
+            &["-import_search_strategy", "s.asn"],
             &[],
         ),
         (

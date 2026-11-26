@@ -27,6 +27,7 @@ use std::ffi::OsString;
 use crate::algorithm::common::hard_chunk_walk::{HardStarts, NcbiStart, NcbiWalk};
 use crate::cli::NativeError;
 use crate::core::subject_split::HardSplitState;
+use crate::report::archive::fields;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 use crate::utils::os_bytes::os_str_bytes;
@@ -186,12 +187,13 @@ impl DbMaskOption {
     /// database of each name of the `-db` list (`SeqDb::name_mask_details`, the tables that the
     /// database's name records keep): an id that one of them does not have is NCBI's database
     /// error, exit 2 (the id 0, an id below -1, or a name's id that a database of the list
-    /// lacks).
+    /// lacks). `app` is the running application, the prefix of the warning.
     pub fn resolve(
         &self,
         db: &SeqDb,
         db_name: &[u8],
         program: &str,
+        app: &str,
         warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     ) -> Result<Option<ResolvedMask>> {
         let (id, key) = match &self.algorithm {
@@ -211,11 +213,7 @@ impl DbMaskOption {
             }
         };
         let Some(id) = id.filter(|&id| id != -1) else {
-            let mut line = format!(
-                "Warning: [{}] Subject mask not found in ",
-                program.to_ascii_lowercase()
-            )
-            .into_bytes();
+            let mut line = format!("Warning: [{app}] Subject mask not found in ").into_bytes();
             line.extend_from_slice(db_name);
             line.extend_from_slice(b", proceeding without subject masking.\n");
             warning(&line)?;
@@ -265,14 +263,14 @@ impl DbMaskOption {
         match (resolved, &self.algorithm) {
             (Some(mask), _) => mask.archive_params(),
             (None, FilteringAlgorithm::Name(name)) if !name.is_empty() => vec![
-                Param {
-                    name: "DbFilteringAlgorithmKey",
-                    value: ParamValue::Str(name.clone()),
-                },
-                Param {
-                    name: "SubjectMaskingType",
-                    value: ParamValue::Integer(self.kind as i32),
-                },
+                Param::new(
+                    fields::DB_FILTERING_ALGORITHM_KEY,
+                    ParamValue::Str(name.clone()),
+                ),
+                Param::new(
+                    fields::SUBJECT_MASKING_TYPE,
+                    ParamValue::Integer(self.kind as i32),
+                ),
             ],
             (None, _) => Vec::new(),
         }
@@ -382,21 +380,21 @@ impl ResolvedMask {
     /// translated to is written.
     pub fn archive_params(&self) -> Vec<Param> {
         let algorithm = match self.key.as_deref() {
-            Some(key) if !key.is_empty() => Param {
-                name: "DbFilteringAlgorithmKey",
-                value: ParamValue::Str(key.to_vec()),
-            },
-            _ => Param {
-                name: "DbFilteringAlgorithmId",
-                value: ParamValue::Integer(self.id),
-            },
+            Some(key) if !key.is_empty() => Param::new(
+                fields::DB_FILTERING_ALGORITHM_KEY,
+                ParamValue::Str(key.to_vec()),
+            ),
+            _ => Param::new(
+                fields::DB_FILTERING_ALGORITHM_ID,
+                ParamValue::Integer(self.id),
+            ),
         };
         vec![
             algorithm,
-            Param {
-                name: "SubjectMaskingType",
-                value: ParamValue::Integer(self.kind as i32),
-            },
+            Param::new(
+                fields::SUBJECT_MASKING_TYPE,
+                ParamValue::Integer(self.kind as i32),
+            ),
         ]
     }
 }
@@ -409,6 +407,10 @@ impl ResolvedMask {
 /// whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place that the walk gives it),
 /// after which the table is not complete (the search does not run). A sequence whose masks or
 /// length cannot be read ends the walk without a finding (the search meets that read error first).
+/// With a negative window (a search strategy's; the command line takes none) the search itself runs
+/// on NCBI's one-thread table, in NCBI's order (BLASTP's `db_masked::neg_window_chunks`, BLASTX's
+/// `search_db_masked.rs`): no sequence starts on a new table or is kept apart, and the walk only
+/// finds the refusals.
 fn protein_walk(
     db: &SeqDb,
     algo_id: i32,
@@ -421,6 +423,7 @@ fn protein_walk(
         window,
         zero_words,
     };
+    let carried = window < 0;
     let mut walk = NcbiWalk::new(word, window);
     let mut starts = HardStarts::default();
     let mut plan = crate::algorithm::common::db_mask_search::SubjectPlan::default();
@@ -429,7 +432,7 @@ fn protein_walk(
         .searched_sequences(algo_id, |ordinal, length, masks| {
             let masks = masks.read()?;
             if masks.is_empty() {
-                if let Some(start) = walk.plain(length) {
+                if let Some(start) = walk.plain(length).filter(|_| !carried) {
                     starts.push(ordinal, start);
                 }
                 return Ok(None);
@@ -439,6 +442,11 @@ fn protein_walk(
             plan.start_hard(masks, length);
             plan.hard_chunks(&mut chunks);
             let (start, reads_back) = walk.masked(length, &chunks);
+            let (start, reads_back) = if carried {
+                (None, false)
+            } else {
+                (start, reads_back)
+            };
             if let Some(start) = start {
                 starts.push(ordinal, start);
             } else if reads_back {
@@ -506,6 +514,7 @@ fn translated_walk(
         zero_words,
     };
     let min_length = translated_min_length(word);
+    let carried = window < 0;
     let mut walk = NcbiWalk::new(word, window);
     let mut starts = HardStarts::default();
     let mut ranges = Vec::new();
@@ -563,18 +572,20 @@ fn translated_walk(
                     end,
                 }));
             }
-            if let Some(start) = step.ncbi {
-                starts.push(ordinal, start);
-            } else if walked {
-                let offset =
-                    i32::try_from(i64::from(window) + step.below_start).unwrap_or(i32::MAX);
-                starts.push(
-                    ordinal,
-                    NcbiStart {
-                        offset,
-                        cleared: false,
-                    },
-                );
+            if !carried {
+                if let Some(start) = step.ncbi {
+                    starts.push(ordinal, start);
+                } else if walked {
+                    let offset =
+                        i32::try_from(i64::from(window) + step.below_start).unwrap_or(i32::MAX);
+                    starts.push(
+                        ordinal,
+                        NcbiStart {
+                            offset,
+                            cleared: false,
+                        },
+                    );
+                }
             }
             Ok(None)
         })

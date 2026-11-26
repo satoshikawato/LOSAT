@@ -65,6 +65,9 @@ impl QueryStrand {
 // and registers `kArgNumThreads` with its default integer value.
 #[derive(Debug, Clone)]
 pub struct BlastnArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    pub(crate) given: crate::cli::GivenArguments,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
     // `-` is standard input (`blastn/blast_engine/run.rs`).
     pub query: PathBuf,
@@ -191,6 +194,22 @@ pub struct BlastnArgs {
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`import::apply`).
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
+    /// A search strategy's gapped extension and traceback algorithms (`GapExtnAlgorithm`,
+    /// `GapTracebackAlgorithm`, the task's where one is missing) other than the pairs that LOSAT
+    /// runs (dynamic programming, and megablast's greedy pair): NCBI's options check reads them
+    /// where it comes (`scoring::check_scoring_options`), and LOSAT refuses them after NCBI's
+    /// checks. `None` from the command line.
+    pub(crate) strategy_algorithms: Option<(i32, i32)>,
+    /// A search strategy's discontiguous template type above 2 (`MBTemplateType`, NCBI's
+    /// `Uint1`), which NCBI's options check refuses (`scoring::check_scoring_options`).
+    pub(crate) strategy_template_type: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-182,262-271
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is
@@ -382,6 +401,7 @@ impl BlastnArgs {
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(BlastnArgs {
+            given: crate::cli::GivenArguments::from_args(args),
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
@@ -418,6 +438,10 @@ impl BlastnArgs {
             min_diag_separation: 0usize,
             out: args.given_option("out")?,
             export_search_strategy: args.given_option("export_search_strategy")?,
+            import_search_strategy: args.given_option("import_search_strategy")?,
+            import: Default::default(),
+            strategy_algorithms: Default::default(),
+            strategy_template_type: Default::default(),
             reward: args.given_option("reward")?,
             penalty: args.given_option("penalty")?,
             gap_open: args.given_option("gapopen")?,
@@ -467,6 +491,38 @@ impl BlastnArgs {
 }
 
 impl BlastnArgs {
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Blastn,
+        )
+    }
+
+    /// Whether the pairwise report (outfmt 0, `CBlastFormat`) cites the megablast paper: the
+    /// formatter is made by the running application, and BLASTN's makes it with its `-task`
+    /// megablast, TBLASTX's never does. So tblastx running a megablast strategy cites Gapped
+    /// BLAST here (`import::apply`, probe `C.tblastx.from.blastn.db`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:244
+    /// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:158-161
+    pub(crate) fn pairwise_megablast_reference(&self) -> bool {
+        self.task == "megablast" && self.app() == crate::blastinput::app::Program::Blastn
+    }
+
+    /// Whether the XML and JSON reports (outfmt 5, 15 and 16) cite the megablast paper: their
+    /// formatters read the program of the options, which is the strategy's task, whichever
+    /// application runs it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:653-668
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:637-653
+    pub(crate) fn structured_megablast_reference(&self) -> bool {
+        self.task == "megablast"
+    }
+
     /// The `-subject` path (empty before NCBI's check that it is given).
     pub fn subject_path(&self) -> &std::path::Path {
         self.subject.as_deref().unwrap_or(std::path::Path::new(""))
@@ -485,10 +541,18 @@ impl BlastnArgs {
     /// The name of the MegaBLAST index that NCBI's handler asks for, and whether it is an
     /// old-style one: with `-use_index true`, task megablast and a database (with `-subject` or
     /// another task NCBI ignores `-use_index`; `blast_engine::mb_index`), the `-index_name` value
-    /// (old style) or else the `-db` value as given (new style first).
+    /// (old style) or else the `-db` value as given (new style first). A run of an imported
+    /// strategy asks for the import's index (`ImportRun::mb_index`: the strategy's, or the one
+    /// that the command line names over it).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
     pub(crate) fn megablast_index_name(&self) -> Option<(Vec<u8>, bool)> {
+        if let Some(run) = &self.import {
+            return run
+                .mb_index
+                .as_ref()
+                .map(|(name, old_style)| (name.clone(), *old_style));
+        }
         if self.use_index != Some(true) || self.task != "megablast" {
             return None;
         }
@@ -589,7 +653,11 @@ impl BlastnArgs {
         }
         let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
         let database = match &self.window_masker_db {
-            Some(name) => Some(super::window_masker::open(&os_str_bytes(name), &*source)?),
+            Some(name) => Some(super::window_masker::open(
+                &os_str_bytes(name),
+                &*source,
+                self.app().ncbi_name(),
+            )?),
             None => None,
         };
         let filter_dbs = usize::from(self.filtering_db.is_some())
@@ -621,7 +689,12 @@ impl BlastnArgs {
                     })?
                     .as_ref()
                     .map_err(|reason| anyhow::anyhow!("{reason}"))?;
-                Some(super::window_masker::open_taxid(taxid, registry, &*source)?)
+                Some(super::window_masker::open_taxid(
+                    taxid,
+                    registry,
+                    &*source,
+                    self.app().ncbi_name(),
+                )?)
             }
             None => database,
         };

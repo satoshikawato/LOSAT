@@ -11,4 +11,4 @@
   preserving NCBI's `2>&1` line order and closed-pipe stop points), overwriting an existing
   database deletes the old files and stops at the log line, and `CWriteDB` stdout lines stop inside
   `AddSequence` without flushing buffered `-logfile` bytes or running destructor clean-up (recorded
-  as exception 10 in `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.34).
+  as exception 10 in `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.35).

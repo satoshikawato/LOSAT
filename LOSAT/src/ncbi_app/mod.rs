@@ -582,7 +582,7 @@ fn run_app(
     // gets the usage report's messages when NCBI opens it, before `-version`.
     // The files that the run opens by name, which end when the run ends (`OpenFiles`).
     let files = OpenFiles::new(files);
-    match files.log_target(log_file(words)) {
+    match files.log_target_for(words, start, log_file(words)) {
         Err(reason) => {
             let mut diag = Diag::new(&DiagTarget::Stderr, err, tool);
             diag.refuse(&crate::seqmasks_io::run::unsupported(

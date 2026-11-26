@@ -102,24 +102,41 @@ impl TblastxDatabase {
     /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
     pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name.as_ref(), settings, None, None, &mut std::io::sink())
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            "tblastx",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
     /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
-    /// `diagnostics`).
+    /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
+    /// run's posts, which is not TBLASTX's where the run is another program's strategy).
     pub(crate) fn open_restricted(
         name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
+        app: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
-        let parsed =
-            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
+        let parsed = shared::restrict_database(
+            &mut db,
+            name,
+            list,
+            mask,
+            diagnostics,
+            settings,
+            PROGRAM,
+            app,
+        )?;
         // TBLASTX has no Gumbel block: the setup of a batch with a valid context divides by the
         // statistics' number of sequences, a count of 0 LOSAT's refusal there
         // (`context_cutoffs`, `shared::check_setup_count`).
@@ -127,7 +144,7 @@ impl TblastxDatabase {
             db,
             name: name.to_vec(),
             parsed,
-            taxdb: shared::TaxdbRun::default(),
+            taxdb: shared::TaxdbRun::running(app),
         })
     }
 
@@ -268,6 +285,7 @@ impl TblastxDatabase {
     pub(crate) fn resolve_mask_option(
         &self,
         option: &crate::blastinput::db_mask::DbMaskOption,
+        app: &str,
         archive: Option<&crate::report::archive::ArchiveHandle>,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
         diagnostics: &mut dyn std::io::Write,
@@ -277,6 +295,7 @@ impl TblastxDatabase {
             &self.name,
             option,
             PROGRAM,
+            app,
             archive,
             strategy,
             &mut |text| match archive {

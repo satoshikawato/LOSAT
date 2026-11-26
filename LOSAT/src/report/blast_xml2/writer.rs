@@ -851,7 +851,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                     let posts = enc.take_posts();
                     let thrown = enc.take_thrown();
                     threw = thrown.is_some();
-                    xml_report_made(report, kind, run.program, result, posts, thrown)
+                    xml_report_made(report, kind, run.app, result, posts, thrown)
                 }
                 Xml2Kind::Single15 => {
                     let mut enc = JsonEncoder::array_element(report);

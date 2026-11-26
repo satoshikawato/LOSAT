@@ -7,9 +7,13 @@
 //! holds for its other formats.
 //!
 //! - `options`: the request's `algorithm-options` (the fold of NCBI's `Set*` calls);
+//! - `fields`: the Blast4 parameters' names and value types, which the writer and the reader share;
 //! - `bioseq`: the Bioseq of a query or subject record;
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
-//! - `writer`: the document.
+//! - `writer`: the document;
+//! - `read`: the reader of an archive file (`blast_formatter -archive`): its objects one after
+//!   another, each as the typed request and results NCBI's `CRemoteBlast` reads; and what NCBI
+//!   makes of a stored request (the options and queries of a search strategy).
 //!
 //! What a run keeps from one archive to the next is `RunState`: the diagnostics saved since the
 //! last archive (`DiagLog`) and what the searches have set in the options handle so far
@@ -18,8 +22,10 @@
 //! - `requests`: the request inputs of a batch from its records.
 
 pub mod bioseq;
+pub mod fields;
 pub mod masks;
 pub mod options;
+pub(crate) mod read;
 pub mod requests;
 pub mod strategy;
 pub mod writer;
@@ -195,7 +201,9 @@ impl ArchiveRequest {
             .filter(|&iterations| iterations != 0 && database.is_some());
         Self {
             program: inputs.kind.program(),
-            application: inputs.kind.application(),
+            application: inputs
+                .application
+                .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
             database: database.map(<[u8]>::to_vec),
@@ -431,11 +439,11 @@ impl OptionsHandle {
         let mut sets = options::ParamList::default();
         if let Some(search) = self.0.search.get() {
             for param in &search.before_batches {
-                sets.set(param.name, param.value.clone());
+                sets.set(param.field(), param.value.clone());
             }
         }
         for param in carry.0.params() {
-            sets.set(param.name, param.value.clone());
+            sets.set(param.field(), param.value.clone());
         }
         sets.into_params()
     }
@@ -450,7 +458,7 @@ impl OptionsHandle {
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
-                carry.0.set(param.name, param.value.clone());
+                carry.0.set(param.field(), param.value.clone());
             }
         }
         if let Some(context0) = searched {
@@ -460,7 +468,7 @@ impl OptionsHandle {
                 .get()
                 .map_or(RequestLength::Search, |filter| filter.request_length);
             carry.0.set(
-                "EffectiveSearchSpace",
+                fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
         }

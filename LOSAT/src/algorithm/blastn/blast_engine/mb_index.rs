@@ -58,10 +58,10 @@ pub(super) fn note_index_use(
         (None, None) => return Ok(()),
     };
     options.set_search_sets(
-        vec![crate::report::archive::options::Param {
-            name: "ForceMbIndex",
-            value: crate::report::archive::options::ParamValue::Boolean(true),
-        }],
+        vec![crate::report::archive::options::Param::new(
+            crate::report::archive::fields::FORCE_MB_INDEX,
+            crate::report::archive::options::ParamValue::Boolean(true),
+        )],
         Vec::new(),
     )
 }
@@ -122,7 +122,12 @@ pub(super) fn megablast_index(
     };
     for post in posts {
         let mut error = |text: &[u8]| {
-            let line = [b"Error: [blastn] ".as_slice(), text, b"\n"].concat();
+            let line = [
+                format!("Error: [{}] ", args.app().ncbi_name()).as_bytes(),
+                text,
+                b"\n",
+            ]
+            .concat();
             write_post(args, diagnostics, ERROR, &line)
         };
         match post {
@@ -141,7 +146,7 @@ pub(super) fn megablast_index(
     // The warning that `ERR_POST_EX` posts (code 1, subcode 1): `errstr`, then
     // " Database index will not be used.".
     let warning = [
-        b"Warning: (1.1) [blastn] ".as_slice(),
+        format!("Warning: (1.1) [{}] ", args.app().ncbi_name()).as_bytes(),
         &text,
         b" Database index will not be used.\n",
     ]

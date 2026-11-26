@@ -491,12 +491,15 @@ fn query_loc(command: &Commands) -> Option<&std::ffi::OsStr> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-/// The `-query_loc` interval of the program's arguments. A value that the search will refuse
-/// has no interval here.
+/// The `-query_loc` interval of the program's arguments, or the query range of the strategy they
+/// import. A value that the search will refuse has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    parse_optional_range(query_loc(command), RangeRole::Query)
-        .ok()
-        .flatten()
+    // An imported strategy's range stands for `-query_loc`'s (`strategy::query_range`).
+    super::strategy::query_range(command).or_else(|| {
+        parse_optional_range(query_loc(command), RangeRole::Query)
+            .ok()
+            .flatten()
+    })
 }
 
 /// `-num_threads` of the program's arguments.
@@ -710,11 +713,17 @@ pub(super) fn run_local(
 
 /// The program's entry of a `run_local` call.
 fn run_local_entry(
-    command: Commands,
+    mut command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own
+    // (`strategy::take_warnings`).
+    if inputs.strategy.is_some() {
+        let warnings = super::strategy::take_warnings(&mut command);
+        outputs.diagnostics.write_all(&warnings)?;
+    }
     let (query, subject) = (inputs.query, inputs.subject);
     // How the reading of the query records ended, which the search meets in its batch
     // (`Inputs::query_end`).

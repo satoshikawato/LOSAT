@@ -1068,6 +1068,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         application_start(
             program,
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -1683,6 +1684,7 @@ fn start_of(program: &str, u: &str, config: ConfigLoad) -> ApplicationStart {
         usage_report: Ok(u.to_string()),
         config: Ok(config),
         settings: Ok(ApplicationSettings::default()),
+        registry_inputs: Vec::new(),
     }
 }
 
@@ -1795,6 +1797,7 @@ fn rpsbproc_starts_without_the_usage_report() {
         application_start(
             "rpsbproc",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -1852,6 +1855,7 @@ fn dustmasker_starts_without_the_usage_report() {
         application_start(
             "dustmasker",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -1896,6 +1900,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
         application_start(
             "blastn",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,

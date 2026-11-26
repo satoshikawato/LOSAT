@@ -43,8 +43,15 @@ impl SequenceRange {
     /// The length of the range as given (`TSeqRange::GetLength`), which the tabular
     /// formats print as `qlen` even where the range ends past a record.
     pub fn length(&self) -> usize {
-        self.to - self.from + 1
+        // `GetLength`: 0 when the end is not past the start (a strategy's range only).
+        (self.to + 1).saturating_sub(self.from)
     }
+
+    /// `kEmptyRange.GetFrom()`: a strategy's range without `RequiredStart` (the command line's
+    /// ranges never have it).
+    pub const EMPTY_FROM: usize = u32::MAX as usize;
+    /// `kEmptyRange.GetTo()`: a strategy's range without `RequiredEnd`.
+    pub const EMPTY_TO: usize = u32::MAX as usize - 1;
 }
 
 /// NCBI's `ParseSequenceRange`: `start-stop`, 1-based and closed.
@@ -101,6 +108,27 @@ pub fn parse_optional_range(
         .transpose()
 }
 
+/// The letters of the subject records `records` that the search reads, cut by the range
+/// `subject_loc` (`-subject_loc`) as the subjects' reader cuts them (`record_interval`): the total
+/// of the formatter's scan mode (before its `int`), which BLASTN's application's batch sizes read
+/// (`query_batch::LoopBatchSizes::of_blastn_app`).
+pub(crate) fn subject_letters(
+    subject_loc: Option<&std::ffi::OsStr>,
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+) -> Result<i64> {
+    let subject_range = parse_optional_range(subject_loc, RangeRole::Subject)?;
+    Ok(records
+        .iter()
+        .map(|record| match subject_range.as_ref() {
+            Some(range) => match record_interval(range, record.seq().len()) {
+                RecordInterval::Letters { from, to } => (to - from + 1) as i64,
+                RecordInterval::Empty | RecordInterval::PastEnd => 0,
+            },
+            None => record.seq().len() as i64,
+        })
+        .sum())
+}
+
 /// What a range makes of one record (`x_FastaToSeqLoc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordInterval {
@@ -118,9 +146,25 @@ pub enum RecordInterval {
 /// The interval of a record of `length` letters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
-/// The parser leaves `to > from`, so `Invalid sequence range` cannot occur. A start equal
+/// The parser leaves `to > from`, so the range error cannot occur; a strategy's range
+/// (`-import_search_strategy`) may lack its start or its end (`kEmptyRange`'s), and one whose end
+/// comes before its start is refused at the import. A start equal
 /// to the record's length passes the check and gives the interval `[seqlen, seqlen-1]`.
 pub fn record_interval(range: &SequenceRange, length: usize) -> RecordInterval {
+    let from = if range.from == SequenceRange::EMPTY_FROM {
+        0
+    } else {
+        range.from
+    };
+    let to = if range.to == SequenceRange::EMPTY_TO {
+        0
+    } else {
+        range.to
+    };
+    let range = &SequenceRange {
+        from,
+        to: if to == 0 { usize::MAX } else { to },
+    };
     if range.from > length {
         RecordInterval::PastEnd
     } else if range.from == length {

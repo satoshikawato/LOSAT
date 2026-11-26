@@ -1,0 +1,4 @@
+Warning: [tblastx] line_length cannot be overridden when using a search strategy
+Warning: [tblastx] seg cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy

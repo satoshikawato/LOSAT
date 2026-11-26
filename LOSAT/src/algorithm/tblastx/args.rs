@@ -15,6 +15,9 @@ use std::path::PathBuf;
 // checked in NCBI's order by `blast_engine::check_options`.
 #[derive(Debug, Clone)]
 pub struct TblastxArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    pub(crate) given: crate::cli::GivenArguments,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
     // The default `-` is standard input.
     pub query: PathBuf,
@@ -62,6 +65,13 @@ pub struct TblastxArgs {
     // (cited at `BlastpArgs::export_search_strategy`). The search strategy file
     // (`report::archive::strategy`), created by `run` before the other options are read.
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`import::apply`).
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     pub query_gencode: u8,
     pub db_gencode: u8,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:74-75
@@ -127,7 +137,11 @@ pub struct TblastxArgs {
     pub xdrop_ungap: Option<f64>,
 
     // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
-    // NCBI's, as tblastn's.
+    // NCBI's, as tblastn's. The command line takes 0 or more (NCBI's argument reader checks it); an
+    // imported search strategy carries any `Int4`, which NCBI runs: a negative window takes the
+    // one-hit word finder too, on a table that keeps its state across the batch's calls
+    // (`blast_engine::word_finder::WideOffset`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:479-480
     pub window_size: Option<i32>,
 
     // Read when NCBI reads it (`blastinput/app.rs` `parse_formatting_string`).
@@ -181,6 +195,11 @@ pub struct TblastxArgs {
     // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
     // line, whose records are the whole input.
     pub first_query_ordinal: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-264
+    // `api::run_batches` hands over one of NCBI's query batches at a time, sized as the running
+    // application's loop sizes them (BLASTN's mixer where blastn runs a TBLASTX strategy); these
+    // records are that batch, whatever its size. No argument of the command line sets this.
+    pub(crate) one_query_batch: bool,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
     /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
     /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
@@ -192,6 +211,13 @@ pub struct TblastxArgs {
     /// command line and the library API (`find_matrix_file`); `None` in LOSAT Web. Not a public
     /// option.
     pub matrix_file: Option<std::path::PathBuf>,
+    // The command line of the run as the SAM `@PG` line shows it: every argument followed by one
+    // space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the library, the
+    // web ABIs). Set by `run` from the process's arguments; only a TBLASTX strategy that BLASTN's
+    // application runs writes SAM (`tblastx::sam`).
+    //
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:877-885
+    pub command_line: Option<Vec<u8>>,
 }
 
 impl TblastxArgs {
@@ -205,6 +231,7 @@ impl TblastxArgs {
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(TblastxArgs {
+            given: crate::cli::GivenArguments::from_args(args),
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
@@ -227,6 +254,10 @@ impl TblastxArgs {
             num_threads: args.option_or_default("num_threads")?,
             out: args.given_option("out")?,
             export_search_strategy: args.given_option("export_search_strategy")?,
+            import_search_strategy: args.given_option("import_search_strategy")?,
+            import: Default::default(),
+            one_query_batch: Default::default(),
+            command_line: Default::default(),
             query_gencode: args.option_or_default("query_gencode")?,
             db_gencode: args.option_or_default("db_gencode")?,
             max_intron_length: args.given_option("max_intron_length")?,
@@ -316,6 +347,17 @@ pub(crate) fn identity_named_matrix_refusal(
 }
 
 impl TblastxArgs {
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Tblastx,
+        )
+    }
+
     /// The `-matrix` name as typed, BLOSUM62 when omitted (the pairwise report prints it so).
     pub fn matrix_name(&self) -> std::borrow::Cow<'_, str> {
         match self.matrix.as_deref() {
@@ -365,12 +407,19 @@ impl TblastxArgs {
         Ok(())
     }
 
-    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
+    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject; a
+    /// search strategy without one keeps the handle's 13 (`BLAST_WORD_THRESHOLD_TBLASTX`): after
+    /// an import NCBI runs only the handlers that `SetOptionsForSavedStrategy` names.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
     /// threshold is always the suggestion's)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:115
     pub fn word_threshold(&self) -> f64 {
         self.threshold.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 13.0;
+            }
             crate::stats::protein_options::suggested_threshold(
                 crate::stats::protein_options::SuggestionProgram::TranslatedSubject,
                 self.matrix_name_bytes(),
@@ -378,11 +427,16 @@ impl TblastxArgs {
         })
     }
 
-    /// The two-hit window: `-window_size`, or the matrix's suggestion.
+    /// The two-hit window: `-window_size`, or the matrix's suggestion; a search strategy without
+    /// one keeps the handle's 40 (`BLAST_WINDOW_SIZE_PROT`, as `word_threshold`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:57
     pub fn window(&self) -> i32 {
         self.window_size.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 40;
+            }
             crate::stats::protein_options::suggested_window_size(self.matrix_name_bytes())
         })
     }

@@ -79,7 +79,7 @@
   `-version` line `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`; line RG item
   D2c, RG DECISIONS D2c-1, D2c-2 and D2c-4; Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07);
-  1.34 2026-11-25 (exception 10: the tools end at NCBI's write that meets the closed pipe, through
+  1.34 2026-11-26 (exception 10: the tools end at NCBI's write that meets the closed pipe, through
   NCBI's stream of their output, so the lines NCBI wrote before that write are written; line RG
   item T8a, RG DECISIONS T8-1; Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items

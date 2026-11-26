@@ -101,6 +101,9 @@ pub(crate) struct Diag<'a> {
     /// When `Some`, `-logfile` names the run's standard output (`ToolLog::Stdout` in a `Receiver`
     /// run): each diagnostic message goes into the run's shared `out` writer as it is posted.
     stdout: Option<&'a dyn Fn(&[u8])>,
+    /// When `Some`, flushes the `NcbiBuffer`-backed shared stdout stream (`SharedStdout`) before a
+    /// `cerr` write (`TextPlace::StandardError`), matching NCBI's `cerr` tie to `cout`.
+    tie_stdout: Option<&'a dyn Fn()>,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -125,6 +128,7 @@ impl<'a> Diag<'a> {
         Diag {
             target,
             stdout: None,
+            tie_stdout: None,
             stderr,
             tool,
             record: None,
@@ -169,6 +173,9 @@ impl Diag<'_> {
         }
         let made = match place {
             TextPlace::StandardError if !self.failed => {
+                if let Some(tie) = self.tie_stdout {
+                    tie();
+                }
                 crate::report::ostream::tie_standard_output()
             }
             TextPlace::LogFile => crate::report::ostream::sync_report(),
@@ -345,10 +352,11 @@ impl Diag<'_> {
             }
             text.push_str(&"=".repeat(72));
             text.push_str("\n\n");
-            self.before_text(TextPlace::StandardError);
-            let mut stderr = self.noted();
-            let _ = stderr.write_all(text.as_bytes());
-            let _ = stderr.flush();
+            if self.before_text(TextPlace::StandardError) {
+                let mut stderr = self.noted();
+                let _ = stderr.write_all(text.as_bytes());
+                let _ = stderr.flush();
+            }
         }
         let messages = error.messages.iter().map(Vec::as_slice);
         for message in messages.chain(backlog.map(str::as_bytes)) {
@@ -588,18 +596,64 @@ pub(crate) fn run_in(
     )
 }
 
+/// Shared stdout state for a `Receiver` tool run whose `-logfile` is `/dev/stdout`
+/// (`ToolLog::Stdout`): models NCBI's 4 KiB pipe `cout` buffer (`NcbiBuffer`) so bytes inserted
+/// into `cout` (`-out -`) stay buffered until NCBI's write point or process exit while
+/// `-logfile /dev/stdout` messages land directly on the underlying writer, matching CLI ordering.
+struct SharedStdout<'b> {
+    out: &'b mut dyn Write,
+    held: Vec<u8>,
+    buffer: crate::cli::NcbiBuffer,
+}
+
+impl SharedStdout<'_> {
+    fn write_log(&mut self, text: &[u8]) {
+        let _ = self.out.write_all(text);
+    }
+
+    fn flush_held(&mut self) -> std::io::Result<()> {
+        self.buffer.flush();
+        if !self.held.is_empty() {
+            self.out.write_all(&self.held)?;
+            self.held.clear();
+        }
+        self.out.flush()
+    }
+}
+
 /// A shared standard-output writer for a `Receiver` tool run whose `-logfile` is `/dev/stdout`
 /// (`ToolLog::Stdout`): both the tool's `out` and its `Diag` reach the same stream (`run_app`)
-/// without changing `RunFiles::Disk`.
-struct SharedOut<'a, 'b>(&'a RefCell<&'b mut dyn Write>);
+/// without changing `RunFiles::Disk`, with `out` buffered by NCBI's `Cout` model.
+struct SharedOut<'a, 'b>(&'a RefCell<SharedStdout<'b>>);
 
 impl Write for SharedOut<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().write(buf)
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut state = self.0.borrow_mut();
+        let before = state.buffer;
+        state.buffer.sputn(buf.len(), buf);
+        let kept = state.buffer.held();
+        if kept == before.held() + buf.len() {
+            state.held.extend_from_slice(buf);
+        } else {
+            let written = buf.len() - kept;
+            if !state.held.is_empty() {
+                let SharedStdout { out, held, .. } = &mut *state;
+                out.write_all(held)?;
+                held.clear();
+            }
+            if written > 0 {
+                state.out.write_all(&buf[..written])?;
+            }
+            state.held.extend_from_slice(&buf[written..]);
+        }
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.borrow_mut().flush()
+        self.0.borrow_mut().flush_held()
     }
 }
 
@@ -646,27 +700,40 @@ fn run_app(
                 body,
                 (start, xml_help),
                 &files,
-                (target, None),
+                (target, None, None),
             )
         }
         Ok(ToolLog::Stdout) => {
-            let shared = RefCell::new(out);
+            let files = files.with_tool_log_stdout();
+            let shared = RefCell::new(SharedStdout {
+                out,
+                held: Vec::new(),
+                buffer: crate::cli::NcbiBuffer::new(crate::cli::NcbiStdio::Cout {
+                    block: 4096,
+                    lines: false,
+                }),
+            });
             let write_stdout = |text: &[u8]| {
-                let _ = shared.borrow_mut().write_all(text);
+                shared.borrow_mut().write_log(text);
+            };
+            let tie_stdout = || {
+                let _ = shared.borrow_mut().flush_held();
             };
             if let Ok(text) = start.usage_report() {
                 write_stdout(text.as_bytes());
             }
             let mut shared_out = SharedOut(&shared);
-            run_app_target(
+            let status = run_app_target(
                 tool,
                 words,
                 (input, &mut shared_out, err),
                 body,
                 (start, xml_help),
                 &files,
-                (DiagTarget::Stderr, Some(&write_stdout)),
-            )
+                (DiagTarget::Stderr, Some(&write_stdout), Some(&tie_stdout)),
+            );
+            let _ = shared_out.flush();
+            status
         }
     }
 }
@@ -680,7 +747,7 @@ fn run_app_target<'a>(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &OpenFiles,
-    (mut target, stdout): (DiagTarget, Option<&'a dyn Fn(&[u8])>),
+    (mut target, stdout, tie_stdout): (DiagTarget, Option<&'a dyn Fn(&[u8])>, Option<&'a dyn Fn()>),
 ) -> i32 {
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
@@ -709,6 +776,7 @@ fn run_app_target<'a>(
     };
     let mut diag = Diag::new(&target, err, tool);
     diag.stdout = stdout;
+    diag.tie_stdout = tie_stdout;
     match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
@@ -754,7 +822,11 @@ fn run_app_target<'a>(
     // file's buffer is written then, standard output's at the exit). Where a write of them met a
     // closed pipe, NCBI's process ended there by SIGPIPE: exit status 0, no message
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
-    if files.finish_streams() || diag.closed() {
+    let mut closed = files.finish_streams() || diag.closed();
+    if let Err(error) = out.flush() {
+        closed |= files::ends_like_sigpipe(&error);
+    }
+    if closed {
         return 0;
     }
     status

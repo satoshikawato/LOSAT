@@ -168,3 +168,54 @@ fn split_keeps_empty_pieces() {
     assert_eq!(split_by_pattern(b" >x", b" >"), [&b""[..], b"x"]);
     assert_eq!(split_by_pattern(b"", b" >"), [&b""[..]]);
 }
+
+#[derive(Clone, Default)]
+struct WriteLog(std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+
+impl std::io::Write for WriteLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn write_sequence_direct_matches_cut_buffer_write_boundaries() {
+    use crate::report::ostream::{with_stream_inserter, CutBuffer, ReportStream};
+    for width in [60u32, 80, 1000] {
+        for len in [0usize, 1, 79, 80, 1500, 4050, 8100, 8190, 16_500] {
+            let letters: Vec<u8> = (0..len).map(|i| b"ACGT"[i % 4]).collect();
+            let changes = if len > 100 {
+                vec![50, 120, len.min(4090)]
+            } else {
+                Vec::new()
+            };
+            let mut cuts = CutBuffer::default();
+            cuts.insertion(b">hdr\n");
+            write_sequence(&letters, width, &changes, &mut cuts);
+            let ref_log = WriteLog::default();
+            let mut ref_stream = ReportStream::tool_file(Box::new(ref_log.clone()), "");
+            cuts.write_to(&mut ref_stream).unwrap();
+            ref_stream.finish_tool().unwrap();
+
+            let dir_log = WriteLog::default();
+            let mut dir_stream = ReportStream::tool_file(Box::new(dir_log.clone()), "");
+            with_stream_inserter(&mut dir_stream, &mut |ins| {
+                ins.insert(b">hdr\n")?;
+                write_sequence_direct(&letters, width, || changes.clone(), ins)
+            })
+            .unwrap();
+            dir_stream.finish_tool().unwrap();
+
+            assert_eq!(
+                *dir_log.0.lock().unwrap(),
+                *ref_log.0.lock().unwrap(),
+                "width {width} len {len}"
+            );
+        }
+    }
+}

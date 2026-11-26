@@ -1562,6 +1562,17 @@ pub trait ReportWrite: std::io::Write {
         0
     }
 
+    /// Runs `f` with a direct inserter into this stream when specialized (`ReportStream` holds
+    /// its lock once for the whole record; `CutBuffer` records cuts directly). Returns `Ok(true)`
+    /// if `f` was invoked, or `Ok(false)` to let [`with_stream_inserter`] fall back to wrapping
+    /// `self` as a generic [`ReportWrite`].
+    fn try_with_inserter(
+        &mut self,
+        _f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
     /// The insertions `report[from..at]` for each cut `(at, _)` of `cuts`, then `report[..to]`
     /// from the last cut: one region's run of NCBI's insertions (every cut a `Cut::Insertion`,
     /// in increasing order, none past `to`), each one write of the stream (`CutCursor::write`).
@@ -1581,6 +1592,107 @@ pub trait ReportWrite: std::io::Write {
             at = end;
         }
         Ok(())
+    }
+}
+
+/// Runs `f` with a [`StreamInserter`] targeting `writer`, locking [`ReportStream`] once per
+/// record or recording cuts into [`CutBuffer`], and falling back to wrapping `writer` directly
+/// otherwise.
+pub fn with_stream_inserter(
+    writer: &mut dyn ReportWrite,
+    f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    if writer.try_with_inserter(f)? {
+        return Ok(());
+    }
+    let mut inserter = StreamInserter(InserterTarget::Writer(writer));
+    f(&mut inserter)
+}
+
+/// Direct inserter passed to [`with_stream_inserter`]: writes directly into a locked
+/// [`ReportStream`]'s held buffer when bytes fit without triggering an NCBI write, and falls back
+/// to exact NCBI `insert`/`put`/`ncbi_flush` calls at write boundaries.
+pub struct StreamInserter<'a>(InserterTarget<'a>);
+
+enum InserterTarget<'a> {
+    Core(&'a mut Core),
+    CutBuffer(&'a mut CutBuffer),
+    Writer(&'a mut dyn ReportWrite),
+}
+
+impl StreamInserter<'_> {
+    /// Bytes fewer than this fit in NCBI's buffer with no device write (`NcbiBuffer::room`).
+    #[inline]
+    pub fn room(&self) -> usize {
+        match &self.0 {
+            InserterTarget::Core(core) => core.room,
+            InserterTarget::CutBuffer(_) => 0,
+            InserterTarget::Writer(writer) => writer.ncbi_room(),
+        }
+    }
+
+    /// Appends up to `max_bytes` directly into NCBI's held buffer when `max_bytes < self.room()`
+    /// (guaranteeing no NCBI write occurs across those bytes). Returns `Ok(true)` if written
+    /// directly, `Ok(false)` if the caller should use `insert`/`put`.
+    #[inline]
+    pub fn push_within_room(
+        &mut self,
+        max_bytes: usize,
+        f: impl FnOnce(&mut Vec<u8>),
+    ) -> std::io::Result<bool> {
+        let InserterTarget::Core(core) = &mut self.0 else {
+            return Ok(false);
+        };
+        if max_bytes >= core.room {
+            return Ok(false);
+        }
+        let before = core.held.len();
+        core.held.reserve(max_bytes);
+        f(&mut core.held);
+        let n = core.held.len() - before;
+        debug_assert!(n <= max_bytes);
+        core.room -= n;
+        core.inserted += n as u64;
+        Ok(true)
+    }
+
+    /// One insertion of NCBI's (`sputn`).
+    #[inline]
+    pub fn insert(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        match &mut self.0 {
+            InserterTarget::Core(core) => core.insert(buf),
+            InserterTarget::CutBuffer(cb) => {
+                cb.insertion(buf);
+                Ok(())
+            }
+            InserterTarget::Writer(writer) => writer.write_all(buf),
+        }
+    }
+
+    /// One `put` of a byte (`sputc`).
+    #[inline]
+    pub fn put(&mut self, byte: u8) -> std::io::Result<()> {
+        match &mut self.0 {
+            InserterTarget::Core(core) => core.put(&[byte]),
+            InserterTarget::CutBuffer(cb) => {
+                cb.put(byte);
+                Ok(())
+            }
+            InserterTarget::Writer(writer) => writer.write_all(&[byte]),
+        }
+    }
+
+    /// One flush of NCBI's (`endl`, `flush`).
+    #[inline]
+    pub fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        match &mut self.0 {
+            InserterTarget::Core(core) => core.flush(),
+            InserterTarget::CutBuffer(cb) => {
+                cb.cuts.push(cb.bytes.len(), Cut::Flush);
+                Ok(())
+            }
+            InserterTarget::Writer(writer) => writer.ncbi_flush(),
+        }
     }
 }
 
@@ -1619,6 +1731,16 @@ impl ReportWrite for ReportStream {
     fn ncbi_room(&self) -> usize {
         lock(&self.0).room
     }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        let mut core = lock(&self.0);
+        let mut inserter = StreamInserter(InserterTarget::Core(&mut core));
+        f(&mut inserter)?;
+        Ok(true)
+    }
 }
 
 impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
@@ -1644,6 +1766,13 @@ impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
 
     fn ncbi_room(&self) -> usize {
         (**self).ncbi_room()
+    }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        (**self).try_with_inserter(f)
     }
 
     fn insert_cut_run(
@@ -1790,6 +1919,15 @@ impl ReportWrite for CutBuffer {
     fn ncbi_flush(&mut self) -> std::io::Result<()> {
         self.cuts.push(self.bytes.len(), Cut::Flush);
         Ok(())
+    }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        let mut inserter = StreamInserter(InserterTarget::CutBuffer(self));
+        f(&mut inserter)?;
+        Ok(true)
     }
 }
 

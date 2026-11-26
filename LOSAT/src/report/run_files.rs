@@ -260,6 +260,10 @@ pub(crate) struct OpenFiles {
     /// The run is the command line's process (`ncbi_app::run`, `of_command_line`): its output
     /// streams are NCBI's and tied to its standard error (`ncbi_app::files::tool_stream`).
     command_line: bool,
+    /// The run's `-logfile` shares standard output on a `Receiver` (`ToolLog::Stdout`):
+    /// `OutputFile::Caller` forwards NCBI's cuts and flushes to the shared buffered stdout stream
+    /// so interleaving matches the CLI's `Cout` stream.
+    tool_log_stdout: bool,
 }
 
 impl std::fmt::Debug for OpenFiles {
@@ -301,6 +305,7 @@ impl OpenFiles {
             },
             streams: Arc::default(),
             command_line: false,
+            tool_log_stdout: false,
         }
     }
 
@@ -311,10 +316,22 @@ impl OpenFiles {
         self
     }
 
+    /// Marks the run's files as sharing standard output with `-logfile /dev/stdout`
+    /// (`ToolLog::Stdout` in `ncbi_app::run_app`).
+    pub(crate) fn with_tool_log_stdout(mut self) -> Self {
+        self.tool_log_stdout = true;
+        self
+    }
+
     /// Whether the run is the command line's process (`of_command_line`); a library run or a run
     /// of LOSAT Web writes to its caller's writers.
     pub(crate) fn command_line(&self) -> bool {
         self.command_line
+    }
+
+    /// Whether `-logfile` writes to the run's shared standard output (`with_tool_log_stdout`).
+    pub(crate) fn tool_log_stdout(&self) -> bool {
+        self.tool_log_stdout
     }
 
     /// The files of a run on the file system (`RunFiles::Disk`).
@@ -323,6 +340,7 @@ impl OpenFiles {
             table: None,
             streams: Arc::default(),
             command_line: false,
+            tool_log_stdout: false,
         }
     }
 

@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use super::args::{arg_message, ArgException};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 pub(crate) use crate::report::ostream::ends_like_sigpipe;
-use crate::report::ostream::{ReportStream, ReportWrite};
+use crate::report::ostream::{ReportStream, ReportWrite, StreamInserter};
 use crate::report::run_files::{Created, OpenFiles, OpenedFile, Unopened};
 
 /// The exception of a file argument whose stream does not open.
@@ -336,11 +336,14 @@ pub(crate) enum OutputFile<'a> {
 
 /// The caller's writer of a library run's standard output (`OutputFile::Caller`) with NCBI's
 /// stream state: after a failed write the later ones do nothing; a closed pipe returns its error
-/// from that write and every later one.
+/// from that write and every later one. When `cut_aware` is set (`ToolLog::Stdout` in a
+/// `Receiver` run, where `-logfile /dev/stdout` shares `out`), NCBI's insertion cuts and flushes
+/// are forwarded to the shared `NcbiBuffer`-backed stdout stream rather than coalesced.
 pub(crate) struct CallerOutput<'a> {
     out: &'a mut dyn Write,
     bad: bool,
     closed: bool,
+    cut_aware: bool,
 }
 
 impl CallerOutput<'_> {
@@ -363,7 +366,7 @@ impl CallerOutput<'_> {
         if self.bad {
             return Ok(());
         }
-        let outcome = self.out.write_all(buf).and_then(|()| self.out.flush());
+        let outcome = self.out.write_all(buf);
         self.result(outcome)
     }
 
@@ -497,11 +500,13 @@ impl Write for OutputFile<'_> {
         }
     }
 
-    /// LOSAT's flushes hold: NCBI's are `ReportWrite::ncbi_flush`, and NCBI's writes come before a
-    /// text on standard error (`ncbi_app::Diag`) and at the run's end (`OpenFiles::finish_streams`).
+    /// LOSAT's flushes hold on NCBI's stream and on a cut-aware shared stdout (`ToolLog::Stdout`):
+    /// NCBI's are `ReportWrite::ncbi_flush`, and NCBI's writes come before a text on standard
+    /// error (`ncbi_app::Diag`) and at the run's end (`OpenFiles::finish_streams`).
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             OutputFile::Stream(_) | OutputFile::Refused(_) => Ok(()),
+            OutputFile::Caller(caller) if caller.cut_aware => Ok(()),
             OutputFile::Caller(caller) => caller.flush(),
         }
     }
@@ -525,6 +530,17 @@ impl ReportWrite for OutputFile<'_> {
     ) -> std::io::Result<()> {
         match self {
             OutputFile::Stream(stream) => stream.insert_cut_run(report, from, cuts, to),
+            OutputFile::Caller(caller) if caller.cut_aware => {
+                let mut at = from;
+                for end in cuts.iter().map(|&(end, _)| end).chain([to]) {
+                    let end = end.max(at);
+                    if end > at {
+                        caller.write_all(&report[at..end])?;
+                    }
+                    at = end;
+                }
+                Ok(())
+            }
             // The caller's writer takes the run's bytes at once.
             OutputFile::Caller(caller) => caller.write_all(&report[from..to.max(from)]),
             OutputFile::Refused(reason) => Err(refused_write(reason)),
@@ -534,8 +550,20 @@ impl ReportWrite for OutputFile<'_> {
     fn ncbi_room(&self) -> usize {
         match self {
             OutputFile::Stream(stream) => stream.ncbi_room(),
+            OutputFile::Caller(caller) if caller.cut_aware => 0,
             OutputFile::Caller(_) => usize::MAX,
             OutputFile::Refused(_) => 0,
+        }
+    }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        match self {
+            OutputFile::Stream(stream) => stream.try_with_inserter(f),
+            OutputFile::Caller(_) => Ok(false),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
         }
     }
 }
@@ -574,6 +602,7 @@ pub(crate) fn standard_output_file<'a>(
             out: stdout,
             bad: false,
             closed: false,
+            cut_aware: files.tool_log_stdout(),
         })
     }
 }

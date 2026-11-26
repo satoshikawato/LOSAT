@@ -12,7 +12,7 @@ use crate::ncbi_app::Diag;
 use crate::report::archive::masks::write_ranges_seq_loc;
 use crate::report::defline::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
-use crate::report::ostream::{CutBuffer, ReportWrite};
+use crate::report::ostream::{with_stream_inserter, CutBuffer, ReportWrite};
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
@@ -81,11 +81,7 @@ pub(crate) enum MaskWriter {
     /// `CMaskWriterTabular`.
     Tabular,
     /// `CMaskWriterFasta` (`-hard_masking`: `N` instead of lower case).
-    Fasta {
-        hard_masking: bool,
-        /// Reusable buffer across records.
-        buffer: CutBuffer,
-    },
+    Fasta { hard_masking: bool },
     /// `CMaskWriterSeqLoc`.
     SeqLoc(Serial),
     /// `CMaskWriterBlastDbMaskInfo`.
@@ -108,10 +104,7 @@ pub(crate) struct MaskInfoWriter {
 impl MaskWriter {
     /// `CMaskWriterFasta` (`-hard_masking`: `N` instead of lower case).
     pub(crate) fn fasta(hard_masking: bool) -> Self {
-        MaskWriter::Fasta {
-            hard_masking,
-            buffer: CutBuffer::default(),
-        }
+        MaskWriter::Fasta { hard_masking }
     }
 
     /// The `CMaskWriterBlastDbMaskInfo` constructor (stream, format, algorithm id, filtering
@@ -173,12 +166,9 @@ impl MaskWriter {
                 }
                 text.write_to(out)?;
             }
-            MaskWriter::Fasta {
-                hard_masking,
-                buffer,
-            } => {
+            MaskWriter::Fasta { hard_masking } => {
                 let id = id_to_string(seq, parsed_id)?;
-                fasta_letters(&id, seq.iupac, mask, *hard_masking, buffer, out)?;
+                fasta_letters(&id, seq.iupac, mask, *hard_masking, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:61-90
@@ -499,55 +489,99 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
 /// each line two insertions (the letters, then a line feed of one byte).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:46-101
-/// The lines go to `out` a block at a time (each line is one of NCBI's insertions into its
-/// buffered stream, `CutBuffer`), so the text of a record is never held whole. Each line is copied
-/// whole and then masked in place ([`mask_line`]): the loop over the letters touches only the
-/// line, not the growing text.
+/// Lines are written straight into NCBI's stream buffer (`with_stream_inserter`) with one lock
+/// per record and zero intermediate `CutBuffer` allocation, masking each 60-letter line in place.
 fn fasta_letters(
     id: &[u8],
     iupac: &[u8],
     mask: &[(u32, u32)],
     hard_masking: bool,
-    text: &mut CutBuffer,
     out: &mut dyn ReportWrite,
 ) -> io::Result<()> {
     const LINE: usize = 60;
-    const BLOCK: usize = 1 << 16;
-    text.clear();
-    text.insertion(id);
-    text.endl();
-    text.write_to(out)?;
-    if iupac.is_empty() {
-        return Ok(());
-    }
-    let mut imask = 0;
-    let mut pos = 0u64;
-    let seq_bytes = iupac.len() + iupac.len().div_ceil(LINE);
-    // After the id line's `endl()`, NCBI's buffer is empty; if the entire sequence body fits
-    // within `ncbi_room()`, no line insertion can trigger a write, so per-line cuts are skipped.
-    if seq_bytes < out.ncbi_room() {
-        text.bytes.reserve(seq_bytes);
-        for letters in iupac.chunks(LINE) {
-            let at = text.bytes.len();
-            text.bytes.extend_from_slice(letters);
-            mask_line(&mut text.bytes[at..], pos, mask, &mut imask, hard_masking);
-            text.bytes.push(b'\n');
-            pos += letters.len() as u64;
+    with_stream_inserter(out, &mut |ins| {
+        ins.insert(id)?;
+        ins.put(b'\n')?;
+        ins.ncbi_flush()?;
+        if iupac.is_empty() {
+            return Ok(());
         }
-        return out.write_all(&text.bytes);
-    }
-    for letters in iupac.chunks(LINE) {
-        let at = text.bytes.len();
-        text.bytes.extend_from_slice(letters);
-        mask_line(&mut text.bytes[at..], pos, mask, &mut imask, hard_masking);
-        text.end_insertion();
-        text.insertion(b"\n");
-        pos += letters.len() as u64;
-        if text.bytes.len() >= BLOCK {
-            text.write_to(out)?;
+        let mut imask = 0;
+        let mut pos = 0usize;
+        let len = iupac.len();
+        if ins.room() == usize::MAX {
+            let mut chunk = [0u8; 64 * (LINE + 1)];
+            let mut used = 0;
+            for letters in iupac.chunks(LINE) {
+                let start = used;
+                chunk[used..used + letters.len()].copy_from_slice(letters);
+                mask_line(
+                    &mut chunk[start..start + letters.len()],
+                    pos as u64,
+                    mask,
+                    &mut imask,
+                    hard_masking,
+                );
+                chunk[start + letters.len()] = b'\n';
+                used += letters.len() + 1;
+                pos += letters.len();
+                if used == chunk.len() {
+                    ins.insert(&chunk[..used])?;
+                    used = 0;
+                }
+            }
+            if used > 0 {
+                ins.insert(&chunk[..used])?;
+            }
+            return Ok(());
         }
-    }
-    text.write_to(out)
+        while pos < len {
+            let room = ins.room();
+            if room > 1 {
+                let avail = room - 1;
+                let rem_letters = len - pos;
+                let full_lines = rem_letters / LINE;
+                let take_lines = (avail / (LINE + 1)).min(full_lines);
+                let tail_letters = rem_letters - take_lines * LINE;
+                let tail_bytes = if tail_letters > 0 {
+                    tail_letters + 1
+                } else {
+                    0
+                };
+                let take_tail = take_lines == full_lines
+                    && tail_bytes > 0
+                    && take_lines * (LINE + 1) + tail_bytes <= avail;
+                let batch_bytes = take_lines * (LINE + 1) + if take_tail { tail_bytes } else { 0 };
+                if batch_bytes > 0 {
+                    let batch_letters =
+                        take_lines * LINE + if take_tail { tail_letters } else { 0 };
+                    let slice = &iupac[pos..pos + batch_letters];
+                    let mut p = pos as u64;
+                    if ins.push_within_room(batch_bytes, |dst| {
+                        for letters in slice.chunks(LINE) {
+                            let at = dst.len();
+                            dst.extend_from_slice(letters);
+                            mask_line(&mut dst[at..], p, mask, &mut imask, hard_masking);
+                            dst.push(b'\n');
+                            p += letters.len() as u64;
+                        }
+                    })? {
+                        pos += batch_letters;
+                        continue;
+                    }
+                }
+            }
+            let end = (pos + LINE).min(len);
+            let n = end - pos;
+            let mut line = [0u8; LINE];
+            line[..n].copy_from_slice(&iupac[pos..end]);
+            mask_line(&mut line[..n], pos as u64, mask, &mut imask, hard_masking);
+            ins.insert(&line[..n])?;
+            ins.insert(b"\n")?;
+            pos = end;
+        }
+        Ok(())
+    })
 }
 
 /// NCBI's walk over the mask for the letters of one line, the first at `pos`: a letter at or

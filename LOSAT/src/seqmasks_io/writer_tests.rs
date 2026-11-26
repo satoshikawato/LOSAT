@@ -7,19 +7,17 @@ fn fasta_letters_follow_ncbis_one_step_mask_iterator() {
     // its letter 3 is masked; a third interval right after is reached only at its own
     // positions.
     let mut out = CutBuffer::default();
-    let mut buf = CutBuffer::default();
     fasta_letters(
         b">x",
         b"ACGTACGT",
         &[(0, 1), (3, 3), (4, 5)],
         false,
-        &mut buf,
         &mut out,
     )
     .unwrap();
     assert_eq!(out.bytes, b">x\nacGtacGT\n");
     let mut out = CutBuffer::default();
-    fasta_letters(b">x", &[b'A'; 61], &[(59, 60)], true, &mut buf, &mut out).unwrap();
+    fasta_letters(b">x", &[b'A'; 61], &[(59, 60)], true, &mut out).unwrap();
     assert_eq!(
         &out.bytes[..],
         [&b">x\n"[..], &[b'A'; 59][..], b"N\nN\n"].concat()
@@ -109,8 +107,7 @@ fn fasta_letters_masked_by_line_equal_the_per_letter_walk() {
                     bytes: b">x\n".to_vec(),
                     cuts: Default::default(),
                 };
-                let mut buf = CutBuffer::default();
-                fasta_letters(b">x", &iupac, &mask, hard_masking, &mut buf, &mut out).unwrap();
+                fasta_letters(b">x", &iupac, &mask, hard_masking, &mut out).unwrap();
                 let out = out.bytes;
                 let want = [
                     &b">x\n"[..],
@@ -124,5 +121,46 @@ fn fasta_letters_masked_by_line_equal_the_per_letter_walk() {
                 );
             }
         }
+    }
+}
+
+/// Captures each device write separately to assert exact NCBI write-boundary equivalence.
+#[derive(Clone, Default)]
+struct WriteLog(std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+
+impl io::Write for WriteLog {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn fasta_letters_direct_matches_cut_buffer_write_boundaries() {
+    use crate::report::ostream::ReportStream;
+    for len in [0usize, 59, 60, 4030, 4095, 4096, 8050, 8190, 8191, 17_000] {
+        let seq: Vec<u8> = (0..len).map(|i| b"ACGT"[i % 4]).collect();
+        let mask = [(10, 80), (4020, 4120), (8050, 8200)];
+        let mut cuts = CutBuffer::default();
+        fasta_letters(b">seq1", &seq, &mask, false, &mut cuts).unwrap();
+        let ref_log = WriteLog::default();
+        let mut ref_stream = ReportStream::tool_file(Box::new(ref_log.clone()), "");
+        cuts.write_to(&mut ref_stream).unwrap();
+        ref_stream.finish_tool().unwrap();
+
+        let dir_log = WriteLog::default();
+        let mut dir_stream = ReportStream::tool_file(Box::new(dir_log.clone()), "");
+        fasta_letters(b">seq1", &seq, &mask, false, &mut dir_stream).unwrap();
+        dir_stream.finish_tool().unwrap();
+
+        assert_eq!(
+            *dir_log.0.lock().unwrap(),
+            *ref_log.0.lock().unwrap(),
+            "len {len}"
+        );
     }
 }

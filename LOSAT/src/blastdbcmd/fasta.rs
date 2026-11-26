@@ -5,10 +5,9 @@
 //! `CFastaOstream::WriteSequence`.
 
 use std::collections::HashSet;
-use std::io::Write;
 
 use crate::report::defline::{bioseq_title_from_source, generate_bioseq_defline};
-use crate::report::ostream::CutBuffer;
+use crate::report::ostream::StreamInserter;
 use crate::seqid::accguide::parse_flags::PARTIAL_OK;
 use crate::seqid::label::{bare, bioseq_fasta, fasta};
 use crate::seqid::model::Dbtag;
@@ -28,8 +27,8 @@ pub(super) struct FastaFormatter {
     /// `CFastaOstream::m_PreviousWholeIds`: the FASTA strings of the ids written without a
     /// range.
     previous_whole_ids: HashSet<Vec<u8>>,
-    /// The record being written, kept from one sequence to the next (bytes and NCBI insertion cuts).
-    units: CutBuffer,
+    /// The formatted header line of the current record, reused across sequences.
+    header: Vec<u8>,
 }
 
 impl FastaFormatter {
@@ -38,7 +37,7 @@ impl FastaFormatter {
             width,
             long_seqids,
             previous_whole_ids: HashSet::new(),
-            units: CutBuffer::default(),
+            header: Vec::new(),
         }
     }
 
@@ -88,17 +87,17 @@ impl FastaFormatter {
         if no_ids && (range.is_some() || masks.as_ref().is_some_and(|masks| !masks.is_empty())) {
             return Err(super::retrieve::null_pointer());
         }
-        let mut units = std::mem::take(&mut self.units);
-        units.clear();
+        let mut header = std::mem::take(&mut self.header);
+        header.clear();
         // NCBI's insertion of the definition lines into m_Out (the long header
         // of `CFastaOstream::Write` is taken as one too, LOSAT's form of it).
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
             let source_taxid = set.first_source_taxid(target_seqid);
-            self.long_header(source, shown, source_taxid, range, config, &mut units.bytes)?;
+            self.long_header(source, shown, source_taxid, range, config, &mut header)?;
         } else {
-            short_header(shown, range, config, &mut units.bytes)?;
+            short_header(shown, range, config, &mut header)?;
         }
         let mut letters = source.fasta_letters(oid, range)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:463-477
@@ -114,26 +113,22 @@ impl FastaFormatter {
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        let width = self.width.max(1) as usize;
-        let seq_bytes = letters.len() + letters.len().div_ceil(width);
-        // When the whole record fits in NCBI's buffer without triggering a write (no flush occurs
-        // inside a FASTA record), every intermediate line insertion and newline put is held whole;
-        // skipping per-line cuts yields the identical buffer state.
-        let written = if units.bytes.len() + seq_bytes < out.ncbi_room() {
-            write_sequence_plain(&letters, width, &mut units.bytes);
-            out.write_all(&units.bytes).map_err(Stop::write)
-        } else {
-            let changes = match &masks {
-                Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
-                None => Vec::new(),
-            };
-            units.end_insertion();
-            write_sequence(&letters, self.width, &changes, &mut units);
-            // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
-            // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-            out.insertions(&mut units)
-        };
-        self.units = units;
+        let width = self.width;
+        let written = out.with_inserter(|ins| {
+            if !header.is_empty() {
+                ins.insert(&header)?;
+            }
+            write_sequence_direct(
+                &letters,
+                width,
+                || match &masks {
+                    Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
+                    None => Vec::new(),
+                },
+                ins,
+            )
+        });
+        self.header = header;
         written
     }
 
@@ -453,54 +448,127 @@ fn mask_changes(
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56
 const SEQ_VECTOR_CACHE: usize = 1024;
 
-/// Plain FASTA line wrapping without per-line cuts, used only when the whole record is proven to
-/// fit inside NCBI's stream buffer with zero writes (`ReportWrite::ncbi_room`).
-fn write_sequence_plain(letters: &[u8], width: usize, out: &mut Vec<u8>) {
-    out.reserve(letters.len() + letters.len().div_ceil(width));
-    for line in letters.chunks(width) {
-        out.extend_from_slice(line);
-        out.push(b'\n');
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3164-3320
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
-/// last one shorter, each ended by a line feed, as NCBI's insertions into `out`. NCBI takes the
-/// letters a piece at a time: up to the end of its iterator's cache (`SEQ_VECTOR_CACHE`) or to
-/// the next change of the masking state (`changes`, increasing), whichever comes first. Each
-/// line, or the part of it in a piece, is one insertion (`x_WriteBuffer`), and each line feed a
-/// `put` (NCBI's `<<` of a `char`), the last one also after a shorter last line.
-fn write_sequence(letters: &[u8], width: u32, changes: &[usize], out: &mut CutBuffer) {
+/// last one shorter, each ended by a line feed, written straight into `out` (`StreamInserter`).
+/// Whenever whole wrapped lines fit strictly inside `out.room()` (so no NCBI write can happen
+/// across them), they are wrapped directly into NCBI's held buffer; at NCBI write boundaries
+/// (and on terminals or cut-recording test buffers), each piece split at `SEQ_VECTOR_CACHE` or
+/// a masking-state change (`changes`) is one insertion and each line feed is a `put`.
+fn write_sequence_direct(
+    letters: &[u8],
+    width: u32,
+    changes: impl FnOnce() -> Vec<usize>,
+    out: &mut StreamInserter<'_>,
+) -> std::io::Result<()> {
     let width = width.max(1) as usize;
     let len = letters.len();
-    out.bytes.reserve(len + len.div_ceil(width));
-    out.cuts
-        .reserve(2 * len.div_ceil(width) + len / SEQ_VECTOR_CACHE + changes.len() + 1);
-    let mut changes = changes.iter().copied().peekable();
+    if len == 0 {
+        return Ok(());
+    }
+    if out.room() == usize::MAX {
+        return write_sequence_unbuffered(letters, width, out);
+    }
+    let mut changes_opt: Option<Vec<usize>> = None;
+    let mut make_changes = Some(changes);
+    let mut changes_idx = 0;
     let mut rem_line = width;
     let mut pos = 0;
     while pos < len {
-        while changes.next_if(|&change| change <= pos).is_some() {}
+        let room = out.room();
+        if rem_line == width && room > 1 {
+            let avail = room - 1;
+            let rem_letters = len - pos;
+            let full_lines = rem_letters / width;
+            let take_lines = (avail / (width + 1)).min(full_lines);
+            let tail_letters = rem_letters - take_lines * width;
+            let tail_bytes = if tail_letters > 0 {
+                tail_letters + 1
+            } else {
+                0
+            };
+            let take_tail = take_lines == full_lines
+                && tail_bytes > 0
+                && take_lines * (width + 1) + tail_bytes <= avail;
+            let batch_bytes = take_lines * (width + 1) + if take_tail { tail_bytes } else { 0 };
+            if batch_bytes > 0 {
+                let batch_letters = take_lines * width + if take_tail { tail_letters } else { 0 };
+                let slice = &letters[pos..pos + batch_letters];
+                if out.push_within_room(batch_bytes, |dst| {
+                    for line in slice.chunks(width) {
+                        dst.extend_from_slice(line);
+                        dst.push(b'\n');
+                    }
+                })? {
+                    pos += batch_letters;
+                    continue;
+                }
+            }
+        }
+        let changes_slice =
+            changes_opt.get_or_insert_with(|| make_changes.take().map_or_else(Vec::new, |f| f()));
+        while changes_idx < changes_slice.len() && changes_slice[changes_idx] <= pos {
+            changes_idx += 1;
+        }
         let mut end = ((pos / SEQ_VECTOR_CACHE + 1) * SEQ_VECTOR_CACHE).min(len);
-        if let Some(&change) = changes.peek() {
+        if let Some(&change) = changes_slice.get(changes_idx) {
             end = end.min(change);
         }
-        let mut at = pos;
-        while end - at >= rem_line {
-            out.insertion(&letters[at..at + rem_line]);
-            out.put(b'\n');
-            at += rem_line;
+        let step_end = end.min(pos + rem_line);
+        out.insert(&letters[pos..step_end])?;
+        rem_line -= step_end - pos;
+        pos = step_end;
+        if rem_line == 0 {
+            out.put(b'\n')?;
             rem_line = width;
         }
-        if end > at {
-            out.insertion(&letters[at..end]);
-            rem_line -= end - at;
-        }
-        pos = end;
     }
     if rem_line < width {
-        out.put(b'\n');
+        out.put(b'\n')?;
     }
+    Ok(())
+}
+
+/// Batched line wrapping for library `CallerOutput` streams (`room == usize::MAX`) that have no
+/// NCBI write-point boundaries to preserve.
+fn write_sequence_unbuffered(
+    letters: &[u8],
+    width: usize,
+    out: &mut StreamInserter<'_>,
+) -> std::io::Result<()> {
+    let mut chunk = [0u8; 4096];
+    let mut used = 0;
+    for line in letters.chunks(width) {
+        if used + line.len() + 1 > chunk.len() && used > 0 {
+            out.insert(&chunk[..used])?;
+            used = 0;
+        }
+        if line.len() + 1 <= chunk.len() {
+            chunk[used..used + line.len()].copy_from_slice(line);
+            chunk[used + line.len()] = b'\n';
+            used += line.len() + 1;
+        } else {
+            out.insert(line)?;
+            out.put(b'\n')?;
+        }
+    }
+    if used > 0 {
+        out.insert(&chunk[..used])?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn write_sequence(
+    letters: &[u8],
+    width: u32,
+    changes: &[usize],
+    out: &mut crate::report::ostream::CutBuffer,
+) {
+    crate::report::ostream::with_stream_inserter(out, &mut |ins| {
+        write_sequence_direct(letters, width, || changes.to_vec(), ins)
+    })
+    .expect("writing to CutBuffer is infallible");
 }
 
 /// `ObjectId` of a `BL_ORD_ID` tag, for tests.

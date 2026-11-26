@@ -15,7 +15,7 @@ use crate::algorithm::common::database::TaxdbRun;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, OutputFile};
 use crate::ncbi_str::string_to_non_negative_int;
-use crate::report::ostream::{CutBuffer, ReportWrite};
+use crate::report::ostream::{with_stream_inserter, CutBuffer, ReportWrite, StreamInserter};
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -496,10 +496,13 @@ impl Output<'_, '_> {
         self.closed()
     }
 
-    /// Bytes fewer than this fit in NCBI's buffer with no write (`ReportWrite::ncbi_room`).
-    #[inline]
-    pub fn ncbi_room(&self) -> usize {
-        self.out.ncbi_room()
+    /// Runs `f` with a direct inserter into the underlying report stream (one lock per record,
+    /// zero intermediate `CutBuffer` copy).
+    pub fn with_inserter(
+        &mut self,
+        mut f: impl FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> Result<(), Stop> {
+        with_stream_inserter(&mut *self.out, &mut f).map_err(Stop::write)
     }
 
     /// NCBI's insertions and flushes `text` (`CutBuffer`), emptied.

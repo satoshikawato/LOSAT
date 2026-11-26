@@ -1590,16 +1590,6 @@ pub(crate) fn run_with_env(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-/// The log of `-logfile name` (`AsOutputFile`, append): the file that the system opens under
-/// the name as written; none for the empty name and a name that it cannot open (`logs/`). The
-/// diagnostics open the file of NCBI's reading of the name (`diag_target`), which is this file
-/// for most names and another one where that reading differs (` mk.log`, `a/../mk.log` beside
-/// a link `a`; NCBI BLAST+ 2.17.0 makeblastdb writes its log to ` mk.log` and its
-/// diagnostics to `mk.log`; line WQA's D11 round 2, 2026-11-20). Both append, so where they are
-/// one file the two streams land in it in the order they are written, as NCBI's two appending
-/// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
-/// which the WASI targets cannot make: the run stopped with "File is not accessible".)
 /// The file of `-logfile` as NCBI's log stream writes it: each line, ended by its `NcbiEndl`, in
 /// one write (line RG KD-11b2: the pieces of a line are not written one by one); the bytes of a
 /// line not ended yet at the end.
@@ -1631,6 +1621,16 @@ impl Write for LogLines {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
+/// The log of `-logfile name` (`AsOutputFile`, append): the file that the system opens under
+/// the name as written; none for the empty name and a name that it cannot open (`logs/`). The
+/// diagnostics open the file of NCBI's reading of the name (`diag_target`), which is this file
+/// for most names and another one where that reading differs (` mk.log`, `a/../mk.log` beside
+/// a link `a`; NCBI BLAST+ 2.17.0 makeblastdb writes its log to ` mk.log` and its
+/// diagnostics to `mk.log`; line WQA's D11 round 2, 2026-11-20). Both append, so where they are
+/// one file the two streams land in it in the order they are written, as NCBI's two appending
+/// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
+/// which the WASI targets cannot make: the run stopped with "File is not accessible".)
 fn log_of(name: &str) -> Option<std::fs::File> {
     if name.is_empty() {
         return None;

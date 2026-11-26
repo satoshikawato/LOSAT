@@ -186,35 +186,37 @@ fn caller(out: &mut dyn Write) -> OutputFile<'_> {
 
 /// Counts flush calls on a library caller's writer to verify `CallerOutput::write_all` does not
 /// flush after every insertion (review S3).
-struct CountFlushes {
+struct CountFlushes<'a> {
     bytes: Vec<u8>,
-    flushes: usize,
+    flushes: &'a std::cell::Cell<usize>,
 }
 
-impl Write for CountFlushes {
+impl Write for CountFlushes<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.bytes.extend_from_slice(buf);
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.flushes += 1;
+        self.flushes.set(self.flushes.get() + 1);
         Ok(())
     }
 }
 
 #[test]
 fn caller_output_flushes_at_ncbi_flush_not_every_insertion() {
+    let flushes = std::cell::Cell::new(0);
     let mut sink = CountFlushes {
         bytes: Vec::new(),
-        flushes: 0,
+        flushes: &flushes,
     };
     let mut out = caller(&mut sink);
     out.write_all(b"first").unwrap();
     out.write_all(b"second").unwrap();
-    assert_eq!(sink.flushes, 0);
+    assert_eq!(flushes.get(), 0);
     out.ncbi_flush().unwrap();
-    assert_eq!(sink.flushes, 1);
+    assert_eq!(flushes.get(), 1);
+    drop(out);
     assert_eq!(sink.bytes, b"firstsecond");
 }
 

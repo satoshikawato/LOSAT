@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::ostream::CutBuffer;
 use crate::seqid::BlastDefline;
 
 fn defline(ids: Vec<ParsedSeqId>, title: Option<&str>) -> BlastDefline {

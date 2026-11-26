@@ -1,0 +1,114 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: mask ids v5
+Masked using: 'mydust', options: 'window=64; level=20; linker=1'
+           5 sequences; 7,360 total letters
+
+
+
+Query= lcl|Query_1 q1
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 test subject s1                                                    678     0.0  
+
+
+>s1 test subject s1
+Length=3000
+
+ Score = 678 bits (367),  Expect = 0.0
+ Identities = 389/400 (97%), Gaps = 0/400 (0%)
+ Strand=Plus/Plus
+
+Query  1    TCCTTGCGCATCTGTCGATTGAAATAGCAGCCGACCGGTCTATGTTACTCATTTTGTGCG  60
+            ||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  601  TCCCTGCGCATCTGTCGATTGAAATAGCAGCCGACCGGTCTATGTTACTCATTTTGTGCG  660
+
+Query  61   CTACGAGGCGGGCCTCCGTTTACCAGATCGGTGCACTCTACCGGTTCGAACACATAATAT  120
+            |||||| | ||||||||||||||||||||||||||||||||||||||||||||| |||||
+Sbjct  661  CTACGACGAGGGCCTCCGTTTACCAGATCGGTGCACTCTACCGGTTCGAACACAAAATAT  720
+
+Query  121  ACGCATCGACTGGTGGAAAACCTCCACGAGACTGAGAGACTGCCATGACTTATCCACTTT  180
+            || |||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  721  ACTCATCGACTGGTGGAAAACCTCCACGAGACTGAGAGACTGCCATGACTTATCCACTTT  780
+
+Query  181  CGAGATAATCTAGACCGCTGTCCCTCTAGCCCAGCTATCTGCGGCCCTCCAGAAATCAAG  240
+            |||||||||||||||||||||| |||||||||||| ||||||||||||||||||||||||
+Sbjct  781  CGAGATAATCTAGACCGCTGTCACTCTAGCCCAGCGATCTGCGGCCCTCCAGAAATCAAG  840
+
+Query  241  GTCATTAAACAAGCGATCAGGGGACAGGATCTGAGGGCTTCAACTCTAGGGGTACGAGCA  300
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  841  GTCATTAAACAAGCGATCAGGGGACAGGATCTGAGGGCTTCAACTCTAGGGGTACGTGCA  900
+
+Query  301  TTTGAGTGATTCGCACGGCGTCCAGTCGTTTTGAACCTCTTCACTCTGAAACCGGATGCG  360
+            |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  901  TTTGAGTGATTCGCACGGCGTCCAGTCGTTTTGAACCTCTTCACTCGGAAACCGGATGCG  960
+
+Query  361  GCCTCATGAATGCAGCATTTAGGCACGTTGGGCCTACCAT  400
+            |||| |||||||||| ||||||||||||||||||||||||
+Sbjct  961  GCCTAATGAATGCAGAATTTAGGCACGTTGGGCCTACCAT  1000
+
+
+ Score = 662 bits (358),  Expect = 0.0
+ Identities = 386/400 (97%), Gaps = 0/400 (0%)
+ Strand=Plus/Plus
+
+Query  501   TCCGAGCGAGTAGGGGTGTACTTTTCTCCCCCTCGTAGTAGCCTAAGAGTTTAACCCGCA  560
+             ||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||
+Sbjct  1101  TCCGAGCGAGTAGGGGTGTACTTTTCTCCCCCTCGTAGTAGCCTAAGGGTTTAACCCGCA  1160
+
+Query  561   CGCCATGGCTTGAGCCAATCGCTGAGAGGCTGAGGATTGTTTATTCAGGCACAGAAGGAG  620
+             |||| ||||||||||||||||||||||| |||||||||||||||||||||||||||||||
+Sbjct  1161  CGCCGTGGCTTGAGCCAATCGCTGAGAGACTGAGGATTGTTTATTCAGGCACAGAAGGAG  1220
+
+Query  621   CAGAAAGGGCTGCCATATTTGGGGCCATCGTCACAAGCTCTAACCGCGTCTGGCGTACGA  680
+             |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||
+Sbjct  1221  CAGAAAGGGCTGCCATATTTGGCGCCATCGTCACAAGCTCTAACCGCGTCTGGCGTACGA  1280
+
+Query  681   TGACTAACGCTCTCGGCTTTCTGCCCGGAAGCATCTACCGTCCGCAGTTCGTGTACACCG  740
+             ||||||||||||||||||||||||| ||||||||||||||||| ||||||||||||||||
+Sbjct  1281  TGACTAACGCTCTCGGCTTTCTGCCGGGAAGCATCTACCGTCCCCAGTTCGTGTACACCG  1340
+
+Query  741   AGGCACGTCTGGTAAGATCTTGGAACCGGGTTCGGACCAGAATCATTAGTTTCGGTTATA  800
+             ||||||||||||||||||| |||||||||||||||||||||||| |||||| ||||||| 
+Sbjct  1341  AGGCACGTCTGGTAAGATCATGGAACCGGGTTCGGACCAGAATCGTTAGTTCCGGTTATG  1400
+
+Query  801   GGTAGAGAGCGTTATTAGCCAACGCCTTTGTCTAATGCTCCCAGAAAGGAGTAGAGATTT  860
+             |||||| |||||||||||||||||||||||||||||||||| ||||||||| ||||||||
+Sbjct  1401  GGTAGAAAGCGTTATTAGCCAACGCCTTTGTCTAATGCTCCGAGAAAGGAGCAGAGATTT  1460
+
+Query  861   GGCACAGCCGTTCCATCCAGATGCTCATATCCTTCGGAAC  900
+             |||||||||| |||||||||||||||||||||||||||||
+Sbjct  1461  GGCACAGCCGGTCCATCCAGATGCTCATATCCTTCGGAAC  1500
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 6447225
+
+
+  Database: mask ids v5
+  Masked using: 'mydust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 14, 2026  5:20 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

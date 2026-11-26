@@ -78,7 +78,12 @@ pub(super) fn batch_flags<S: TbxScore>(
     let num_threads = parallel_pool.threads();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    let requested_parallel = parallel_pool.enabled();
+    //
+    // A negative `-window_size` (an imported strategy's) searches serially, in NCBI's order of
+    // subjects and chunks on one diagonal table, which is NCBI's `-num_threads 1` search: its
+    // table keeps its state from one call of the word finder to the next, so what NCBI's threads
+    // find would depend on how they share the subjects (`word_finder::WideOffset`).
+    let requested_parallel = parallel_pool.enabled() && args.window() >= 0;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003
     //
     // The scan-chunk experiment keeps the canonical two-hit state serial inside
@@ -354,9 +359,9 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
                 || diag_enabled
                 || debug_hsp_saving
                 || x_soft_subjects
-                // The one-hit word finder (`-window_size 0`) runs in the reference frame loop
-                // only (`scan_chunk_one_hit`).
-                || window == 0,
+                // The one-hit word finder (`-window_size 0` or less) runs in the reference frame
+                // loop only (`scan_chunk_one_hit`).
+                || window <= 0,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,

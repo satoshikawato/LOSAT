@@ -18,6 +18,7 @@ use crate::emit::{
     emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_PRINTED,
     STREAM_RESPONSE, STREAM_RUN_FILES,
 };
+use crate::imported::Supplied;
 use crate::json;
 
 /// The programs that ABI v2 runs.
@@ -199,8 +200,8 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 /// (`ReportOutputs`), and `validate` gives the checks of the arguments alone (`check_options`)
 /// the argv's own format.
 pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), String> {
-    let (program, command) = parse_words(words)?;
-    read_outfmt(words, program, command)
+    let (program, command, supplied) = parse_imported(words)?;
+    read_outfmt(words, program, command, supplied.is_some())
 }
 
 /// The first part of `parse_run`: the adapter's own rules and the engine's CLI parser, without the
@@ -209,15 +210,17 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), Strin
 /// help (`parse_printing` tells it apart).
 fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     match parse_printing(words, None)? {
-        Parsed::Command(program, command) => Ok((program, *command)),
+        Parsed::Command(program, command, _) => Ok((program, *command)),
         Parsed::Prints(text) => Err(text),
     }
 }
 
 /// What the engine's CLI parser makes of an argv (`parse_printing`).
 enum Parsed {
-    /// The program's arguments (boxed: they are far larger than a text).
-    Command(Program, Box<Commands>),
+    /// The program's arguments (boxed: they are far larger than a text), and with an
+    /// `-import_search_strategy NAME` the run's import of the registered strategy file, which has
+    /// what it carries as inputs (`Supplied::take`).
+    Command(Program, Box<Commands>, Option<Supplied>),
     /// The text that the command line prints to its standard output in place of a run, where
     /// NCBI's reader stopped at a help word (`-h`, `-help`, `-help-full`, `-xmlhelp`, the words
     /// before it read: `losat::web_adapter::ArgvError::Printed`).
@@ -227,6 +230,12 @@ enum Parsed {
 /// `parse_words`, with the help that stopped the reader as its own outcome (`Parsed::Prints`; line
 /// WQA's D14, 2026-11-20). The help is printed as the command line prints it, whatever the words
 /// around it (`-out` too: line WQA's D14 review, 2026-11-20); any other argv with `-out` is refused.
+/// With an `-import_search_strategy NAME` the command line's import of the registered strategy file
+/// `NAME` (kind 3, `files::strategy`): the arguments are the import's
+/// (`losat::web_adapter::import_strategy`: the engine's import, the path of the command line),
+/// and what the strategy carries as inputs comes with them; the program is the strategy's where
+/// the argv's program runs another program's strategy as the command line does. A file that is
+/// not registered is the command line's file that is not accessible.
 /// A run gives its start (`started_command`): the posts of an argument error go to the run's
 /// `-logfile` target, as the command line's (`try_parse_cli`).
 fn parse_printing(words: &[&str], started: Option<&CallerStart>) -> Result<Parsed, String> {
@@ -249,7 +258,35 @@ fn parse_printing(words: &[&str], started: Option<&CallerStart>) -> Result<Parse
     }
     let cli: Cli = parsed.map_err(|error| losat::web_adapter::argv_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    Ok(Parsed::Command(program, Box::new(cli.command)))
+    let command = cli.command;
+    let Some(name) =
+        losat::web_adapter::strategy_file_name(&command).map(std::path::Path::to_path_buf)
+    else {
+        return Ok(Parsed::Command(program, Box::new(command), None));
+    };
+    let bytes = crate::files::strategy(&name).ok_or_else(|| {
+        format!(
+            "Command line argument error: Argument \"import_search_strategy\". File is not accessible:  `{}'",
+            name.display()
+        )
+    })?;
+    // The import is the run's, made once (`imported`): a reading of the same argv over the same
+    // file takes a copy of its arguments. The strategy's program reads the inputs and runs
+    // (`losat::web_adapter::program_of`).
+    let supplied = Supplied::of(words, program, command, &bytes)?;
+    Ok(Parsed::Command(
+        supplied.program(),
+        Box::new(supplied.command()),
+        Some(supplied),
+    ))
+}
+
+/// `parse` with the inputs that the argv's search strategy supplies (`parse_printing`).
+pub fn parse_imported(words: &[&str]) -> Result<(Program, Commands, Option<Supplied>), String> {
+    match parse_printing(words, None)? {
+        Parsed::Command(program, command, supplied) => Ok((program, *command, supplied)),
+        Parsed::Prints(text) => Err(text),
+    }
 }
 
 /// What a run of `words` (program name first) prints in place of a search (`STREAM_PRINTED`), as the
@@ -294,6 +331,7 @@ fn read_outfmt(
     words: &[&str],
     program: Program,
     mut command: Commands,
+    imported: bool,
 ) -> Result<(Program, Commands, Requested), String> {
     use losat::web_adapter::EarlyFormat;
     let strategy = losat::web_adapter::export_search_strategy_of(&command).is_some();
@@ -303,8 +341,9 @@ fn read_outfmt(
     // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
     // raises after it read `-outfmt`'s number and before its other checks, as it does where the
     // run has inputs (the registered records are the files of `-query` and `-subject`; line
-    // WQA's D14, 2026-11-21: `blastp -query -h`, whose `-h` is the query's name).
-    if !names_subjects(&command) {
+    // WQA's D14, 2026-11-21: `blastp -query -h`, whose `-h` is the query's name). A search strategy
+    // gives the subjects or the database itself (its import has refused one that gives none).
+    if !imported && !names_subjects(&command) {
         return Err(format!("{:#}", losat::web_adapter::missing_subject_error()));
     }
     let choice = match early {
@@ -368,7 +407,8 @@ fn read_outfmt(
 
 /// Whether a run of `words` (program name first) takes its query and subject from
 /// `store::register_inputs`, which reads them together for its argv, and not from `register`: an
-/// argv with `-parse_deflines` (`parse_deflines_of`), whose reading of the inputs needs the argv
+/// argv with `-import_search_strategy`, whose inputs may come from the strategy, or with
+/// `-parse_deflines` (`parse_deflines_of`), whose reading of the inputs needs the argv
 /// (the ids of the deflines, read in one scope of ids for the query and the subjects), that is not
 /// a dry run, which reads no input. False for an argv that the CLI's parser rejects.
 pub fn inputs_together(words: &[&str]) -> bool {
@@ -376,9 +416,12 @@ pub fn inputs_together(words: &[&str]) -> bool {
         losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])),
         losat::web_adapter::Preparsed::Words { dryrun: true, .. }
     );
+    // A strategy's queries and subjects are read here too, with the argv's options.
     !dry_run
-        && parse_words(words)
-            .is_ok_and(|(_, command)| losat::web_adapter::parse_deflines_of(&command))
+        && parse_words(words).is_ok_and(|(_, command)| {
+            losat::web_adapter::parse_deflines_of(&command)
+                || losat::web_adapter::strategy_file_name(&command).is_some()
+        })
 }
 
 /// Whether the run of `words` writes the BLAST archive (outfmt 11) or a search strategy file
@@ -659,9 +702,9 @@ fn started_command(
     if let Some(text) = started.version() {
         return Ok(Next::Prints(text.to_string()));
     }
-    let (program, command) = match parse_printing(words, to_log.then_some(started))? {
+    let (program, command, imported) = match parse_printing(words, to_log.then_some(started))? {
         Parsed::Prints(text) => return Ok(Next::Prints(text)),
-        Parsed::Command(program, command) => (program, *command),
+        Parsed::Command(program, command, supplied) => (program, *command, supplied.is_some()),
     };
     started.settings()?;
     if started.dry_run() {
@@ -672,7 +715,8 @@ fn started_command(
     // leaves it empty (the receiver gets the file when it is dropped).
     let strategy = losat::web_adapter::open_strategy_file(&command, &words[1..], run_files)
         .map_err(|error| format!("{error:#}"))?;
-    read_outfmt(words, program, command).map(|parsed| Next::Search(Box::new(parsed), strategy))
+    read_outfmt(words, program, command, imported)
+        .map(|parsed| Next::Search(Box::new(parsed), strategy))
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing), carrying
@@ -1350,12 +1394,25 @@ impl Searched {
 /// failed (`emit::discard`), and the host drops what it received of it where a chunk reached it
 /// already (a report that failed after 1 MiB, BLASTX's later query batch).
 fn search(
-    command: Commands,
+    mut command: Commands,
     formats: &[Output],
     inputs: RunInputs,
     settings: &ApplicationSettings,
     diagnostics: &mut (dyn std::io::Write + Send),
 ) -> Result<Searched, Failed> {
+    // An imported strategy's warnings (`RecoverSearchStrategy`, `x_IssueWarningsForIgnoredOptions`)
+    // come first, before the program's own, as the CLI posts them at its start.
+    let warnings = losat::web_adapter::take_strategy_warnings(&mut command);
+    if let Err(error) = diagnostics.write_all(&warnings) {
+        let message = format!("the diagnostics could not be written: {error}");
+        return Err(Failed {
+            cli_stderr: message.clone().into_bytes(),
+            message,
+            native: None,
+            fault: true,
+            kept: Vec::new(),
+        });
+    }
     let RunInputs {
         query,
         query_end,
@@ -1842,6 +1899,8 @@ pub fn run(
     // refused (`RunFileArchive::receive`).
     let kept = files.close();
     let emitted = handed.and_then(|()| RunFileArchive::emit(kept));
+    // The run's import of its search strategy ends with it (`imported`).
+    crate::imported::end_run();
     result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 
@@ -2388,6 +2447,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
 #[cfg(test)]
 #[path = "run_start_tests.rs"]
 mod start_tests;
+
+#[cfg(test)]
+#[path = "run_import_tests.rs"]
+mod import_tests;
 
 #[cfg(test)]
 #[path = "run_strategy_tests.rs"]

@@ -571,6 +571,16 @@ pub fn records_refused_options(program: crate::api::Program) -> &'static [&'stat
     }
 }
 
+// A search strategy file given as bytes (`-import_search_strategy`, `file_begin` kind 3): the
+// engine's import over them (the strategy's program's arguments, `program_of`), the file that the
+// parsed arguments name, and the warnings of the import, which the run writes first
+// (`api::strategy`; the same path as the command line's and the library's
+// `Search::read_strategy`).
+pub use crate::api::strategy::{
+    apply as import_strategy, import_name as strategy_file_name, program_of,
+    take_warnings as take_strategy_warnings,
+};
+
 // The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their
 // names (`file_begin`): NCBI's check of the format and the counts readers on the bytes, and the
 // source through which BLASTN opens them (`BlastnArgs::window_masker_counts`).

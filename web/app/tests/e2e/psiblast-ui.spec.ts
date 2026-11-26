@@ -31,6 +31,11 @@ async function attachQueryFile(page: import('@playwright/test').Page, name: stri
   await expect(page.getByTestId('query-file-name')).toContainText(name);
 }
 
+async function setNumIterations(page: import('@playwright/test').Page, count: number): Promise<void> {
+  await openParameters(page);
+  await page.getByTestId('param-num_iterations').fill(String(count));
+}
+
 test.describe('PSIBLAST and TBLASTN -in_pssm UI', () => {
   test('selects PSI-BLAST under BLASTP Algorithm radios, configures MSA query + iterations + PSSM outputs, runs, and offers PSSM downloads', async ({ page }) => {
     await openSearch(page);
@@ -55,8 +60,7 @@ test.describe('PSIBLAST and TBLASTN -in_pssm UI', () => {
 
     await paste(page, 'subject', PSIBLAST_SUBJECT_FASTA);
 
-    await openParameters(page);
-    await page.getByTestId('param-num_iterations').fill('2');
+    await setNumIterations(page, 2);
     await page.getByTestId('param-out_pssm').fill('out.asn');
     await page.getByTestId('param-out_ascii_pssm').fill('out.ascii');
     await page.getByTestId('param-save_pssm_after_last_round').check();
@@ -86,8 +90,7 @@ test.describe('PSIBLAST and TBLASTN -in_pssm UI', () => {
     await program(page, 'psiblast');
     await paste(page, 'query', readFileSync(join(REPOSITORY, PSIBLAST_QUERY_FIXTURE), 'utf8'));
     await paste(page, 'subject', readFileSync(join(REPOSITORY, PSIBLAST_SUBJ_IDS_FIXTURE), 'utf8'));
-    await openParameters(page);
-    await page.getByTestId('param-num_iterations').fill('2');
+    await setNumIterations(page, 2);
 
     await submit(page);
     await waitStatus(page, 1, 'completed');

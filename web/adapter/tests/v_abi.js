@@ -1823,16 +1823,16 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       const start = JSON.parse(started.streams.get(2).toString());
       assert.equal(start.database, Boolean(c.db), `${c.id}: start.database`);
       assert.equal(start.query_file, c.queryFile ?? null, `${c.id}: start.query_file`);
+      const queryBytes = c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query));
+      const subjectBytes = c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject));
+      const registerPair = (argvStr, ctxLabel) => {
+        const reg = reactor.call("losat_web2_register_inputs", argvStr, queryBytes, subjectBytes);
+        assert.equal(reg.status, 0, `${ctxLabel}: register_inputs: ${reg.error}`);
+        return JSON.parse(reg.streams.get(2).toString());
+      };
       let qHandle = 0, qIds, sHandle = 0, shownIds;
       if (start.register_inputs) {
-        const reg = reactor.call(
-          "losat_web2_register_inputs",
-          [...baseArgv, "-num_threads", "1"].join("\0"),
-          c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query)),
-          c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject)),
-        );
-        assert.equal(reg.status, 0, `${c.id}: register_inputs: ${reg.error}`);
-        const parsed = JSON.parse(reg.streams.get(2).toString());
+        const parsed = registerPair([...baseArgv, "-num_threads", "1"].join("\0"), c.id);
         qHandle = parsed.query ? parsed.query.handle : 0;
         qIds = parsed.query ? parsed.query.records.map((r) => r.id) : undefined;
         sHandle = parsed.subject ? parsed.subject.handle : 0;
@@ -1844,13 +1844,13 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         }
       } else {
         if (!c.queryFile) {
-          const regQ = reactor.call("losat_web2_register", c.program, 0, 1, fs.readFileSync(path.join(losatDir, c.query)));
+          const regQ = reactor.call("losat_web2_register", c.program, 0, 1, queryBytes);
           assert.ok(regQ.status > 0, `${c.id}: register query: ${regQ.error}`);
           qHandle = regQ.status;
           qIds = JSON.parse(regQ.streams.get(2).toString()).records.map((r) => r.id);
         }
         if (!c.db) {
-          const regS = reactor.call("losat_web2_register", c.program, 1, 1, fs.readFileSync(path.join(losatDir, c.subject)));
+          const regS = reactor.call("losat_web2_register", c.program, 1, 1, subjectBytes);
           assert.ok(regS.status > 0, `${c.id}: register subject: ${regS.error}`);
           sHandle = regS.status;
         }
@@ -1860,16 +1860,9 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         const argv = [...baseArgv, "-num_threads", String(threads)].join("\0");
         let runQHandle = qHandle, runSHandle = sHandle, releasePerThread = false;
         if (start.register_inputs && threads !== 1) {
-          const reg = reactor.call(
-            "losat_web2_register_inputs",
-            argv,
-            c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query)),
-            c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject)),
-          );
-          assert.equal(reg.status, 0, `${label}: register_inputs: ${reg.error}`);
-          const parsed = JSON.parse(reg.streams.get(2).toString());
-          runQHandle = parsed.query ? parsed.query.handle : 0;
-          runSHandle = parsed.subject ? parsed.subject.handle : 0;
+          const pair = registerPair(argv, label);
+          runQHandle = pair.query ? pair.query.handle : 0;
+          runSHandle = pair.subject ? pair.subject.handle : 0;
           releasePerThread = true;
         }
         const val = reactor.call("losat_web2_validate", argv);

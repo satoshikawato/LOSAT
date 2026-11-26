@@ -100,7 +100,9 @@ watch(
 onUnmounted(() => clearTimeout(engineWait));
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const blastpTaskField = programById('blastp').sections[0]!.fields[0]!;
-const blastpTaskLabel = (choice: string): string => blastpTaskField.choiceLabels?.[choice] ?? choice;
+const proteinAlgorithmChoices = [...BLASTP_TASK_CHOICES, 'psiblast'] as const;
+const proteinAlgorithmLabel = (choice: string): string =>
+  choice === 'psiblast' ? PSIBLAST_ALGORITHM_LABEL : (blastpTaskField.choiceLabels?.[choice] ?? choice);
 const activeModeTab = computed(() => modeTabOf(state.value.program));
 const summaryParts = computed(() => {
   void state.value; // recompute with the draft
@@ -224,27 +226,16 @@ defineExpose({ focusRepeats });
           <span id="param-task-label" class="param-label">Algorithm</span>
           <div class="param-control">
             <div class="radios" role="radiogroup" aria-labelledby="param-task-label" data-testid="param-task">
-              <label v-for="choice in BLASTP_TASK_CHOICES" :key="choice" class="radio">
+              <label v-for="choice in proteinAlgorithmChoices" :key="choice" class="radio">
                 <input
                   type="radio"
                   name="param-task"
                   :value="choice"
-                  :checked="false"
+                  :checked="choice === 'psiblast'"
                   :data-testid="`param-task-${choice}`"
                   @change="draft.selectProteinAlgorithm(choice)"
                 />
-                {{ blastpTaskLabel(choice) }}
-              </label>
-              <label class="radio">
-                <input
-                  type="radio"
-                  name="param-task"
-                  value="psiblast"
-                  :checked="true"
-                  data-testid="param-task-psiblast"
-                  @change="draft.selectProteinAlgorithm('psiblast')"
-                />
-                {{ PSIBLAST_ALGORITHM_LABEL }}
+                {{ proteinAlgorithmLabel(choice) }}
               </label>
             </div>
           </div>

@@ -1153,6 +1153,9 @@ pub(super) fn write_custom_tabular(
             length: &subject_length,
             taxonomy: &taxonomy,
             loads: view.hit_loads,
+            seen: listed_titles
+                .as_ref()
+                .map_or_else(Default::default, database::ListedTitles::seen),
         },
         _ => tabular::TabularSubjects::Records {
             records: subject_records,
@@ -1286,6 +1289,7 @@ pub(super) fn write_text(
         Some(titles) => crate::report::tabular::failed_database_subject(
             titles.oid(s_idx),
             view.hit_loads.thrown(s_idx),
+            view.listed_parsed.get(s_idx).and_then(Option::as_deref),
             false,
         ),
         None => crate::report::tabular::failed_record_title(

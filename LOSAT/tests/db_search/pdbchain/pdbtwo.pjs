@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pdbtwo",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pdbtwo",
+  "number-of-letters": 440,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-24T15:23:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1018,
+  "bytes-to-cache": 531,
+  "files": [
+    "pdbtwo.phr",
+    "pdbtwo.pin",
+    "pdbtwo.pog",
+    "pdbtwo.psd",
+    "pdbtwo.psi",
+    "pdbtwo.psq"
+  ]
+}

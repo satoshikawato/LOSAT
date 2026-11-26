@@ -289,6 +289,13 @@ export interface DraftState {
    */
   readonly dataLoaders: boolean;
   /**
+   * Whether the run of the draft's argv reads deflines as parsed Seq-ids (`-parse_deflines`), as the
+   * latest validation that the engine answered says (off before one): the engine's index scan reads
+   * with it so that the record table matches the run's reading of records whose Seq-id names the other
+   * molecule (line RG-XT item X7-5, 2026-11-25).
+   */
+  readonly parseDeflines: boolean;
+  /**
    * What the engine's start read of the argv of the latest validation (`EngineGateway.start`): the
    * name of its `-conffile`, for which the form asks for a file; undefined before it, or when the
    * engine could not start the argv.
@@ -404,6 +411,7 @@ export class SearchDraft {
       race: {},
       validation: { state: 'idle' },
       dataLoaders: true,
+      parseDeflines: false,
       submitting: false,
     });
     void this.loadDescription('blastn');
@@ -1869,41 +1877,53 @@ export class SearchDraft {
     return fastaParser(programById(this.state.get().program), role);
   }
 
-  /** The engine's reader of the role's input now: the program's, with the data loaders of the latest validation. */
+  /** The engine's reader of the role's input now: the program's, with the data loaders and `-parse_deflines` of the latest validation. */
   private readerOf(role: InputRole): FastaReader {
-    const { program, dataLoaders } = this.state.get();
-    return { program, role, dataLoaders };
+    const { program, dataLoaders, parseDeflines } = this.state.get();
+    return { program, role, dataLoaders, parseDeflines };
   }
 
   /**
-   * The validation says that the run reads its inputs with the data loaders on or off (`dataLoaders`), as the CLI
-   * reads them under the argv's registry (line WQA's D16, 2026-11-20): where that changes, the sources that the reader
-   * refused are read again (a first line that may be a Seq-id is data with the loaders off), and the rest checked again.
+   * Applies the reader settings (`dataLoaders` and `parseDeflines`) reported by validation. When
+   * `parseDeflines` changes, every source's cached record tables are cleared and every source is
+   * reindexed (record lengths and stops can change for records whose Seq-id names the other
+   * molecule). When only `dataLoaders` changes (line WQA's D16, 2026-11-20), failed sources are
+   * read again and the rest checked again.
    */
-  private setDataLoaders(dataLoaders: boolean): void {
-    if (this.state.get().dataLoaders === dataLoaders) return;
-    this.set({ dataLoaders });
+  private setReaderSettings(dataLoaders: boolean | undefined, parseDeflines: boolean | undefined): void {
+    const current = this.state.get();
+    const loadersChanged = dataLoaders !== undefined && current.dataLoaders !== dataLoaders;
+    const parseChanged = parseDeflines !== undefined && current.parseDeflines !== parseDeflines;
+    if (!loadersChanged && !parseChanged) return;
+    this.set({
+      ...(loadersChanged ? { dataLoaders } : {}),
+      ...(parseChanged ? { parseDeflines } : {}),
+    });
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
-        if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
+        if (parseChanged) this.reindex(role, source.key, this.parserOf(role), true);
+        else if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
         else this.scheduleCheck(role, source.key, 0);
       }
     }
   }
 
-  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). */
-  private reindex(role: InputRole, key: string, parser: FastaParserKind): Promise<void> {
+  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). When `fresh` is true, cached tables are discarded and the source is rescanned while exclusions stay in the source's `excludedKeys`. */
+  private reindex(role: InputRole, key: string, parser: FastaParserKind, fresh = false): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return Promise.resolve();
+    const task = `${role}:${key}`;
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
-    // Cache the table of the kind the source leaves; exclusions belong to the source (`excludedKeys`)
-    // so they survive mode changes while newly parsed records enter as included (line WQA's D16, Owner Q2=B).
-    const tables: Partial<Record<FastaParserKind, SourceTable>> = { ...source.tables };
-    if (source.base !== undefined) {
+    // Cache the table of the kind the source leaves unless `fresh` clears all cached tables
+    // (a `-parse_deflines` change invalidates every cached table); exclusions belong to the
+    // source (`excludedKeys`) so they survive mode changes while newly parsed records enter
+    // as included (line WQA's D16, Owner Q2=B).
+    const tables: Partial<Record<FastaParserKind, SourceTable>> = fresh ? {} : { ...source.tables };
+    if (!fresh && source.base !== undefined) {
       tables[source.parser] = { base: source.base, ...(source.indexMs === undefined ? {} : { indexMs: source.indexMs }) };
     }
-    const kept = tables[parser];
+    const kept = fresh ? undefined : tables[parser];
     delete tables[parser];
     this.updateSource(role, key, (s) => {
       const next: DraftSource = {
@@ -1924,7 +1944,7 @@ export class SearchDraft {
     });
     if (kept !== undefined) {
       // An index of the kind that was left, still running, must not replace this table.
-      this.nextGeneration(`${role}:${key}`);
+      this.nextGeneration(task);
       this.scheduleCheck(role, key, 0);
       this.recheckReaderErrors(role, key);
       return Promise.resolve();
@@ -2012,7 +2032,12 @@ export class SearchDraft {
     first: { ref: SourceRef | undefined; sourceId: string | undefined; head: string | undefined; lead: InputLead | undefined },
   ): boolean {
     const inForce = this.readerOf(role);
-    if (inForce.program === reader.program && inForce.dataLoaders === reader.dataLoaders) return false;
+    if (
+      inForce.program === reader.program &&
+      inForce.dataLoaders === reader.dataLoaders &&
+      inForce.parseDeflines === reader.parseDeflines
+    )
+      return false;
     const { ref, sourceId, head, lead } = first;
     this.updateSource(role, key, (source) => ({
       ...source,
@@ -2054,14 +2079,14 @@ export class SearchDraft {
       return;
     }
     const reader = this.readerOf(role);
-    const { program, dataLoaders } = reader;
+    const { program, dataLoaders, parseDeflines } = reader;
     const started = this.deps.now();
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
       // A source removed meanwhile is not checked (nor cached).
       if (source.sourceId === undefined || !this.formSources.has(source.sourceId)) return;
-      const key = `${program}|${role}|${dataLoaders}|${revisionId}`;
+      const key = `${program}|${role}|${dataLoaders}|${parseDeflines}|${revisionId}`;
       let verdict = this.verdicts.get(key);
       if (verdict === undefined) {
         verdict = this.deps.data.checkInput(reader, [revisionId]);
@@ -2081,7 +2106,13 @@ export class SearchDraft {
     } catch (error) {
       check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
-    if (this.generations.get(task) !== generation || this.state.get().program !== program || this.state.get().dataLoaders !== dataLoaders) return;
+    if (
+      this.generations.get(task) !== generation ||
+      this.state.get().program !== program ||
+      this.state.get().dataLoaders !== dataLoaders ||
+      this.state.get().parseDeflines !== parseDeflines
+    )
+      return;
     const checkMs = this.deps.now() - started;
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
@@ -2191,8 +2222,9 @@ export class SearchDraft {
     let validation: Validation;
     let start: StartInfo | undefined;
     let registry: ChosenRegistryFile | undefined;
-    // The data loaders of the argv's run, where the engine found the argv valid.
+    // The reader settings of the argv's run, where the engine read them.
     let dataLoaders: boolean | undefined;
+    let parseDeflines: boolean | undefined;
     // Whether the engine answered (its start did), whatever the verdict.
     let answered = false;
     try {
@@ -2213,6 +2245,7 @@ export class SearchDraft {
         // Also from a refused argv whose registry the engine read (line WQA's D13 round 3, L1): the setting does not depend
         // on the option that it refuses.
         if (result.dataLoaders !== undefined) dataLoaders = result.dataLoaders;
+        if (result.parseDeflines !== undefined) parseDeflines = result.parseDeflines;
       }
     } catch (error) {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.
@@ -2224,7 +2257,7 @@ export class SearchDraft {
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
-    if (dataLoaders !== undefined) this.setDataLoaders(dataLoaders);
+    this.setReaderSettings(dataLoaders, parseDeflines);
     this.prepareEngine();
     if (answered) void this.askOptionsAgain();
   }

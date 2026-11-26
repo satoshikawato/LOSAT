@@ -24,8 +24,8 @@ fn input(name: &str) -> Vec<u8> {
 
 fn run_blastp(words: &[&str]) -> Result<(), String> {
     let program = run::Program::parse("blastp").unwrap();
-    let (query, _) = store::register("blastp", 0, true, &input("arch_bp_q.faa")).unwrap();
-    let (subject, _) = store::register("blastp", 1, true, &input("arch_bp_s.faa")).unwrap();
+    let (query, _) = store::register("blastp", 0, true, false, &input("arch_bp_q.faa")).unwrap();
+    let (subject, _) = store::register("blastp", 1, true, false, &input("arch_bp_s.faa")).unwrap();
     let result = store::with_inputs(
         program,
         query,

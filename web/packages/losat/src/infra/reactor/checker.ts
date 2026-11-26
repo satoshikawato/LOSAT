@@ -13,7 +13,13 @@ export class ReactorInputChecker implements InputChecker {
     const abi = await this.reactor();
     let registered;
     try {
-      registered = abi.register(reader.program, reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT, reader.dataLoaders, bytes);
+      registered = abi.register(
+        reader.program,
+        reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT,
+        reader.dataLoaders,
+        reader.parseDeflines,
+        bytes,
+      );
     } catch (error) {
       if (error instanceof EngineCallError && !(error instanceof EngineAllocationError)) {
         return { ok: false, message: error.message };

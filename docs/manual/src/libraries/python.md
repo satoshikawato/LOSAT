@@ -42,7 +42,7 @@ outcome.diagnostics                     # what the command line writes to its st
 
 ## What it runs
 
-`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
+`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
 
 ## Options
 
@@ -123,7 +123,7 @@ The GIL is released while a search runs, so other Python threads go on. Python c
 
 ## Database and masking tools
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, mask sequences in memory, or write the reports of a BLAST archive (`-outfmt 11`) again.
 
 ```python
 pylosat.makeblastdb("-dbtype", "prot", "-title", "proteins", "-out", "proteins", input=fasta_text)

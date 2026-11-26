@@ -788,7 +788,6 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.src.byte_at(self.at).is_none()
     }

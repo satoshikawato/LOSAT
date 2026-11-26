@@ -152,10 +152,11 @@ impl Volume {
     // strategy (`-import_search_strategy`, blast_app_util.cpp:498-511; blast_formatter.cpp:370
     // likewise); without one `GetFilteringAlgorithm` is -1 (uniform_search.cpp:198, 225,
     // 303-308; seqsrc_seqdb.cpp:318-320, 727-729; seqinfosrc_seqdb.cpp:113-123;
-    // align_format_util.cpp:396-403). LOSAT has no blast_formatter and refuses the imported
-    // strategy and the database masks but BLASTN's (series NP, M4a-2), so a search without them
-    // reads no column file, whatever the files hold; BLASTN's masked search and `losat blastdbcmd`
-    // open them on first use ([`Volume::columns`]).
+    // align_format_util.cpp:396-403). LOSAT refuses the imported strategy and the database masks
+    // but BLASTN's (series NP, M4a-2), so a search without them reads no column file, whatever
+    // the files hold; BLASTN's masked search, `losat blastdbcmd` and `losat blast_formatter` with
+    // an archive's filtering algorithm (`blast_formatter::archive`, the formatter's
+    // `GetMaskAlgorithmDetails`) open them on first use ([`Volume::columns`]).
     /// `open` with the index read as `mode` says.
     pub(super) fn open_as(
         base: &Path,

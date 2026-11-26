@@ -158,8 +158,6 @@ impl OutputSink<'_> {
 /// run ends it as the command line's run ends its `-out` (`OutFile::finish`).
 pub struct OutFile {
     path: std::path::PathBuf,
-    /// The program whose file names must be UTF-8 (`cli::create_out_file`).
-    program: Option<&'static str>,
     /// The application's name in NCBI's posts.
     app: &'static str,
     /// The file's `-outfmt` value.
@@ -181,17 +179,11 @@ enum OutState {
 }
 
 impl OutFile {
-    /// The file `path` of a search of `program` (`cli::create_out_file`), the application `app`,
-    /// that writes the report of `outfmt`, not made yet.
-    pub(crate) fn new(
-        path: &Path,
-        program: Option<&'static str>,
-        app: &'static str,
-        outfmt: &str,
-    ) -> Self {
+    /// The file `path` of a search (`cli::create_out_file`), the application `app`, that writes
+    /// the report of `outfmt`, not made yet.
+    pub(crate) fn new(path: &Path, app: &'static str, outfmt: &str) -> Self {
         OutFile {
             path: path.to_path_buf(),
-            program,
             app,
             outfmt: outfmt.to_owned(),
             posts: Posts::default(),
@@ -209,7 +201,7 @@ impl OutFile {
     /// command line's `-out` stream of the format (`ReportStream::of_library_file`).
     fn make(&mut self) -> anyhow::Result<()> {
         match self.state {
-            OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
+            OutState::Unmade => match crate::cli::create_out_file(&self.path) {
                 Ok(file) => {
                     // No strategy file comes before the report: the library refuses
                     // `-export_search_strategy` (`search::file_options`).

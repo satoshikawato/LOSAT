@@ -110,16 +110,18 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
         }
     );
     assert_eq!(parse_formatting_string("+6").unwrap().number, 6);
-    assert_eq!(parse_formatting_string("06").unwrap().normalized(), "6");
+    assert_eq!(parse_formatting_string("06").unwrap().normalized(), b"6");
     assert!(parse_formatting_string("6 std").unwrap().custom());
     assert!(!parse_formatting_string("0 std").unwrap().custom());
-    assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), "0");
+    assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), b"0");
     let delimited = parse_formatting_string("7 delim=, qseqid  sseqid ").unwrap();
     assert_eq!(
         (delimited.spec.as_slice(), delimited.delimiter.as_slice()),
         (b"qseqid  sseqid".as_slice(), b",".as_slice())
     );
-    assert_eq!(delimited.normalized(), "7 qseqid  sseqid");
+    assert_eq!(delimited.normalized(), b"7 qseqid  sseqid");
+    let non_utf8 = parse_formatting_string(b"6 qseqid x\xe9").unwrap();
+    assert_eq!(non_utf8.normalized(), b"6 qseqid x\xe9");
     assert!(!parse_formatting_string("6 delim=").unwrap().custom());
     assert!(message(parse_formatting_string("6 delim").unwrap_err())
         .contains("Delimiter format is invalid"));

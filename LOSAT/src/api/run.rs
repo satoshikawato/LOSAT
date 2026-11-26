@@ -1081,7 +1081,7 @@ pub fn run_to_file(
     };
     let command = start.command();
     let app = search.program().name();
-    let mut file = OutFile::new(path, out_file_program(search.program()), app, outfmt);
+    let mut file = OutFile::new(path, app, outfmt);
     let posts = file.posts();
     with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
@@ -1108,19 +1108,6 @@ pub fn run_to_file(
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })
-}
-
-/// The program whose `-out` file names must be UTF-8, as its command line checks them
-/// (`cli::create_out_file`): every search program but BLASTX.
-fn out_file_program(program: Program) -> Option<&'static str> {
-    match program {
-        Program::Blastn => Some("BLASTN"),
-        Program::Blastp => Some("BLASTP"),
-        Program::Psiblast => Some("PSIBLAST"),
-        Program::Tblastn => Some("TBLASTN"),
-        Program::Tblastx => Some("TBLASTX"),
-        Program::Blastx => None,
-    }
 }
 
 /// What one search of `run_collect` gathered.

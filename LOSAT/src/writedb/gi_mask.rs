@@ -405,6 +405,18 @@ impl GiMasks {
     }
 }
 
+/// Lower-cases every valid UTF-8 chunk of `bytes` while preserving invalid byte sequences
+/// verbatim, so distinct non-UTF-8 file names (`a\xff`, `a\xfe`) do not collide under case folding.
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))]
+fn lowercase_utf8_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        out.extend_from_slice(chunk.valid().to_lowercase().as_bytes());
+        out.extend_from_slice(chunk.invalid());
+    }
+    out
+}
+
 /// The directory of the files of the GI mask `name` (resolved through symbolic links) and the
 /// last part of the name, which with a dot and an extension names each file; on the platforms
 /// whose file systems ignore case by default (Windows, macOS), both in lower case. `None` when
@@ -418,10 +430,7 @@ fn files_place(name: &[u8]) -> Option<(PathBuf, Vec<u8>)> {
     let dir = std::fs::canonicalize(crate::utils::os_bytes::path_of_bytes(dir)).ok()?;
     if cfg!(any(windows, target_os = "macos")) {
         let dir = PathBuf::from(dir.to_string_lossy().to_lowercase());
-        return Some((
-            dir,
-            String::from_utf8_lossy(file).to_lowercase().into_bytes(),
-        ));
+        return Some((dir, lowercase_utf8_bytes(file)));
     }
     Some((dir, file.to_vec()))
 }

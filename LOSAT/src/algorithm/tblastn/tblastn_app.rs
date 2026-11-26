@@ -519,7 +519,7 @@ impl TblastnArgs {
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
         // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
         let outfmt: Vec<u8> = match choice.parsed() {
-            Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized().into_bytes(),
+            Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
             _ => outfmt_bytes,
         };
         let strategy = args.strategy.clone();
@@ -724,7 +724,7 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 

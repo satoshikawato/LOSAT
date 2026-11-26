@@ -129,6 +129,15 @@ DATE_TEXTS = re.compile(rb"\d\d/\d\d/\d{4} \d\d:\d\d:\d\d|\d{4}-\d\d-\d\dT\d\d:\
 
 # A database's index files, whose header holds the build's date in a field of its own length.
 INDEX = (b".nin", b".pin")
+# Alias files, whose header holds `# Alias file created: <date>` whose length varies with the date.
+ALIAS = (b".nal", b".pal")
+
+
+def alias_date_len(data: bytes):
+    """The length of the date text after `# Alias file created: ` on the header line of an alias
+    file, or None if absent."""
+    m = re.search(rb"# Alias file created: ([^\n]*)", data)
+    return len(m.group(1)) if m else None
 
 
 def index_date(data: bytes):
@@ -173,19 +182,29 @@ def undated(d: bytes, path: bytes, data: bytes) -> bytes:
     elif path.endswith((b".njs", b".pjs")):
         directory = os.path.dirname(os.path.join(d, path))
         listed = re.search(rb'"files": \[(.*?)\]', data, re.S)
-        dates = 0
+        index_dates = 0
+        alias_dates = 0
         for name in re.findall(rb'"([^"]*)"', listed.group(1)) if listed else []:
-            if name.endswith(INDEX):
-                idx_path = os.path.join(directory, name)
-                if not os.path.exists(idx_path):
-                    idx_path = os.path.join(directory, os.path.basename(name))
-                with open(idx_path, "rb") as index:
-                    span = index_date(index.read())
-                dates += span[1] - span[0]
-        for key in (b"bytes-total", b"bytes-to-cache"):
+            if name.endswith(INDEX) or name.endswith(ALIAS):
+                item_path = os.path.join(directory, name)
+                if not os.path.exists(item_path):
+                    item_path = os.path.join(directory, os.path.basename(name))
+                with open(item_path, "rb") as item:
+                    item_bytes = item.read()
+                if name.endswith(INDEX):
+                    span = index_date(item_bytes)
+                    index_dates += span[1] - span[0]
+                else:
+                    alen = alias_date_len(item_bytes)
+                    if alen is not None:
+                        alias_dates += alen
+        for key, delta in (
+            (b"bytes-total", index_dates + alias_dates),
+            (b"bytes-to-cache", index_dates),
+        ):
             data = re.sub(
                 rb'"' + key + rb'": (\d+)',
-                lambda m, k=key: b'"' + k + b'": %d' % (int(m.group(1)) - dates),
+                lambda m, k=key, dlt=delta: b'"' + k + b'": %d' % (int(m.group(1)) - dlt),
                 data,
                 count=1,
             )

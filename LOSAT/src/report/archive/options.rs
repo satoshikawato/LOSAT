@@ -365,27 +365,22 @@ impl OptionInputs {
 /// leaves both at 0 (blast_stat.c:3383-3384), which NCBI BLAST+ 2.17.0 records in the search
 /// strategy of a tblastx run whose search then fails on that matrix (RG-F1 probe 5 `mat`).
 fn matrix_gaps(matrix: &[u8]) -> (i32, i32) {
-    std::str::from_utf8(matrix)
-        .ok()
-        .and_then(crate::stats::protein_options::protein_gap_existence_extend_params)
-        .unwrap_or((0, 0))
+    crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((0, 0))
 }
 
 /// The word threshold the matrix suggests before the program's addition
 /// (`BLAST_GetSuggestedThreshold`, blast_options.c:1174-1209; `protein_options`).
 fn suggested_threshold(matrix: &[u8]) -> i32 {
-    let name = std::str::from_utf8(matrix).unwrap_or("");
     crate::stats::protein_options::suggested_threshold(
         crate::stats::protein_options::SuggestionProgram::Protein,
-        name,
+        matrix,
     ) as i32
 }
 
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
 /// blast_options.c:1211-1236; `protein_options`).
 fn suggested_window(matrix: &[u8]) -> i32 {
-    let name = std::str::from_utf8(matrix).unwrap_or("");
-    crate::stats::protein_options::suggested_window_size(name)
+    crate::stats::protein_options::suggested_window_size(matrix)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-602

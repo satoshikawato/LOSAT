@@ -2,19 +2,25 @@
 //! against NCBI BLAST+ 2.17.0 makeprofiledb (probes of 2026-11-26 for line RG item KD).
 //!
 //! A fresh `-dbtype rps` build writes nothing to standard output, so a closed standard-output pipe
-//! builds the full database and exits with status 0 in both NCBI and LOSAT. Overwriting an
+//! builds the full database and exits with status 0 in both NCBI and LOSAT. For `-dbtype delta`,
+//! exclusion lines are written without `endl` to `m_LogFile` (`cout` by default or with
+//! `-logfile -`, 4096-byte pipe buffer; `OfStream` with `-logfile /dev/stdout`, 8191-byte put
+//! area): exclusion text within the stream buffer stays buffered so all volumes are built (14
+//! files, exit 0 in LOSAT), whereas exclusion text that overflows the buffer hits the closed pipe
+//! before any volume is created (0 files; NCBI SIGPIPE 141, LOSAT exit 0). Overwriting an
 //! existing database of the same name deletes its files (`s_DeleteMakeprofileDb`) and then writes
-//! `Deleted existing BLAST database with identical name.` with `endl` to `m_LogFile` (standard
-//! output unless `-logfile` names a file): when that stream is a closed pipe outside Windows, NCBI
-//! 2.17.0 is ended by SIGPIPE (exit status 141, no message) before creating any new volume, and
-//! LOSAT stops there with exit status 0 and no message (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-//! exception 10). When `CWriteDB` writes an `ib=...,n4sz=...` line to `cout`
-//! (`writedb_convert.cpp:464-466`) on a closed standard-output pipe (even with `-logfile`), NCBI
-//! is ended by SIGPIPE inside `AddSequence` without closing the database writer or running
-//! `~CMakeProfileDBApp`, and LOSAT stops there with exit status 0 and no message. Non-pipe write
-//! failures (`/dev/full`) and `-logfile` naming a regular file finish with exit status 0 in both.
+//! `Deleted existing BLAST database with identical name.` with `endl` to `m_LogFile`: when that
+//! stream is a closed pipe outside Windows, NCBI 2.17.0 is ended by SIGPIPE (exit status 141, no
+//! message) before creating any new volume, and LOSAT stops there with exit status 0 and no
+//! message (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 10). When `CWriteDB` writes an
+//! `ib=...,n4sz=...` line to `cout` (`writedb_convert.cpp:464-466`) on a closed standard-output
+//! pipe (even with `-logfile`), NCBI is ended by SIGPIPE inside `AddSequence` without closing the
+//! database writer, flushing buffered `-logfile` bytes, or running `~CMakeProfileDBApp`, and
+//! LOSAT stops there with exit status 0, empty stderr, and unflushed `-logfile` bytes discarded.
+//! Non-pipe write failures (`/dev/full`) and `-logfile` naming a regular file finish with exit
+//! status 0 in both.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:490-493,1330-1333
+//! NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:490-493,1330-1333,1804-1816
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
 
 #![cfg(unix)]
@@ -279,4 +285,261 @@ fn help_version_and_dryrun_on_closed_stdout_pipe() {
         assert_eq!(out.status.code(), Some(0), "{words:?}");
         assert!(out.stderr.is_empty(), "{words:?}");
     }
+}
+
+/// D11 (`-dbtype delta -exclude_invalid false -in in/l_D10.lst -out db`) writes one 70-byte
+/// exclusion line without `endl`: on a closed stdout pipe (default, `-logfile -`, and
+/// `-logfile /dev/stdout`), NCBI 2.17.0 keeps it in its stream buffer and builds all 14 files.
+#[test]
+fn delta_buffered_exclusion_completes_on_closed_stdout_pipe() {
+    let dir = unique_dir("losat_mp_pipe_delta_d11");
+    copy_profiles(
+        dir.path(),
+        &["l_D10.lst", "d_obsr5.smp", "d_obsr49.smp", "c2.smp"],
+    );
+    let expected_exts = [
+        "aux", "freq", "loo", "obsr", "pdb", "phr", "pin", "pos", "pot", "psq", "ptf", "pto",
+        "rps", "wcounts",
+    ];
+    for (db, extra) in [
+        ("db_def", &[][..]),
+        ("db_dash", &["-logfile", "-"][..]),
+        ("db_dev", &["-logfile", "/dev/stdout"][..]),
+    ] {
+        let mut args = vec![
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "in/l_D10.lst",
+            "-out",
+            db,
+        ];
+        args.extend_from_slice(extra);
+        let out = run_makeprofiledb(dir.path(), &args, closed_pipe());
+        assert_eq!(out.status.code(), Some(0), "{db}");
+        assert!(
+            out.stderr.is_empty(),
+            "{db}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let files = db_files(dir.path(), &format!("{db}."));
+        let want: Vec<String> = expected_exts.iter().map(|e| format!("{db}.{e}")).collect();
+        assert_eq!(files, want, "{db}");
+    }
+}
+
+/// Many excluded delta profiles (70 bytes per line) test NCBI's exact stream buffer thresholds on a
+/// closed stdout pipe: `cout` / `-logfile -` builds all 14 files at 58 lines (4060 <= 4096 bytes)
+/// and stops with 0 files at 59 lines (4130 > 4096 bytes); `-logfile /dev/stdout` (`OfStream`,
+/// 8191-byte put area) builds all 14 files at 117 lines (8190 < 8191) and stops with 0 files at
+/// 118 lines (8260 >= 8191).
+#[test]
+fn delta_exclusion_overflow_matches_ncbi_buffer_boundaries() {
+    let dir = unique_dir("losat_mp_pipe_delta_overflow");
+    copy_profiles(dir.path(), &["d_obsr49.smp", "c2.smp"]);
+
+    let cases: &[(&str, &[&str], usize, usize)] = &[
+        ("def_58", &[], 58, 14),
+        ("def_59", &[], 59, 0),
+        ("dash_58", &["-logfile", "-"], 58, 14),
+        ("dash_59", &["-logfile", "-"], 59, 0),
+        ("dev_117", &["-logfile", "/dev/stdout"], 117, 14),
+        ("dev_118", &["-logfile", "/dev/stdout"], 118, 0),
+    ];
+    for &(label, extra, excluded_count, want_files) in cases {
+        let list_name = format!("list_{label}.pn");
+        let mut content = "in/d_obsr49.smp\n".repeat(excluded_count);
+        content.push_str("in/c2.smp\n");
+        fs::write(dir.path().join(&list_name), content).unwrap();
+
+        let mut args = vec![
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            &list_name,
+            "-out",
+            label,
+        ];
+        args.extend_from_slice(extra);
+        let out = run_makeprofiledb(dir.path(), &args, closed_pipe());
+        assert_eq!(out.status.code(), Some(0), "{label}");
+        assert!(
+            out.stderr.is_empty(),
+            "{label}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let files = db_files(dir.path(), &format!("{label}."));
+        assert_eq!(files.len(), want_files, "{label}: {files:?}");
+    }
+}
+
+/// Overwriting an existing delta DB with an exclusion list on a closed stdout pipe: the
+/// `Deleted existing ...` line with `endl` comes first, so old files are deleted and no new files
+/// are built (NCBI 2.17.0: SIGPIPE 141, 0 files).
+#[test]
+fn delta_overwrite_plus_exclusion_stops_at_delete_line() {
+    let dir = unique_dir("losat_mp_pipe_delta_overwrite");
+    copy_profiles(
+        dir.path(),
+        &["l_D10.lst", "d_obsr5.smp", "d_obsr49.smp", "c2.smp"],
+    );
+    let init = run_makeprofiledb(
+        dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "in/l_D10.lst",
+            "-out",
+            "db_ov",
+        ],
+        Stdio::piped(),
+    );
+    assert_eq!(init.status.code(), Some(0));
+    assert_eq!(db_files(dir.path(), "db_ov.").len(), 14);
+
+    let out = run_makeprofiledb(
+        dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "in/l_D10.lst",
+            "-out",
+            "db_ov",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stderr.is_empty());
+    assert!(
+        db_files(dir.path(), "db_ov.").is_empty(),
+        "{:?}",
+        db_files(dir.path(), "db_ov.")
+    );
+}
+
+/// A delta build with an excluded profile buffered in a regular `-logfile`, followed by a
+/// delta-valid profile with `ncbi4na` length mismatch whose `CWriteDB` `ib=9,n4sz=11` line hits a
+/// closed stdout pipe: NCBI 2.17.0 is ended by SIGPIPE inside `AddSequence` without flushing the
+/// `-logfile` buffer (leaving the log file empty) and without closing `WriteDB` (`.pin` absent).
+#[test]
+fn delta_writer_closed_pipe_does_not_flush_regular_logfile() {
+    let dir = unique_dir("losat_mp_pipe_delta_logfile_discard");
+    copy_profiles(dir.path(), &["d_obsr49.smp", "c2.smp"]);
+
+    // Derive a delta-valid profile from c2.smp (length 18) with ncbi4na having 2 extra bytes (11B)
+    // so delta validation accepts it and CWriteDB prints `ib=9,n4sz=11` to cout.
+    let c2 = fs::read_to_string(dir.path().join("in/c2.smp")).unwrap();
+    let needle = "seq-data ncbieaa \"KTPAIRLLDKAKIPYELH\"";
+    assert!(c2.contains(needle));
+    let c2_n4 = c2.replace(needle, "seq-data ncbi4na '4141414141414141414141'H");
+    fs::write(dir.path().join("in/c2_n4.smp"), c2_n4).unwrap();
+    fs::write(
+        dir.path().join("list.pn"),
+        "in/d_obsr49.smp\nin/c2_n4.smp\n",
+    )
+    .unwrap();
+
+    // Baseline with normal stdout: stdout gets `ib=9,n4sz=11\n`, norm.log gets the exclusion line.
+    let norm = run_makeprofiledb(
+        dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "list.pn",
+            "-out",
+            "db_norm",
+            "-logfile",
+            "norm.log",
+        ],
+        Stdio::piped(),
+    );
+    assert_eq!(norm.status.code(), Some(0));
+    assert_eq!(norm.stdout, b"ib=9,n4sz=11\n");
+    assert_eq!(
+        fs::read(dir.path().join("norm.log")).unwrap(),
+        b"in/d_obsr49.smp was excluded: due to too few independent observations\n"
+    );
+
+    // Closed stdout pipe: stops inside AddSequence with empty stderr, no .pin, and empty pipe.log.
+    let pipe = run_makeprofiledb(
+        dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "list.pn",
+            "-out",
+            "db_pipe",
+            "-logfile",
+            "pipe.log",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(pipe.status.code(), Some(0));
+    assert!(
+        pipe.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&pipe.stderr)
+    );
+    let files = db_files(dir.path(), "db_pipe.");
+    assert!(files.contains(&"db_pipe.rps".to_string()), "{files:?}");
+    assert!(files.contains(&"db_pipe.wcounts".to_string()), "{files:?}");
+    assert!(files.contains(&"db_pipe.obsr".to_string()), "{files:?}");
+    for ext in ["phr", "pin", "psq", "pog"] {
+        assert!(!files.contains(&format!("db_pipe.{ext}")), "{files:?}");
+    }
+    assert_eq!(
+        fs::read(dir.path().join("pipe.log")).unwrap(),
+        b"",
+        "unflushed -logfile buffer must not be written when closed pipe stops the run"
+    );
+}
+
+/// An excluded delta profile buffered in `cout` followed by a missing profile on a closed stdout
+/// pipe: NCBI's `cerr` is tied to `cout`, so flushing `cout` before `ERR_POST` hits SIGPIPE
+/// before any error line is written to stderr.
+#[test]
+fn delta_buffered_exclusion_before_error_on_closed_stdout_pipe() {
+    let dir = unique_dir("losat_mp_pipe_delta_tie");
+    copy_profiles(dir.path(), &["d_obsr49.smp"]);
+    fs::write(
+        dir.path().join("list.pn"),
+        "in/d_obsr49.smp\nin/missing.smp\n",
+    )
+    .unwrap();
+    let out = run_makeprofiledb(
+        dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-in",
+            "list.pn",
+            "-out",
+            "db_tie",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

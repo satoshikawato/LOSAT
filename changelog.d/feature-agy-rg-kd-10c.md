@@ -3,8 +3,11 @@
   `psiblast`, `rpsblast`, `rpstblastn`), `makeblastdb`, and `rpsbproc`, preserving the raw bytes
   of paths, keys, delimiters (`-outfmt "6 delim=..."`), `-export_search_strategy`, `-use_index`,
   reports, and diagnostics to match NCBI BLAST+ 2.17.0 and RpsbProc 0.5.1.
-- `makeprofiledb` now matches NCBI BLAST+ 2.17.0 when standard output or `-logfile` is a closed
-  pipe: fresh builds complete with exit status 0, overwriting an existing database deletes the old
-  files and stops at the log line with exit status 0 and no message, and `CWriteDB` stdout lines
-  stop inside `AddSequence` with exit status 0 and no message (recorded as exception 10 in
-  `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.34).
+- `makeprofiledb` now stops where NCBI BLAST+ 2.17.0 stops when standard output or `-logfile` is a
+  closed pipe, with exit status 0 where NCBI is ended by SIGPIPE (exit status 141): fresh builds
+  and `-dbtype delta` exclusion lines within NCBI's stream buffer complete with all database files,
+  exclusion lines that overflow the stream buffer (`cout` or `-logfile`) stop before creating
+  volumes, overwriting an existing database deletes the old files and stops at the log line, and
+  `CWriteDB` stdout lines stop inside `AddSequence` without flushing buffered `-logfile` bytes or
+  running destructor clean-up (recorded as exception 10 in `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+  v1.34).

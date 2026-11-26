@@ -17,6 +17,7 @@ use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
 use crate::writedb::convert::{iupacna_high_byte, short_nucleotide_data, ShortNucleotideData};
+use crate::writedb::cout::{cout, Cout};
 use crate::writedb::deflines::{bioseq_deflines, first_org_taxid, BioseqDeflinesError};
 use crate::writedb::files::{make_short_name, DbVersion};
 use crate::writedb::ofstream::{OfStream, StreamBuf};
@@ -172,9 +173,7 @@ impl From<WriteDbError> for RunError {
             WriteDbError::Io { path, source } => {
                 RunError::Failed(format!("{}: {source}", path.display()))
             }
-            // Only makeblastdb's log raises it (`writedb::build_db::endl`); makeprofiledb's
-            // writer never does.
-            WriteDbError::ClosedPipe => unreachable!("makeblastdb's closed log in makeprofiledb"),
+            WriteDbError::ClosedPipe => RunError::ClosedPipe,
         }
     }
 }
@@ -182,8 +181,10 @@ impl From<WriteDbError> for RunError {
 /// The parameters of `x_InitProgramParameters` that the build reads.
 struct Params<'a> {
     /// The standard output (`cout`): the database writer's lines (`WriteDb::take_stdout`), and
-    /// `m_LogFile` without a file of `-logfile`.
-    stdout: &'a mut dyn Write,
+    /// `m_LogFile` without a file of `-logfile`, modelled with NCBI's `cout` buffer
+    /// (`writedb::cout::Cout`) so buffered exclusion lines and `endl` flushes interact with a
+    /// closed pipe as in NCBI.
+    stdout: Cout<'a>,
     /// `m_LogFile` when `-logfile` names a file (`None`: the standard output), modelled with
     /// NCBI's `std::ofstream` buffer (`OfStream`) so buffered exclusion lines and flushed lines
     /// interact with `-logfile` diagnostics as in NCBI.
@@ -227,10 +228,16 @@ impl Params<'_> {
                 if file.rdbuf().closed_pipe() {
                     return Err(RunError::ClosedPipe);
                 }
-                Ok(())
             }
-            None => write_line_or_closed_pipe(self.stdout, &[line, b"\n"].concat()),
+            None => {
+                self.stdout.insert(line);
+                self.stdout.endl();
+                if self.stdout.rdbuf().closed_pipe() {
+                    return Err(RunError::ClosedPipe);
+                }
+            }
         }
+        Ok(())
     }
 
     /// Writes `bytes` to `m_LogFile` without forcing a flush (as NCBI writes exclusion lines).
@@ -241,26 +248,31 @@ impl Params<'_> {
                 if file.rdbuf().closed_pipe() {
                     return Err(RunError::ClosedPipe);
                 }
-                Ok(())
             }
             None => {
-                if let Err(error) = self.stdout.write_all(bytes) {
-                    if files::ends_like_sigpipe(&error) {
-                        return Err(RunError::ClosedPipe);
-                    }
+                self.stdout.insert(bytes);
+                if self.stdout.rdbuf().closed_pipe() {
+                    return Err(RunError::ClosedPipe);
                 }
-                Ok(())
             }
         }
+        Ok(())
     }
 
-    /// Flushes `m_LogFile` at program end (matching `~CArgs` flushing `m_LogFile` after `Run`).
+    /// Flushes `m_LogFile` and `cout` at program end (matching `~CArgs` and `atexit`), ignoring
+    /// any write error.
     fn flush_log(&mut self) {
-        match &mut self.log_file {
-            Some(file) => file.flush(),
-            None => {
-                let _ = self.stdout.flush();
-            }
+        if let Some(file) = &mut self.log_file {
+            file.flush();
+        }
+        self.stdout.flush();
+    }
+
+    /// Discards any unflushed `-logfile` bytes without syncing when a closed pipe ends the run
+    /// where SIGPIPE ends NCBI's process (`OfStream::discard_unflushed`).
+    fn discard_log(&mut self) {
+        if let Some(file) = &mut self.log_file {
+            file.discard_unflushed();
         }
     }
 }
@@ -375,7 +387,7 @@ fn init<'a>(
         (TaxIdSet::default(), false)
     };
     Ok(Params {
-        stdout: out,
+        stdout: cout(out, crate::cli::NcbiStdio::cout()),
         log_file,
         in_list,
         binary,
@@ -438,13 +450,31 @@ pub(super) fn run(
     };
     let status = match x_run(&mut params, &mut built, settings, diag) {
         Ok(()) => 0,
-        // A closed pipe ends the run where SIGPIPE ends NCBI's process: no message, no flush, and
-        // no `~CMakeProfileDBApp` clean-up (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
-        Err(RunError::ClosedPipe) => return 0,
-        Err(error) => report(error, diag),
+        // A closed pipe ends the run where SIGPIPE ends NCBI's process: no message, no flush of
+        // buffered `-logfile` or `cout` bytes, and no `~CMakeProfileDBApp` clean-up
+        // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        Err(RunError::ClosedPipe) => {
+            params.discard_log();
+            return 0;
+        }
+        Err(error) => {
+            // `cerr` is tied to `cout`: posting an NCBI error on `cerr` (when diagnostics are not
+            // redirected to a file) flushes `cout` first. If that flush meets a closed pipe,
+            // SIGPIPE ends NCBI's process before the error message and before `~CMakeProfileDBApp`.
+            if !matches!(error, RunError::Refused(_) | RunError::Failed(_))
+                && params.log_file.is_none()
+            {
+                params.stdout.flush();
+                if params.stdout.rdbuf().closed_pipe() {
+                    params.discard_log();
+                    return 0;
+                }
+            }
+            report(error, diag)
+        }
     };
-    params.flush_log();
     destroy(&built, &params.out_db_name, params.op_mode);
+    params.flush_log();
     status
 }
 
@@ -829,28 +859,14 @@ fn read_profile(
     }
 }
 
-/// Writes `bytes` and flushes `sink` (`endl` on `m_LogFile` or `cout`): returns
-/// `Err(RunError::ClosedPipe)` when a write or flush meets a closed pipe where SIGPIPE ends
-/// NCBI's process (`files::ends_like_sigpipe`), and ignores any other write error (as NCBI's
-/// unchecked `ostream` does on `/dev/full`).
-fn write_line_or_closed_pipe(sink: &mut dyn Write, bytes: &[u8]) -> Result<(), RunError> {
-    let result = sink.write_all(bytes).and_then(|()| sink.flush());
-    if let Err(error) = result {
-        if files::ends_like_sigpipe(&error) {
-            return Err(RunError::ClosedPipe);
-        }
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
 // The writer's line on `cout` is written with `endl`: at once, before what the run writes after
 // it. A closed pipe on `cout` ends NCBI's process by SIGPIPE there, even with `-logfile`.
 /// The writer's diagnostics since the last call, posted, and its text on the standard output
-/// written there.
+/// written through NCBI's `cout` stream.
 fn post_writer(
     diag: &mut Diag,
-    stdout: &mut dyn Write,
+    stdout: &mut Cout<'_>,
     output_db: &mut WriteDb,
 ) -> Result<(), RunError> {
     let text = output_db.take_diagnostics();
@@ -859,7 +875,11 @@ fn post_writer(
     }
     let text = output_db.take_stdout();
     if !text.is_empty() {
-        write_line_or_closed_pipe(stdout, &text)?;
+        stdout.insert(&text);
+        stdout.flush();
+        if stdout.rdbuf().closed_pipe() {
+            return Err(RunError::ClosedPipe);
+        }
     }
     Ok(())
 }
@@ -931,7 +951,11 @@ fn make_vol(
     }
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
     // error (`~CWriteDB_Impl` closes it), then the destructors of the writer's members.
-    let closed = output_db.close();
+    let closed = if matches!(result, Err(RunError::Refused(_))) {
+        output_db.close()
+    } else {
+        output_db.close_with_cout(&mut params.stdout)
+    };
     if let Err(RunError::Refused(_)) = result {
         // LOSAT's refusal: NCBI's run has no defined result there, and nothing after it is
         // reported.
@@ -939,7 +963,12 @@ fn make_vol(
         drop(output_db.take_stdout());
         return result;
     }
-    post_writer(diag, params.stdout, &mut output_db)?;
+    if matches!(closed, Err(WriteDbError::ClosedPipe)) {
+        // SIGPIPE ended NCBI inside `Close` -> `x_Publish`: neither volume close nor destructor
+        // clean-up runs.
+        return Err(RunError::ClosedPipe);
+    }
+    post_writer(diag, &mut params.stdout, &mut output_db)?;
     match (result, closed) {
         (Ok(()), Ok(())) => {}
         // The `Close` after the loop threw: its error leaves `x_MakeVol`, the destructor's
@@ -947,7 +976,7 @@ fn make_vol(
         // name, the LMDB files).
         (Ok(()), Err(close_error)) => {
             let destroyed = output_db.destroy_after_failed_close();
-            post_writer(diag, params.stdout, &mut output_db)?;
+            post_writer(diag, &mut params.stdout, &mut output_db)?;
             let error = RunError::from(close_error);
             return Err(match destroyed {
                 Ok(()) => error,
@@ -967,7 +996,7 @@ fn make_vol(
             }
             diag.err_post_bytes(&close_error.message());
             let destroyed = output_db.destroy_after_failed_close();
-            post_writer(diag, params.stdout, &mut output_db)?;
+            post_writer(diag, &mut params.stdout, &mut output_db)?;
             return Err(match destroyed {
                 Ok(()) => error,
                 Err(destructor) => aborts(error, &destructor),
@@ -975,7 +1004,7 @@ fn make_vol(
         }
         (Err(error), Ok(())) => {
             let destroyed = output_db.destroy_after_close();
-            post_writer(diag, params.stdout, &mut output_db)?;
+            post_writer(diag, &mut params.stdout, &mut output_db)?;
             return Err(match destroyed {
                 Ok(()) => error,
                 Err(destructor) => aborts(error, &destructor),
@@ -1153,7 +1182,7 @@ fn add_to_database(
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {
                 output_db.post_extracted_deflines(&extracted.set);
-                post_writer(diag, params.stdout, output_db)?;
+                post_writer(diag, &mut params.stdout, output_db)?;
             }
             (extracted.set, extracted.null_seqids)
         }
@@ -1222,8 +1251,11 @@ fn add_to_database(
         }),
         delta_fix: None,
     };
-    let added = output_db.add_sequence(bioseq);
-    post_writer(diag, params.stdout, output_db)?;
+    let added = output_db.add_sequence_with_cout(bioseq, &mut params.stdout);
+    if matches!(added, Err(WriteDbError::ClosedPipe)) {
+        return Err(RunError::ClosedPipe);
+    }
+    post_writer(diag, &mut params.stdout, output_db)?;
     added?;
     output_db.set_deflines_with_null_seqids(deflines, null_seqids);
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604

@@ -156,14 +156,34 @@ impl Write for FailingWriter {
 }
 
 #[test]
-fn write_line_or_closed_pipe_maps_broken_pipe_only_off_windows() {
+fn cout_log_buffers_exclusion_lines_until_flush_or_overflow() {
     let mut pipe = FailingWriter(std::io::ErrorKind::BrokenPipe);
-    let pipe_result = write_line_or_closed_pipe(&mut pipe, b"Deleted\n");
-    #[cfg(windows)]
-    assert!(pipe_result.is_ok());
-    #[cfg(not(windows))]
-    assert!(matches!(pipe_result, Err(RunError::ClosedPipe)));
+    let mut stream = cout(
+        &mut pipe,
+        crate::cli::NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        },
+    );
+    // An insertion within the 4096-byte pipe buffer is held and does not observe EPIPE yet.
+    let line = [b'x'; 70];
+    for _ in 0..58 {
+        stream.insert(&line);
+        assert!(!stream.rdbuf().closed_pipe());
+    }
+    // The 59th line (4130 > 4096) flushes a block and observes BrokenPipe off Windows.
+    stream.insert(&line);
+    assert_eq!(stream.rdbuf().closed_pipe(), cfg!(not(windows)));
 
     let mut full = FailingWriter(std::io::ErrorKind::WriteZero);
-    assert!(write_line_or_closed_pipe(&mut full, b"Deleted\n").is_ok());
+    let mut full_stream = cout(
+        &mut full,
+        crate::cli::NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        },
+    );
+    full_stream.insert(b"Deleted");
+    full_stream.endl();
+    assert!(!full_stream.rdbuf().closed_pipe());
 }

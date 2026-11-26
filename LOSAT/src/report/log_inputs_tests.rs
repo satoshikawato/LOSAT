@@ -247,17 +247,17 @@ fn detects_database_component_files() {
 #[test]
 fn version_request_does_not_collect_argv_inputs() {
     let dir = fresh_dir("version-run");
-    let q = dir.join("q.fa");
-    std::fs::write(&q, b">q\nACGT\n").unwrap();
+    let query = dir.join("ver_q.fa");
+    std::fs::write(&query, b">vq\nACGT\n").unwrap();
     let words: Vec<OsString> = vec![
         "-version".into(),
         "-query".into(),
-        q.as_os_str().to_os_string(),
+        query.as_os_str().to_os_string(),
         "-logfile".into(),
-        q.as_os_str().to_os_string(),
+        query.as_os_str().to_os_string(),
     ];
     let start = blastn_start(&words);
-    assert!(check_disk_logfile("blastn", &words, &start, Some(q.as_os_str())).is_ok());
+    assert!(check_disk_logfile("blastn", &words, &start, Some(query.as_os_str())).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

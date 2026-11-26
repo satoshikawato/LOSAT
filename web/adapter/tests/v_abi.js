@@ -1467,34 +1467,34 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         assert.equal(run.status, -1, `${label}: run refuses`);
         assert.equal(run.error, expectedError, `${label}: run refusal`);
         assert.ok(!run.streams.has(8), `${label}: no stream 8`);
-        if (c.cliRefuses) {
-          const targetPath = path.resolve(cliDir, c.cliRefuses);
+        if (c.cliRefuses || c.cliAppends) {
+          const targetRel = c.cliRefuses || c.cliAppends;
+          const targetPath = path.resolve(cliDir, targetRel);
           const beforeBytes = fs.readFileSync(targetPath);
           const beforeMtime = fs.statSync(targetPath, { bigint: true }).mtimeNs;
           const outPath = path.join(cliDir, "o.txt");
           const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
-          const cliRefusalLine = `Error: a -logfile file '${c.logfile}' that is also an input file read by this run (appending diagnostics to an input file corrupts it and can cause an endless read loop) is not supported by LOSAT's ${c.program.toUpperCase()}\n`;
-          assert.equal(cli.status, 1, `${label}: native CLI refuses: ${cli.stderr}`);
-          const cliStderr = cli.stderr.toString();
-          if (c.cliHasUsageNotice) {
-            assert.ok(cliStderr.endsWith(cliRefusalLine), `${label}: native CLI stderr ends with D23 refusal: ${cliStderr}`);
+          if (c.cliRefuses) {
+            const cliRefusalLine = `Error: a -logfile file '${c.logfile}' that is also an input file read by this run (appending diagnostics to an input file corrupts it and can cause an endless read loop) is not supported by LOSAT's ${c.program.toUpperCase()}\n`;
+            assert.equal(cli.status, 1, `${label}: native CLI refuses: ${cli.stderr}`);
+            const cliStderr = cli.stderr.toString();
+            if (c.cliHasUsageNotice) {
+              assert.ok(cliStderr.endsWith(cliRefusalLine), `${label}: native CLI stderr ends with D23 refusal: ${cliStderr}`);
+            } else {
+              assert.equal(cliStderr, cliRefusalLine, `${label}: native CLI stderr`);
+            }
+            assert.ok(fs.readFileSync(targetPath).equals(beforeBytes), `${label}: ${targetRel} bytes unchanged`);
+            assert.equal(fs.statSync(targetPath, { bigint: true }).mtimeNs, beforeMtime, `${label}: ${targetRel} mtime unchanged`);
+            assert.ok(!fs.existsSync(outPath), `${label}: o.txt not created`);
           } else {
-            assert.equal(cliStderr, cliRefusalLine, `${label}: native CLI stderr`);
+            assert.equal(cli.status, 0, `${label}: native CLI append: ${cli.stderr}`);
+            const afterBytes = fs.readFileSync(targetPath);
+            assert.ok(
+              afterBytes.length > beforeBytes.length && afterBytes.subarray(0, beforeBytes.length).equals(beforeBytes),
+              `${label}: native CLI appends to ${targetRel}`,
+            );
+            assert.equal(cli.stderr.toString(), "", `${label}: native CLI stderr empty`);
           }
-          assert.ok(fs.readFileSync(targetPath).equals(beforeBytes), `${label}: ${c.cliRefuses} bytes unchanged`);
-          assert.equal(fs.statSync(targetPath, { bigint: true }).mtimeNs, beforeMtime, `${label}: ${c.cliRefuses} mtime unchanged`);
-          assert.ok(!fs.existsSync(outPath), `${label}: o.txt not created`);
-        } else if (c.cliAppends) {
-          const targetPath = path.resolve(cliDir, c.cliAppends);
-          const beforeBytes = fs.readFileSync(targetPath);
-          const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
-          assert.equal(cli.status, 0, `${label}: native CLI append: ${cli.stderr}`);
-          const afterBytes = fs.readFileSync(targetPath);
-          assert.ok(
-            afterBytes.length > beforeBytes.length && afterBytes.subarray(0, beforeBytes.length).equals(beforeBytes),
-            `${label}: native CLI appends to ${c.cliAppends}`,
-          );
-          assert.equal(cli.stderr.toString(), "", `${label}: native CLI stderr empty`);
         }
       } else {
         assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);

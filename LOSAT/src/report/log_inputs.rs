@@ -529,8 +529,8 @@ fn matches_mb_index(candidates: &[PathBuf], index_name: &OsStr, search_path: &Se
         for vol in 0..100u8 {
             let file = [base, format!(".{vol:02}.idx").as_bytes()].concat();
             if let Some(resolved) = search_path.resolve_file(&file) {
-                let path = crate::utils::os_bytes::path_of_bytes(&resolved);
-                if matches_candidate(candidates, &path) {
+                let idx_path = crate::utils::os_bytes::path_of_bytes(&resolved);
+                if matches_candidate(candidates, &idx_path) {
                     return true;
                 }
             }

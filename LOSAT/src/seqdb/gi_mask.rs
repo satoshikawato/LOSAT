@@ -72,12 +72,13 @@ pub(super) fn read_paths(
     let file_name = |extension: &str| [name, b".", extension.as_bytes()].concat();
     let vol_data_file =
         |vol: u32| file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
-    let mut push_or_raw = |file: Vec<u8>| {
-        out.insert(search.resolve_file(&file).unwrap_or(file));
-    };
     let index_file = file_name(EXTENSIONS[0]);
     let index_resolved = search.resolve_file(&index_file);
     out.insert(index_resolved.clone().unwrap_or(index_file));
+
+    let mut push_or_raw = |file: Vec<u8>| {
+        out.insert(search.resolve_file(&file).unwrap_or(file));
+    };
     push_or_raw(file_name(EXTENSIONS[1]));
 
     let num_vols = index_resolved

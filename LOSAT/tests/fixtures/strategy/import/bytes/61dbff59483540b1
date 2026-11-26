@@ -1,0 +1,140 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: arch_sprot
+           2 sequences; 279 total letters
+
+
+
+Query= lcl|Query_1 qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             278     2e-96
+sp2 subject protein beta, distant                                     204     1e-67
+
+
+>sp1 subject protein alpha
+Length=137
+
+ Score = 278 bits (608),  Expect = 2e-96, Method: Compositional matrix adjust.
+ Identities = 125/140 (89%), Positives = 128/140 (91%), Gaps = 3/140 (2%)
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+               WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  121  FEKLKIFHYMVGHGRTASEG  140
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>sp2 subject protein beta, distant
+Length=142
+
+ Score = 204 bits (444),  Expect = 1e-67, Method: Compositional matrix adjust.
+ Identities = 100/143 (70%), Positives = 104/143 (73%), Gaps = 6/143 (4%)
+
+Query  2    WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSD  57
+            WMEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE YC      ANMS  VLMKYEF S 
+Sbjct  2    WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSG  61
+
+Query  58   IHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMH  117
+            IHPCN W CWIPK MA PGW  TDTLH+SEMGLWMH  P  MC MVR T ++LRHWKI  
+Sbjct  62   IHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINE  119
+
+Query  118  DANFEKLKIFHYMVGHGRTASEG  140
+              NFEKLK F Y V  GR A EG
+Sbjct  120  ICNFEKLKAFPYQVPMGRAANEG  142
+
+
+
+Lambda      K        H        a         alpha
+   0.349    0.176    0.789    0.522     1.92 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.314   0.0950    0.350    0.900     8.81     9.22 
+
+Effective search space used: 32131
+
+
+Query= lcl|Query_2 qp2 unrelated protein (no hits expected)
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             15.6    0.13 
+
+
+>sp1 subject protein alpha
+Length=137
+
+ Score = 15.6 bits (27),  Expect = 0.13, Method: Compositional matrix adjust.
+ Identities = 10/32 (31%), Positives = 16/32 (50%), Gaps = 4/32 (13%)
+
+Query  4   NWKMVCRYVPYLEEDMEAWMLW--KEHLTFQW  33
+            WK++ +Y      D+  W+ W  KE+ T  W
+Sbjct  45  SWKVLMKYE--FSSDIHPWICWIPKEQQTPGW  74
+
+
+ Score = 12.0 bits (19),  Expect = 2.2, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  33  WCNYFW  38
+           W NY W
+Sbjct  35  WENYCW  40
+
+
+ Score = 11.6 bits (18),  Expect = 3.4, Method: Compositional matrix adjust.
+ Identities = 3/9 (33%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+
+Query  24  LWKEHLTFQ  32
+           +W EH   +
+Sbjct  1   MWMEHSVLK  9
+
+
+
+Lambda      K        H        a         alpha
+   0.353    0.178    0.854    0.522     1.92 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.314   0.0950    0.350    0.900     8.81     9.22 
+
+Effective search space used: 9065
+
+
+  Database: arch_sprot
+    Posted date:  Oct 23, 2026  11:17 AM
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM80
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

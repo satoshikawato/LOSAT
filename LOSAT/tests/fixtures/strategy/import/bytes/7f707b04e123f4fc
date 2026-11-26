@@ -1,0 +1,8 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:129
+@SQ	SN:Query_2	LN:129
+@PG	ID:0	VN:2.17.0+	PN:tblastx
+Subject_1	0	Query_1	4	255	39H117M62H	*	0	0	*	*	NM:i:0
+Subject_2	16	Query_1	28	255	18H75M115H	*	0	0	*	*	NM:i:0
+Subject_2	0	Query_2	13	255	67H108M33H	*	0	0	*	*	NM:i:0
+Subject_1	16	Query_2	61	255	80H60M78H	*	0	0	*	*	NM:i:0

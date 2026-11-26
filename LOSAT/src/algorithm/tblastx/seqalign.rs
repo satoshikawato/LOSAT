@@ -139,6 +139,7 @@ pub(crate) fn write_tblastx_seqalign(
     subjects: &SeqalignSubjects<'_>,
     subject_letters: SubjectLetters<'_>,
     warnings: &mut QueryWarnings<'_>,
+    app: &str,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
@@ -176,6 +177,7 @@ pub(crate) fn write_tblastx_seqalign(
         write_query_to(
             format,
             &run,
+            app,
             &query_record,
             &subject_records,
             &hsp_records,

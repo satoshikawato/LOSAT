@@ -122,6 +122,49 @@ test('record scanner contract: the serial reactor', async ({ context }) => {
   expect(results.length).toBeGreaterThan(20);
 });
 
+/**
+ * A search strategy file (kind 3 of `file_begin`; line RG item F2-4) in the browser: the serial
+ * reactor imports it as the CLI does, and the report, the tabular formats and the warnings equal
+ * the native CLI's of the same commit, whose bytes for these strategies are NCBI's (the import
+ * fixtures of LOSAT/tests/fixtures/strategy/import).
+ */
+const STRATEGY_FIXTURES = 'LOSAT/tests/fixtures/strategy/import/ss';
+const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+for (const program of ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const) {
+  test(`search strategy file (kind 3): ${program} imports its queries and subjects`, async ({ context }) => {
+    const file = `${program}.sub.ss`;
+    const bytes = Array.from(readFileSync(join(REPOSITORY, STRATEGY_FIXTURES, file)));
+    const page = await openHarness(context, isolated);
+    const result = await page.evaluate(
+      ({ program, file, bytes }) =>
+        window.losatHarness!.engine.strategySearch({ program, name: file, strategy: new Uint8Array(bytes), options: [] }),
+      { program, file, bytes },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.kind).toBe('search_strategy');
+    expect(result.registerInputs).toBe(true);
+    expect(result.queryRecords).toBeGreaterThan(0);
+    expect(result.subjectRecords).toBeGreaterThan(0);
+    const native = nativeExpectation([program, '-import_search_strategy', file], STRATEGY_FIXTURES);
+    for (const format of FORMATS) {
+      expect(result.sha256![format], `${program} outfmt ${format} = native CLI`).toBe(native.sha256[format]);
+    }
+    expect(result.sha256![3] ?? EMPTY_SHA256, `${program} warnings = native CLI standard error`).toBe(native.stderrSha256);
+  });
+}
+
+test('search strategy file (kind 3): a file that is not a strategy is the CLI\'s error', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const bytes = Array.from(new TextEncoder().encode('not a strategy'));
+  const result = await page.evaluate(
+    ({ bytes }) =>
+      window.losatHarness!.engine.strategySearch({ program: 'blastp', name: 'x.ss', strategy: new Uint8Array(bytes), options: [] }),
+    { bytes },
+  );
+  expect(result.kind).toBe('search_strategy');
+  expect(result.error ?? '').toContain('Failed to read search strategy');
+});
+
 for (const threads of [1, 4]) {
   test(`engine input contract: the real EngineGateway at ${threads} thread(s)`, async ({ context }) => {
     const page = await openHarness(context, isolated);

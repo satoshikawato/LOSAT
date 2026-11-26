@@ -4642,6 +4642,8 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(|(rank, (record, &ordinal))| {
             let id = match parsed.get(rank).and_then(Option::as_deref) {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                Some(subject) if subject.scope_finds_none() => Ok(None),
                 Some(subject) => subject.tabular_saccver(protein).map_err(|problem| {
                     parsed_refusal(oids.oid(ordinal), &format!("has {problem}"), program)
                 }),

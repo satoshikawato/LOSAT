@@ -3058,16 +3058,22 @@ impl ListedTitles<'_> {
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
-                let found = match subject.tabular_ids(true) {
-                    Ok(ids) => ids,
-                    Err(_) if !reads => Some(Default::default()),
-                    Err(problem) => {
-                        return Err(shared::parsed_refusal(
-                            self.oids.oid(ordinal),
-                            &format!("has {problem}"),
-                            self.program,
-                        ))
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                // No ids where the scope gets no Bioseq (`scope_finds_none`) or the lookup throws
+                // (`ParsedSubject::tabular_ids`).
+                let found = if subject.scope_finds_none() {
+                    None
+                } else {
+                    match subject.tabular_ids(true) {
+                        Ok(ids) => ids,
+                        Err(_) if !reads => Some(Default::default()),
+                        Err(problem) => {
+                            return Err(shared::parsed_refusal(
+                                self.oids.oid(ordinal),
+                                &format!("has {problem}"),
+                                self.program,
+                            ))
+                        }
                     }
                 };
                 ids.push(found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice())));

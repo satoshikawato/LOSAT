@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.117
+- Version: 1.118
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -847,9 +847,18 @@
   必要はない」 and 2026-10-22 「広い型になおしましょう」); numbered after 1.114 at the merge of
   dev 42678f399 that brought line DBID item pfoff-7's 1.114; first 1.105, then 1.106, 1.107,
   1.108, 1.113 and 1.114; exception 31 until the 1.113 merge);
-  1.116 2026-11-24 (approved exception 33, the Owner's decision of 2026-11-20 on line RG's question
+  1.116 2026-11-26 (BLASTN query chunks, line RG item X-chunk: unifies BLASTN's split-batch steps on
+  `SplitBatchSteps` (`without_resplit_stop()`), keeps 64-bit wrapping `size_t` chunk-range
+  arithmetic in `query_split.rs` across all three empty-chunk shapes (including exact-overlap
+  `L <= overlap` and unwrapped negative pairs reaching or passing L before the last chunk), checks
+  split chunks in duplicate-id batch setup with batch validity, shared chunk registry loads
+  (`WindowMasker::load_posts`) and chunk masks, and clarifies in approved exception 1 that
+  re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
+  brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
+  1.117 2026-11-24 (approved exception 33, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`; numbered after 1.115; first 1.70, taking exception 22 at the merge
+  F2, `-import_search_strategy`; numbered after 1.116; first 1.70, taking exception 22 at the merge
   of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
   then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
   the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
@@ -876,11 +885,12 @@
   1.112 and exception 31 (line RG items D1c-2, X-short-bat-2, D3c-4 and psiblast line item PS7c);
   then 1.114 at the merge of dev fe1452e21 that brought 1.113 (psiblast line item PS14); then 1.115
   at the merge of dev 42678f399 that brought 1.114 (line DBID item pfoff-7); then 1.116 and
-  exception 33 at the merge of dev 9758dbd59 that brought 1.115 and exception 32 (line RG item G1));
-  1.117 2026-11-24 (approved exception 34, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  exception 33 at the merge of dev 9758dbd59 that brought 1.115 and exception 32 (line RG item G1);
+  then 1.117 at the merge of dev f71a5cb85 that brought 1.116 (line RG item X-chunk));
+  1.118 2026-11-24 (approved exception 34, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
   line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
   `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
-  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.116;
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.117;
   first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
   merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
   2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.95 at the merge of dev 73242b104 that
@@ -897,7 +907,8 @@
   D3c-4 and psiblast line item PS7c); then 1.115 at the merge of dev fe1452e21 that brought 1.113
   (psiblast line item PS14); then 1.116 at the merge of dev 42678f399 that brought 1.114 (line DBID
   item pfoff-7); then 1.117 and exception 34 at the merge of dev 9758dbd59 that brought 1.115 and
-  exception 32 (line RG item G1))
+  exception 32 (line RG item G1); then 1.118 at the merge of dev f71a5cb85 that brought 1.116 (line
+  RG item X-chunk))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -930,11 +941,16 @@ rule.
 ## Approved exceptions (BLASTN)
 
 1. **A query chunk that NCBI would split again.** With `CHUNK_SIZE` and
-   `OVERLAP_CHUNK_SIZE` such that a query chunk is long enough to be split again (an
-   overlap close to the chunk size), NCBI skips the chunk's lookup table and stops with a
-   `CCoreException` (null pointer) that names its build's source files, exit 3
-   (`split_query_aux_priv.cpp:190-201`, `blast_aux_priv.cpp:206-208`; only a debug build
-   asserts against it). LOSAT searches each chunk once. Evidence
+   `OVERLAP_CHUNK_SIZE` such that every chunk holds a query and a query chunk is long enough to
+   be split again (an overlap close to the chunk size, such as `CHUNK_SIZE` 101 to 150 with the
+   default overlap 100 and a query length of at least 101), NCBI skips the chunk's lookup table
+   and stops with a `CCoreException` (null pointer) that names its build's source files, exit 3
+   (`split_query_aux_priv.cpp:190-201`, `blast_aux_priv.cpp:206-208`,
+   `prelim_search_runner.hpp:77`; only a debug build asserts against it; at `-num_threads` > 1
+   with `-db` worker threads log the exception and exit 0 without that chunk's hits). Where any
+   chunk holds no query (for example `CHUNK_SIZE` 101 to 150 with overlap 100 and length at most
+   100), NCBI stops earlier in `CQuerySplitter::Split`, which is a rule-3 explicit rejection
+   below. LOSAT searches each non-empty re-splitting chunk once. Evidence
    `docs/evidence/losat_web_e2g/resplit/`: 42 configurations (3 queries of 30 to 60 kb,
    blastn and megablast, 7 chunk and overlap pairs); NCBI exit 3 in all; LOSAT's output
    equals NCBI's unsplit output in 35, and NCBI's output at the largest overlap that does
@@ -2681,30 +2697,43 @@ file would differ, and NCBI's programs still could not open the database).
   It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
   greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
-  (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
-  wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
-  searches chunk ranges with gaps between them (hits are lost). Version 1.1 (maintainer,
-  2026-10-02): the second case, although NCBI's result is deterministic, stays an explicit
-  rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
-  `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
+  (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's 64-bit `size_t` chunk ranges
+  wrap (`split_query_cxx.cpp:145-171`). Where the wrapped chunk size covers the batch, or where
+  `chunk_start` reaches or passes the batch's end before the last chunk (for example `-100/-200`
+  on 310 bases, `-133/-200` on 200 bases, or `-132/-200` on 201 bases), later chunks hold no query
+  and NCBI stops in `CQuerySplitter::Split` with a null-pointer `CCoreException` (exit 3), handled
+  by the empty-chunk rejection below (a negative pair never produces a non-empty chunk that would
+  be split again). Otherwise every chunk holds a query with gaps between them (for example
+  `-100/-200` on 248 bases, `-1/-200` on 930 bases): NCBI searches on and loses hits in the gaps.
+  Version 1.1 (maintainer, 2026-10-02): that gap case, although NCBI's result is deterministic,
+  stays an explicit rejection (a setting without a practical use; reproducing it would need NCBI's
+  wrapped `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
-  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since version 1.110 the rejection
-  comes after the reports of the query batches before (line RG item X-short-bat-2, rows
-  `db.xs.blastn.bat.*`): a pair whose first range covers the batch leaves the chunks after it
-  without a query, where NCBI's split stops (the next item); a pair whose chunks all hold a query
-  and leave gaps is refused where the search of the batch's first chunk with a valid context would
-  read subjects in hand whose sequences can be read, after that chunk's setup and the reads of the
-  database that fail before it (TBLASTN's step of 1.97); a batch without such subjects is reported
-  as NCBI reports it.
+  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since versions 1.110 (line RG item
+  X-short-bat-2, rows `db.xs.blastn.bat.*`) and 1.116 (line RG item X-chunk, rows `db.xc.*`), in
+  BLASTN, as in TBLASTN (1.97) and BLASTP (1.98), the gap rejection comes after earlier batches'
+  reports and prologs, at the first chunk with a valid context with subjects in hand, after that
+  chunk's masking, setup checks (`e_nF`, average subject length) and database sequence-file read
+  (`nonsq`); without subjects in hand (empty alias `e_nA`, seqid list leaving no subject) or when
+  no chunk has a valid context (`gapvalid`, whose valid letters lie only in the gap, which reaches
+  traceback setup: `Traceback failed` on short subjects, `Database memory map file error` on OID 0,
+  or exit 0 with no hits), the batch is reported as NCBI reports it.
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
-  query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
-  (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
-  `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all). Since version 1.110 the rejection comes where
-  `CQuerySplitter::Split` stops, after the reports of the query batches before and before the
-  setup of any chunk and its read of the database, also with no subject in hand (rows
-  `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`).
+  query: a positive pair with evened chunk size below or equal to overlap at batch length `<=`
+  overlap (for example `140/100` on 90 bases, `150/100` on 100 bases, `100/95` on 31 bases), a
+  negative pair whose wrapped chunk size covers the batch (`-100/-200` on 310 bases), or an
+  unwrapped negative pair whose `chunk_start` reaches or passes the batch's end before the last
+  chunk (`-133/-200` on 200 bases, `-132/-200` on 201 bases). NCBI's `CQuerySplitter::Split`
+  (`split_query_cxx.cpp:234-249,872-880`) stops with a null-pointer `CCoreException` (exit 3) at
+  every thread count before any chunk is masked, set up, or searched, after earlier batches'
+  reports and prologs (in `-outfmt` 0, 15, 16 and 20 on batch 1, and all formats on batch 2, with
+  `-subject` outfmt 15/16 holding back the previous query). Since versions 1.110 (line RG item
+  X-short-bat-2, rows `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`) and 1.116 (line
+  RG item X-chunk, rows `db.xc.*` of `blastn.xc.tsv`, `tests/blastn_chunk_stops.rs`; round-3 audit:
+  27 oracle cases, plus 461 official 2.17.0 probe runs across all four tasks, `-db` and `-subject`,
+  1 and 4 threads), LOSAT rejects "a query chunk without a query" at that exact step in BLASTN,
+  also with no subject in hand.
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -4874,9 +4903,9 @@ past `Int4`)". Line RG item G1.
     and the `g1.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`). Before version 1.115
     LOSAT refused megablast gap costs above 32767 (rule 3).
 
-## Approved exception 33 (an imported strategy's subjects at more than one thread, version 1.116)
+## Approved exception 33 (an imported strategy's subjects at more than one thread, version 1.117)
 
-Version 1.116, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.117, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -4914,9 +4943,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
-## Approved exception 34 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.117)
+## Approved exception 34 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.118)
 
-Version 1.117, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+Version 1.118, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
 2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
 Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22

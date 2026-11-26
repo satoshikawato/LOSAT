@@ -71,7 +71,7 @@ use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, pairwise_windows, DisplayMasks, Rows as PairwiseRows};
 use super::super::query_split::{
     masked_before_part, restrict_masks, restrict_masks_with_letter_before, split_query_batch,
-    splits, QueryChunk, SplitSizes,
+    splits, ChunkQuery, ChunkStep, QueryChunk, SplitBatchSteps, SplitSizes,
 };
 use super::super::repeat_filter::MasksOutside;
 use super::super::scoring::{check_losat_limits, check_scoring_options, ContextKarlin};
@@ -4070,6 +4070,24 @@ impl QueryContextIndex {
             }
         }
         self.x_context_for_offset_ref(n)
+    }
+
+    /// No NCBI counterpart: EXPERIMENT (LOSAT_X_DCEMITHOIST) the constant-time form as a value
+    /// (`x_ctx_o1::CtxO1::x_view`), `None` without one; for `x_context_with`.
+    fn x_view(&self) -> Option<x_ctx_o1::XView<'_>> {
+        self.x_o1.as_ref().map(x_ctx_o1::CtxO1::x_view)
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219
+    /// EXPERIMENT (LOSAT_X_DCEMITHOIST): `context_for_offset` with the constant-time form `form`
+    /// made once (`x_view`, or `x_ctx_o1::XNone` without one): the form's answer, else the
+    /// out-of-line forms, as `context_for_offset` asks them. The same answer for every `n`.
+    #[inline(always)]
+    fn x_context_with<G: x_ctx_o1::XCtxGet>(&self, form: &G, n: usize) -> usize {
+        match form.get(n) {
+            Some(context) => context,
+            None => self.x_context_for_offset_ref(n),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
@@ -8293,6 +8311,17 @@ struct QueryBatch {
     fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
+/// Whether a `BatchStage::Search` call runs only the batch's set-up (`refused_batch_setup_error`),
+/// and if so whether NCBI splits the refused batch (`Split`: skip whole-batch subject checks and
+/// sequence-file reads so the chunk loop checks them in NCBI's order; `Whole`: run them as for a
+/// non-split batch).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupOnly {
+    No,
+    Whole,
+    Split,
+}
+
 /// Which of NCBI's stages `search_query_batch` runs for its queries.
 #[derive(Clone, Copy)]
 enum BatchStage<'a> {
@@ -8322,7 +8351,7 @@ enum BatchStage<'a> {
         lower_case_before: &'a [bool],
         masks_outside: &'a [MasksOutside],
         last: bool,
-        setup_only: bool,
+        setup_only: SetupOnly,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -8336,6 +8365,7 @@ enum BatchStage<'a> {
         query_masks: &'a [Vec<MaskedInterval>],
         batch_eff_searchsp: &'a [i64],
         x_last: bool,
+        setup_only: bool,
     },
 }
 
@@ -8354,10 +8384,10 @@ impl BatchStage<'_> {
     }
 }
 
-/// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
-/// error of NCBI's. Never shown: the refusal of the batch takes its place.
-#[derive(Debug)]
-struct SetUpOnly;
+/// The end of a batch's or chunk's set-up alone (`setup_only`) whose checks pass: `0` is whether
+/// any context was valid. Never shown: the refusal of the batch takes its place.
+#[derive(Debug, PartialEq, Eq)]
+struct SetUpOnly(bool);
 
 impl std::fmt::Display for SetUpOnly {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -9016,7 +9046,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
-                    setup_only: false,
+                    setup_only: SetupOnly::No,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -9037,7 +9067,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
-                    setup_only: false,
+                    setup_only: SetupOnly::No,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -10587,11 +10617,78 @@ fn read_db_seq_ranges(
     Some(none)
 }
 
+/// Appends the chunk's `-window_masker_taxid` registry load posts (`WindowMasker::load_posts`),
+/// restricts the batch's masks to the query parts of one chunk (`chunk_parts`, each mapped to its
+/// index in `query_masks`, `query_offsets`, `lower_case_before` and `masks_outside`), computes
+/// `parts_outside` for `-filtering_db`, and delegates to `chunk_query_masks`. Shared by
+/// `search_query_chunks` and `refused_batch_setup_error` so both paths apply identical chunk
+/// registry loads and masking.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:411-422
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:171-180
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
+#[allow(clippy::too_many_arguments)]
+fn chunk_part_masks<'a>(
+    args: &BlastnArgs,
+    parts: &[FastaRecord],
+    chunk_parts: impl IntoIterator<Item = (&'a ChunkQuery, usize)>,
+    query_masks: &[Vec<MaskedInterval>],
+    query_offsets: &[usize],
+    lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    posts: &mut Posts,
+) -> Result<Vec<Vec<MaskedInterval>>> {
+    // The chunk's query source loads the registry of `-window_masker_taxid` before it
+    // makes the masks (`WindowMasker::load_posts`): after the posts of the batch's set-up and
+    // of the chunks before, and before every error of the chunk's search.
+    if let Some(window_masker) = &args.window_masker {
+        posts.append(window_masker.load_posts(false));
+    }
+    if parts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut restricted: Vec<Vec<MaskedInterval>> = Vec::with_capacity(parts.len());
+    // With `-filtering_db` the masks that the chunk keeps before a part's letters join the part's
+    // masks when it combines the part's repeat hits with them (`query_split::masked_before_part`).
+    let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
+        Vec::with_capacity(parts.len())
+    } else {
+        Vec::new()
+    };
+    for (part, slot) in chunk_parts {
+        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
+        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
+        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
+        let (masks, offset) = (&query_masks[slot], query_offsets[slot]);
+        let letter_before = lower_case_before.get(slot) == Some(&true)
+            || masks_outside
+                .get(slot)
+                .is_some_and(|outside| outside.before & 1 != 0);
+        restricted.push(if letter_before {
+            restrict_masks_with_letter_before(masks, part, offset)
+        } else {
+            restrict_masks(masks, part, offset)
+        });
+        if args.repeat_filter.is_some() {
+            let before = masks_outside.get(slot).map_or(0, |outside| outside.before);
+            parts_outside.push(MasksOutside::before_part(masked_before_part(
+                masks, before, part, offset,
+            )));
+        }
+    }
+    chunk_query_masks(args, parts, restricted, &mut parts_outside, parallel_pool)
+        .map_err(|error| mask_rejection(args, error))
+}
+
 /// NCBI's error of the set-up of the records of a refused batch that are first in their scope
 /// (`first_in_scope`, of the batch's searched records `batch`, numbered from `start` in the run),
-/// which ends before the search (`BatchStage::Search::setup_only`), or `None` where the set-up
-/// succeeds or NCBI splits the batch, whose chunks check the subjects (`ContextInputs::split`):
+/// which ends before the search (`setup_only`), or `None` where the set-up succeeds, no chosen
+/// record has a valid context, or a split batch stops at an empty chunk (`CQuerySplitter::Split`):
 /// the refusal then comes (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+#[allow(clippy::too_many_arguments)]
 fn refused_batch_setup_error(
     args: &BlastnArgs,
     batch: &[FastaRecord],
@@ -10602,29 +10699,34 @@ fn refused_batch_setup_error(
     lower_case_before: &[bool],
     masks_outside: &[MasksOutside],
     subjects: SubjectSource<'_>,
-    outputs: BatchOutputs<'_, '_>,
+    mut outputs: BatchOutputs<'_, '_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batching: QueryBatching,
     first_batch: bool,
     posts: &mut Posts,
     query_keep: &mut Vec<u8>,
 ) -> Option<anyhow::Error> {
-    let batch_letters: usize = batch.iter().map(|record| record.seq().len()).sum();
-    if !args.ungapped && splits(batching.split, batch_letters) {
-        return None;
-    }
     let chosen: Vec<usize> = first_in_scope.collect();
     let records: Vec<FastaRecord> = chosen
         .iter()
         .map(|&query| batch[query - start].clone())
         .collect();
     let offsets: Vec<usize> = chosen.iter().map(|&query| query_offsets[query]).collect();
-    let masks: Option<Vec<Vec<MaskedInterval>>> = window_masker_masks.map(|masks| {
-        chosen
+    // Compute the batch's masks for the chosen records once so both the batch validity check and
+    // (when split) each chunk's restricted masks share them (`window_masker_masks` holds
+    // WindowMasker or `-filtering_db` masks; otherwise DUST and `-lcase_masking`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-128
+    let chosen_masks: Vec<Vec<MaskedInterval>> = match window_masker_masks {
+        Some(masks) => chosen
             .iter()
             .map(|&query| masks[query - start].clone())
-            .collect()
-    });
+            .collect(),
+        None => match query_masks(args, records.as_slice(), &mut [], parallel_pool) {
+            Ok((masks, _)) => masks,
+            Err(error) => return Some(mask_rejection(args, error)),
+        },
+    };
     let letter_before: Vec<bool> = if lower_case_before.is_empty() {
         Vec::new()
     } else {
@@ -10641,13 +10743,27 @@ fn refused_batch_setup_error(
             .map(|&query| masks_outside[query - start])
             .collect()
     };
+    let batch_lengths: Vec<usize> = batch.iter().map(|record| record.seq().len()).collect();
+    let chunks = (!args.ungapped)
+        .then(|| {
+            split_query_batch(
+                &batch_lengths,
+                batching.split,
+                QueryStrand::from_option(&args.strand),
+            )
+        })
+        .flatten();
     let stage = BatchStage::Search {
         query_offsets: &offsets,
-        query_masks: masks.as_deref(),
+        query_masks: Some(&chosen_masks),
         lower_case_before: &letter_before,
         masks_outside: &outside,
         last: true,
-        setup_only: true,
+        setup_only: if chunks.is_some() {
+            SetupOnly::Split
+        } else {
+            SetupOnly::Whole
+        },
     };
     let queries = x_query_drop::BatchQueries::Shared(&records);
     let set_up = if args.ungapped {
@@ -10655,7 +10771,7 @@ fn refused_batch_setup_error(
             args,
             queries,
             subjects,
-            outputs,
+            reborrow_outputs(&mut outputs),
             parallel_pool,
             batching,
             first_batch,
@@ -10669,7 +10785,7 @@ fn refused_batch_setup_error(
             args,
             queries,
             subjects,
-            outputs,
+            reborrow_outputs(&mut outputs),
             parallel_pool,
             batching,
             first_batch,
@@ -10679,9 +10795,148 @@ fn refused_batch_setup_error(
             query_keep,
         )
     };
-    set_up
-        .err()
-        .map(crate::blastinput::app::ErrorAfterBatchReports::held)
+    let any_valid_context = match set_up {
+        Ok(_) => unreachable!("setup_only always ends with SetUpOnly or an error"),
+        Err(error) => match error.downcast::<SetUpOnly>() {
+            Ok(SetUpOnly(valid)) => valid,
+            Err(error) => return Some(crate::blastinput::app::ErrorAfterBatchReports::held(error)),
+        },
+    };
+    let chunks = chunks?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:232-236
+    // Enter the chunk loop only when the chosen records have a valid context, matching the normal
+    // split path (`search_query_batch_inner`).
+    if !any_valid_context {
+        return None;
+    }
+    let read_fails = context_statistics::split_read_fails(subjects);
+    let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
+    let steps = SplitBatchSteps::new(
+        "BLASTN",
+        &chunks,
+        batching.split,
+        read_fails,
+        setup_checks,
+        &after_batch_reports,
+    )
+    .ok()?;
+    let mut steps = steps.without_resplit_stop();
+    let mut chosen_slot: Vec<Option<usize>> = vec![None; batch.len()];
+    for (slot, &query) in chosen.iter().enumerate() {
+        chosen_slot[query - start] = Some(slot);
+    }
+    for chunk in &chunks {
+        let mut parts: Vec<FastaRecord> = Vec::new();
+        let mut chunk_parts: Vec<(&ChunkQuery, usize)> = Vec::new();
+        for part in &chunk.queries {
+            if let Some(slot) = chosen_slot[part.query] {
+                parts.push(batch[part.query].cut(part.from, part.to));
+                chunk_parts.push((part, slot));
+            }
+        }
+        let part_masks = match chunk_part_masks(
+            args,
+            &parts,
+            chunk_parts,
+            &chosen_masks,
+            &offsets,
+            &letter_before,
+            &outside,
+            parallel_pool,
+            posts,
+        ) {
+            Ok(masks) => masks,
+            Err(error) => return Some(error),
+        };
+        let zero_spaces = vec![0i64; 2 * parts.len()];
+        let set_up = search_query_batch_inner::<false>(
+            args,
+            x_query_drop::BatchQueries::Shared(&parts),
+            subjects,
+            reborrow_outputs(&mut outputs),
+            parallel_pool,
+            batching,
+            first_batch,
+            BatchStage::ChunkPrelim {
+                query_masks: &part_masks,
+                batch_eff_searchsp: &zero_spaces,
+                x_last: true,
+                setup_only: true,
+            },
+            posts,
+            None,
+            query_keep,
+            Some((chunk, &mut steps)),
+        );
+        if let Err(error) = set_up {
+            match error.downcast::<SetUpOnly>() {
+                Ok(SetUpOnly(true)) => return None,
+                Ok(SetUpOnly(false)) => continue,
+                Err(error) => {
+                    return Some(crate::blastinput::app::ErrorAfterBatchReports::held(error));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Applies `SplitBatchSteps` (`before_read` and `before_search`) to one BLASTN query chunk after
+/// its Karlin-Altschul validity is known, matching NCBI's preliminary-stage order: OID 0 read
+/// (`ReadFails::Setup`) before chunk validity, skipping invalid chunks, batch setup checks once at
+/// the first valid chunk, sequence-file read (`ReadFails::Search`), and D13 negative-pair gaps
+/// with subjects in hand. Out of line and cold so non-split searches execute no chunk logic.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-290
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-993
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn run_chunk_split_steps(
+    chunk: &QueryChunk,
+    steps: &mut SplitBatchSteps<'_>,
+    any_valid_context: bool,
+    setup_only: bool,
+    subjects: SubjectSource<'_>,
+    first_batch: bool,
+    outputs: BatchOutputs<'_, '_>,
+    intro: BlastnIntro,
+    shown: &ShownSubjects,
+) -> Result<bool> {
+    match steps.before_read(chunk, any_valid_context) {
+        Ok(ChunkStep::Skip) => {
+            if setup_only {
+                return Err(SetUpOnly(false).into());
+            }
+            Ok(false)
+        }
+        Ok(ChunkStep::End) => {
+            let error = context_statistics::split_read_error(subjects)
+                .expect("ChunkStep::End is returned only when a database read fails");
+            Err(database_search_error(
+                error,
+                first_batch,
+                outputs,
+                intro,
+                shown,
+            ))
+        }
+        Ok(ChunkStep::Read) => {
+            if setup_only {
+                return Err(SetUpOnly(true).into());
+            }
+            steps.before_search(subjects.num_subjects() > 0)?;
+            Ok(true)
+        }
+        Err(error) => Err(context_statistics::setup_failure(
+            error,
+            first_batch,
+            setup_only,
+            outputs,
+            intro,
+            shown,
+        )),
+    }
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
@@ -10691,7 +10946,38 @@ fn refused_batch_setup_error(
 /// posted for the batch so far (the batch loop's warnings before its first query), to which the
 /// search adds what NCBI posts while it searches it (the masks of a split batch's chunks,
 /// `search_query_chunks`), also when the search then fails.
+#[allow(clippy::too_many_arguments)]
 fn search_query_batch<const UNGAPPED: bool>(
+    args: &BlastnArgs,
+    query_records: x_query_drop::BatchQueries<'_>,
+    subjects: SubjectSource<'_>,
+    outputs: BatchOutputs<'_, '_>,
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batching: QueryBatching,
+    first_batch: bool,
+    stage: BatchStage<'_>,
+    posts: &mut Posts,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    query_keep: &mut Vec<u8>,
+) -> Result<QueryBatch> {
+    search_query_batch_inner::<UNGAPPED>(
+        args,
+        query_records,
+        subjects,
+        outputs,
+        parallel_pool,
+        batching,
+        first_batch,
+        stage,
+        posts,
+        x_keep,
+        query_keep,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn search_query_batch_inner<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
     subjects: SubjectSource<'_>,
@@ -10703,6 +10989,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     posts: &mut Posts,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
     query_keep: &mut Vec<u8>,
+    split_steps: Option<(&QueryChunk, &mut SplitBatchSteps<'_>)>,
 ) -> Result<QueryBatch> {
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -10927,14 +11214,29 @@ fn search_query_batch<const UNGAPPED: bool>(
     // Whether NCBI searches the batch chunk by chunk when it has a valid context (a gapped
     // search, `search_query_chunks`): each chunk's set-up then checks the subjects
     // (`ContextInputs::split`).
-    let split = matches!(stage, BatchStage::Search { .. })
-        && !UNGAPPED
-        && splits(
-            batching.split,
-            (0..letters.count())
-                .map(|index| letters.length(index))
-                .sum(),
-        );
+    let split = match stage {
+        BatchStage::Search {
+            setup_only: SetupOnly::Split,
+            ..
+        } => true,
+        BatchStage::Search {
+            setup_only: SetupOnly::Whole,
+            ..
+        } => false,
+        BatchStage::Search {
+            setup_only: SetupOnly::No,
+            ..
+        } => {
+            !UNGAPPED
+                && splits(
+                    batching.split,
+                    (0..letters.count())
+                        .map(|index| letters.length(index))
+                        .sum(),
+                )
+        }
+        BatchStage::ChunkPrelim { .. } => false,
+    };
     // The Karlin-Altschul blocks of the batch's contexts, the checks of the set-up and the
     // effective search spaces (`context_statistics::context_statistics`).
     let context_statistics::ContextStatistics {
@@ -10962,10 +11264,42 @@ fn search_query_batch<const UNGAPPED: bool>(
         },
         reborrow_outputs(&mut outputs),
     )?;
-    if let BatchStage::Search {
-        setup_only: true, ..
-    } = stage
-    {
+    if let BatchStage::ChunkPrelim { setup_only, .. } = stage {
+        let (chunk, steps) =
+            split_steps.expect("BatchStage::ChunkPrelim always carries SplitBatchSteps");
+        if !run_chunk_split_steps(
+            chunk,
+            steps,
+            any_valid_context,
+            setup_only,
+            subjects,
+            first_batch,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )? {
+            if let (true, Some(keep)) = (stage.x_last_tables(), x_keep) {
+                keep.close_qs();
+            }
+            return Ok(QueryBatch {
+                hit_lists: Vec::new(),
+                chunk_prelim_lists: Vec::new(),
+                good_init_extends: 0,
+                searched: false,
+                query_masks: Vec::new(),
+                context_karlin: Vec::new(),
+                query_eff_searchsp: Vec::new(),
+                timing: String::new(),
+                fetched_utf8: None,
+            });
+        }
+    } else if matches!(
+        stage,
+        BatchStage::Search {
+            setup_only: SetupOnly::Whole | SetupOnly::Split,
+            ..
+        }
+    ) {
         // The search's first read of the database after the set-up (`prelim_pass`): a sequence
         // file that cannot be opened fails the batch there (line WQA D10 round 6, review 4 M2).
         if let (true, SubjectSource::Database(database)) = (any_valid_context && !split, subjects) {
@@ -10979,7 +11313,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 ));
             }
         }
-        return Err(SetUpOnly.into());
+        return Err(SetUpOnly(any_valid_context).into());
     }
     // The preliminary stage's option spaces and its own spaces where they differ from the setup's
     // (`batch_setup::batch_spaces`).
@@ -11045,54 +11379,25 @@ fn search_query_batch<const UNGAPPED: bool>(
             masks_outside,
             last,
             ..
-        } if any_valid_context && !UNGAPPED => {
-            let chunks = search_query_chunks(
-                args,
-                &letters,
-                &seq_data.query_masks,
-                query_offsets,
-                lower_case_before,
-                masks_outside,
-                option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
-                &query_context_offsets,
-                subjects,
-                reborrow_outputs(&mut outputs),
-                parallel_pool,
-                batching,
-                first_batch,
-                posts,
-                (x_keep, last),
-            )?;
-            // A batch with a valid context whose chunks have none (for example, under
-            // `-soft_masking false` with `-lcase_masking`, `restrict_masks`'s end extension
-            // covers the batch's remaining non-N base in chunk 0) meets `BLAST_GapAlignSetUp`
-            // first in the set-up of its traceback, after the chunks:
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
-            // The subject check runs before the greedy set-up there (NCBI: `Traceback failed`,
-            // exit status 3, or SIGFPE for a count of 0; line RG D1a-6, review A F1).
-            if let Some((_, false)) = &chunks {
-                if let Some(error) = context_statistics::gap_align_setup_error(
-                    args,
-                    subjects,
-                    &seq_data,
-                    false,
-                    crate::blastinput::app::TRACEBACK_FAILED,
-                ) {
-                    return Err(context_statistics::setup_failure(
-                        error,
-                        first_batch,
-                        false,
-                        reborrow_outputs(&mut outputs),
-                        intro,
-                        &shown,
-                    ));
-                }
-            }
-            chunks.map(|(lists, _)| lists)
-        }
+        } if any_valid_context && !UNGAPPED => search_query_chunks(
+            args,
+            &letters,
+            &seq_data.query_masks,
+            query_offsets,
+            lower_case_before,
+            masks_outside,
+            option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
+            &query_context_offsets,
+            subjects,
+            reborrow_outputs(&mut outputs),
+            parallel_pool,
+            batching,
+            first_batch,
+            intro,
+            &shown,
+            posts,
+            (x_keep, last),
+        )?,
         _ => None,
     };
     // EXPERIMENT (LOSAT_X_BNQPACK): the encoding and the query chunks were the last readers of the
@@ -11606,9 +11911,10 @@ fn search_query_batch<const UNGAPPED: bool>(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-289
 /// A chunk has its own query block, masks, Karlin-Altschul blocks, lookup table and
 /// diagnostics (a split batch gives the next batch size 0 initial hits), and NCBI drops its
-/// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error. With the
-/// merged lists it returns whether a chunk had a valid context (its set-up checked the subjects
-/// and the greedy set-up). `x_keep`: the batch loop's keep (LOSAT_X_MBLUTKEEP) and whether the
+/// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error. Chunk
+/// stops, setup checks, read errors and unmet traceback checks follow the shared `SplitBatchSteps`
+/// state machine (with BLASTN skipping the re-split stop under approved exception 1 of
+/// PD-LOSAT-NCBI-DEFECTS). `x_keep`: the batch loop's keep (LOSAT_X_MBLUTKEEP) and whether the
 /// batch is the loop's last (`BatchStage::Search`'s `last`; LOSAT_X_CSRQSKEEP, the chunks'
 /// `x_last`).
 #[allow(clippy::too_many_arguments)]
@@ -11626,9 +11932,11 @@ fn search_query_chunks(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batching: QueryBatching,
     first_batch: bool,
+    intro: BlastnIntro,
+    shown: &ShownSubjects,
     posts: &mut Posts,
     (x_keep, last_batch): (Option<&Arc<x_mb_lut_keep::Keep>>, bool),
-) -> Result<Option<(PrelimHitLists, bool)>> {
+) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
         .collect();
@@ -11639,93 +11947,47 @@ fn search_query_chunks(
     ) else {
         return Ok(None);
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234-247,872-880
-    // NCBI's query splitter makes the query factory of every chunk before any chunk is set up, and
-    // stops at the missing query vector of a chunk that no query reaches (a null pointer:
-    // `split_query_batch` makes no part for it), after the reports that its batch loop printed
-    // (`after_batch_reports`). This is where a negative CHUNK_SIZE above a negative
-    // OVERLAP_CHUNK_SIZE (NCBI's `size_t` chunk ranges wrap) whose first range covers the batch
-    // stops, and a positive pair whose evened chunk size falls below the overlap.
-    if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
-        return Err(after_batch_reports(anyhow::anyhow!(
-            "a query chunk without a query is not supported by LOSAT's BLASTN"
-        )));
-    }
-    // The wrapped ranges of a negative pair whose chunks all hold a query leave gaps between the
-    // chunks: refused where the search of a chunk reads the subjects (D13, `search_query_batch`).
-    // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
-    // and stop with a CCoreException that names its build's files. LOSAT searches each chunk
-    // once, as NCBI does for every overlap that does not split a chunk again (approved
-    // exception 1 of PD-LOSAT-NCBI-DEFECTS).
-    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:232-290
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234-249,876-880
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
-    // (each chunk's setup builds its own query splitter; only a debug build asserts.)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
+    // `SplitBatchSteps` owns the empty-chunk stop, OID 0 read, per-chunk setup checks, read
+    // failures, D13 negative-pair gap refusal, and post-loop traceback setup checks; BLASTN
+    // disables the re-split stop (approved exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    let read_fails = context_statistics::split_read_fails(subjects);
+    let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
+    let mut steps = SplitBatchSteps::new(
+        "BLASTN",
+        &chunks,
+        batching.split,
+        read_fails,
+        setup_checks,
+        &after_batch_reports,
+    )?
+    .without_resplit_stop();
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
     merged.resize_with(queries.count(), || None);
     // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,
     // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
     let mut query_keep: Vec<u8> = Vec::new();
-    // Whether a chunk had a valid context, so that its set-up (`context_statistics`) checked the
-    // subjects and the greedy set-up.
-    let mut chunk_set_up = false;
     for (index, chunk) in chunks.iter().enumerate() {
         let parts: Vec<FastaRecord> = chunk
             .queries
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
-        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
-        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
-        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
-        let restricted = chunk
-            .queries
-            .iter()
-            .map(|part| {
-                let (masks, offset) = (&query_masks[part.query], query_offsets[part.query]);
-                let letter_before = lower_case_before.get(part.query) == Some(&true)
-                    || masks_outside
-                        .get(part.query)
-                        .is_some_and(|outside| outside.before & 1 != 0);
-                if letter_before {
-                    restrict_masks_with_letter_before(masks, part, offset)
-                } else {
-                    restrict_masks(masks, part, offset)
-                }
-            })
-            .collect();
-        // The chunk's query source loads the registry of `-window_masker_taxid` before it
-        // makes the masks (`WindowMasker::load_posts`): after the posts of the batch's set-up and
-        // of the chunks before, and before every error of the chunk's search.
-        if let Some(window_masker) = &args.window_masker {
-            posts.append(window_masker.load_posts(false));
-        }
-        // With `-filtering_db` the masks that the chunk keeps before a part's letters join the
-        // part's masks when it combines the part's repeat hits with them
-        // (`query_split::masked_before_part`).
-        let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
-            chunk
-                .queries
-                .iter()
-                .map(|part| {
-                    let before = masks_outside
-                        .get(part.query)
-                        .map_or(0, |outside| outside.before);
-                    MasksOutside::before_part(masked_before_part(
-                        &query_masks[part.query],
-                        before,
-                        part,
-                        query_offsets[part.query],
-                    ))
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let part_masks =
-            chunk_query_masks(args, &parts, restricted, &mut parts_outside, parallel_pool)
-                .map_err(|error| mask_rejection(args, error))?;
-        let batch = search_query_batch::<false>(
+        let part_masks = chunk_part_masks(
+            args,
+            &parts,
+            chunk.queries.iter().map(|part| (part, part.query)),
+            query_masks,
+            query_offsets,
+            lower_case_before,
+            masks_outside,
+            parallel_pool,
+            posts,
+        )?;
+        let batch = search_query_batch_inner::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),
             subjects,
@@ -11737,12 +11999,13 @@ fn search_query_chunks(
                 query_masks: &part_masks,
                 batch_eff_searchsp,
                 x_last: last_batch && index + 1 == chunks.len(),
+                setup_only: false,
             },
             &mut *posts,
             x_keep,
             &mut query_keep,
+            Some((chunk, &mut steps)),
         )?;
-        chunk_set_up |= batch.searched;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:519-522
         merge_query_chunk(
@@ -11753,7 +12016,19 @@ fn search_query_chunks(
             batching.split.overlap as u32 as i32,
         )?;
     }
-    Ok(Some((merged, chunk_set_up)))
+    // A batch with a valid context whose chunks have none (for instance valid letters only in a
+    // negative-pair gap, or masks covering every chunk) meets `BLAST_GapAlignSetUp` first in the
+    // set-up of its traceback, after the chunks (`SplitBatchSteps::unmet_checks`).
+    if let Some(unmet) = steps.unmet_checks() {
+        return Err(context_statistics::traceback_setup_error(
+            unmet,
+            first_batch,
+            outputs,
+            intro,
+            shown,
+        ));
+    }
+    Ok(Some(merged))
 }
 
 /// NCBI's `BlastHSPStreamMerge` of a query chunk: the HSPs of each query part's hit list

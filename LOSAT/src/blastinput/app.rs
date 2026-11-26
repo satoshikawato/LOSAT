@@ -80,9 +80,9 @@ pub(crate) fn hsp_filtering_error(
 }
 
 /// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
-/// split batch whose chunks found nothing (`blastp::protein_query_split::UnmetChecks`), a failed
-/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTP's, psiblast's
-/// and TBLASTN's error there.
+/// split batch whose chunks found nothing (`blastn::query_split::UnmetChecks`), a failed
+/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTN's, BLASTP's,
+/// psiblast's and TBLASTN's error there.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
 pub const TRACEBACK_FAILED: &str = "Traceback failed";

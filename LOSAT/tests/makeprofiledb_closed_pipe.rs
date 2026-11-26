@@ -543,3 +543,242 @@ fn delta_buffered_exclusion_before_error_on_closed_stdout_pipe() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// Runs `losat makeprofiledb` with both standard output and standard error directed to the same
+/// file (`> both.txt 2>&1`) and returns `(exit_code, combined_bytes)`.
+fn run_makeprofiledb_combined(dir: &Path, words: &[&str]) -> (Option<i32>, Vec<u8>) {
+    let both_path = dir.join("both.txt");
+    let both = fs::File::create(&both_path).unwrap();
+    let both_err = both.try_clone().unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
+    cmd.current_dir(dir)
+        .arg("makeprofiledb")
+        .args(words)
+        .env("HOME", dir)
+        .env("TZ", "UTC")
+        .env("BLAST_USAGE_REPORT", "false")
+        .env("LOSAT_BLASTX_WORKER_LOG", "/dev/null")
+        .env_remove("BLASTDB")
+        .env_remove("NCBI_CONFIG_PATH")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(both))
+        .stderr(Stdio::from(both_err));
+    let status = cmd.status().expect("run losat makeprofiledb");
+    let bytes = fs::read(&both_path).unwrap();
+    (status.code(), bytes)
+}
+
+/// D31, D25, D31 with `-logfile -`, and D31 with `-logfile /dev/stdout` under `2>&1` interleave
+/// stdout exclusion lines and cerr diagnostics in the exact byte order of NCBI BLAST+ 2.17.0
+/// (`cerr` is tied to `cout`, whereas `-logfile /dev/stdout` is not tied to `cout`).
+#[test]
+fn cerr_tie_matches_ncbi_combined_stream_order() {
+    let d31_want = b"in/d_obsr49.smp was excluded: due to too few independent observations\n\
+                     Created protein BLAST (alias) database db with 3 sequences\n";
+    let d31_dev_want = b"in/d_obsr49.smp was excluded: due to too few independent observations\n";
+    let badchar = b"Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title\n\
+                    Bad char [0x1] in string at line 15\n\
+                    \x01cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose\n";
+    let mut d25_want = Vec::new();
+    d25_want.extend_from_slice(badchar);
+    d25_want.extend_from_slice(
+        b"in/d_badchar_ex.smp was excluded: due to too few independent observations\n",
+    );
+    for _ in 0..3 {
+        d25_want.extend_from_slice(badchar);
+    }
+
+    for (label, extra, want) in [
+        ("d31", &[][..], &d31_want[..]),
+        ("d31_dash", &["-logfile", "-"][..], &d31_want[..]),
+        (
+            "d31_devstdout",
+            &["-logfile", "/dev/stdout"][..],
+            &d31_dev_want[..],
+        ),
+    ] {
+        let dir = unique_dir(&format!("losat_mp_order_{label}"));
+        copy_profiles(
+            dir.path(),
+            &["l_D29.lst", "d_obsr49.smp", "c1.smp", "c2.smp", "c3.smp"],
+        );
+        let mut args = vec![
+            "-dbtype",
+            "delta",
+            "-max_smp_vol",
+            "2",
+            "-in",
+            "in/l_D29.lst",
+            "-out",
+            "db",
+        ];
+        args.extend_from_slice(extra);
+        let (rc, got) = run_makeprofiledb_combined(dir.path(), &args);
+        assert_eq!(rc, Some(0), "{label}");
+        assert_eq!(
+            got,
+            want,
+            "{label}:\ngot:  {:?}\nwant: {:?}",
+            String::from_utf8_lossy(&got),
+            String::from_utf8_lossy(want)
+        );
+    }
+
+    let dir = unique_dir("losat_mp_order_d25");
+    copy_profiles(
+        dir.path(),
+        &["l_D25.lst", "d_badchar_ex.smp", "d_badchar_in.smp"],
+    );
+    let (rc, got) = run_makeprofiledb_combined(
+        dir.path(),
+        &["-dbtype", "delta", "-in", "in/l_D25.lst", "-out", "db"],
+    );
+    assert_eq!(rc, Some(0));
+    assert_eq!(
+        got,
+        d25_want,
+        "D25:\ngot:  {:?}\nwant: {:?}",
+        String::from_utf8_lossy(&got),
+        String::from_utf8_lossy(&d25_want)
+    );
+}
+
+/// D25 and D31 on a closed stdout pipe stop at the `cerr`-to-`cout` tie flush where NCBI BLAST+
+/// 2.17.0 is ended by SIGPIPE (141): D25 leaves 0 database files and only the first Bad char post
+/// on stderr (because `cout` was empty at the first post); D31 leaves all 31 files (including both
+/// `.pog` files and `db.pal`, no destructor clean-up) and empty stderr.
+#[test]
+fn delta_cerr_tie_stops_at_ncbi_point_on_closed_stdout_pipe() {
+    let badchar = b"Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title\n\
+                    Bad char [0x1] in string at line 15\n\
+                    \x01cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose\n";
+
+    let d25_dir = unique_dir("losat_mp_pipe_d25");
+    copy_profiles(
+        d25_dir.path(),
+        &["l_D25.lst", "d_badchar_ex.smp", "d_badchar_in.smp"],
+    );
+    let d25_out = run_makeprofiledb(
+        d25_dir.path(),
+        &["-dbtype", "delta", "-in", "in/l_D25.lst", "-out", "db"],
+        closed_pipe(),
+    );
+    assert_eq!(d25_out.status.code(), Some(0));
+    assert_eq!(d25_out.stderr, badchar);
+    assert!(
+        db_files(d25_dir.path(), "db.").is_empty(),
+        "{:?}",
+        db_files(d25_dir.path(), "db.")
+    );
+
+    let d31_dir = unique_dir("losat_mp_pipe_d31");
+    copy_profiles(
+        d31_dir.path(),
+        &["l_D29.lst", "d_obsr49.smp", "c1.smp", "c2.smp", "c3.smp"],
+    );
+    let d31_out = run_makeprofiledb(
+        d31_dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-max_smp_vol",
+            "2",
+            "-in",
+            "in/l_D29.lst",
+            "-out",
+            "db",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(d31_out.status.code(), Some(0));
+    assert!(
+        d31_out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&d31_out.stderr)
+    );
+    let d31_files = db_files(d31_dir.path(), "db.");
+    assert_eq!(d31_files.len(), 31, "{d31_files:?}");
+    assert!(
+        d31_files.contains(&"db.00.pog".to_string()),
+        "{d31_files:?}"
+    );
+    assert!(
+        d31_files.contains(&"db.01.pog".to_string()),
+        "{d31_files:?}"
+    );
+    assert!(d31_files.contains(&"db.pal".to_string()), "{d31_files:?}");
+}
+
+/// D31 and D25 with `-logfile run.log`: diagnostics go to the file (not `cerr`), so there is no
+/// tie flush and both runs complete with the exact NCBI 2.17.0 `run.log` bytes and full database
+/// files even on a closed stdout pipe.
+#[test]
+fn delta_regular_logfile_has_no_cerr_tie_and_matches_ncbi() {
+    let badchar = b"Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title\n\
+                    Bad char [0x1] in string at line 15\n\
+                    \x01cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose\n";
+    let d25_excl = b"in/d_badchar_ex.smp was excluded: due to too few independent observations\n";
+    let mut d25_log_want = Vec::new();
+    for _ in 0..4 {
+        d25_log_want.extend_from_slice(badchar);
+    }
+    // `m_LogFile` opens `run.log` at offset 0 and flushes the exclusion line at program end,
+    // overwriting the first `d25_excl.len()` bytes of the 4 appended diagnostics (NCBI 2.17.0).
+    d25_log_want[..d25_excl.len()].copy_from_slice(d25_excl);
+
+    let d25_dir = unique_dir("losat_mp_logfile_d25");
+    copy_profiles(
+        d25_dir.path(),
+        &["l_D25.lst", "d_badchar_ex.smp", "d_badchar_in.smp"],
+    );
+    let d25_out = run_makeprofiledb(
+        d25_dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-in",
+            "in/l_D25.lst",
+            "-out",
+            "db",
+            "-logfile",
+            "run.log",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(d25_out.status.code(), Some(0));
+    assert!(d25_out.stderr.is_empty());
+    assert_eq!(db_files(d25_dir.path(), "db.").len(), 14);
+    assert_eq!(
+        fs::read(d25_dir.path().join("run.log")).unwrap(),
+        d25_log_want
+    );
+
+    let d31_dir = unique_dir("losat_mp_logfile_d31");
+    copy_profiles(
+        d31_dir.path(),
+        &["l_D29.lst", "d_obsr49.smp", "c1.smp", "c2.smp", "c3.smp"],
+    );
+    let d31_out = run_makeprofiledb(
+        d31_dir.path(),
+        &[
+            "-dbtype",
+            "delta",
+            "-max_smp_vol",
+            "2",
+            "-in",
+            "in/l_D29.lst",
+            "-out",
+            "db",
+            "-logfile",
+            "run.log",
+        ],
+        closed_pipe(),
+    );
+    assert_eq!(d31_out.status.code(), Some(0));
+    assert!(d31_out.stderr.is_empty());
+    assert_eq!(db_files(d31_dir.path(), "db.").len(), 29);
+    assert_eq!(
+        fs::read(d31_dir.path().join("run.log")).unwrap(),
+        b"in/d_obsr49.smp was excluded: due to too few independent observations\n"
+    );
+}

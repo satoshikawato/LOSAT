@@ -303,6 +303,7 @@ fn init<'a>(
     } else {
         None
     };
+    let mut stdout = cout(out, crate::cli::NcbiStdio::cout());
     let in_name = args
         .os_value("in")
         .ok_or_else(|| crate::ncbi_app::args::no_value("in"))
@@ -362,16 +363,18 @@ fn init<'a>(
                 warnings.push(warning)
             });
         for warning in warnings {
-            post_seq_id_warning(diag, &warning);
+            let _ = post_seq_id_warning(&mut stdout, diag, &warning);
         }
         match read {
             Ok(_) => {}
             Err(TaxIdMapError::Exception(exception)) => {
-                diag.write_text(&exception.report_default_ex(
-                    106,
-                    15,
-                    "Application's initialization failed",
-                ));
+                let _ = post_diag(&mut stdout, diag, |diag| {
+                    diag.write_text(&exception.report_default_ex(
+                        106,
+                        15,
+                        "Application's initialization failed",
+                    ));
+                });
                 return Err(2);
             }
             Err(TaxIdMapError::BlankLine(line)) => {
@@ -387,7 +390,7 @@ fn init<'a>(
         (TaxIdSet::default(), false)
     };
     Ok(Params {
-        stdout: cout(out, crate::cli::NcbiStdio::cout()),
+        stdout,
         log_file,
         in_list,
         binary,
@@ -411,12 +414,36 @@ fn init<'a>(
     })
 }
 
+/// Runs `post` on `diag`, modelling `cerr`'s tie to `cout` (`cerr.tie()`): when diagnostics go to
+/// `cerr` (`diag.is_cerr()`), `stdout` (`cout`) is flushed first so standard output and standard
+/// error interleave in NCBI's order, and a closed pipe stops the run before the diagnostic line is
+/// written (`RunError::ClosedPipe`). Flushing an empty `cout` buffer writes nothing.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+fn post_diag(
+    stdout: &mut Cout<'_>,
+    diag: &mut Diag,
+    post: impl FnOnce(&mut Diag),
+) -> Result<(), RunError> {
+    if diag.is_cerr() {
+        stdout.flush();
+        if stdout.rdbuf().closed_pipe() {
+            return Err(RunError::ClosedPipe);
+        }
+    }
+    post(diag);
+    Ok(())
+}
+
 /// A warning of the Seq-id parser (a warning that `CSeq_id` posts with `ERR_POST_X`), as
 /// makeprofiledb posts it (no prefix of its own).
-fn post_seq_id_warning(diag: &mut Diag, warning: &crate::seqid::accguide::SeqIdWarning) {
+fn post_seq_id_warning(
+    stdout: &mut Cout<'_>,
+    diag: &mut Diag,
+    warning: &crate::seqid::accguide::SeqIdWarning,
+) -> Result<(), RunError> {
     let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
     line.extend_from_slice(&warning.message);
-    diag.post_bytes(&line);
+    post_diag(stdout, diag, |diag| diag.post_bytes(&line))
 }
 
 /// The state that makeprofiledb's destructor reads: the volumes made (`m_VolNames`), whether the
@@ -449,7 +476,11 @@ pub(super) fn run(
         done: false,
     };
     let status = match x_run(&mut params, &mut built, settings, diag) {
-        Ok(()) => 0,
+        Ok(()) => Ok(0),
+        Err(error) => report(error, &mut params.stdout, diag),
+    };
+    let status = match status {
+        Ok(status) => status,
         // A closed pipe ends the run where SIGPIPE ends NCBI's process: no message, no flush of
         // buffered `-logfile` or `cout` bytes, and no `~CMakeProfileDBApp` clean-up
         // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
@@ -457,21 +488,7 @@ pub(super) fn run(
             params.discard_log();
             return 0;
         }
-        Err(error) => {
-            // `cerr` is tied to `cout`: posting an NCBI error on `cerr` (when diagnostics are not
-            // redirected to a file) flushes `cout` first. If that flush meets a closed pipe,
-            // SIGPIPE ends NCBI's process before the error message and before `~CMakeProfileDBApp`.
-            if !matches!(error, RunError::Refused(_) | RunError::Failed(_))
-                && params.log_file.is_none()
-            {
-                params.stdout.flush();
-                if params.stdout.rdbuf().closed_pipe() {
-                    params.discard_log();
-                    return 0;
-                }
-            }
-            report(error, diag)
-        }
+        Err(_) => unreachable!("report handles every other RunError"),
     };
     destroy(&built, &params.out_db_name, params.op_mode);
     params.flush_log();
@@ -508,35 +525,40 @@ fn refusal(args: &Args) -> Option<String> {
     }
 }
 
-/// The report of `Run`'s handler; the exit status.
-fn report(error: RunError, diag: &mut Diag) -> i32 {
-    let post = |diag: &mut Diag, prefix: &[u8], message: &[u8]| {
-        diag.err_post_bytes(&[prefix, message].concat());
+/// The report of `Run`'s handler; the exit status, or `Err(RunError::ClosedPipe)` when the
+/// `cerr`-to-`cout` flush before posting an NCBI error meets a closed pipe.
+fn report(error: RunError, stdout: &mut Cout<'_>, diag: &mut Diag) -> Result<i32, RunError> {
+    let mut post = |prefix: &[u8], message: &[u8]| {
+        post_diag(stdout, diag, |diag| {
+            diag.err_post_bytes(&[prefix, message].concat());
+        })
     };
     match error {
         RunError::Input(message) => {
-            post(diag, b"INPUT ERROR: ", &message);
-            1
+            post(b"INPUT ERROR: ", &message)?;
+            Ok(1)
         }
         RunError::SeqDb(message) => {
-            post(diag, b"ERROR: ", &message);
-            2
+            post(b"ERROR: ", &message)?;
+            Ok(2)
         }
         RunError::Blast(message) => {
-            post(diag, b"ERROR: ", &message);
-            1
+            post(b"ERROR: ", &message)?;
+            Ok(1)
         }
         RunError::Exception(message) => {
-            post(diag, b"ERROR: ", &message);
-            255
+            post(b"ERROR: ", &message)?;
+            Ok(255)
         }
         RunError::Unknown => {
-            diag.err_post("Error: Unknown exception");
-            255
+            post_diag(stdout, diag, |diag| {
+                diag.err_post("Error: Unknown exception");
+            })?;
+            Ok(255)
         }
-        RunError::Refused(what) => diag.refuse(&unsupported(&what)),
-        RunError::Failed(text) => diag.refuse(&text),
-        RunError::ClosedPipe => 0,
+        RunError::Refused(what) => Ok(diag.refuse(&unsupported(&what))),
+        RunError::Failed(text) => Ok(diag.refuse(&text)),
+        RunError::ClosedPipe => Err(RunError::ClosedPipe),
     }
 }
 
@@ -622,13 +644,7 @@ fn create_delta_list<'a>(
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let (pssm_w_parameters, _) = read_profile(
-            &path,
-            filename,
-            params.binary,
-            &params.read_verification,
-            diag,
-        )?;
+        let (pssm_w_parameters, _) = read_profile(&path, filename, params, diag)?;
         check_input_scoremat(&pssm_w_parameters, filename)?;
         let seq_size = query_length(&pssm_w_parameters);
         match delta::check_delta(
@@ -739,7 +755,7 @@ fn x_run(
 /// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line
 /// (`writedb::alias_file::create_alias_file`).
 fn create_alias_file(
-    params: &Params<'_>,
+    params: &mut Params<'_>,
     built: &Built,
     settings: &ApplicationSettings,
     diag: &mut Diag,
@@ -760,10 +776,7 @@ fn create_alias_file(
         &path,
     );
     match created {
-        Ok(line) => {
-            diag.post_bytes(&line);
-            Ok(())
-        }
+        Ok(line) => post_diag(&mut params.stdout, diag, |diag| diag.post_bytes(&line)),
         Err(AliasError::SeqDb(text)) => Err(RunError::SeqDb(text)),
         Err(AliasError::Reader(error)) => Err(RunError::Failed(
             crate::algorithm::common::database::losat_reader_error(&error, super::PROGRAM),
@@ -777,15 +790,18 @@ fn create_alias_file(
 /// (`Post::Utf8Tag`, 803.10) are suppressed while errors (`Post::BadChar`, `Post::Error`,
 /// `Post::UnendedByteBlock`) are written with no application prefix.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
-fn post_asn_posts(diag: &mut Diag, posts: &[Post]) {
+fn post_asn_posts(stdout: &mut Cout<'_>, diag: &mut Diag, posts: &[Post]) -> Result<(), RunError> {
     for post in posts {
         match post {
-            Post::BadChar(replaced) => diag.post_replaced(std::slice::from_ref(replaced)),
-            Post::Error(text) => diag.err_post(text),
+            Post::BadChar(replaced) => post_diag(stdout, diag, |diag| {
+                diag.post_replaced(std::slice::from_ref(replaced));
+            })?,
+            Post::Error(text) => post_diag(stdout, diag, |diag| diag.err_post(text))?,
             Post::Utf8Tag(_) => {}
-            other => diag.write_text(&other.line(None)),
+            other => post_diag(stdout, diag, |diag| diag.write_text(&other.line(None)))?,
         }
     }
+    Ok(())
 }
 
 /// Maps an ASN.1 [`ReadError`] of root type `root_type` to makeprofiledb's `Run` error: a
@@ -829,16 +845,15 @@ fn read_error_to_run_error(
 fn read_profile(
     path: &Path,
     filename: &[u8],
-    binary: bool,
-    read_verification: &ReadVerification,
+    params: &mut Params<'_>,
     diag: &mut Diag,
 ) -> Result<(PssmWithParameters, Vec<Post>), RunError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1386-1395
     // The file is read through a `CNcbiIfstream` whose open is not checked: a file that does not
     // open (no permission) reads as an empty stream, whose reader stops at once.
     let bytes = std::fs::read(path).unwrap_or_default();
-    let read = crate::blastinput::pssm_text::read_profile(&bytes, binary);
-    post_asn_posts(diag, &read.posts);
+    let read = crate::blastinput::pssm_text::read_profile(&bytes, params.binary);
+    post_asn_posts(&mut params.stdout, diag, &read.posts)?;
     use crate::blastinput::pssm_text::PssmReadError;
     let refuse = |what: String| {
         format!(
@@ -852,7 +867,7 @@ fn read_profile(
             error,
             "PssmWithParameters",
             "a profile (-in)",
-            read_verification,
+            &params.read_verification,
             refuse,
         )),
         Err(PssmReadError::Refused(what)) => Err(RunError::Refused(refuse(what))),
@@ -871,7 +886,7 @@ fn post_writer(
 ) -> Result<(), RunError> {
     let text = output_db.take_diagnostics();
     if !text.is_empty() {
-        diag.write_text(&text);
+        post_diag(stdout, diag, |diag| diag.write_text(&text))?;
     }
     let text = output_db.take_stdout();
     if !text.is_empty() {
@@ -941,7 +956,7 @@ fn make_vol(
     output_db.set_max_file_size(MAX_FILE_SIZE);
     let result = add_profiles(params, diag, &mut rps, delta.as_mut(), &mut output_db, smps)
         .and_then(|()| match delta {
-            Some(delta) => delta.finish(diag, post_asn_posts).map_err(RunError::from),
+            Some(delta) => delta.finish(|posts| post_asn_posts(&mut params.stdout, diag, posts)),
             None => Ok(()),
         });
     if matches!(result, Err(RunError::ClosedPipe)) {
@@ -994,7 +1009,9 @@ fn make_vol(
             ) {
                 return Err(aborts(error, &close_error));
             }
-            diag.err_post_bytes(&close_error.message());
+            post_diag(&mut params.stdout, diag, |diag| {
+                diag.err_post_bytes(&close_error.message());
+            })?;
             let destroyed = output_db.destroy_after_failed_close();
             post_writer(diag, &mut params.stdout, &mut output_db)?;
             return Err(match destroyed {
@@ -1047,13 +1064,7 @@ fn add_profiles(
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let (mut pssm_w_parameters, posts) = read_profile(
-            &path,
-            filename,
-            params.binary,
-            &params.read_verification,
-            diag,
-        )?;
+        let (mut pssm_w_parameters, posts) = read_profile(&path, filename, params, diag)?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
         // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);
@@ -1160,7 +1171,7 @@ fn add_to_database(
     let (mut deflines, null_seqids) = match &query.descr {
         Some(descr) => {
             let read = bioseq_deflines(&query.ids, descr);
-            post_asn_posts(diag, &read.posts);
+            post_asn_posts(&mut params.stdout, diag, &read.posts)?;
             let extracted = read.result.map_err(|error| match error {
                 BioseqDeflinesError::NoDeflines => {
                     RunError::Exception(b"Error: No deflines provided.".to_vec())
@@ -1211,7 +1222,7 @@ fn add_to_database(
                 .add_tax_id(first_id, taxid, &mut |warning| warnings.push(warning))
                 .map_err(|exception| RunError::Exception(exception.get_msg().to_vec()))?;
             for warning in warnings {
-                post_seq_id_warning(diag, &warning);
+                post_seq_id_warning(&mut params.stdout, diag, &warning)?;
             }
         }
     }

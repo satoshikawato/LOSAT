@@ -7,7 +7,8 @@
   closed pipe, with exit status 0 where NCBI is ended by SIGPIPE (exit status 141): fresh builds
   and `-dbtype delta` exclusion lines within NCBI's stream buffer complete with all database files,
   exclusion lines that overflow the stream buffer (`cout` or `-logfile`) stop before creating
-  volumes, overwriting an existing database deletes the old files and stops at the log line, and
-  `CWriteDB` stdout lines stop inside `AddSequence` without flushing buffered `-logfile` bytes or
-  running destructor clean-up (recorded as exception 10 in `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-  v1.34).
+  volumes, diagnostics written to `cerr` flush buffered `cout` bytes first (`cerr` tied to `cout`,
+  preserving NCBI's `2>&1` line order and closed-pipe stop points), overwriting an existing
+  database deletes the old files and stops at the log line, and `CWriteDB` stdout lines stop inside
+  `AddSequence` without flushing buffered `-logfile` bytes or running destructor clean-up (recorded
+  as exception 10 in `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.34).

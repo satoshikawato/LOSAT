@@ -461,9 +461,18 @@ fn refusals_by_name_have_one_form() {
     }
     // blastx's remaining refusal by name (`-entrez_query` with `-remote`) has the same form
     // (`-gilist`, `-ipglist`, and `-import_search_strategy` run now).
-    for (option, extra) in [("-entrez_query", &["-entrez_query", "x", "-remote"][..])] {
-        let mut argv = vec!["blastx", "-query", "q.fa", "-db", "d"];
-        argv.extend_from_slice(extra);
+    {
+        let option = "-entrez_query";
+        let argv = [
+            "blastx",
+            "-query",
+            "q.fa",
+            "-db",
+            "d",
+            "-entrez_query",
+            "x",
+            "-remote",
+        ];
         let output = run(losat(), &argv);
         assert_eq!(output.status.code(), Some(1), "{option} {output:?}");
         assert_eq!(

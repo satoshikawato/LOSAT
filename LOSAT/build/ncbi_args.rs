@@ -155,7 +155,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "phi_pattern", Refused::Read(None)),
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at

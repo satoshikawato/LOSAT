@@ -1,0 +1,188 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>PSIBLAST 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=16218944&dopt=Citation">Reference for
+compositional score matrix adjustment</a>:</b>
+Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa
+Agarwala, Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo
+Yu (2005) "Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics starting in round 2</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: tfp
+           23 sequences; 3,263 total letters
+
+Results from round 1
+
+
+<b>Query=</b> P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] &gt;P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] &gt;P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for P69905.2" href="https://www.ncbi.nlm.nih.gov/protein/P69905.2?report=genbank&log$=prottop&blast_rank=1&RID=" >P69905.2 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P69905.2>286</a>     3e-105
+<a title="Show report for P01923.1" href="https://www.ncbi.nlm.nih.gov/protein/P01923.1?report=genbank&log$=prottop&blast_rank=2&RID=" >P01923.1 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P01923.1>282</a>     2e-103
+<a title="Show report for Q9TS35.2" href="https://www.ncbi.nlm.nih.gov/protein/Q9TS35.2?report=genbank&log$=prottop&blast_rank=3&RID=" >Q9TS35.2 </a>RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  <a href=#Q9TS35.2>281</a>     4e-103
+<a title="Show report for P63107.2" href="https://www.ncbi.nlm.nih.gov/protein/P63107.2?report=genbank&log$=prottop&blast_rank=4&RID=" >P63107.2 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P63107.2>278</a>     6e-102
+<a title="Show report for P67818.1" href="https://www.ncbi.nlm.nih.gov/protein/P67818.1?report=genbank&log$=prottop&blast_rank=5&RID=" >P67818.1 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P67818.1>275</a>     2e-100
+
+
+><a title="Show report for P69905.2" href="https://www.ncbi.nlm.nih.gov/protein/P69905.2?report=genbank&log$=protalign&blast_rank=1&RID=0" >P69905.2</a><a name=P69905.2></a> RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] &gt;sp|P69906.2| RecName: 
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] &gt;sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ <a title="Show report for P01972.1" href="https://www.ncbi.nlm.nih.gov/protein/P01972.1?report=genbank&log$=protalign&blast_rank=1&RID=0" >P01972.1</a><a name=P01972.1></a> RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 286 bits (733),  Expect = 3e-105, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 263006
+Results from round 2
+
+
+<b>Query=</b> P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] &gt;P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] &gt;P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+<a title="Show report for P69905.2" href="https://www.ncbi.nlm.nih.gov/protein/P69905.2?report=genbank&log$=prottop&blast_rank=1&RID=" >P69905.2 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P69905.2>243</a>     6e-88
+<a title="Show report for P63107.2" href="https://www.ncbi.nlm.nih.gov/protein/P63107.2?report=genbank&log$=prottop&blast_rank=2&RID=" >P63107.2 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P63107.2>243</a>     9e-88
+<a title="Show report for Q9TS35.2" href="https://www.ncbi.nlm.nih.gov/protein/Q9TS35.2?report=genbank&log$=prottop&blast_rank=3&RID=" >Q9TS35.2 </a>RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  <a href=#Q9TS35.2>241</a>     3e-87
+<a title="Show report for P67818.1" href="https://www.ncbi.nlm.nih.gov/protein/P67818.1?report=genbank&log$=prottop&blast_rank=4&RID=" >P67818.1 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P67818.1>240</a>     1e-86
+<a title="Show report for P01923.1" href="https://www.ncbi.nlm.nih.gov/protein/P01923.1?report=genbank&log$=prottop&blast_rank=5&RID=" >P01923.1 </a>RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  <a href=#P01923.1>239</a>     1e-86
+
+Sequences not found previously or not previously below threshold:
+
+
+
+><a title="Show report for P69905.2" href="https://www.ncbi.nlm.nih.gov/protein/P69905.2?report=genbank&log$=protalign&blast_rank=1&RID=0" >P69905.2</a><a name=P69905.2></a> RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] &gt;sp|P69906.2| RecName: 
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] &gt;sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ <a title="Show report for P01972.1" href="https://www.ncbi.nlm.nih.gov/protein/P01972.1?report=genbank&log$=protalign&blast_rank=1&RID=0" >P01972.1</a><a name=P01972.1></a> RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 243 bits (620),  Expect = 6e-88, Method: Composition-based stats.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.136    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0417    0.140     1.90     42.6     43.6 
+
+Effective search space used: 263006
+
+Search has CONVERGED!
+
+
+  Database: tfp
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

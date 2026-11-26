@@ -1,0 +1,208 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>PSIBLAST 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=16218944&dopt=Citation">Reference for
+compositional score matrix adjustment</a>:</b>
+Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa
+Agarwala, Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo
+Yu (2005) "Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics starting in round 2</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           4 sequences; 820 total letters
+
+Results from round 1
+
+
+<b>Query=</b> q1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a>s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3</a>s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 
+http://local.example/Subject_2?db=&taxid=0&p=https:&t=Subject_2</a>s2 long title words long title words long title words long title ...  <a href=#Subject_2>159</a>     2e-53 
+http://local.example/Subject_4?db=&taxid=0&p=https:&t=Subject_4</a>s4 plain title for the third subject                                  <a href=#Subject_4>138</a>     1e-45 
+
+
+>http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a><a name=Subject_1></a> s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä 
+short
+Length=450
+
+ Score = 313 bits (803),  Expect = 2e-109, Method: Compositional matrix adjust.
+ Identities = 151/153 (99%), Positives = 151/153 (99%), Gaps = 0/153 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR
+Sbjct  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK
+Sbjct  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+
+Query  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGL  153
+            VSAYDFAVKTSNDFDGGVCERDKSYVTLIP  L
+Sbjct  121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPPPL  153
+
+
+ Score = 228 bits (580),  Expect = 8e-76, Method: Compositional matrix adjust.
+ Identities = 118/149 (79%), Positives = 124/149 (83%), Gaps = 0/149 (0%)
+
+Query  152  GLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPEST  211
+            GLSTPFVNLVRHA QLKV SRLA    H AALKG  SPRLT+Y RCS HSGRGLF+PEST
+Sbjct  302  GLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPEST  361
+
+Query  212  LGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKR  271
+            LGDPSRVQIPLTE  CN RL+T  T+YCTSK+REP HSC LV VNVILICNS+RG LCKR
+Sbjct  362  LGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKR  421
+
+Query  272  SRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+            SRGTEY KFTSS FSSPP M  TLVNYQN
+Sbjct  422  SRGTEYSKFTSSGFSSPPSMVTTLVNYQN  450
+
+
+>http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3</a><a name=Subject_3></a> s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+&amp; tail after a word of seventy letters
+Length=150
+
+ Score = 247 bits (630),  Expect = 2e-87, Method: Compositional matrix adjust.
+ Identities = 127/150 (85%), Positives = 128/150 (85%), Gaps = 0/150 (0%)
+
+Query  51   GDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTC  110
+            GDESHIVA  PA PTLTRSVR TISPDPFF CRCRRD SIQYMLQPRLLRPSENVES TC
+Sbjct  1    GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRLLRPSENVESITC  60
+
+Query  111  ANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVP  170
+            AN VMRAV K SAYDFAVKTSNDFDG VCERDKS VTLI SGLSTP  NLVRHAMQL+VP
+Sbjct  61   ANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVP  120
+
+Query  171  SRLAACYTHLAALKGLGSPRLTEYNRCSTH  200
+            SRLA CYTH AA KGLGS  L E NRCSTH
+Sbjct  121  SRLALCYTHGAASKGLGSSPLPESNRCSTH  150
+
+
+ Score = 15.0 bits (27),  Expect = 5.9, Method: Compositional matrix adjust.
+ Identities = 5/8 (63%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+
+Query  17   LTSNPFPE  24
+            L S+P PE
+Sbjct  136  LGSSPLPE  143
+
+
+>http://local.example/Subject_2?db=&taxid=0&p=https:&t=Subject_2</a><a name=Subject_2></a> s2 long title words long title words long title words long title 
+words ab &amp; cd &lt; ef &gt; gh &quot;ij&quot; &amp; kl 
+&amp; mn &amp; op &amp; qr &amp; st &amp; uv
+Length=120
+
+ Score = 159 bits (402),  Expect = 2e-53, Method: Compositional matrix adjust.
+ Identities = 81/120 (68%), Positives = 87/120 (73%), Gaps = 0/120 (0%)
+
+Query  1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+            CF YQG GFI + S R+TSNPFP  F RVE  MRGR A I++RHRVPYACGDES   AGR
+Sbjct  1    CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPYACGDESLAAAGR  60
+
+Query  61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+            PARPT TR VRHTI P  FF+CRCRR   IQYMLQ RLLR   NVESG C  LV   V+K
+Sbjct  61   PARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK  120
+
+
+>http://local.example/Subject_4?db=&taxid=0&p=https:&t=Subject_4</a><a name=Subject_4></a> s4 plain title for the third subject
+Length=100
+
+ Score = 138 bits (348),  Expect = 1e-45, Method: Compositional matrix adjust.
+ Identities = 70/94 (74%), Positives = 70/94 (74%), Gaps = 0/94 (0%)
+
+Query  206  FEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSAR  265
+            FEPE TLG P   Q PL ETRCNSR VTPI  YCTSK REPRHS NLVR N  LICNSAR
+Sbjct  6    FEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRHSLNLVRYNGKLICNSAR  65
+
+Query  266  GYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQ  299
+            G LCKR RGTEY KFTSSEF  PPW N T  NYQ
+Sbjct  66   GSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQ  99
+
+
+ Score = 14.6 bits (26),  Expect = 7.9, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+
+Query  158  VNLVRHAMQL  167
+            +NLVR+  +L
+Sbjct  50   LNLVRYNGKL  59
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+Results from round 1
+
+
+<b>Query=</b> pq2 unrelated query (no hits)
+
+Length=40
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.477    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20736
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 820
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

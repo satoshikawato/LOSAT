@@ -213,17 +213,17 @@ fn ncbi4na_of_pieces() {
     }
 }
 
-/// The codes without a table are the table's for `A`, `C`, `G`, `T` and `U`, and 0 for every
-/// other byte, whose code in the table is not 0.
+/// The codes without a table are the table's for `A`, `C`, `G`, `T`, `U` and `N` in either case,
+/// and 0 for every other byte, whose code in the table is not 0.
 #[test]
 fn the_codes_of_bases_are_the_table() {
     for byte in 0..=u8::MAX {
         let code = ncbi4na_code_of_base(byte);
-        if b"ACGTU".contains(&byte) {
-            assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte}");
+        if b"ACGTUNacgtun".contains(&byte) {
+            assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte:#04x}");
         } else {
-            assert_eq!(code, 0, "{byte}");
-            assert_ne!(NCBI4NA_CODES[usize::from(byte)], 0, "{byte}");
+            assert_eq!(code, 0, "{byte:#04x}");
+            assert_ne!(NCBI4NA_CODES[usize::from(byte)], 0, "{byte:#04x}");
         }
     }
 }
@@ -256,9 +256,10 @@ fn ncbi4na_pairs_are_the_table_of_every_residue() {
         let odd: Vec<u8> = [b'N'].iter().chain(src).copied().collect();
         assert_eq!(built(b"N", src), table(&odd), "{src:?}");
     };
-    // Every byte at every place of the first two blocks of bases, in lengths that end at the
-    // byte, at the end of a block and after it.
-    let bases: Vec<u8> = (0..200).map(|i| b"ACGTUGCA"[i % 8]).collect();
+    // Every byte at every place of the first two blocks of mixed-case bases and N, in lengths
+    // that cover the short path (< NCBI4NA_BLOCK) and the blocked path (ending at the byte, at
+    // the end of a block, and after it).
+    let bases: Vec<u8> = (0..200).map(|i| b"ACGTUNacgtun"[i % 12]).collect();
     for place in 0..2 * NCBI4NA_BLOCK + 1 {
         for byte in 0..=u8::MAX {
             let mut src = bases.clone();

@@ -505,7 +505,7 @@ fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySeq
 fn ncbi4na_codes_are_the_table() {
     for base in 0..16u8 {
         let code = NA4_TO_NA2[usize::from(base)];
-        assert_eq!(is_unambiguous_ncbi4na(base), code & 0x80 == 0, "{base}");
+        assert_eq!(ambig_nibble_bits(base) == 0, code & 0x80 == 0, "{base}");
         if code & 0x80 == 0 {
             assert_eq!(ncbi4na_code(base), code, "{base}");
         }
@@ -523,7 +523,8 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
         );
     };
     // Every byte at every place of the first two blocks of unambiguous bytes, with lengths that
-    // end in a block, after it and inside the last byte.
+    // exercise the short path (< NCBI4NA_BLOCK) and the blocked path (ending on, after, and inside
+    // a block and inside the last byte).
     let clean: Vec<u8> = (0..200)
         .map(|i| [0x12, 0x48, 0x84, 0x21, 0x14][i % 5])
         .collect();
@@ -531,7 +532,15 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
         for byte in 0..=u8::MAX {
             let mut data = clean.clone();
             data[place] = byte;
-            for base_length in [256, 259, 300, 2 * place as u32 + 1, 2 * place as u32 + 2] {
+            for base_length in [
+                62,
+                64,
+                128,
+                131,
+                200,
+                2 * place as u32 + 1,
+                2 * place as u32 + 2,
+            ] {
                 check(&data, base_length);
             }
         }

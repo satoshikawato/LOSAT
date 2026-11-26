@@ -608,9 +608,9 @@ struct ScopePlaces {
     exact: std::collections::HashMap<HandleKey, Vec<u32>>,
     taken: std::collections::HashMap<u64, Vec<u32>>,
     kinds: std::collections::HashMap<u64, Vec<u32>>,
-    /// The ranges of loads whose order among themselves LOSAT does not know (a failed prefetch's,
-    /// [`ScopeWalk::failed_prefetch`]).
-    unordered: Vec<std::ops::Range<u32>>,
+    /// The ranges of loads from a failed prefetch ([`ScopeWalk::failed_prefetch`]), whose
+    /// occurrence and order among themselves LOSAT does not know.
+    maybe: Vec<std::ops::Range<u32>>,
 }
 
 impl ScopePlaces {
@@ -658,22 +658,30 @@ impl ScopePlaces {
         found
     }
 
-    /// The first of the loads `found` (of [`ScopePlaces::holders`]) as the scope's index gives it:
-    /// its sequence, `Unknown` where a load of another sequence in its unordered range
-    /// (`unordered`) holds the id too.
-    fn first_of(&self, found: &[(u32, ShownBy)]) -> Option<Resolved> {
-        let &(first, by) = found.first()?;
+    /// Whether the load `at` comes from a failed prefetch (`maybe`) and may not have happened.
+    fn is_maybe(&self, at: u32) -> bool {
+        self.maybe.iter().any(|range| range.contains(&at))
+    }
+
+    /// The first of the loads `found` (of [`ScopePlaces::holders`]) as the scope's index gives it,
+    /// and whether a load in `found` is definite (not only from a failed prefetch, `maybe`):
+    /// `Unknown` where another sequence's load could come first (among `maybe` loads before the
+    /// first definite load, or against that definite load).
+    fn first_of(&self, found: &[(u32, ShownBy)]) -> Option<(Resolved, bool)> {
+        let first_definite = found.iter().position(|&(at, _)| !self.is_maybe(at));
+        let (candidates, definite) = match first_definite {
+            Some(index) => (&found[..=index], true),
+            None => (found, false),
+        };
+        let &(first, by) = candidates.first()?;
         let sequence = self.sequence(first);
-        let tied = self.unordered.iter().find(|range| range.contains(&first));
-        if let Some(range) = tied {
-            if found
-                .iter()
-                .any(|&(at, _)| range.contains(&at) && self.sequence(at) != sequence)
-            {
-                return Some(Resolved::Unknown(Some(sequence), ShownBy::Order));
-            }
+        if candidates
+            .iter()
+            .any(|&(at, _)| self.sequence(at) != sequence)
+        {
+            return Some((Resolved::Unknown(Some(sequence), ShownBy::Order), definite));
         }
-        Some(Resolved::Blob(sequence, by))
+        Some((Resolved::Blob(sequence, by), definite))
     }
 
     /// The sequence of the load `at`.
@@ -1228,23 +1236,51 @@ impl ScopeWalk {
     /// Step 2: the scope's index, for the Seq-align id of `keys`: the exact handle first, then
     /// the ids that it takes for it or matches weakly; of each, the sequence loaded first (the
     /// record's before the walk's; among the record's, which LOSAT holds as sets, one where they
-    /// are the same sequence, else `Unknown`).
-    fn scope_match(&self, keys: &IdKeys) -> Option<Resolved> {
-        let scope = self.recorded_scope();
-        for exact in [true, false] {
-            if let Some(scope) = &scope {
-                let found = self
-                    .before
-                    .read(|record| record.scope_match(keys, exact, &scope.loads));
-                if found.is_some() {
-                    return found;
-                }
+    /// are the same sequence, else `Unknown`), and whether a matching load is definite (not only
+    /// from a failed prefetch, where a miss can fall through to a weak match or the loader).
+    fn scope_match(&self, keys: &IdKeys) -> Option<(Resolved, bool)> {
+        let exact = self.scope_match_pass(keys, true);
+        if let Some((resolved, true)) = exact {
+            return Some((resolved, true));
+        }
+        let weak = self.scope_match_pass(keys, false);
+        match (exact, weak) {
+            (None, weak) => weak,
+            (Some(exact), None) => Some(exact),
+            (Some((Resolved::Blob(a, by), false)), Some((Resolved::Blob(b, _), definite)))
+                if a == b =>
+            {
+                Some((Resolved::Blob(a, by), definite))
             }
-            if let Some(found) = self.scope.first_of(&self.scope.holders(keys, exact)) {
-                return Some(found);
+            (Some((exact, false)), Some((weak, _))) => {
+                let (holder, by) = match weak {
+                    Resolved::Blob(sequence, by) => (Some(sequence), by),
+                    Resolved::Unknown(holder, by) => (holder, by),
+                    Resolved::Throws | Resolved::Nothing => (None, ShownBy::Order),
+                };
+                let holder = holder.or(match exact {
+                    Resolved::Blob(sequence, _) => Some(sequence),
+                    Resolved::Unknown(holder, _) => holder,
+                    Resolved::Throws | Resolved::Nothing => None,
+                });
+                Some((Resolved::Unknown(holder, by), true))
+            }
+            (Some((_, true)), _) => unreachable!("definite exact match returned above"),
+        }
+    }
+
+    /// One pass of [`ScopeWalk::scope_match`] (`exact` or weak/taken), returning whether a
+    /// matching load is definite.
+    fn scope_match_pass(&self, keys: &IdKeys, exact: bool) -> Option<(Resolved, bool)> {
+        if let Some(scope) = self.recorded_scope() {
+            let found = self
+                .before
+                .read(|record| record.scope_match(keys, exact, &scope.loads));
+            if let Some(found) = found {
+                return Some((found, true));
             }
         }
-        None
+        self.scope.first_of(&self.scope.holders(keys, exact))
     }
 
     /// The blob of `keys` loaded by the requested handle `requested` (its blob id): where it is
@@ -1273,7 +1309,7 @@ impl ScopeWalk {
             if self.many_blobs() {
                 self.maybe_register(keys);
             }
-        } else if self.maybe_blobs.contains(&id) {
+        } else if self.maybe_blobs.remove(&id) {
             self.maybe_register(keys);
             self.blob_ids.insert(id);
         } else {
@@ -1471,7 +1507,7 @@ impl ScopeWalk {
         let handle = keys.handle?;
         let resolved = self
             .cached(handle)
-            .or_else(|| self.scope_match(keys))
+            .or_else(|| self.scope_match(keys).map(|(resolved, _)| resolved))
             .or_else(|| self.registered_place(handle))?;
         self.scope.cache.insert(handle, resolved);
         match Self::answer(subject, Some(resolved)) {
@@ -1512,19 +1548,35 @@ impl ScopeWalk {
             }
         }
         let resolved = match scope.then(|| self.scope_match(keys)).flatten() {
-            Some(resolved) => {
+            Some((resolved, true)) => {
                 self.relock(Some(resolved));
                 Some(resolved)
             }
-            // A scope kept for the run (outfmt 5) after calls whose loads LOSAT has no record
-            // of may hold a holder that LOSAT lists from the database (`ScopeHolders::scope`).
-            None if scope && self.keeps_scope && self.before.unrecorded => {
-                match subject.resolution.unrecorded.scope.first() {
-                    Some(holder) => Some(Resolved::Unknown(holder, ShownBy::Calls)),
-                    None => self.loader(subject, keys),
+            Some((resolved, false)) => {
+                // Only a failed prefetch's load (`ScopePlaces::maybe`) matched in the scope:
+                // where that blob was loaded before the failure, the scope gives `resolved`;
+                // where it was not, the read misses the scope and reaches the loader.
+                match resolved {
+                    Resolved::Blob(sequence, _) if subject.mine(sequence) => {
+                        match self.resolve_after_scope(subject, keys, scope) {
+                            Some(Resolved::Blob(other, _)) if other == sequence => Some(resolved),
+                            other => {
+                                let (holder, by) = match other {
+                                    Some(Resolved::Blob(holder, by)) => (Some(holder), by),
+                                    Some(Resolved::Unknown(holder, by)) => (holder, by),
+                                    _ => (Some(sequence), ShownBy::Order),
+                                };
+                                Some(Resolved::Unknown(holder, by))
+                            }
+                        }
+                    }
+                    other => {
+                        self.relock(Some(other));
+                        Some(other)
+                    }
                 }
             }
-            None => self.loader(subject, keys),
+            None => self.resolve_after_scope(subject, keys, scope),
         };
         // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3300-3330
         // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2200-2218
@@ -1543,6 +1595,25 @@ impl ScopeWalk {
             }
         }
         resolved
+    }
+
+    /// Steps 3 and 4 of [`ScopeWalk::resolve`] after the scope's index misses (or only had a
+    /// failed prefetch's `maybe` load): unrecorded-call scope holders for outfmt 5, then the
+    /// loader.
+    fn resolve_after_scope(
+        &mut self,
+        subject: &ParsedSubject,
+        keys: &IdKeys,
+        scope: bool,
+    ) -> Option<Resolved> {
+        // A scope kept for the run (outfmt 5) after calls whose loads LOSAT has no record
+        // of may hold a holder that LOSAT lists from the database (`ScopeHolders::scope`).
+        if scope && self.keeps_scope && self.before.unrecorded {
+            if let Some(holder) = subject.resolution.unrecorded.scope.first() {
+                return Some(Resolved::Unknown(holder, ShownBy::Calls));
+            }
+        }
+        self.loader(subject, keys)
     }
 
     /// The reports' answer of `resolved` for `subject` ([`ScopeWalk::load`]).
@@ -1619,7 +1690,7 @@ impl ScopeWalk {
     /// its load would give (the loader's registrant of its handle, else its lookup's) may have
     /// registered its lines (a handle that such a blob and another sequence may hold last is not
     /// sure afterwards) and entered the scope by the line of that load, where their order is not
-    /// known either (`ScopePlaces::unordered`). No id is resolved: the reports load each one by one.
+    /// known either (`ScopePlaces::maybe`). No id is resolved: the reports load each one by one.
     pub fn failed_prefetch<'p>(
         &mut self,
         subjects: impl IntoIterator<Item = (usize, &'p ParsedSubject)> + Clone,
@@ -1655,8 +1726,8 @@ impl ScopeWalk {
             self.scope.add(keys, *line);
         }
         let end = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
-        if end > start + 1 {
-            self.scope.unordered.push(start..end);
+        if end > start {
+            self.scope.maybe.push(start..end);
         }
     }
 

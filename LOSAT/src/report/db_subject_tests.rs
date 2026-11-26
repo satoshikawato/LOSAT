@@ -3404,3 +3404,46 @@ fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
     let mut walk = ScopeWalk::new(before, Some(false));
     assert_ne!(walk.load(&a), HitLoad::Loaded);
 }
+
+#[test]
+fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
+    let sp = |acc: Option<&str>, ver: Option<i32>, name: Option<&str>| {
+        ParsedSeqId::Swissprot(crate::seqid::model::TextseqId {
+            name: name.map(|s| s.as_bytes().to_vec()),
+            accession: acc.map(|s| s.as_bytes().to_vec()),
+            release: None,
+            version: ver,
+        })
+    };
+    // `db.id.pfw.ps.weak.6.reject`: a failed prefetch may or may not have loaded `sp||NAMEY`
+    // (OID 0) or `sp|P00042.1|NAMEY` (OID 1) before throwing; unrelated `gb|FFF00099.1|` (OID 2)
+    // still loads, while each mutually weakly matching Swiss-Prot id must be refused.
+    let s0 = sequence(vec![sp(None, None, Some("NAMEY"))], 0);
+    let s1 = sequence(vec![sp(Some("P00042"), Some(1), Some("NAMEY"))], 1);
+    let s2 = sequence(vec![gb("FFF00099", 1)], 2);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(1, &s1), (2, &s2), (0, &s0)]);
+    assert_eq!(walk.load(&s2), HitLoad::Loaded);
+    assert_eq!(walk.load(&s1), shown(None, ShownBy::Order));
+    assert_eq!(walk.load(&s0), shown(Some(1), ShownBy::Order));
+
+    // A single-subject failed prefetch is still uncertain (`end == start + 1`): a definite load
+    // of versioned `gb|AAA00001.1|` (OID 1, which does not weakly match unversioned `gb|AAA00001|`)
+    // succeeds, and then reading `gb|AAA00001|` (OID 0) refuses because a miss on OID 0's maybe
+    // load falls through to OID 1's weak match.
+    let u0 = sequence(vec![gb_unversioned("AAA00001")], 0);
+    let u1 = sequence(vec![gb("AAA00001", 1)], 1);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(0, &u0)]);
+    assert_eq!(walk.load(&u1), HitLoad::Loaded);
+    assert_eq!(walk.load(&u0), shown(None, ShownBy::Order));
+
+    // A failed prefetch where another subject's second line registers S's exact handle in `m_Ids`:
+    // S's maybe exact load in the scope must still check the loader and refuse (`ShownBy::Order`).
+    let s = sequence(vec![gb("AAA00001", 1)], 0);
+    let t = lines(vec![vec![gb("TTT00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(1));
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(0, &s), (1, &t)]);
+    assert_eq!(walk.load(&s), shown(Some(1), ShownBy::Order));
+}

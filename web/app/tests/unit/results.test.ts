@@ -524,6 +524,38 @@ function setup(
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('ResultsBrowser', () => {
+  it('uses RunRecord.readRecords for query and subject metadata when an assembled input read differently (D17)', async () => {
+    const { results } = setup({
+      record: {
+        readRecords: {
+          query: [
+            { id: 'q0', length: 120 },
+            { id: 'q1', length: 180 },
+            { id: 'q2', length: 90 },
+          ],
+          subject: [
+            { id: 's0', length: 300 },
+            { id: 's1', length: 310 },
+            { id: 's2', length: 320 },
+          ],
+        },
+      },
+    });
+    await results.open('r1');
+    await settle();
+    const state = results.state.get();
+    expect(state.queries.map((q) => [q.id, q.length])).toEqual([
+      ['q0', 120],
+      ['q1', 180],
+      ['q2', 90],
+    ]);
+    expect(state.subjects.map((s) => [s.recordId, s.length])).toEqual([
+      ['s1', 310],
+      ['s0', 300],
+      ['s2', 320],
+    ]);
+  });
+
   it('opens a run on its first query with hits, its first subject and HSP, and reads the HSP as written', async () => {
     const { results } = setup();
     await results.open('r1');

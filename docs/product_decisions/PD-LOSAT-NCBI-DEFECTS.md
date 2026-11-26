@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.113
+- Version: 1.114
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -807,7 +807,18 @@
   1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.111 at the merge of dev that brought line RG item X-short-bat-2's 1.110 (#1647) and
   psiblast line item PS7c's 1.111; first 1.105, then 1.106, 1.107, 1.108, 1.109 and 1.110);
-  1.113 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
+  1.113 2026-11-26 (rule-3 rejections of `losat makeprofiledb -dbtype delta`, psiblast line item
+  PS14: profiles stored by row (`byRow TRUE`) or with `numRows < 28` and non-empty
+  `weightedResFreqsPerPos`, where NCBI's `x_CheckDelta` and `x_UpdateDelta` copy into an empty
+  `std::list::begin()`; an empty `numIndeptObsr` list, where NCBI dereferences `end()`; a
+  `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 ==
+  numIndeptObsr.len()` and every full column of 28 sums within 0.0001 of 1.0, where `x_ValidateCd`
+  increments past `end()`; `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled
+  conversion to `Uint4` is out of range or `NaN`; and a missing or unwritable `TMPDIR` where
+  NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
+  245b7e2e3; first 1.109, then 1.110);
+  1.114 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
   `Q-D23=A` / `web-qa-20261119/DECISIONS.md` 49 of 2026-11-24: a `-logfile` naming an input file
   read by the run — including `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`,
   `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`,
@@ -817,8 +828,8 @@
   or a BLAST database alias or component file of `-db` / `-filtering_db`, via relative paths,
   symlinks, hard links, or missing inputs that `-logfile` would create — is refused before opening
   or creating the file, exit status 1, leaving existing inputs unchanged, matching LOSAT Web's D19
-  rule; numbered after 1.112 at the merge of dev that brought 1.110 (#1647), 1.111 (#1638) and
-  1.112 (#1627); first 1.110)
+  rule; numbered after 1.113 at the merge of dev that brought 1.113 (#1649); first 1.110, then
+  1.113)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1073,7 +1084,7 @@ Explicit rejections (rule 3):
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
 maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
 NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
-together with D8, every sum above 2^30 is rejected); and (version 1.113, line WQA item D23,
+together with D8, every sum above 2^30 is rejected); and (version 1.114, line WQA item D23,
 Owner decision `Q-D23=A` of 2026-11-24) a `-logfile` pointing to any input file read by the run
 (all programs, command line and library API, matching LOSAT Web's D19 rule): NCBI BLAST+ 2.17.0
 opens `-logfile` in append mode before loading configuration or reading inputs, which causes
@@ -3967,6 +3978,24 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+  - With `-dbtype delta` (version 1.113, 2026-11-26, psiblast line item PS14, Owner-delegated,
+    standing instruction 2026-09-29, restated 2026-10-07): profiles stored by row (`byRow TRUE`) or
+    with `numRows < 28` and non-empty `weightedResFreqsPerPos` (`makeprofiledb.cpp:1610-1647,
+    1763-1800`, where NCBI copies into an empty `std::list::begin()`, overwriting the list header
+    node; rows `QR16`, `QR17`); an empty `numIndeptObsr` list (`makeprofiledb.cpp:1659, 1803`,
+    where NCBI dereferences `end()`; row `QR18`); a `weightedResFreqsPerPos` list whose length is
+    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums
+    within 0.0001 of 1.0 (`makeprofiledb.cpp:1720-1740`, where `x_ValidateCd` increments past
+    `end()`; row `QR19`; when an earlier full column fails the sum check, NCBI returns false
+    deterministically before reaching the partial tail, reproduced in rows `D33`-`D35`);
+    `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled conversion `(val * 1000)` or
+    `((val + 1) * 1000)` to `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows
+    `QR20`-`QR22`); and a missing or unwritable temporary directory (`TMPDIR`) when `x_UpdateDelta`
+    creates its two temporary files (`makeprofiledb.cpp:1572-1575`, `ncbifile.cpp:6580-6599`, where
+    NCBI throws `mkstemp() failed for '...'` with the process and thread IDs in the message, which
+    changes from run to run). Delta 32-bit offset wrapping (`CurrFreqOffset += FreqBuff.size()`,
+    `CurrObsrOffset += ObsrBuff.size()`, `Uint4 num++`) is deterministic in NCBI and reproduced
+    with wrapping arithmetic.
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
   M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI

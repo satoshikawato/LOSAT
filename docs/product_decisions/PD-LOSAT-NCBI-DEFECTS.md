@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.116
+- Version: 1.117
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -548,7 +548,7 @@
   ends before it starts (`Inverted`); not yet ported, as the range longer than 5,000,000 letters:
   masks out of order whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and such a short
   part whose alignments meet another part's in that merge (`short_chunk_merge_refusal`), line NP item
-  M4b-3d (both ported in version 1.116, leaving only the final-chunk overlap read past the list of
+  M4b-3d (both ported in version 1.117, leaving only the final-chunk overlap read past the list of
   ranges as an explicit rejection under rule 3); TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the Owner's decision of 2026-11-21
   (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07, for the rejections; numbered after 1.94 as the next free numbers
@@ -848,7 +848,16 @@
   必要はない」 and 2026-10-22 「広い型になおしましょう」); numbered after 1.114 at the merge of
   dev 42678f399 that brought line DBID item pfoff-7's 1.114; first 1.105, then 1.106, 1.107,
   1.108, 1.113 and 1.114; exception 31 until the 1.113 merge);
-  1.116 2026-11-26 (BLASTP and BLASTX `-db_hard_mask`, line NP item M4b-3d: `PartsOutOfOrder`, hard
+  1.116 2026-11-26 (BLASTN query chunks, line RG item X-chunk: unifies BLASTN's split-batch steps on
+  `SplitBatchSteps` (`without_resplit_stop()`), keeps 64-bit wrapping `size_t` chunk-range
+  arithmetic in `query_split.rs` across all three empty-chunk shapes (including exact-overlap
+  `L <= overlap` and unwrapped negative pairs reaching or passing L before the last chunk), checks
+  split chunks in duplicate-id batch setup with batch validity, shared chunk registry loads
+  (`WindowMasker::load_posts`) and chunk masks, and clarifies in approved exception 1 that
+  re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
+  brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
+  1.117 2026-11-26 (BLASTP and BLASTX `-db_hard_mask`, line NP item M4b-3d: `PartsOutOfOrder`, hard
   ranges longer than 5,000,000 residues (`LongRange`), and in-bounds `short_chunk_merge_refusal`
   ported under rule 4 via the shared `core::blast_hits::merge_subject_chunk_hsps` helper; explicit
   rejection, rule 3, of `HardMaskShape::LastRangeOverlap` (before the search) and
@@ -856,11 +865,14 @@
   chunk's out-of-bounds overlap read (`blast_engine.c:579-580`, `hard_ranges[num_hard_ranges].left`)
   would decide a merge with an alignment from an earlier hard range (same B-d boundary as BLASTN's
   `ShortLastMask`: merges within a final range longer than 5,000,000 letters keep
-  `DBSEQ_CHUNK_OVERLAP = 100`); version 1.21's explicit rejection, rule 3, of an ungapped one-hit
-  chunk merge whose query lengths sum to 0 or whose scaled score leaves `Int4`
-  (`chunk_merge_undefined_refusal`) extended to BLASTP and BLASTX `-db_hard_mask`; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev
-  9758dbd59; first 1.113, then 1.114, then 1.115)
+  `DBSEQ_CHUNK_OVERLAP = 100`); version 1.21's explicit rejection, rule 3, of a chunk-overlap merge
+  whose query lengths sum to 0 or whose density-scaled score leaves `Int4`
+  (`chunk_merge_undefined_refusal`, typed `ShortChunkSeedRefusal` naming the subject OID and, for
+  TBLASTN, reading frame) extended to BLASTP and BLASTX `-db_hard_mask`, TBLASTN subject-chunk
+  merges (both frames longer than 5,000,000 residues and `-db_hard_mask`), and BLASTN subject-chunk
+  and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.116 at the merge of dev f71a5cb85 that brought
+  line RG item X-chunk's 1.116; first 1.113, then 1.114, then 1.115, then 1.116)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -893,11 +905,16 @@ rule.
 ## Approved exceptions (BLASTN)
 
 1. **A query chunk that NCBI would split again.** With `CHUNK_SIZE` and
-   `OVERLAP_CHUNK_SIZE` such that a query chunk is long enough to be split again (an
-   overlap close to the chunk size), NCBI skips the chunk's lookup table and stops with a
-   `CCoreException` (null pointer) that names its build's source files, exit 3
-   (`split_query_aux_priv.cpp:190-201`, `blast_aux_priv.cpp:206-208`; only a debug build
-   asserts against it). LOSAT searches each chunk once. Evidence
+   `OVERLAP_CHUNK_SIZE` such that every chunk holds a query and a query chunk is long enough to
+   be split again (an overlap close to the chunk size, such as `CHUNK_SIZE` 101 to 150 with the
+   default overlap 100 and a query length of at least 101), NCBI skips the chunk's lookup table
+   and stops with a `CCoreException` (null pointer) that names its build's source files, exit 3
+   (`split_query_aux_priv.cpp:190-201`, `blast_aux_priv.cpp:206-208`,
+   `prelim_search_runner.hpp:77`; only a debug build asserts against it; at `-num_threads` > 1
+   with `-db` worker threads log the exception and exit 0 without that chunk's hits). Where any
+   chunk holds no query (for example `CHUNK_SIZE` 101 to 150 with overlap 100 and length at most
+   100), NCBI stops earlier in `CQuerySplitter::Split`, which is a rule-3 explicit rejection
+   below. LOSAT searches each non-empty re-splitting chunk once. Evidence
    `docs/evidence/losat_web_e2g/resplit/`: 42 configurations (3 queries of 30 to 60 kb,
    blastn and megablast, 7 chunk and overlap pairs); NCBI exit 3 in all; LOSAT's output
    equals NCBI's unsplit output in 35, and NCBI's output at the largest overlap that does
@@ -2644,30 +2661,43 @@ file would differ, and NCBI's programs still could not open the database).
   It differs from NCBI where NCBI finishes with other gap costs because no seed reaches the
   greedy alignment (small inputs). `-no_greedy` and `-ungapped` with other gap costs run.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
-  (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
-  wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
-  searches chunk ranges with gaps between them (hits are lost). Version 1.1 (maintainer,
-  2026-10-02): the second case, although NCBI's result is deterministic, stays an explicit
-  rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
-  `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
+  (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's 64-bit `size_t` chunk ranges
+  wrap (`split_query_cxx.cpp:145-171`). Where the wrapped chunk size covers the batch, or where
+  `chunk_start` reaches or passes the batch's end before the last chunk (for example `-100/-200`
+  on 310 bases, `-133/-200` on 200 bases, or `-132/-200` on 201 bases), later chunks hold no query
+  and NCBI stops in `CQuerySplitter::Split` with a null-pointer `CCoreException` (exit 3), handled
+  by the empty-chunk rejection below (a negative pair never produces a non-empty chunk that would
+  be split again). Otherwise every chunk holds a query with gaps between them (for example
+  `-100/-200` on 248 bases, `-1/-200` on 930 bases): NCBI searches on and loses hits in the gaps.
+  Version 1.1 (maintainer, 2026-10-02): that gap case, although NCBI's result is deterministic,
+  stays an explicit rejection (a setting without a practical use; reproducing it would need NCBI's
+  wrapped `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
-  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since version 1.110 the rejection
-  comes after the reports of the query batches before (line RG item X-short-bat-2, rows
-  `db.xs.blastn.bat.*`): a pair whose first range covers the batch leaves the chunks after it
-  without a query, where NCBI's split stops (the next item); a pair whose chunks all hold a query
-  and leave gaps is refused where the search of the batch's first chunk with a valid context would
-  read subjects in hand whose sequences can be read, after that chunk's setup and the reads of the
-  database that fail before it (TBLASTN's step of 1.97); a batch without such subjects is reported
-  as NCBI reports it.
+  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since versions 1.110 (line RG item
+  X-short-bat-2, rows `db.xs.blastn.bat.*`) and 1.116 (line RG item X-chunk, rows `db.xc.*`), in
+  BLASTN, as in TBLASTN (1.97) and BLASTP (1.98), the gap rejection comes after earlier batches'
+  reports and prologs, at the first chunk with a valid context with subjects in hand, after that
+  chunk's masking, setup checks (`e_nF`, average subject length) and database sequence-file read
+  (`nonsq`); without subjects in hand (empty alias `e_nA`, seqid list leaving no subject) or when
+  no chunk has a valid context (`gapvalid`, whose valid letters lie only in the gap, which reaches
+  traceback setup: `Traceback failed` on short subjects, `Database memory map file error` on OID 0,
+  or exit 0 with no hits), the batch is reported as NCBI reports it.
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
-  query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
-  (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
-  `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all). Since version 1.110 the rejection comes where
-  `CQuerySplitter::Split` stops, after the reports of the query batches before and before the
-  setup of any chunk and its read of the database, also with no subject in hand (rows
-  `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`).
+  query: a positive pair with evened chunk size below or equal to overlap at batch length `<=`
+  overlap (for example `140/100` on 90 bases, `150/100` on 100 bases, `100/95` on 31 bases), a
+  negative pair whose wrapped chunk size covers the batch (`-100/-200` on 310 bases), or an
+  unwrapped negative pair whose `chunk_start` reaches or passes the batch's end before the last
+  chunk (`-133/-200` on 200 bases, `-132/-200` on 201 bases). NCBI's `CQuerySplitter::Split`
+  (`split_query_cxx.cpp:234-249,872-880`) stops with a null-pointer `CCoreException` (exit 3) at
+  every thread count before any chunk is masked, set up, or searched, after earlier batches'
+  reports and prologs (in `-outfmt` 0, 15, 16 and 20 on batch 1, and all formats on batch 2, with
+  `-subject` outfmt 15/16 holding back the previous query). Since versions 1.110 (line RG item
+  X-short-bat-2, rows `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`) and 1.116 (line
+  RG item X-chunk, rows `db.xc.*` of `blastn.xc.tsv`, `tests/blastn_chunk_stops.rs`; round-3 audit:
+  27 oracle cases, plus 461 official 2.17.0 probe runs across all four tasks, `-db` and `-subject`,
+  1 and 4 threads), LOSAT rejects "a query chunk without a query" at that exact step in BLASTN,
+  also with no subject in hand.
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -3034,11 +3064,14 @@ file would differ, and NCBI's programs still could not open the database).
   (since version 1.40, as the refusal of an extension past a query frame's end; before, they were
   written only where the reports were streamed). Every other merge of such HSPs is NCBI's (`Int4`
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
-  that absorbs another and becomes positive). Version 1.116 (2026-11-26, line NP item M4b-3d,
-  Owner-delegated) extends the same rule-3 refusal (`chunk_merge_undefined_refusal`, via the shared
-  `core::blast_hits::merge_subject_chunk_hsps`) to BLASTP and BLASTX `-db_hard_mask` `-ungapped
-  -window_size 0` subject-chunk merges whose query lengths sum to 0 or whose scaled score leaves
-  `Int4`.
+  that absorbs another and becomes positive). Version 1.117 (2026-11-26, line NP item M4b-3d,
+  Owner-delegated, rule 3) extends the same rule-3 refusal (`chunk_merge_undefined_refusal`, typed
+  `ShortChunkSeedRefusal` via the shared `core::blast_hits::merge_two_chunk_hsps` /
+  `merge_subject_chunk_hsps`) to BLASTP and BLASTX `-db_hard_mask` `-ungapped -window_size 0`
+  subject-chunk merges, TBLASTN `-ungapped -window_size 0` subject-chunk merges (both frames longer
+  than 5,000,000 residues and `-db_hard_mask`, naming OID and frame), and BLASTN subject-chunk and
+  query-chunk merges (`merge_prelim_hit_lists`) whose density-scaled merged score leaves `Int4`
+  (naming OID, where NCBI's `(Int4)` float conversion at `blast_hits.c:1526` is undefined).
 
 - BLASTP and BLASTN `-outfmt 1` to `4` (the query-anchored views; version 1.23, 2026-11-14, line RG
   item T3a, Owner-delegated; BLASTN version 1.28, 2026-11-15, line RG item T3b, probes
@@ -4087,7 +4120,7 @@ file would differ, and NCBI's programs still could not open the database).
     TAIR10 0, the UniRef50 sample 0.
   - `HardMaskShape::LastRangeOverlap` (before the search) and
     `hard_chunk_scan::last_range_overlap_merge_refusal` (during the search, for short `OneWord`
-    chunks) (version 1.116, 2026-11-26, line NP item M4b-3d, Owner-delegated, rule 3): version 1.116
+    chunks) (version 1.117, 2026-11-26, line NP item M4b-3d, Owner-delegated, rule 3): version 1.117
     ported NCBI's `Blast_HSPListsMerge` across overlapping subject chunks for BLASTP and BLASTX
     `-db_hard_mask` (ranges longer than 5,000,000 letters and out-of-order masks whose parts overlap
     when NCBI reads the merge overlap in bounds, replacing version 1.95's unported `PartsOutOfOrder`
@@ -4106,10 +4139,10 @@ file would differ, and NCBI's programs still could not open the database).
     within a final hard range longer than 5,000,000 letters keep `DBSEQ_CHUNK_OVERLAP = 100`.
     Out-of-order merges in middle ranges and long-range merges are searched byte-for-byte
     (`db.pmask.{bp,bx}.hard.pe_unsorted_mid.*`, `LOSAT/tests/protein_db_hard_long.rs`).
-    `hard_chunk_scan::chunk_merge_undefined_refusal` refuses an ungapped one-hit merge across a
-    chunk overlap whose query lengths sum to 0 or whose scaled score leaves `Int4` (version 1.21
-    extended to BLASTP and BLASTX in version 1.116). Counts of `LastRangeOverlap`: TAIR10 0, the
-    UniRef50 sample 0.
+    `hard_chunk_scan::chunk_merge_undefined_refusal` refuses a chunk-overlap merge whose query
+    lengths sum to 0 or whose scaled score leaves `Int4` (version 1.21 extended in version 1.117 to
+    BLASTP and BLASTX `-db_hard_mask`, TBLASTN subject-chunk merges, and BLASTN subject/query-chunk
+    merges). Counts of `LastRangeOverlap`: TAIR10 0, the UniRef50 sample 0.
   - `HardMaskShape::Inverted`, before the search: a mask that ends before it starts, which makeblastdb
     never writes.
   TBLASTN and TBLASTX (version 1.106, line NP item M4b-3c part 2) search masks that overlap or nest

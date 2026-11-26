@@ -2261,3 +2261,477 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges() {
         "{cover:?}"
     );
 }
+
+// EXPERIMENT (LOSAT_X_DCEMITHOIST): `DcPairs` and `scan_strip_disc_csr`'s `HOIST` instance against
+// `seed_of_pair` and the instance without `HOIST`, the code `LOSAT_X_DCEMITHOIST=0` runs.
+
+/// Contexts of `lengths` (0: a context without letters) as the batch lays them out: each context
+/// with letters right after the one before and its sentinel, one without letters at the place the
+/// next one starts. `gap` letters more after each sentinel leave no constant-time form (the runs
+/// answer); a `back` above 1 makes contexts overlap (the table answers).
+fn hoist_contexts(lengths: &[usize], gap: usize, back: usize) -> Vec<QueryContext> {
+    let mut at = 0usize;
+    lengths
+        .iter()
+        .enumerate()
+        .map(|(k, &len)| {
+            let query_offset = at as i32;
+            if len > 0 {
+                at = (at + len + 1 + gap).saturating_sub(back);
+            }
+            QueryContext {
+                query_idx: (k / 2) as u32,
+                frame: if k % 2 == 0 { 1 } else { -1 },
+                query_offset,
+                len,
+                masks: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// The form of a context index that `DcPairs` asks (`QueryContextIndex::x_view`, and for offsets it
+/// leaves, `x_context_for_offset_ref`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum HoistForm {
+    Div,
+    Blocks,
+    BlocksRanks,
+    /// `Blocks` with crowded blocks (their offsets go to the runs).
+    Crowded,
+    /// No constant-time form: the runs.
+    Runs,
+    /// No constant-time form, overlapping contexts: `direct_map`.
+    Table,
+}
+
+fn hoist_form(index: &QueryContextIndex) -> HoistForm {
+    match (&index.x_o1, index.x_view()) {
+        (Some(o1), _) if o1.needs_runs() => HoistForm::Crowded,
+        (_, Some(XView::Div(_))) => HoistForm::Div,
+        (_, Some(XView::Blocks(_))) => HoistForm::Blocks,
+        (_, Some(XView::BlocksRanks(_))) => HoistForm::BlocksRanks,
+        (_, None) if !index.direct_map.is_empty() => HoistForm::Table,
+        (_, None) => HoistForm::Runs,
+    }
+}
+
+/// Random contexts of the form `form` (asserted by the caller) over about `cover` offsets:
+/// lengths, contexts without letters, gaps and overlaps.
+fn hoist_layout(rng: &mut Lcg, form: HoistForm, cover: usize) -> Vec<QueryContext> {
+    // lengths from `len` until they cover `cover` offsets (at least two)
+    let lengths = |rng: &mut Lcg, len: &mut dyn FnMut(&mut Lcg, usize) -> usize| {
+        let mut lengths = Vec::new();
+        let mut sum = 0usize;
+        while sum < cover || lengths.len() < 2 {
+            let l = len(rng, lengths.len());
+            sum += l + 1;
+            lengths.push(l);
+        }
+        lengths
+    };
+    let long = |rng: &mut Lcg| 20 + rng.below(3000) as usize;
+    // lengths within 1024..1536 keep 2^shift = 1024 with zero crowded blocks (no shift step can
+    // stay below 1 / CROWDED_SHARE)
+    let even = |rng: &mut Lcg| 1024 + rng.below(512) as usize;
+    match form {
+        HoistForm::Div => {
+            let len = [1, 17, 18, 21, 64, 1000][rng.below(6) as usize];
+            hoist_contexts(&vec![len; (cover / (len + 1)).clamp(1, 4000)], 0, 0)
+        }
+        HoistForm::Blocks => {
+            let mut lengths = lengths(rng, &mut |rng, _| even(rng));
+            lengths[0] = lengths[1] + 1;
+            hoist_contexts(&lengths, 0, 0)
+        }
+        HoistForm::BlocksRanks => {
+            // a plus-strand search (every minus context without letters), or zeros anywhere
+            let alternate = rng.below(2) == 0;
+            let mut lengths = lengths(rng, &mut |rng, k| {
+                if (alternate && k % 2 == 1) || (!alternate && rng.below(3) == 0) {
+                    0
+                } else {
+                    even(rng)
+                }
+            });
+            lengths[0] = even(rng);
+            lengths[1] = 0;
+            hoist_contexts(&lengths, 0, 0)
+        }
+        HoistForm::Crowded => {
+            // long contexts with three consecutive 1-letter contexts: at shift 3 (block 8) at
+            // least one adjacent pair of sentinels shares a block while crowded_blocks <= blocks/256
+            let mut lengths = Vec::new();
+            let mut sum = 0usize;
+            let need = cover.max(20_000);
+            while sum < need || lengths.len() < 10 {
+                let k = lengths.len();
+                let l = if (3..=5).contains(&k) { 1 } else { even(rng) };
+                sum += l + 1;
+                lengths.push(l);
+            }
+            hoist_contexts(&lengths, 0, 0)
+        }
+        HoistForm::Runs => {
+            let lengths = lengths(rng, &mut |rng, _| long(rng));
+            hoist_contexts(&lengths, 1 + rng.below(5) as usize, 0)
+        }
+        HoistForm::Table => {
+            let lengths = lengths(rng, &mut |rng, _| long(rng) + 20);
+            hoist_contexts(&lengths, 0, 2 + rng.below(15) as usize)
+        }
+    }
+}
+
+/// The offsets and lengths of `contexts`, for messages.
+fn hoist_spans(contexts: &[QueryContext]) -> Vec<(i32, usize)> {
+    contexts.iter().map(|c| (c.query_offset, c.len)).collect()
+}
+
+/// A sink with `push` alone (`SeedOut::x_push_run`'s default, which `part::PartSink` and
+/// `part::PieceSink` take).
+struct PushOnly(Vec<Seed>);
+
+impl SeedOut for PushOnly {
+    fn push(&mut self, seed: Seed) {
+        self.0.push(seed);
+    }
+}
+
+/// A sink of at most `limit` seeds, closed as a seed piece is (`part::PieceSink`'s `room` and
+/// `close`).
+struct Capped {
+    seeds: Vec<Seed>,
+    limit: usize,
+}
+
+impl SeedOut for Capped {
+    fn push(&mut self, seed: Seed) {
+        assert!(self.seeds.len() < self.limit, "a push past the room");
+        self.seeds.push(seed);
+    }
+
+    fn room(&self) -> usize {
+        self.limit - self.seeds.len()
+    }
+
+    fn close(&mut self) {
+        self.limit = self.seeds.len();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1106-1144
+// `DcPairs::run` against `seed_of_pair` called for each pair of a run, as `scan_strip_disc_csr`
+// calls it: random runs of query offsets (random, and at the edges: the first and the last offset
+// of a context where a word fits, the first where it does not, sentinels, offsets at and past the
+// contexts' end, which the binary search answers) at random subject offsets (and at the subject's
+// end: the last word that fits and the first that does not), for every form of the context index
+// (`Div`, `Blocks`, `Blocks` with ranks, crowded `Blocks`, the runs, the table; both strands' and
+// one strand's bounds of the binary search) and the templates of lengths 16, 18 and 21. Every
+// field of every seed, in order, after seeds already in the list (a list with no spare room, and
+// one with room), and through `push` alone (`x_push_run`'s default).
+#[test]
+fn the_hoisted_emit_gives_the_seeds_of_seed_of_pair() {
+    let mut rng = Lcg(0xE317_0001);
+    let c = make_case_with(&mut rng, 3000, 1100);
+    let mut forms_seen = std::collections::BTreeSet::new();
+    let (mut kept, mut ctx_dropped, mut s_dropped) = (0usize, 0usize, 0usize);
+    let forms = [
+        HoistForm::Div,
+        HoistForm::Blocks,
+        HoistForm::BlocksRanks,
+        HoistForm::Crowded,
+        HoistForm::Runs,
+        HoistForm::Table,
+    ];
+    for (word_type, template_length) in [
+        (DiscWordType::Coding, 16usize),
+        (DiscWordType::Optimal, 18),
+        (DiscWordType::Coding, 21),
+    ] {
+        let lookup = build_disc_mb_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            11,
+            template_length,
+            word_type,
+            &c.masks,
+            c.concat.len(),
+        );
+        let word = lookup.word_length();
+        assert_eq!(word, template_length);
+        for round in 0..60 {
+            let form = forms[round % forms.len()];
+            let cover = 2000 + rng.below(60_000) as usize;
+            let contexts = hoist_layout(&mut rng, form, cover);
+            let one_strand = rng.below(2) == 0;
+            let index = QueryContextIndex::new(&contexts, one_strand);
+            assert_eq!(hoist_form(&index), form, "{:?}", hoist_spans(&contexts));
+            forms_seen.insert(form);
+            let x = Inputs {
+                query_context_index: &index,
+                query_contexts: &contexts,
+                ..inputs(&c, &lookup, 0, 40)
+            };
+            let view = index.x_view();
+            let total = contexts
+                .iter()
+                .map(|ctx| ctx.query_offset as usize + ctx.len)
+                .max()
+                .unwrap();
+            // the edges of every context (1-based offsets of the run)
+            let mut edges = vec![1usize, total, total + 1, total + 40];
+            for ctx in &contexts {
+                let start = ctx.query_offset as usize;
+                let end = start + ctx.len;
+                edges.extend([start + 1, end + 1, end + 2]);
+                if ctx.len >= word {
+                    edges.extend([end - word + 1, end - word + 2]);
+                }
+            }
+            for _ in 0..400 {
+                let len = match rng.below(10) {
+                    0 => 0,
+                    1 => 40 + rng.below(60) as usize,
+                    _ => 1 + rng.below(12) as usize,
+                };
+                let run: Vec<u32> = (0..len)
+                    .map(|_| {
+                        if rng.below(3) == 0 {
+                            edges[rng.below(edges.len() as u64) as usize] as u32
+                        } else {
+                            1 + rng.below(total as u64 + 60) as u32
+                        }
+                    })
+                    .collect();
+                let kmer_start = match rng.below(8) {
+                    0 => c.s_len - word,
+                    1 => c.s_len - word + 1,
+                    2 => c.s_len,
+                    3 => 0,
+                    _ => rng.below((c.s_len + 1) as u64) as usize,
+                };
+                let s_range = kmer_start + word + rng.below(5000) as usize;
+                let prefix: Vec<Seed> = (0..rng.below(4))
+                    .map(|k| Seed {
+                        context: k as u32,
+                        q: 7,
+                        s: 9,
+                        s_range: 11,
+                    })
+                    .collect();
+                let mut want = prefix.clone();
+                for &q_off_1 in &run {
+                    seed_of_pair(&x, q_off_1 as usize - 1, kmer_start, s_range, &mut want);
+                }
+                let pairs = DcPairs::new(&x, s_range);
+                let at = format!("{form:?} word {word} run {run:?} at {kmer_start}");
+                // a list without spare room, then one with room
+                let mut tight = prefix.clone();
+                tight.shrink_to_fit();
+                pairs.run(view, &run, kmer_start, &mut tight);
+                assert_eq!(tight, want, "{at}");
+                let mut roomy = Vec::with_capacity(prefix.len() + run.len() + 5);
+                roomy.extend_from_slice(&prefix);
+                pairs.run(view, &run, kmer_start, &mut roomy);
+                assert_eq!(roomy, want, "{at}");
+                let mut push_only = PushOnly(prefix.clone());
+                pairs.run(view, &run, kmer_start, &mut push_only);
+                assert_eq!(push_only.0, want, "{at}");
+                let added = want.len() - prefix.len();
+                kept += added;
+                if kmer_start + word > c.s_len {
+                    s_dropped += run.len();
+                } else {
+                    ctx_dropped += run.len() - added;
+                }
+            }
+        }
+    }
+    assert_eq!(forms_seen.len(), forms.len());
+    assert!(
+        kept > 10_000 && ctx_dropped > 1000 && s_dropped > 1000,
+        "{kept} {ctx_dropped} {s_dropped}"
+    );
+}
+
+/// The pieces of the scan `scan` of a strip from `start` into sinks of `limit` seeds, as
+/// LOSAT_X_SEEDPIECE cuts a strip: each piece's seeds and where it stopped.
+fn hoist_pieces(
+    limit: usize,
+    start: usize,
+    mut scan: impl FnMut(Resume, &mut Capped) -> Option<Resume>,
+) -> Vec<(Vec<Seed>, Option<Resume>)> {
+    let mut from = Resume::at(start);
+    let mut pieces = Vec::new();
+    loop {
+        let mut sink = Capped {
+            seeds: Vec::new(),
+            limit,
+        };
+        let stop = scan(from, &mut sink);
+        pieces.push((sink.seeds, stop));
+        match stop {
+            Some(at) => from = at,
+            None => return pieces,
+        }
+        assert!(pieces.len() < 1 << 22, "no progress");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+// `scan_strip_disc_csr` with `HOIST` against it without on CSR tables (a query of 2 x 560,000
+// letters: above LOSAT_X_DCCSR's size rule for 4^11 cells; repeats give runs of 20 and more) of
+// the templates of lengths 18 and 21, the strips of 1, 5 and 33 per subject of the strips stage
+// (`plan_strips`), the subject whole and masked (scanned in its ranges), the contexts of the
+// search and contexts of every form of the index laid over the same query: the same seeds in the
+// same order, field by field. Then in pieces of 1, 2, 3 and 7 seeds (LOSAT_X_SEEDPIECE's cut:
+// `Cut::fit` and its `Err` path `Cut::run_cold`, which stops inside a run): the same seeds in each
+// piece and the same stop.
+#[test]
+fn the_hoisted_csr_scan_gives_the_seeds_and_stops_of_the_csr_scan() {
+    let mut rng = Lcg(0xE317_0002);
+    let q_len = 560_000;
+    let c = make_case_with(&mut rng, 1000, q_len);
+    // a subject of diverged copies of the query's repeat (`make_case_with`: at offset 0, twenty
+    // times in its first 2,000 letters) and of other pieces of both strands
+    let plus: Vec<u8> = c.ctx_seqs[0].iter().map(|&b| b"ACGT"[b as usize]).collect();
+    let minus = reverse_complement(&plus);
+    let mut subject = Vec::new();
+    while subject.len() < 24_000 {
+        let src = if rng.below(2) == 0 { &plus } else { &minus };
+        let len = 30 + rng.below(800) as usize;
+        let at = match rng.below(3) {
+            0 => rng.below(2000) as usize,
+            1 => q_len - 2000 + rng.below(1000) as usize,
+            _ => rng.below((q_len - len) as u64) as usize,
+        };
+        for &b in &src[at..(at + len).min(q_len)] {
+            if rng.below(100) < 6 {
+                subject.push(b"ACGT"[rng.below(4) as usize]);
+            } else {
+                subject.push(b);
+            }
+        }
+    }
+    let s_len = subject.len();
+    let packed = encode_subject_ncbi2na_packed(&subject);
+    let whole = vec![(0i32, s_len as i32)];
+    let mut ranges = Vec::new();
+    let mut at = rng.below(30) as usize;
+    while at < s_len {
+        let len = if rng.below(10) == 0 {
+            1 + rng.below(20) as usize
+        } else {
+            30 + rng.below(2000) as usize
+        };
+        let end = (at + len).min(s_len);
+        ranges.push((at as i32, end as i32));
+        at = end + 1 + rng.below(120) as usize;
+    }
+    // the search's contexts (`Div`: both strands of one query), and others over the same offsets
+    let mut layouts = vec![c.contexts.clone()];
+    for form in [
+        HoistForm::Blocks,
+        HoistForm::BlocksRanks,
+        HoistForm::Crowded,
+        HoistForm::Runs,
+    ] {
+        let contexts = hoist_layout(&mut rng, form, c.concat.len());
+        let index = QueryContextIndex::new(&contexts, false);
+        assert_eq!(hoist_form(&index), form, "{:?}", hoist_spans(&contexts));
+        layouts.push(contexts);
+    }
+    let (mut seeds_n, mut stops_in_runs) = (0usize, 0usize);
+    for (word_type, template_length) in
+        [(DiscWordType::Optimal, 18usize), (DiscWordType::Coding, 21)]
+    {
+        let lookup = build_disc_mb_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            11,
+            template_length,
+            word_type,
+            &c.masks,
+            c.concat.len(),
+        );
+        let disc = lookup.disc().expect("a discontiguous table");
+        let Some(csr) = disc.x_csr() else {
+            assert_eq!(
+                std::env::var("LOSAT_X_DCCSR").as_deref(),
+                Ok("0"),
+                "no CSR table"
+            );
+            return;
+        };
+        assert!(
+            (1..1u32 << 22).any(|cell| csr.run(cell as usize).len() >= 20),
+            "no long run"
+        );
+        for (masked, seq_ranges) in [(false, &whole), (true, &ranges)] {
+            for (li, contexts) in layouts.iter().enumerate() {
+                let index = QueryContextIndex::new(contexts, false);
+                let x = Inputs {
+                    search_seq_packed: &packed,
+                    s_len,
+                    subject_seq_ranges: seq_ranges,
+                    subject_masked: masked,
+                    query_context_index: &index,
+                    query_contexts: contexts,
+                    ..inputs(&c, &lookup, 0, 40)
+                };
+                for strips in [1usize, 5, 33] {
+                    let jobs = plan_strips(
+                        seq_ranges,
+                        s_len,
+                        template_length,
+                        template_length,
+                        1,
+                        masked,
+                        strips,
+                    );
+                    assert!(!jobs.is_empty());
+                    for (j, job) in jobs.iter().enumerate() {
+                        let at = format!(
+                            "template {template_length} masked {masked} layout {li} strips {strips} job {j} {job:?}"
+                        );
+                        let from = Resume::at(job.start);
+                        let mut want: Vec<Seed> = Vec::new();
+                        let r = scan_strip_disc_csr::<_, false>(
+                            &x, disc, csr, job, from, &mut want, false,
+                        );
+                        assert_eq!(r, None, "{at}");
+                        let mut got: Vec<Seed> = Vec::new();
+                        let r = scan_strip_disc_csr::<_, false>(
+                            &x, disc, csr, job, from, &mut got, true,
+                        );
+                        assert_eq!(r, None, "{at}");
+                        assert_eq!(got, want, "{at}");
+                        seeds_n += got.len();
+                        // pieces (one layout, the subject whole and masked, one strip count)
+                        if li > 1 || strips != 5 {
+                            continue;
+                        }
+                        for limit in [1usize, 2, 3, 7] {
+                            let want = hoist_pieces(limit, job.start, |from, out| {
+                                scan_strip_disc_csr::<_, true>(&x, disc, csr, job, from, out, false)
+                            });
+                            let got = hoist_pieces(limit, job.start, |from, out| {
+                                scan_strip_disc_csr::<_, true>(&x, disc, csr, job, from, out, true)
+                            });
+                            assert_eq!(got, want, "{at} pieces of {limit}");
+                            stops_in_runs += got
+                                .iter()
+                                .filter(|(_, stop)| stop.is_some_and(|r| r.skip > 0))
+                                .count();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        seeds_n > 100_000 && stops_in_runs > 1000,
+        "{seeds_n} seeds, {stops_in_runs} stops inside runs"
+    );
+}

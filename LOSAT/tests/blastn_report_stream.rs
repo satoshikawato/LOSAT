@@ -14,7 +14,7 @@
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters, a header file that cannot be read, a search space overflow), and with
 //! `-db`. Where the switch must not act (scoring options without Karlin-Altschul
-//! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
+//! values; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a tabular row whose lookup fails (a subject's id or a
 //! failed lookup), both paths write the reports of the batches before and then the refusal, as
@@ -1255,7 +1255,7 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
 /// overflows 64-bit search space (including after an earlier valid batch with hits). A subject
 /// whose tabular id LOSAT refuses streams, its refusal after the rows of the batches before, and so
 /// does a negative `CHUNK_SIZE`, whose refusal comes where a batch is split, after the reports of
-/// the batches before in both paths (line RG item X-short-bat-2).
+/// the batches before in both paths (line RG items X-short-bat-2 and X-chunk).
 #[test]
 fn where_the_switch_must_not_act_the_counters_name_why() {
     let dir = TempDir::new("off");

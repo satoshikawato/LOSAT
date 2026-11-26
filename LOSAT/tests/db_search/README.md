@@ -2864,3 +2864,11 @@ database reach the links of NCBI's HTML formatter through a reader of their own.
 Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
 formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,
 and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directories and databases above.
+
+- `LOSAT/tests/fasta/xchunk/` (rows `db.xc.*` of `tests/db_search_manifest/blastn.xc.tsv`, line RG
+  item X-chunk): slices of `HBA1` (`ENST00000320868.9`) from `taxfilter/tfn.fna` exercising
+  BLASTN query-chunk stops and step order (`CHUNK_SIZE` / `OVERLAP_CHUNK_SIZE`), including empty
+  chunks (`q_under*`, `q_l100`, `q_neg_empty*`, `q_neg201`), Exception 1 boundary (`q_l101`),
+  negative-pair gaps (`q_neg_gap*`, `q_first`), valid letters only in a gap (`q_gapvalid`),
+  unsearchable batch (`q_alln310`), and split duplicate-id batches (`q_dup300`, `q_dup_lc_both`,
+  `q_dup_lc_first`, `q_dup_alln`).

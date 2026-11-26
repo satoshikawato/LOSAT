@@ -202,12 +202,13 @@ onMounted(() => {
     (entries) => {
       for (const item of entries) {
         const k = (item.target as HTMLElement).dataset['range'];
-        const range = shown.value.find((r) => sectionKey(r.id) === k);
-        if (range === undefined || k === undefined) continue;
-        if (sections.get(k) !== null) {
+        const range = shown.value.find((r) => key(r.id) === k);
+        if (range === undefined) continue;
+        const sk = sectionKey(range.id);
+        if (sections.get(sk) !== null) {
           if (item.isIntersecting) read(range);
-        } else if (!item.isIntersecting) away.add(k);
-        else if (away.has(k)) retry(range);
+        } else if (!item.isIntersecting) away.add(sk);
+        else if (away.has(sk)) retry(range);
       }
     },
     { rootMargin: '300px 0px' },
@@ -369,12 +370,12 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             data-testid="range-section"
             data-state="failed"
             data-lazy="failed"
-            :data-range="sectionKey(range.id)"
+            :data-range="key(range.id)"
           >
             The alignment could not be read.
             <button type="button" class="link" data-testid="range-retry" @click="retry(range)">Try again</button>
           </p>
-          <p v-else class="range-pending muted" data-testid="range-section" data-state="pending" data-lazy="pending" :data-range="sectionKey(range.id)">
+          <p v-else class="range-pending muted" data-testid="range-section" data-state="pending" data-lazy="pending" :data-range="key(range.id)">
             Reading the alignment…
           </p>
         </template>

@@ -939,7 +939,7 @@ fn alias_value_errors_come_in_ncbis_order() {
     .unwrap();
     db.x_keep_oids(|oid| oid < 3);
     db.check_alias_values().unwrap();
-    assert!(what(db.read_name_records(&name, false).unwrap_err()).contains("'n1'"));
+    assert!(what(db.read_name_records(name.as_bytes(), false).unwrap_err()).contains("'n1'"));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
@@ -1506,14 +1506,17 @@ fn alias_lines_are_read_as_ncbi_reads_them() {
     // The names the reports open alone: white space at their ends dropped, empty ones left
     // out (probe DI-8f K01, K02: `<db>` of XML2).
     assert_eq!(
-        super::alias::report_names(" db/n5t  db/nc5 "),
-        ["db/n5t", "db/nc5"]
+        super::alias::report_names(b" db/n5t  db/nc5 "),
+        [b"db/n5t".to_vec(), b"db/nc5".to_vec()]
     );
     assert_eq!(
-        super::alias::report_names("\"db/n5t\" \"db/nc5\""),
-        ["\"db/n5t\"", "\"db/nc5\""]
+        super::alias::report_names(b"\"db/n5t\" \"db/nc5\""),
+        [b"\"db/n5t\"".to_vec(), b"\"db/nc5\"".to_vec()]
     );
-    assert_eq!(super::alias::report_names("a\t b"), ["a", "b"]);
+    assert_eq!(
+        super::alias::report_names(b"a\t b"),
+        [b"a".to_vec(), b"b".to_vec()]
+    );
 }
 
 /// BER bytes of one `Blast-def-line-set` with one definition line.
@@ -1935,7 +1938,7 @@ fn a_name_is_a_list_as_for_ncbi() {
     let prot_old = db_name("prot_old");
     let alone = |name: &str| {
         let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
-        db.read_name_records(name, false).unwrap();
+        db.read_name_records(name.as_bytes(), false).unwrap();
         db
     };
     // What the reports show of a record (its table is read only with masks).
@@ -1980,7 +1983,7 @@ fn a_name_is_a_list_as_for_ncbi() {
     assert_eq!(shown(&twice.name_records()[1..]), shown(v4.name_records()));
     // A quoted name keeps its quotes in its record (`GetBlastDbInfo` splits with them).
     let quoted_db = alone(&quoted);
-    assert_eq!(quoted_db.name_records()[0].name, quoted);
+    assert_eq!(quoted_db.name_records()[0].name, quoted.as_bytes());
     let error = SeqDb::open("  ", SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)

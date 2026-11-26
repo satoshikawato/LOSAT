@@ -25,7 +25,7 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         format!("{error:#}"),
         "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's TBLASTX"
     );
-    TblastxDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+    TblastxDatabase::open(path("tests/seqdb/db/nucl_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
 }
 
@@ -74,7 +74,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
     TblastxDatabase {
         parsed: db.has_parsed_seqids().unwrap(),
         db,
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
     }
 }

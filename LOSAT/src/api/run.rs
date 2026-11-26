@@ -476,7 +476,7 @@ pub(super) fn searched_queries(
 }
 
 /// The `-query_loc` of the program's arguments.
-fn query_loc(command: &Commands) -> Option<&str> {
+fn query_loc(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(a) => a.query_loc.as_deref(),
         Commands::Tblastn(a) => a.query_loc.as_deref(),
@@ -1010,7 +1010,7 @@ pub fn run(
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
-                            outfmt: formats[position],
+                            outfmt: formats[position].as_bytes(),
                             refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
@@ -1091,7 +1091,7 @@ pub fn run_to_file(
     };
     let command = start.command();
     let app = search.program().name();
-    let mut file = OutFile::new(path, out_file_program(search.program()), app, outfmt);
+    let mut file = OutFile::new(path, app, outfmt);
     let posts = file.posts();
     with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
@@ -1102,7 +1102,7 @@ pub fn run_to_file(
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
@@ -1118,19 +1118,6 @@ pub fn run_to_file(
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })
-}
-
-/// The program whose `-out` file names must be UTF-8, as its command line checks them
-/// (`cli::create_out_file`): every search program but BLASTX.
-fn out_file_program(program: Program) -> Option<&'static str> {
-    match program {
-        Program::Blastn => Some("BLASTN"),
-        Program::Blastp => Some("BLASTP"),
-        Program::Psiblast => Some("PSIBLAST"),
-        Program::Tblastn => Some("TBLASTN"),
-        Program::Tblastx => Some("TBLASTX"),
-        Program::Blastx => None,
-    }
 }
 
 /// What one search of `run_collect` gathered.
@@ -1171,7 +1158,7 @@ fn collect_one(
                 .iter()
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
-                    outfmt: formats[position],
+                    outfmt: formats[position].as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })

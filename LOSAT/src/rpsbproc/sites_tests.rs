@@ -30,7 +30,7 @@ fn load(sites: &[(&str, &str, &str)]) -> CddData {
         ));
     }
     write("cddannot.dat", &annot);
-    let file = |name: &str| format!("{}/{name}", dir.display());
+    let file = |name: &str| format!("{}/{name}", dir.display()).into_bytes();
     let data = CddData::load(&DataFiles {
         cddids: file("cddid.tbl"),
         spfeats: file("cddannot.dat"),

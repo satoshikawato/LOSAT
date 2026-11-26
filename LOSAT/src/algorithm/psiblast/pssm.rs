@@ -32,8 +32,8 @@ use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_
 pub struct PsiblastPssmOptions {
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
-    pub out_pssm: Option<String>,
-    pub out_ascii_pssm: Option<String>,
+    pub out_pssm: Option<std::path::PathBuf>,
+    pub out_ascii_pssm: Option<std::path::PathBuf>,
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
@@ -57,9 +57,9 @@ pub struct PsiblastPssmOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PssmRequest {
     /// `-out_pssm`, as given: the ASN.1 text PSSM (`SaveCheckpoint`).
-    pub asn_path: Option<String>,
+    pub asn_path: Option<std::path::PathBuf>,
     /// `-out_ascii_pssm`, as given (`SaveAsciiPssm`).
-    pub ascii_path: Option<String>,
+    pub ascii_path: Option<std::path::PathBuf>,
     /// `-save_each_pssm`: the files are `F.1`, `F.2`, ... (`CAutoOutputFileReset` with versions).
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
@@ -137,7 +137,7 @@ impl PssmRequest {
     /// where it is requested: with `-save_each_pssm` they number their files with the run's
     /// numbers (`versions`).
     pub(crate) fn streams(&self) -> [Option<OutputFileReset>; 2] {
-        let stream = |path: Option<&str>, version: &Version| {
+        let stream = |path: Option<&std::path::Path>, version: &Version| {
             path.map(|path| OutputFileReset::new(path, self.save_each.then(|| version.clone())))
         };
         [
@@ -959,16 +959,16 @@ pub(crate) fn file_posts(application: &str, replaced: &[ReplacedChar]) -> Posts 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:54-55
 #[derive(Debug)]
 pub(crate) struct OutputFileReset {
-    file_name: String,
+    file_name: std::path::PathBuf,
     /// `m_Version`: `None` for version 0 (no `-save_each_pssm`), else the run's number of the
     /// stream (`PssmVersions`).
     version: Option<Version>,
 }
 
 impl OutputFileReset {
-    fn new(file_name: &str, version: Option<Version>) -> Self {
+    fn new(file_name: &std::path::Path, version: Option<Version>) -> Self {
         Self {
-            file_name: file_name.to_string(),
+            file_name: file_name.to_path_buf(),
             version,
         }
     }
@@ -977,16 +977,22 @@ impl OutputFileReset {
     pub(crate) fn next_file(&mut self) -> PssmFile {
         let Some(version) = self.version.as_ref() else {
             return PssmFile {
-                path: std::path::PathBuf::from(&self.file_name),
+                path: self.file_name.clone(),
                 replaced: true,
             };
         };
         let number = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         PssmFile {
-            path: std::path::PathBuf::from(format!("{}.{number}", self.file_name)),
+            path: numbered_pssm_path(&self.file_name, number),
             replaced: false,
         }
     }
+}
+
+fn numbered_pssm_path(base: &std::path::Path, number: u32) -> std::path::PathBuf {
+    let mut name = base.as_os_str().to_os_string();
+    name.push(format!(".{number}"));
+    std::path::PathBuf::from(name)
 }
 
 /// One file of `CAutoOutputFileReset::GetStream`.
@@ -1573,10 +1579,10 @@ pub(crate) fn check_pssm_files(
         };
         let names: Vec<std::path::PathBuf> = if request.save_each {
             (first..first.saturating_add(u32::try_from(queries).unwrap_or(u32::MAX)))
-                .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
+                .map(|n| numbered_pssm_path(path, n))
                 .collect()
         } else {
-            vec![std::path::PathBuf::from(path)]
+            vec![path.to_path_buf()]
         };
         for name in &names {
             check.check(option, name)?;

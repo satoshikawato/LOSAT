@@ -37,7 +37,7 @@ use crate::stats::tables::KarlinParams;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for BlastpArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -45,7 +45,10 @@ impl crate::report::archive::strategy::StrategyArgs for BlastpArgs {
                 num_descriptions: self.num_descriptions,
                 num_alignments: self.num_alignments,
             },
-            database: self.db.as_deref().map(crate::seqdb::db_argument_name),
+            database: self.db.as_deref().map(|v| {
+                crate::seqdb::db_argument_name_bytes(&crate::utils::os_bytes::os_str_bytes(v))
+                    .to_vec()
+            }),
         }
     }
 }
@@ -71,7 +74,10 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
     // `-xdrop_ungap` has no entry (NCBI records none, `tblastn/archive.rs` `opt_xdropu`).
     inputs.xdrop_gap = args.xdrop_gap;
@@ -93,16 +99,17 @@ pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
     inputs.soft_masking = args.soft_masking;
-    inputs.seg = args
-        .seg
-        .as_deref()
-        .and_then(crate::report::archive::options::seg_filter);
+    inputs.seg = args.seg.as_deref().and_then(|v| {
+        crate::report::archive::options::seg_filter(crate::utils::os_bytes::os_str_bytes(v))
+    });
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = hitlist_size;
-    if let Ok((mode, unified_p)) =
-        crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, true, false)
-    {
+    if let Ok((mode, unified_p)) = crate::blastinput::app::parse_comp_based_stats(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+        true,
+        false,
+    ) {
         inputs.comp_based_stats = mode as i32;
         inputs.unified_p = unified_p;
     }
@@ -122,10 +129,12 @@ pub(crate) fn handle_for(
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
+    let database = args.db.as_deref().map(|v| {
+        crate::seqdb::db_argument_name_bytes(&crate::utils::os_bytes::os_str_bytes(v)).to_vec()
+    });
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        database,
+        database.as_deref(),
         options,
     ))
 }
@@ -501,7 +510,7 @@ impl import::StrategyArgs for BlastpArgs {
             Setter::WordSize(n) => self.word_size = Some(*n),
             Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
             Setter::WindowSize(n) => self.window_size = Some(*n),
-            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
             Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
             Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
             Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
@@ -530,10 +539,10 @@ impl import::StrategyArgs for BlastpArgs {
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;
         if let Some(value) = collected.seg.value() {
-            self.seg = Some(value);
+            self.seg = Some(value.into());
         }
         if let Some(value) = collected.composition_value(true, program)? {
-            self.comp_based_stats = value;
+            self.comp_based_stats = value.into();
         }
         Ok(())
     }

@@ -194,14 +194,17 @@ impl TabularField {
 /// NCBI's field list of a custom specification (`x_SetFieldsToShow`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:70-99
-pub fn parse_fields(spec: &str) -> Vec<TabularField> {
+pub fn parse_fields(spec: impl AsRef<[u8]>) -> Vec<TabularField> {
     let mut fields: Vec<TabularField> = Vec::new();
     let add = |fields: &mut Vec<TabularField>, field| {
         if !fields.contains(&field) {
             fields.push(field);
         }
     };
-    for token in spec.split(' ') {
+    for token in spec.as_ref().split(|&b| b == b' ') {
+        let Ok(token) = std::str::from_utf8(token) else {
+            continue;
+        };
         if token == "std" {
             for field in STD_FIELDS {
                 add(&mut fields, field);
@@ -224,29 +227,37 @@ pub fn parse_fields(spec: &str) -> Vec<TabularField> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2753-2792
 /// Returns NCBI's message; the field list (`spec`) is searched as text, as NCBI does.
-pub fn custom_delimiter_conflict(spec: &str, delimiter: &str) -> Option<String> {
-    let spec = crate::ncbi_str::truncate_spaces(spec.as_bytes());
+pub fn custom_delimiter_conflict(
+    spec: impl AsRef<[u8]>,
+    delimiter: impl AsRef<[u8]>,
+) -> Option<String> {
+    let spec = crate::ncbi_str::truncate_spaces(spec.as_ref());
     if spec.is_empty() {
         return None;
     }
+    let delimiter = delimiter.as_ref();
     let contains = |needle: &str| spec.windows(needle.len()).any(|w| w == needle.as_bytes());
-    let field = match delimiter {
-        ";" => [
-            "sallseqid",
-            "staxids",
-            "sscinames",
-            "scomnames",
-            "sblastnames",
-            "sskingdoms",
-        ]
-        .into_iter()
-        .find(|field| contains(field)),
-        "/" => Some("frames").filter(|field| contains(field)),
-        "<>" => Some("salltitles").filter(|field| contains(field)),
-        _ => None,
-    }?;
+    let (shown, field) = match delimiter {
+        b";" => (
+            ";",
+            [
+                "sallseqid",
+                "staxids",
+                "sscinames",
+                "scomnames",
+                "sblastnames",
+                "sskingdoms",
+            ]
+            .into_iter()
+            .find(|field| contains(field)),
+        ),
+        b"/" => ("/", Some("frames").filter(|field| contains(field))),
+        b"<>" => ("<>", Some("salltitles").filter(|field| contains(field))),
+        _ => return None,
+    };
+    let field = field?;
     Some(format!(
-        "Your custom record separator ({delimiter}) is also used by the format specifier ({field}) to separate multiple entries. Please use a different record separator (delim keyword)."
+        "Your custom record separator ({shown}) is also used by the format specifier ({field}) to separate multiple entries. Please use a different record separator (delim keyword)."
     ))
 }
 
@@ -274,7 +285,7 @@ pub struct TabularSpec {
     pub kind: TabularKind,
     pub fields: Vec<TabularField>,
     /// The field delimiter of the rows (and of outfmt 20's header line).
-    pub delimiter: String,
+    pub delimiter: Vec<u8>,
 }
 
 /// What a program's adapter must give the writer besides the values every row has.
@@ -416,11 +427,11 @@ impl TabularSpec {
         app: crate::report::archive::options::RequestKind,
     ) -> Option<Self> {
         use crate::report::archive::options::RequestKind;
-        let delimiter = match app {
+        let delimiter: &[u8] = match app {
             RequestKind::Psiblast
             | RequestKind::Phiblastp
             | RequestKind::Rpsblast
-            | RequestKind::Rpstblastn => "",
+            | RequestKind::Rpstblastn => b"",
             RequestKind::Blastn
             | RequestKind::Blastp
             | RequestKind::Blastx
@@ -432,18 +443,18 @@ impl TabularSpec {
     }
 
     /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
-    fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
-        let (kind, default_delimiter) = match format {
-            ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
-            ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
-            ReportFormat::CommaSeparatedValues => (TabularKind::Csv, ","),
-            ReportFormat::CommaSeparatedValuesWithHeader => (TabularKind::CsvWithHeader, ","),
+    fn of_fields(format: ReportFormat, spec: &[u8], delimiter: &[u8]) -> Option<Self> {
+        let (kind, default_delimiter): (_, &[u8]) = match format {
+            ReportFormat::Tabular => (TabularKind::Tabular, b"\t"),
+            ReportFormat::TabularWithComments => (TabularKind::Commented, b"\t"),
+            ReportFormat::CommaSeparatedValues => (TabularKind::Csv, b","),
+            ReportFormat::CommaSeparatedValuesWithHeader => (TabularKind::CsvWithHeader, b","),
             // NCBI's `ParseFormattingString` keeps no field list for outfmt 18.
             ReportFormat::TaxFormat => {
                 return Some(TabularSpec {
                     kind: TabularKind::TaxReport,
                     fields: Vec::new(),
-                    delimiter: String::new(),
+                    delimiter: Vec::new(),
                 })
             }
             _ => return None,
@@ -454,10 +465,10 @@ impl TabularSpec {
         } else {
             delimiter
         }
-        .to_string();
+        .to_vec();
         let default_report = matches!(kind, TabularKind::Tabular | TabularKind::Commented)
             && fields == STD_FIELDS
-            && delimiter == "\t";
+            && delimiter == b"\t";
         (!default_report).then_some(TabularSpec {
             kind,
             fields,
@@ -482,7 +493,7 @@ impl TabularSpec {
             TabularSpec {
                 kind,
                 fields: STD_FIELDS.to_vec(),
-                delimiter: "\t".to_string(),
+                delimiter: b"\t".to_vec(),
             }
             .intern()
         })
@@ -997,7 +1008,7 @@ impl TabularSpec {
 
     /// `x_IsCsv`: the names are quoted when the delimiter is a comma.
     fn is_csv(&self) -> bool {
-        self.delimiter == ","
+        self.delimiter == b","
     }
 }
 
@@ -1981,7 +1992,7 @@ impl<'a> TabularWriter<'a> {
         let mut line = Vec::new();
         for (i, field) in self.spec.fields.iter().enumerate() {
             if i > 0 {
-                line.extend_from_slice(self.spec.delimiter.as_bytes());
+                line.extend_from_slice(&self.spec.delimiter);
             }
             line.extend_from_slice(field.name().as_bytes());
         }
@@ -2204,7 +2215,7 @@ impl<'a> TabularWriter<'a> {
         let subject_set = stage == FailedStage::SubjectIds;
         for (i, field) in spec.fields.iter().enumerate() {
             if i > 0 {
-                out.extend_from_slice(spec.delimiter.as_bytes());
+                out.extend_from_slice(&spec.delimiter);
             }
             if kept_by_failed_row(*field) {
                 match (kept, &names) {
@@ -2327,7 +2338,7 @@ impl<'a> TabularWriter<'a> {
         let names = RowNames::of(spec, subject);
         for (i, field) in spec.fields.iter().enumerate() {
             if i > 0 {
-                out.extend_from_slice(spec.delimiter.as_bytes());
+                out.extend_from_slice(&spec.delimiter);
             }
             match field {
                 QuerySeqId => out.extend_from_slice(query.id),

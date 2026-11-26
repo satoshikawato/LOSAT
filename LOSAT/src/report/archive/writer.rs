@@ -290,7 +290,7 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
         ParamValue::BigInteger(value) => enc.big_int(*value),
         ParamValue::Boolean(value) => enc.boolean(*value),
         ParamValue::Real(value) => enc.real(*value),
-        ParamValue::Str(value) => enc.visible_str(value.as_bytes()),
+        ParamValue::Str(value) => enc.visible_str(value),
         ParamValue::IntegerList(values) => {
             enc.begin_list(false);
             for &value in values {

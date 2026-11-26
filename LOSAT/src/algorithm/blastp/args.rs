@@ -226,7 +226,7 @@ pub struct BlastpArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
     // exclusion (`cli::reader`).
-    pub db: Option<String>,
+    pub db: Option<std::ffi::OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
@@ -314,15 +314,15 @@ pub struct BlastpArgs {
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
     pub window_size: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<std::ffi::OsString>,
     pub gap_open: Option<i32>,
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`).
-    pub comp_based_stats: String,
+    pub comp_based_stats: std::ffi::OsString,
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`);
     // an omitted value keeps the default of the task (no filtering).
-    pub seg: Option<String>,
+    pub seg: Option<std::ffi::OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
@@ -331,13 +331,13 @@ pub struct BlastpArgs {
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`check_options`).
-    pub query_loc: Option<String>,
+    pub query_loc: Option<std::ffi::OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<std::ffi::OsString>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    pub outfmt: String,
+    pub outfmt: std::ffi::OsString,
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
     /// reads the arguments (`archive::handle_for`).
     pub archive: Option<crate::report::archive::ArchiveHandle>,
@@ -566,7 +566,7 @@ pub struct ResolvedBlastpArgs {
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
     pub is_html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
-    pub db: Option<String>,
+    pub db: Option<Vec<u8>>,
     /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
     /// series NP, M4b).
     pub db_mask: Option<crate::blastinput::db_mask::DbMaskOption>,
@@ -673,7 +673,7 @@ pub struct ResolvedBlastpArgs {
     pub chaining: bool,
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
-    pub outfmt: String,
+    pub outfmt: std::ffi::OsString,
     /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
     pub archive: Option<crate::report::archive::ArchiveHandle>,
     /// The run's search strategy export (`BlastpArgs::strategy`), shared as the archive is.
@@ -830,10 +830,11 @@ impl BlastpArgs {
     /// sets for such a search; a gapped one refuses the name first).
     pub(crate) fn unknown_matrix_name(&self) -> bool {
         self.ungapped
-            && self
-                .matrix
-                .as_deref()
-                .is_some_and(|name| name.parse::<ScoringMatrix>().is_err())
+            && self.matrix.as_deref().is_some_and(|name| {
+                name.to_str()
+                    .and_then(|name| name.parse::<ScoringMatrix>().ok())
+                    .is_none()
+            })
     }
 
     /// The options as `check_options` resolves them, without NCBI's warnings.
@@ -870,8 +871,11 @@ impl BlastpArgs {
         // of a word size above 4) are the command line's, and a strategy's options keep the
         // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
         let command_line = self.import.is_none();
-        let (matrix_gap_open, matrix_gap_extend) = self
+        let matrix_bytes = self
             .matrix
+            .as_deref()
+            .map(crate::utils::os_bytes::os_str_bytes);
+        let (matrix_gap_open, matrix_gap_extend) = matrix_bytes
             .as_deref()
             .and_then(protein_gap_existence_extend_params)
             .unwrap_or((0, 0));
@@ -901,16 +905,22 @@ impl BlastpArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406 (the
         // filtering handler; `blastinput/app.rs` `parse_seg_option`)
         if let Some(seg) = &self.seg {
-            options.seg = crate::blastinput::app::parse_seg_option(seg)?;
+            options.seg = crate::blastinput::app::parse_seg_option(
+                crate::utils::os_bytes::os_str_bytes(seg),
+            )?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
         // The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"),
         // and no other handler of blastp sets `mask_at_hash`.
         let soft_masking = self.soft_masking.unwrap_or(false);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:634-639
-        if let Some(matrix) = &self.matrix {
-            options.matrix_name = matrix.clone();
-        }
+        let matrix_name_bytes: Vec<u8> = match matrix_bytes.as_deref() {
+            Some(bytes) => {
+                options.matrix_name = String::from_utf8_lossy(bytes).into_owned();
+                bytes.to_vec()
+            }
+            None => options.matrix_name.as_bytes().to_vec(),
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         // psiblast's programs (`ePSIBlast`, and `ePHIBlastp` with `-phi_pattern`) are not among
         // those whose threshold away from 11 counts as set (`s_IsDefaultWordThreshold`): theirs is
@@ -921,13 +931,12 @@ impl BlastpArgs {
         } else if command_line
             && (options.threshold as i32 == 11 || self.app == BlastpApp::Psiblast)
         {
-            options.threshold =
-                suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
+            options.threshold = suggested_threshold(SuggestionProgram::Protein, &matrix_name_bytes);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         options.window_size = match self.window_size {
             Some(window) => window,
-            None if command_line => suggested_window_size(&options.matrix_name),
+            None if command_line => suggested_window_size(&matrix_name_bytes),
             None => options.window_size,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
@@ -943,17 +952,22 @@ impl BlastpArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
-        let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
+        let choice = crate::blastinput::app::parse_formatting_string(
+            crate::utils::os_bytes::os_str_bytes(&self.outfmt),
+        )?;
         crate::blastinput::app::formatting_handler_check(
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
+        let db_name_bytes = self.db.as_deref().map(|db| {
+            crate::seqdb::db_argument_name_bytes(&crate::utils::os_bytes::os_str_bytes(db)).to_vec()
+        });
         let request_kind = self.app.request_kind();
         let html = crate::blastinput::app::html_links(
             self.html,
             request_kind,
             request_kind,
-            self.db.as_deref().map(crate::seqdb::db_argument_name),
+            db_name_bytes.as_deref(),
             &[choice.number],
         )?;
         // The hit list size and the counts of the pairwise report
@@ -976,7 +990,7 @@ impl BlastpArgs {
         // composition-based statistics handler; `blastinput/app.rs`)
         // The unified P-values are blastp's only (`program` is `eBlastp`, blast_args.cpp:880-883).
         let (mode, unified_p) = crate::blastinput::app::parse_comp_based_stats(
-            &self.comp_based_stats,
+            crate::utils::os_bytes::os_str_bytes(&self.comp_based_stats),
             self.app == BlastpApp::Blastp,
             self.ungapped,
         )?;
@@ -1161,7 +1175,7 @@ impl BlastpArgs {
             gapped: !self.ungapped,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
-            matrix_name: &options.matrix_name,
+            matrix_name: &matrix_name_bytes,
             threshold: options.threshold,
             word_size: options.word_size,
             compressed_lookup: options.lookup_table_type
@@ -1191,17 +1205,18 @@ impl BlastpArgs {
         // without IDENTITY's statistics table (`IDENTITYX`, exit 139): LOSAT refuses it, as BLASTX
         // does (`blastx::args`, ungapped searches only: a gapped one stops at NCBI's matrix error
         // first).
-        let matrix = options.matrix_name.parse::<ScoringMatrix>().ok();
+        let matrix = std::str::from_utf8(&matrix_name_bytes)
+            .ok()
+            .and_then(|name| name.parse::<ScoringMatrix>().ok());
         let unknown_matrix = matrix.is_none();
         if unknown_matrix {
             debug_assert!(
                 self.ungapped,
                 "validate_protein_options refuses an unknown matrix of a gapped search"
             );
-            if options
-                .matrix_name
+            if matrix_name_bytes
                 .get(..8)
-                .is_some_and(|start| start.eq_ignore_ascii_case("identity"))
+                .is_some_and(|start| start.eq_ignore_ascii_case(b"identity"))
             {
                 bail!(
                     "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP",
@@ -1216,7 +1231,7 @@ impl BlastpArgs {
         // entry of a search resolves the options (`matrix_search`).
         let matrix_file = match (&self.matrix_search, unknown_matrix) {
             (Some(search), true) => search
-                .file(&options.matrix_name)
+                .file(&matrix_name_bytes)
                 .map_err(anyhow::Error::msg)?,
             _ => None,
         };
@@ -1241,11 +1256,7 @@ impl BlastpArgs {
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // The name without the white space at its ends: what the reader resolves and
             // what the reports show.
-            db: self
-                .db
-                .as_deref()
-                .map(crate::seqdb::db_argument_name)
-                .map(str::to_string),
+            db: db_name_bytes,
             db_mask: self.db_mask.option(),
             db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572

@@ -261,3 +261,90 @@ fn ncbi8na_of_both_codings() {
     seq4na.push_iupacna(b"ACGTUN");
     assert_eq!(seq4na.into_bytes(), [0x12, 0x48, 0x8f]);
 }
+
+/// The scan's test of the best coding is `best_coding_iupacna` for every byte (the search finds
+/// the first byte a test holds for, `utils::byte_search`'s tests).
+#[test]
+fn the_scan_of_the_best_coding_is_the_table() {
+    for byte in 0..=u8::MAX {
+        let narrow = best_coding_iupacna(byte) == Coding::Ncbi2na;
+        assert_eq!(is_ncbi2na_best(byte), narrow, "{byte:#04x}");
+        assert_eq!(
+            BEST_IS_NCBI4NA[byte as usize],
+            u8::from(!narrow),
+            "{byte:#04x}"
+        );
+    }
+}
+
+/// `ncbi2na_code` returns the NCBI2na code for upper-case `A`, `C`, `G`, `T` and `U` (0 for
+/// every other byte), and `iupacna_to_ncbi2na` packs the codes four to a byte, the first in the
+/// high bits, for every length across its short and blocked paths and every byte at every place
+/// of a 4-base chunk.
+#[test]
+fn ncbi2na_codes_and_their_bytes() {
+    let row = |residue: u8| match residue {
+        b'C' => 1,
+        b'G' => 2,
+        b'T' | b'U' => 3,
+        _ => 0,
+    };
+    for byte in 0..=u8::MAX {
+        assert_eq!(ncbi2na_code(byte), row(byte), "{byte:#04x}");
+    }
+    let packed = |src: &[u8]| {
+        src.chunks(4)
+            .map(|four| {
+                four.iter().enumerate().fold(0u8, |byte, (i, &residue)| {
+                    byte | row(residue) << (6 - 2 * i)
+                })
+            })
+            .collect::<Vec<u8>>()
+    };
+    for byte in 0..=u8::MAX {
+        for at in 0..4 {
+            let mut short = b"ACGT".to_vec();
+            short[at] = byte;
+            assert_eq!(
+                iupacna_to_ncbi2na(&short),
+                packed(&short),
+                "short {byte:#04x} {at}"
+            );
+            let mut blocked = b"ACGT".repeat(10);
+            blocked[at] = byte;
+            assert_eq!(
+                iupacna_to_ncbi2na(&blocked),
+                packed(&blocked),
+                "blocked {byte:#04x} {at}"
+            );
+        }
+    }
+    let src: Vec<u8> = (0..1100usize).map(|i| b"ACGTUGCAAT"[i * 7 % 10]).collect();
+    for len in (0..=600).chain([1023, 1024, 1025, 1100]) {
+        assert_eq!(
+            iupacna_to_ncbi2na(&src[..len]),
+            packed(&src[..len]),
+            "{len}"
+        );
+    }
+}
+
+/// `pack_four_codes` packs every quadruple of 2-bit codes `(c0..=c3)` in `0..4` into
+/// `(c0 << 6) | (c1 << 4) | (c2 << 2) | c3`.
+#[test]
+fn pack_four_codes_matches_all_256_quadruples() {
+    for c0 in 0..4u8 {
+        for c1 in 0..4u8 {
+            for c2 in 0..4u8 {
+                for c3 in 0..4u8 {
+                    let expected = (c0 << 6) | (c1 << 4) | (c2 << 2) | c3;
+                    assert_eq!(
+                        pack_four_codes([c0, c1, c2, c3]),
+                        expected,
+                        "{c0} {c1} {c2} {c3}"
+                    );
+                }
+            }
+        }
+    }
+}

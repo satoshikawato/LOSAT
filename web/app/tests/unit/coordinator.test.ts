@@ -1100,6 +1100,71 @@ describe('Coordinator', () => {
     expect(run.ok).toBe(true);
     expect(seen).toEqual([true, true]);
   });
+
+  const addIndexed = async (data: DataGateway, name: string, text: string) => {
+    const source = await data.addSource(new File([text], name));
+    return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
+  };
+
+  it('shares the bytes of the same revisions across programs of the same reader kind', async () => {
+    let builds = 0;
+    const { coordinator, data } = setup(new FakeEngine(), (d) => {
+      const gateway = Object.create(d) as DataGateway;
+      gateway.buildRunInput = (ids) => {
+        builds++;
+        return d.buildRunInput(ids);
+      };
+      return gateway;
+    });
+    const subject = await addIndexed(data, 's.fa', '>s1\nACGT\n>s2\nGGCC\n');
+    const query = await addIndexed(data, 'q.fa', '>q\nACGT\n');
+    const result = await coordinator.enqueueAll([
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, program: 'tblastx', query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+    ]);
+    expect(result.ok).toBe(true);
+    const [a, b] = result.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(builds).toBe(2);
+    expect(a!.query.bytes).toBe(b!.query.bytes);
+    expect(a!.subject.bytes).toBe(b!.subject.bytes);
+  });
+
+  it('records engine readRecords on RunRecord when an assembled input reads differently at register (D17)', async () => {
+    const engine = new FakeEngine();
+    const realRun = engine.run.bind(engine);
+    let sawAssembled: boolean | undefined;
+    engine.run = async (req, output, onPhase) => {
+      sawAssembled = req.query.assembled;
+      const info = await realRun(req, output, onPhase);
+      return { ...info, readRecords: { query: [{ id: 'q1', length: 120 }] } };
+    };
+    const { coordinator, data } = setup(engine);
+    const q1 = await addIndexed(data, 'q1.fa', '>q1\nACGTACGT\n');
+    const q2 = await addIndexed(data, 'q2.fa', '>q2\nGGCCGGCC\n');
+    const s = await addIndexed(data, 's.fa', '>s1\nACGTACGT\n');
+    const queued = await coordinator.enqueue({
+      ...request,
+      query: {
+        dataset: {
+          revisionIds: [q1, q2],
+          from: [
+            { name: 'q1.fa', records: 1, leftOut: [], leftOutCount: 0 },
+            { name: 'q2.fa', records: 1, leftOut: [], leftOutCount: 0 },
+          ],
+        },
+      },
+      subject: { dataset: { name: 's.fa', revisionIds: [s] } },
+    });
+    expect(queued.ok).toBe(true);
+    await waitFor(coordinator, queued.runId!, 'completed');
+    expect(sawAssembled).toBe(true);
+    const view = viewOf(coordinator, queued.runId!)!;
+    expect(view.snapshot.query.records).toEqual([
+      { id: 'q1', length: 8 },
+      { id: 'q2', length: 8 },
+    ]);
+    expect(view.record.readRecords).toEqual({ query: [{ id: 'q1', length: 120 }] });
+  });
 });
 
 // --- saved counts held by the runs that read them -------------------------------------------------

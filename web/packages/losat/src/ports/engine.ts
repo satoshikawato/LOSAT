@@ -164,6 +164,15 @@ export interface RuntimeInfo {
    * argv whose start `prints` (line WQA's D14, 2026-11-20).
    */
   readonly printed?: Uint8Array;
+  /**
+   * The records that the engine read at `register` for an assembled input (`EngineInput.assembled`)
+   * when they differ from the request's per-file record table (`EngineInput.records`; line WQA's D17).
+   * Absent when the engine read the same records as the table.
+   */
+  readonly readRecords?: {
+    readonly query?: readonly RecordKey[];
+    readonly subject?: readonly RecordKey[];
+  };
 }
 
 /** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */
@@ -176,9 +185,17 @@ export interface EngineInput {
   /**
    * ID and length of each record in `bytes`, from the data layer's index scan. After
    * `register`, the engine compares the records its own parser read with these and fails
-   * the run with InputMismatchError, before searching, if they differ (plan §5.4).
+   * the run with InputMismatchError, before searching, if they differ (plan §5.4), unless
+   * `assembled` is true.
    */
   readonly records: readonly RecordKey[];
+  /**
+   * Whether `bytes` was assembled from parts (several sources joined, or a source with records
+   * left out; line WQA's D17). Because NCBI's line reader keeps line-end state across parts,
+   * reading `bytes` as one file can differ from the per-file tables in `records`: the engine
+   * accepts what `register` read and returns it in `RuntimeInfo.readRecords`.
+   */
+  readonly assembled?: boolean;
 }
 
 export interface EngineRunRequest {

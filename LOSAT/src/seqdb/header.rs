@@ -18,9 +18,8 @@ use std::path::Path;
 
 use super::SeqDbError;
 use crate::seqid::ber::{
-    fix_visible_chars, int_list, replaced_bytes, BerError, Reader, DEFLINE_LAST_MEMBER,
-    DEFLINE_MEMBERS, DEFLINE_SEQID, DEFLINE_TAXID, DEFLINE_TITLE, TAG_CONTEXT_CONSTRUCTED,
-    TAG_SEQUENCE,
+    fix_visible_chars, int_list, BerError, Reader, DEFLINE_LAST_MEMBER, DEFLINE_MEMBERS,
+    DEFLINE_SEQID, DEFLINE_TAXID, DEFLINE_TITLE, TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
 use crate::seqid::DeflineSet;
 
@@ -146,6 +145,12 @@ pub fn decode_deflines_as(
 /// volume-relative tag.
 pub fn decode_full(record: &[u8], path: &Path) -> Result<DeflineSet, SeqDbError> {
     crate::seqid::ber::decode_full_set(record).map_err(|error| format_error(error, path))
+}
+
+/// [`decode_full`] written over `set`, whose buffers are kept
+/// (`seqid::ber::decode_full_set_in`).
+pub fn decode_full_in(record: &[u8], path: &Path, set: &mut DeflineSet) -> Result<(), SeqDbError> {
+    crate::seqid::ber::decode_full_set_in(record, set).map_err(|error| format_error(error, path))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:51-69
@@ -326,10 +331,12 @@ fn decode_defline(
     let Some(volume_ordinal) = volume_ordinal.filter(|&ordinal| ordinal == oid) else {
         return Err(HeaderError::ParsedSeqIds);
     };
+    let mut title = Vec::with_capacity(stored_title.len());
+    let replaced_title_bytes = fix_visible_chars(stored_title, &mut title);
     Ok(Defline {
-        title: fix_visible_chars(stored_title),
+        title,
         volume_ordinal,
-        replaced_title_bytes: replaced_bytes(stored_title),
+        replaced_title_bytes,
         taxid,
         utf8: false,
     })

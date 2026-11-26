@@ -330,22 +330,34 @@ export class EngineRuntime {
       }
       let handles: readonly [number, number] = [0, 0];
       let subjectRetained = false;
+      let readQuery: readonly RecordKey[] | undefined;
+      let readSubject: readonly RecordKey[] | undefined;
       if (!prints) {
         const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, false, request.query.bytes);
         query = registered.handle;
         const queryMismatch = recordMismatch(request.query.records, registered.records);
-        if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
+        if (queryMismatch !== undefined) {
+          if (request.query.assembled === true) readQuery = registered.records;
+          else throw new InputMismatchError('query', queryMismatch);
+        }
         const given = request.subject;
         subjectRetained = given !== undefined && together === undefined && this.retains(loaded, given, dataLoaders);
         let subjectHandle = 0;
         if (given !== undefined) {
           const subject = together?.subject ?? this.subject(loaded, given, request.program, dataLoaders);
           const subjectMismatch = recordMismatch(given.records, subject.records);
-          if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+          if (subjectMismatch !== undefined) {
+            if (given.assembled === true) readSubject = subject.records;
+            else throw new InputMismatchError('subject', subjectMismatch);
+          }
           subjectHandle = subject.handle;
         }
         handles = [registered.handle, subjectHandle];
       }
+      const readRecords =
+        readQuery === undefined && readSubject === undefined
+          ? undefined
+          : { ...(readQuery === undefined ? {} : { query: readQuery }), ...(readSubject === undefined ? {} : { subject: readSubject }) };
       const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
@@ -400,6 +412,7 @@ export class EngineRuntime {
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
         ...(runFiles.length === 0 ? {} : { runFiles }),
         ...(prints ? { printed: joined(printed) } : {}),
+        ...(readRecords === undefined ? {} : { readRecords }),
       };
     } finally {
       if (abi.stoppedBy === undefined) {

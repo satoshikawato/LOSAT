@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.110
+- Version: 1.113
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -374,10 +374,9 @@
   the explicit rejections, rule 3, of a binary PSSM's string or byte block whose length passes the
   end of the file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are
   missing or whose number is not its Seq-inst's `length`, on which NCBI crashes or writes past its
-  buffer for most lengths and which it answers for one less than the letters, an answer LOSAT does
-  not yet give; and a refusal that is not a
-  rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
-  yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
+  buffer for most lengths and which it answers for one less than the letters, an answer that LOSAT gives
+  since line PS item PS7c; Karlin-Altschul values that are not finite numbers are searched as NCBI
+  does since PS7c; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.76; first 1.71, then 1.72, 1.74, 1.76 and 1.77 at the merges of dev that brought line DBID item
   pfoff-3's 1.71, line NP items M5a and M5b's 1.72 and line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74 and
   line NP item M5's 1.75, then line RG item X4b-2's 1.76);
@@ -768,10 +767,51 @@
   NCBI's `std::sort` violates strict weak ordering or depends on the C++ library's sort steps;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.108 at
   the merge of dev that brought 1.108 (line RG item X-short-bat-2); first 1.105, then 1.108);
-  1.110 2026-11-26 (exception 31, `losat blastdbcheck` alias count checks and `-ends`/`-stride` OID
-  arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and empty CDD profile
-  files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54 JST, Q-D2b-OV=A;
-  numbered after 1.109 at the merge of dev that brought 1.109 (line RG item D1c-2))
+  1.110 2026-11-24 (BLASTN and BLASTX, line RG item X-short-bat-2: their rejections inside the search
+  of a query batch come after the reports of the query batches before, in NCBI's order: a query
+  chunk without a query (in BLASTN also a negative `CHUNK_SIZE` whose first range covers the batch,
+  in BLASTX every negative pair that splits a batch) and, in BLASTX, a chunk split again, at NCBI's
+  split, before the errors of the database that NCBI meets in a chunk's setup; BLASTN's rejection
+  of a negative pair whose chunks leave gaps (version 1.1) at TBLASTN's step of 1.97, where the
+  search of the batch's first chunk with a valid context would read subjects in hand whose
+  sequences can be read; BLASTX's rejection of an overlap that is not a multiple of 3 only with
+  such subjects (a batch without them is reported, or fails, as NCBI's is); the fetch rejections
+  under a negative seqid list of 1.93 and BLASTX's rejection of the compressed-lookup thresholds
+  that exhaust NCBI's overflow banks (decision D3, LOSAT's rejection with exit status 1, no
+  longer reported as an engine error) after the same reports; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.109; first 1.99, then 1.109 at the merge of dev that brought 1.99 to 1.108,
+  then 1.110 at the merge of dev of 2026-11-26 that brought 1.109, line RG item D1c-2);
+  1.111 2026-11-24 (approved exception 31, the Spouge cutoff search past `Int4`, psiblast line item
+  PS7c: psiblast and tblastn `-in_pssm` search for the score of the hit-saving cutoff
+  (`BLAST_SpougeEtoS`) without the signed overflow of its `Int4` doubling and bisection; the Owner's
+  answer of 2026-11-24, 12:44 JST, 「Q-PS7c-SPOUGE=B」; the explicit rejection of these Lambdas that the
+  item's fix round 1 had built, never on dev, removed; numbered after 1.110; first 1.99, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.104 at the
+  merge of dev of 2026-11-25 that brought 1.100, line RG item KC-11d, 1.101, line RG item D5c (which
+  took the number 30 for its exception), 1.102, psiblast line item PS10e, and 1.103, line RG item
+  K10a, then 1.105 at the merge of dev of 2026-11-25 that brought 1.104, line NP item M4b-T3, then
+  1.106 at the merge of dev of 2026-11-25 that brought 1.105, psiblast line item PS10b, then 1.107 at
+  the merge of dev of 2026-11-25 that brought 1.106, line NP item M4b-3c part 2, then 1.108 at the
+  merge of dev of 2026-11-26 that brought 1.107, line NP item M (b), then 1.109 at the merge of dev of
+  2026-11-26 that brought 1.108, line RG item X-short-bat-2, then 1.110 at the merge of dev of
+  2026-11-26 that brought 1.109, line RG item D1c-2, then 1.111 at the merge of dev of
+  2026-11-26 that brought 1.110, line RG item X-short-bat-2; this item's exception was 30 until
+  the 1.104 merge);
+  1.112 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
+  explicit rejections, rule 3, of a nucleotide ASN.1 sequence whose `Seq-data` (`iupacna`,
+  `ncbi2na` or `ncbi4na`) is shorter than `Seq-inst.length` asks for (including a `-hash_index`
+  read of 1 to 3 packed tail bases past the data, class of 1.86), of `NULL` elements inside
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set`, or
+  `Blast-def-line.seqid` and an empty `Delta-ext` list (class of 1.45 and 1.52), and of a
+  punctuation-only Bioseq title that NCBI's `x_CleanAndCompress` reads past the end of (class of
+  1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.111 at the merge of dev that brought line RG item X-short-bat-2's 1.110 (#1647) and
+  psiblast line item PS7c's 1.111; first 1.105, then 1.106, 1.107, 1.108, 1.109 and 1.110);
+  1.113 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
+  `-ends`/`-stride` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and
+  empty CDD profile files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
+  JST, Q-D2b-OV=A; numbered after 1.112 at the merge of dev that brought 1.110 to 1.112; first
+  1.109, then 1.110, exception 31 until 1.111 took 31)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1008,10 +1048,18 @@ Explicit rejections (rule 3):
   status 0), in BLASTP, psiblast and TBLASTN. A refused batch of two queries with one id that NCBI splits
   gives NCBI's error where its chunks reach the setup's failure, and the refusal where a chunk
   stops first.
+  BLASTX (version 1.110, line RG item X-short-bat-2, rows `db.xs.blastx.bat.*`) refuses a chunk
+  split again and a chunk without a query at NCBI's split, after the reports of the query batches
+  before and before the database's errors of a chunk's setup; every negative pair that splits a
+  BLASTX batch leaves such chunks (BLASTX evens the chunk size to a multiple of 3 and does not
+  adjust it again, so chunk 0 covers the batch). Its rejection of an overlap that is not a
+  multiple of 3, whose chunks NCBI searches out of the query's reading frames, comes after the same
+  reports, only where the batch has subjects in hand whose sequences can be read.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
-  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
+  batch whose table exhausts it, after the reports of the batches before; in BLASTX since version
+  1.110, after the reports of the query batches before, exit status 1). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -2555,13 +2603,23 @@ file would differ, and NCBI's programs still could not open the database).
   rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
   `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
-  variables and so does LOSAT (fixtures `env.negative_pair_*`).
+  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since version 1.110 the rejection
+  comes after the reports of the query batches before (line RG item X-short-bat-2, rows
+  `db.xs.blastn.bat.*`): a pair whose first range covers the batch leaves the chunks after it
+  without a query, where NCBI's split stops (the next item); a pair whose chunks all hold a query
+  and leave gaps is refused where the search of the batch's first chunk with a valid context would
+  read subjects in hand whose sequences can be read, after that chunk's setup and the reads of the
+  database that fail before it (TBLASTN's step of 1.97); a batch without such subjects is reported
+  as NCBI reports it.
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
   query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
   (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all).
+  oracle cases, the reason holds in all). Since version 1.110 the rejection comes where
+  `CQuerySplitter::Split` stops, after the reports of the query batches before and before the
+  setup of any chunk and its read of the database, also with no subject in hand (rows
+  `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -3320,27 +3378,26 @@ file would differ, and NCBI's programs still could not open the database).
   reserve that throws is posted first (`Error: (803.4) [psiblast] unended byte block`), as in
   NCBI (rows `db.ber.ps.block_*`). A query whose letters are missing or whose number is not the
   `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than its
-  Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
+  Seq-inst (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one letter more than the Seq-inst's length) is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
   for a query of 30 letters NCBI 2.17.0's psiblast ends by a signal with the lengths 31, 60 and
   255 (SIGSEGV), 0, 1, 2, 10 and 4,294,967,295 (SIGABRT), and writes past its buffer with 28
   (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
   (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
-  the PSSM, and its E-values are those of a query of 29 letters. LOSAT does not yet give that
-  answer (the PSSM of 30 columns over a query of 29 letters belongs to line PS: hand-off
-  `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md` of line RG), so it is refused too. Not a rule-3 item but
+  the PSSM, and its E-values are those of a query of 29 letters. LOSAT gives that answer since
+  line PS item PS7c (the query is searched as its first 29 letters), and refuses the other lengths. Not a rule-3 item but
   a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
   in a delay buffer and reads again only while it writes them, where that read posts a message or
   fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
   UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
   the file, so the second read posts nothing and the names are written. Also not a rule-3 item
   but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
-  `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
-  whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,
-  E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) ..."). NCBI goes on with them
-  (E-values 0.0, bit scores `inf` or -1.0); LOSAT's search wrote NaN or found other hits, and its
-  arithmetic of these values belongs to line PS (hand-off `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`
-  of line RG), which lifts the refusal when it computes NCBI's output. `MINUS-INFINITY` stays in the
-  refusal of a negative gapped value above. Tests:
+  `kappa` or `h` of `NOT-A-NUMBER`, a negative gapped value, and psiblast's `lambdaUngapped` of
+  `PLUS-INFINITY` were refused here while LOSAT did not compute NCBI's output of them. Since line PS
+  item PS7c LOSAT does: NCBI goes on with these values (E-values 0.0, bit scores `inf` or -1.0) and
+  so does LOSAT, so none of them is refused for what it is. A gapped `lambda` below 0 (a finite one)
+  or so small that NCBI's search for the score of the hit-saving cutoff (`BLAST_SpougeEtoS`) doubles
+  or adds its `Int4` scores past 2^31 - 1 is searched without that signed overflow: approved
+  exception 31 (the Spouge cutoff search past `Int4`). Tests:
   `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
   `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
   `db.ber.ps.*` and `db.ber.tbn.*`.
@@ -4109,6 +4166,19 @@ file would differ, and NCBI's programs still could not open the database).
   `db.il.bp.v5.sq.uns.*`, `db.il.bp.v5.sq.amb1.plain.6`, and `db.il.bp.v5.sq.nslamb.6` of
   `LOSAT/tests/db_search_manifest/blastp.il.tsv`; unit test
   `v5_rejects_non_strict_weak_equivalent_seqid_pairs` in `LOSAT/src/seqdb/alias_tests.rs`.
+- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.112, 2026-11-25,
+  line RG item D3c-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07):
+  (a) a nucleotide `Bioseq` whose `iupacna`, `ncbi2na` or `ncbi4na` `Seq-data` holds fewer bytes or
+  letters than `Seq-inst.length` asks for (including a `-hash_index` `CSeqVector` read of 1 to 3
+  packed tail bases past the end of `ncbi2na`/`ncbi4na` data), where `WriteDB_Ncbi4naToBinary`,
+  `WriteDB_Ncbi2naToBinary` and `copy_2bit_any`/`copy_4bit_any` read past the buffer (class of
+  1.86; fixture `llong.asn`); (b) a list element stated as `NULL` (`05 00` in BER) in
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set` or
+  `Blast-def-line.seqid`, or an empty `Delta-ext` list, where NCBI dereferences a null pointer or
+  `dext.Get().front()` (`build_db.cpp:309`) and crashes (class of 1.45 and 1.52); and (c) a
+  punctuation-only Bioseq title that `CDeflineGenerator::x_CleanAndCompress` reads past the end of
+  and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
+  partial build (`erase_after_refusal`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -4592,28 +4662,6 @@ hits into the list that NCBI frees.
     (`rand_d5c2.py`, 267 databases of 2 to 9 volumes, `CHUNK_SIZE` 600 to 2,500, 1 and 4 threads):
     each LOSAT run gave NCBI's output.
 
-31. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
-    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.110).** NCBI BLAST+ 2.17.0
-    computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
-    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
-    (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where
-    products such as `(FIRST_OID + 1) * (LAST_OID + 1)` (e.g. `65535 * 65535`) or `num_oids - n`
-    for `-ends -2147483648` overflow signed integer arithmetic (undefined behavior in C++): NCBI's
-    x86-64 build wraps them to negative or zero values, emitting false alias errors (rows `a_ov1`
-    and `a_ov2`) or wrapping `-ends -2147483648` back into the valid OID range (row `ends_intmin`,
-    passing exit 0 while nearby `-ends -2147483638` jumps to `oid 2147483647` and fails with
-    `OID not found`). On 2026-11-25 17:54 JST (`qbatch-20261125/ANSWERS.md`), the Owner chose
-    option A (`Q-D2b-OV=A`: 「A: 広い型で正確に計算し誤判定を出さない（PD に新例外）」): LOSAT computes the
-    alias count expressions in 128-bit signed integers (`blastdbcheck::alias::check_values`) and
-    `-ends`/`-stride` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
-    signed overflow and producing exact results (`a_ov1` and `a_ov2` pass with exit 0 while keeping
-    non-overflow warnings such as `.msk` extension warnings; `ends_intmin` jumps past the volume
-    to `oid 2147483657` and fails with `OID not found`, matching nearby `-ends -2147483638`).
-    Not taken: (B) reproducing NCBI's signed wraparound; (C) refusing overflowing inputs. Under
-    rule 3, `blastdbcheck -cdd_delta` also refuses empty (0-byte) `.loo`, `.rps`, `.freq`,
-    `.wcounts`, and `.obsr` profile files (row `c_rps0`, where NCBI dereferences a null memory
-    mapping and crashes with exit status 139).
-
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 
 Version 1.82, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
@@ -4637,6 +4685,81 @@ past `Int4`)". Psiblast line item PS10a.
     after the scaling stays refused (rule 3). The recursion is the one psiblast and tblastn
     `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
     threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
+
+## Approved exception 31 (psiblast and tblastn `-in_pssm`, the Spouge cutoff search past `Int4`, version 1.111)
+
+Decided by the Owner on 2026-11-24 at 12:44 JST, 「Q-PS7c-SPOUGE=B」 (one answer of the batch 「Q-AGVI-CAP=A
+Q-FM-R2=B Q-D23=A Q-KD-1=A Q-MIXIDX=C Q-GBHELP=A Q-DL-TIE=B Q-DL-QLOC=B Q-PS7c-SPOUGE=B Q-PS10e=A」; psiblast line
+`DECISIONS.md` 103 and 104). The option chosen reads 「Owner 10-10 の「符号付きオーバーフローは広げる」方針（承認例外 17 の
+culling と同じ形）で数学的に正しい値へ広げ、PD 例外として記録する」: under the Owner's rule of 2026-10-10 that a signed
+overflow is widened, in the form of the culling limit's exception 4 (line NP entry 17 of `docs/decisions/OWNER_DECISIONS.md`, 「広い型になおしましょう」),
+the overflowing values are computed as their mathematical values and recorded here as an exception. Not taken: option
+A, the explicit rejection at the overflow that line PS item PS7c's fix round 1 had built (never on dev). Its version
+is in the list at the top; elsewhere it is cited by its number and name, "approved exception 31 (the Spouge cutoff
+search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
+
+31. **A gapped Lambda for which NCBI's search for the hit-saving cutoff passes `Int4`.** With the Gumbel block of
+    the search's matrix, the hit-saving cutoff is the score of the preliminary e-value that `BLAST_SpougeEtoS`
+    searches for (`blast_parameters.c:931-945`): from `b = MAX((int)(log(db_length / e) / Lambda), 2)` it doubles
+    `b` while the e-value of `b` is above `e`, then bisects (`c = (a + b) / 2`) down to the score `a`
+    (`blast_stat.c:5236-5269`), all in `Int4`. The gapped Lambda of a matrix keeps the search far below 2^30 at
+    every e-value; a PSSM file's gapped Lambda (psiblast and tblastn `-in_pssm`, `kbp_gap_psi`) need not. The cutoff
+    is about t / Lambda, where t (7.4 for the PSSM of 30 letters of the rows below, at `-evalue 10` against
+    `tests/db_search/paja`) depends on the e-value, the lengths and the Gumbel block, so it passes 2^31 - 1 below
+    about 3.4e-9 for that PSSM; with a Lambda below 0 the e-value grows with the score and no score reaches `e`.
+    Then `b *= 2` or `a + b` overflows (signed overflow, undefined behaviour). NCBI BLAST+ 2.17.0's x86-64 build
+    (under gdb): at the doubling with a small positive Lambda (1e-9, 1e-300) it wraps `b` to `INT_MIN`, then to 0,
+    and never ends; at the doubling with a negative Lambda (-0.5) it wraps `b` to `INT_MIN`, whose e-value is 0,
+    and returns 2^30 (1,073,741,824) as the cutoff; at the bisection (psiblast 5e-9 to 7e-9, tblastn 4e-9 and 5e-9
+    here) it wraps the sum, takes it as the lower bound and returns a negative cutoff (psiblast 6e-9: 733,828,724 +
+    1,467,657,448, the cutoff -1,046,740,562; tblastn 4e-9: 876,829,330 + 1,753,658,660, -832,239,653), with which
+    every ungapped hit starts a gapped extension and every gapped HSP passes the cutoff. LOSAT takes NCBI's steps
+    with `b`, `a + b` and the scores in 64 bits (`stats::spouge::blast_spouge_etos`, from NCBI's first bound, its
+    cast of the double as `core::blast_util::ncbi_int4_from_double`): a search inside `Int4` gives NCBI's score, a
+    bisection past it its score in 64 bits (psiblast 6e-9: 1,231,258,856; tblastn 4e-9: 1,689,538,156), and a
+    search whose lower bound `a`, a score whose e-value is above `e` that no step lowers, passes 2^31 - 1 ends
+    there with `i32::MAX`, the cutoff of NCBI's context that saves nothing (`blast_parameters.c:920`): the cutoff is
+    then above every `Int4` score (psiblast 1e-9: about 7.4e9; 1e-300: about 4.7e300; -0.5: none). So the doubling
+    runs at most 31 times and the bisection at most 33, for every Lambda. With the PSSM of the rows below,
+    whose alignments score far below these cutoffs, each report has no hits.
+    Where NCBI ends, its wrapped cutoff keeps no hit either and LOSAT writes its bytes (rows
+    `db.ps7c.ps.lambda_6e-9`, `db.ps7c.ps.lambda_neg`, `db.ps7c.tbn.lambda_4e-9` and `db.ps7c.tbn.lambda_neg`, and
+    their outfmt 0 rows `.0`). Where NCBI never ends (1e-9), LOSAT writes the bytes of NCBI's run of the near
+    Lambda 8e-9, whose search stays inside `Int4` (the cutoffs 923,444,142 and 844,769,078) and which reports no
+    hits either, with X-drops of 1 bit that NCBI's kernels size (rows `db.ps7c.ps.lambda_1e-9` and
+    `db.ps7c.tbn.lambda_1e-9`, outfmt 7, which prints neither; in outfmt 0 LOSAT's report is the 8e-9 report with
+    the footer's Lambda of the file). NCBI's runs of the bisection and of the negative Lambda gap every ungapped
+    hit; LOSAT's keep NCBI's cutoff of the words (the gap trigger) and spend no time there.
+    `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
+    Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
+
+## Approved exception 32 (`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed overflow, version 1.113)
+
+Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
+Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
+The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さない（PD に新例外）」. Not taken: (B) reproducing
+NCBI's signed wraparound; (C) refusing overflowing inputs.
+
+32. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.113).** NCBI BLAST+ 2.17.0
+    computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
+    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
+    (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where
+    products such as `(FIRST_OID + 1) * (LAST_OID + 1)` (e.g. `65535 * 65535`) or `num_oids - n`
+    for `-ends -2147483648` overflow signed integer arithmetic (undefined behavior in C++): NCBI's
+    x86-64 build wraps them to negative or zero values, emitting false alias errors (rows `a_ov1`,
+    `a_ov2`, and `-dir .` rows `a_dir` and `a_dir_v1` that visit them) or wrapping `-ends -2147483648`
+    back into the valid OID range (row `ends_intmin`, passing exit 0 while nearby `-ends -2147483638`
+    jumps to `oid 2147483647` and fails with `OID not found`). LOSAT computes the alias count
+    expressions in 128-bit signed integers (`blastdbcheck::alias::check_values`) and
+    `-ends`/`-stride` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
+    signed overflow and producing exact results (`a_ov1` and `a_ov2` pass with exit 0 while keeping
+    non-overflow warnings such as `.msk` extension warnings; `a_dir` and `a_dir_v1` drop those two
+    false errors and report 19 alias errors and 37 total errors instead of 21 and 39; `ends_intmin`
+    jumps past the volume to `oid 2147483657` and fails with `OID not found`, matching nearby
+    `-ends -2147483638`). Under rule 3, `blastdbcheck -cdd_delta` also refuses empty (0-byte)
+    `.loo`, `.rps`, `.freq`, `.wcounts`, and `.obsr` profile files (row `c_rps0`, where NCBI
+    dereferences a null memory mapping and crashes with exit status 139).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

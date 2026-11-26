@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "s1" }, descr { title "second file" }, inst { repr raw, mol dna, length 4, seq-data iupacna "TTTT" } }

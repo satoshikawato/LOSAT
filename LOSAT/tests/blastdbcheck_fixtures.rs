@@ -36,15 +36,12 @@ const LOSAT_REFUSES: [&str; 8] = [
     "strideneg",
 ];
 
-/// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
-/// them: `MEMB_BIT` (D1d); `-dir .` of the alias rows meets `membx.pal`.
-const AWAITING_READER: [&str; 3] = ["a_membx", "a_dir", "a_dir_v1"];
-
-/// Rows covered by approved exception `Q-D2b-OV=A` (`PD-LOSAT-NCBI-DEFECTS`, Owner decision
-/// 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and wraps to produce
-/// a false error (`a_ov1`, `a_ov2`) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the
-/// calculation and reports the exact result (NCBI's frozen output stays beside it for provenance).
-const APPROVED_WIDENED_OVERFLOW: [&str; 3] = ["a_ov1", "a_ov2", "ends_intmin"];
+/// Rows covered by approved exception 32 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.113,
+/// Owner decision 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and
+/// wraps to produce false alias errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`, `a_dir_v1`
+/// that visit them) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the calculation and
+/// reports the exact result (NCBI's frozen output stays beside every row for provenance).
+const APPROVED_WIDENED_OVERFLOW: [&str; 5] = ["a_ov1", "a_ov2", "a_dir", "a_dir_v1", "ends_intmin"];
 
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {
@@ -449,16 +446,36 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Every list of rows that LOSAT must refuse.
-const REFUSAL_LISTS: [&[&str]; 2] = [&LOSAT_REFUSES, &AWAITING_READER];
+const REFUSAL_LISTS: [&[&str]; 1] = [&LOSAT_REFUSES];
 
 fn must_refuse(name: &str) -> bool {
     REFUSAL_LISTS.iter().any(|list| list.contains(&name))
 }
 
 /// Expected LOSAT output for an approved widened-overflow row (`Q-D2b-OV=A`,
-/// `PD-LOSAT-NCBI-DEFECTS`): exact arithmetic avoids NCBI's signed overflow false error, keeping
-/// all non-overflow warnings (`a_ov2` `.msk` extension warning) and returning exit status 0.
+/// `PD-LOSAT-NCBI-DEFECTS` exception 32): exact arithmetic avoids NCBI's signed overflow false
+/// errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`/`a_dir_v1` that visit them) and negative
+/// wraparound (`ends_intmin`), keeping every other line and warning identical to NCBI.
 fn expected_widened(name: &str) -> Run {
+    if matches!(name, "a_dir" | "a_dir_v1") {
+        let (out, err, rc, files) = expected(name);
+        let text = String::from_utf8(out).unwrap();
+        let adjusted = text
+            .replace(
+                "  <RUN>/cases/a/ov1.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID\n",
+                "",
+            )
+            .replace(
+                "  <RUN>/cases/a/ov2.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ\n",
+                "",
+            )
+            .replace(
+                " Result=FAILURE. 21 errors reported in 26 alias(es).\n",
+                " Result=FAILURE. 19 errors reported in 26 alias(es).\n",
+            )
+            .replace("Total errors: 39\n", "Total errors: 37\n");
+        return (adjusted.into_bytes(), err, rc, files);
+    }
     let alias_ok = |alias: &str, warn: &str| -> Vec<u8> {
         let mut s = String::from(concat!(
             "Writing messages to <stdout> at verbosity (Detailed)\n",

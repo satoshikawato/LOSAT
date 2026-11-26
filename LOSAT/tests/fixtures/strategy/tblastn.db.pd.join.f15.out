@@ -1,0 +1,111 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_snucl"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NP_000001.1",
+          "query_title": "first",
+          "query_len": 50,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 965,
+            "hsp_len": 13,
+            "eff_space": 10915,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_snucl"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NP_000001.1",
+          "query_title": "first",
+          "query_len": 50,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "sn2 subject nucleotide beta reverse"
+                }
+              ],
+              "len": 477,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 13.0826,
+                  "score": 22,
+                  "evalue": 1.97413,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 31,
+                  "query_to": 43,
+                  "hit_from": 358,
+                  "hit_to": 396,
+                  "hit_frame": 1,
+                  "align_len": 13,
+                  "gaps": 0,
+                  "qseq": "PSLEGWNGRQFYD",
+                  "hseq": "PSLQPLAHTVFWD",
+                  "midline": "PSL+      F+D"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 965,
+            "hsp_len": 14,
+            "eff_space": 13478,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

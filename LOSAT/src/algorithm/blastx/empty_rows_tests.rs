@@ -112,7 +112,6 @@ fn record(sequence: &str) -> super::super::input::FastaRecord {
         title: Vec::new(),
         sequence: sequence.as_bytes().to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

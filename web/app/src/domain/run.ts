@@ -1,6 +1,6 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
+import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, SequenceKind, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
 import type { ToolId, WindowMaskerStage } from './tools';
 
@@ -87,6 +87,28 @@ export interface ConffileSnapshot {
   readonly sha256: string;
 }
 
+/** Metadata of one database filter list file (`-seqidlist`, `-taxidlist`, etc.) mounted for a `-db` run. */
+export interface DatabaseFilterFileSnapshot {
+  readonly flag: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+/** Metadata of a local BLAST database (`-db` or BLASTN `-filtering_db`) fixed when a run is queued. */
+export interface DatabaseSnapshot {
+  /** Exact relative path passed to `-db` or `-filtering_db` (e.g. `mydb/nt_small`). */
+  readonly name: string;
+  readonly folder?: string;
+  readonly kind: SequenceKind;
+  readonly fileCount: number;
+  readonly totalBytes: number;
+  readonly taxdb: boolean;
+  readonly sqlite: boolean;
+  /** Relative database folder whose taxonomy files were mounted at the run directory root (`BLASTDB=<dir>` on CLI). */
+  readonly blastdbEnv?: string;
+  readonly filterFiles?: readonly DatabaseFilterFileSnapshot[];
+}
+
 export interface RunSnapshot {
   readonly kind?: 'search';
   readonly runId: string;
@@ -101,6 +123,10 @@ export interface RunSnapshot {
   readonly argv: readonly string[];
   readonly query: InputSnapshot;
   readonly subject: InputSnapshot;
+  /** Present when the run searched a local BLAST database (`-db`); absent for `-subject` FASTA runs. */
+  readonly database?: DatabaseSnapshot;
+  /** Present when a BLASTN run used a local repeats database (`-filtering_db`). */
+  readonly filteringDb?: DatabaseSnapshot;
   readonly requestedThreads: number | 'auto';
   /** The counts file of `-window_masker_db`; absent without the option (BLASTN only). */
   readonly windowMasker?: CountsSnapshot;

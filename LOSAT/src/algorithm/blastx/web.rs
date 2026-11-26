@@ -1,5 +1,7 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
-use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+#[cfg(feature = "parallel")]
+use super::input;
+use super::{args::BlastxArgs, input_source, native, query_setup::BATCH_SIZE, report, runtime};
 use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
@@ -97,14 +99,9 @@ pub(crate) fn run_pair(
 ) -> Result<Vec<u8>> {
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let diagnostics = RefCell::new(std::io::stderr());
-    let subjects = input::parse_fasta_batches_with_warnings(
-        subject,
-        true,
-        args.lcase_masking,
-        usize::MAX,
-        &mut |_| Ok(()),
-        &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
-    )?;
+    let subjects = input_source::read_web_subjects(subject, args.lcase_masking, &mut |message| {
+        Ok(diagnostics.borrow_mut().write_all(message)?)
+    })?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // (The same bytes as before for the options ABI v1 had: a hit list size below 5 from
     // -max_target_seqs; `native::warnings_of` also reads -num_descriptions / -num_alignments,
@@ -229,6 +226,8 @@ pub(crate) fn run_pair(
                                 false,
                                 None,
                                 xml_matrix,
+                                // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                                None,
                                 // The queued batches are searched: the pool is free.
                                 Some(pool),
                             )?;
@@ -238,9 +237,8 @@ pub(crate) fn run_pair(
                 }
                 Ok(())
             };
-            let parsed = input::parse_fasta_batches_with_warnings(
+            let parsed = input_source::read_web_queries(
                 query,
-                false,
                 args.lcase_masking,
                 BATCH_SIZE,
                 &mut |queries| {
@@ -266,10 +264,8 @@ pub(crate) fn run_pair(
                     }
                     flushed
                 },
-                &mut |warning| {
-                    let mut bytes = Vec::new();
-                    native::reader_warning(warning, &mut bytes)?;
-                    x_events.borrow_mut().push(XEvent::Warn(bytes));
+                &mut |message| {
+                    x_events.borrow_mut().push(XEvent::Warn(message.to_vec()));
                     Ok(())
                 },
             );
@@ -278,9 +274,8 @@ pub(crate) fn run_pair(
             }
             return parsed;
         }
-        input::parse_fasta_batches_with_warnings(
+        input_source::read_web_queries(
             query,
-            false,
             args.lcase_masking,
             BATCH_SIZE,
             &mut |queries| {
@@ -309,12 +304,14 @@ pub(crate) fn run_pair(
                     false,
                     None,
                     xml_matrix,
+                    // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                    None,
                     x_pool,
                 )?;
                 processed += queries.len();
                 Ok(())
             },
-            &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
+            &mut |message| Ok(diagnostics.borrow_mut().write_all(message)?),
         )
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279

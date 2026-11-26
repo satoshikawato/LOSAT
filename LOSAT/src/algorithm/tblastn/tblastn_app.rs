@@ -2688,15 +2688,8 @@ fn search(
                                 // The first format writes the texts where it reads each subject
                                 // (`places_subject_reads`), else before the report.
                                 if places_reads {
-                                    let joins_copies = matches!(
-                                        first_report,
-                                        Some(
-                                            crate::blastinput::app::ReportFormat::Xml
-                                                | crate::blastinput::app::ReportFormat::Xml2
-                                                | crate::blastinput::app::ReportFormat::Json
-                                                | crate::blastinput::app::ReportFormat::Xml2S
-                                                | crate::blastinput::app::ReportFormat::JsonS
-                                        )
+                                    let joins_copies = first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                                     );
                                     subject_reads.set(
                                         query,

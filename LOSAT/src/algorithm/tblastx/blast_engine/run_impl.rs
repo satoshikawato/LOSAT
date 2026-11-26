@@ -4517,15 +4517,8 @@ fn run_batch_loop(
                                     &titles,
                                     pairwise.filter(|_| pairwise_first),
                                     &loads,
-                                    matches!(
-                                        first_report,
-                                        Some(
-                                            crate::blastinput::app::ReportFormat::Xml
-                                                | crate::blastinput::app::ReportFormat::Xml2
-                                                | crate::blastinput::app::ReportFormat::Json
-                                                | crate::blastinput::app::ReportFormat::Xml2S
-                                                | crate::blastinput::app::ReportFormat::JsonS
-                                        )
+                                    first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                                     ),
                                 );
                                 let texts = super::super::database::subject_read_texts(

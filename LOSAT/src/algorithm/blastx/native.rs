@@ -1647,16 +1647,7 @@ pub(super) fn reported_batch(
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
-            let joins_copies = matches!(
-                first_report,
-                Some(
-                    ReportFormat::Xml
-                        | ReportFormat::Xml2
-                        | ReportFormat::Json
-                        | ReportFormat::Xml2S
-                        | ReportFormat::JsonS
-                )
-            );
+            let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
             let ends_on_throw = asks.throw.run().is_some_and(|run| {
                 matches!(
                     run.after,

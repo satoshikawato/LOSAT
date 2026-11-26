@@ -746,15 +746,8 @@ pub(super) fn prefetch_reported_subjects(
                             // read none of a query whose HSPs have none, which looks no taxid up.
                             // Truncate per query at a throwing `Hit` for `EndsReport`/`EndsRun`
                             // formats and collapse adjacent `joins_as_copy` copies for XML/XML2/JSON.
-                            let joins_copies = matches!(
-                                first_report,
-                                Some(
-                                    crate::blastinput::app::ReportFormat::Xml
-                                        | crate::blastinput::app::ReportFormat::Xml2
-                                        | crate::blastinput::app::ReportFormat::Json
-                                        | crate::blastinput::app::ReportFormat::Xml2S
-                                        | crate::blastinput::app::ReportFormat::JsonS
-                                )
+                            let joins_copies = first_report.is_some_and(
+                                crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                             );
                             let ends_on_throw = after_throw.run().is_some_and(|run| {
                                 matches!(

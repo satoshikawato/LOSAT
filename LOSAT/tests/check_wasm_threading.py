@@ -87,7 +87,8 @@ DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "d
                  "db.cnt.avg2p32.g3.split.6", "db.cnt.avg2p32.g3.split.0", "db.cnt.avg2p32.g3.split.b1.7",
                  "db.cnt.avg2p32.g3.split.mo00.6", "db.cnt.avg2p32.g3.split.mb40k.6",
                  "db.ak.bn.nseq0.l62.alln.7", "db.ak.tbn.nseq0.l62.allx.7",
-                 "db.ak.tbn.nseq1.l62p3.allx.7", "db.ak.tbx.nseq1.l62p3.alln.7"]
+                 "db.ak.tbn.nseq1.l62p3.allx.7", "db.ak.tbx.nseq1.l62p3.alln.7",
+                 "db.xc.dup.split.avg.7", "db.xc.gapvalid.avg.7", "db.xc.ord.neggap.avg.7"]
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108

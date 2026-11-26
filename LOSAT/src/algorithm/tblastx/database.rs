@@ -52,7 +52,7 @@ const PROGRAM: &str = "TBLASTX";
 /// (`TblastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct TblastxDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
     parsed: bool,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
@@ -101,8 +101,15 @@ impl TblastxDatabase {
     /// (`common::database::open_database`). The total length is NCBI's `Int8`, which the engine
     /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
-    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), "tblastx")
+    pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            "tblastx",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -111,7 +118,7 @@ impl TblastxDatabase {
     /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
     /// run's posts, which is not TBLASTX's where the run is another program's strategy).
     pub(crate) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
@@ -135,14 +142,14 @@ impl TblastxDatabase {
         // (`context_cutoffs`, `shared::check_setup_count`).
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             parsed,
             taxdb: shared::TaxdbRun::running(app),
         })
     }
 
     /// The `-db` value (outfmt 7's `# Database:` line).
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -901,8 +908,8 @@ pub(crate) fn hit_identities(
 /// with the call's refusal over the `-outfmt` values of its other searches, `others`
 /// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
 /// (`TblastxArgs::html_links`, which the writer's `PairwiseConfig::html` gets too).
-pub(crate) fn after_throw<'a>(
-    outfmts: impl IntoIterator<Item = &'a str>,
+pub(crate) fn after_throw<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
     others: &[&str],
     html: bool,
 ) -> crate::report::db_subject::FormatThrow {

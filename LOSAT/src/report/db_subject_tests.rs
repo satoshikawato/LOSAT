@@ -1386,8 +1386,8 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sseqid ssciname".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sseqid ssciname".to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastp,
     )

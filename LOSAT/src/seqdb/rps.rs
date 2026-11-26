@@ -641,12 +641,9 @@ impl RpsVolumeFiles {
         &mut self,
         base: &Path,
         program: &str,
-        database_name: Option<&str>,
+        database_name: Option<&[u8]>,
     ) -> Result<(), RpsOpenError> {
-        let shown = database_name.map_or_else(
-            || canonical_volume_path(base),
-            |name| name.as_bytes().to_vec(),
-        );
+        let shown = database_name.map_or_else(|| canonical_volume_path(base), <[u8]>::to_vec);
         let missing = || {
             RpsOpenError::Ncbi(
                 [

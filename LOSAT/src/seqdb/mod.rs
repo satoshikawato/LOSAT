@@ -987,8 +987,16 @@ pub(crate) fn lookup_throw_site(message: &[u8]) -> Option<ThrowSite> {
 /// The database name that a BLAST program hands to the reader for the value
 /// of its `-db` argument: the value without the white space at its ends.
 /// A search program passes the result to [`SeqDb::open_in`].
+#[cfg(test)]
 pub fn db_argument_name(value: &str) -> &str {
     crate::ncbi_str::truncate_spaces_str(value)
+}
+
+/// The `-db` value without ASCII `isspace` bytes at its ends, as NCBI trims it (`NStr::TruncateSpaces`).
+///
+/// A search program passes the result to [`SeqDb::open_in`].
+pub fn db_argument_name_bytes(value: &[u8]) -> &[u8] {
+    crate::ncbi_str::truncate_spaces(value)
 }
 
 /// A contiguous range of sequences inside one volume, as planned by
@@ -1064,7 +1072,7 @@ pub(crate) struct LocatedDatabase {
 #[derive(Debug)]
 pub struct NameRecord {
     /// The name as the reports take it (`alias::report_names`): `GetDBNameList`.
-    pub name: String,
+    pub name: Vec<u8>,
     /// The title of the database (`GetTitle`), empty when it has none.
     pub title: Vec<u8>,
     /// `GetDate`.
@@ -1428,10 +1436,10 @@ impl SeqDb {
     /// `masks` (a search with `-db_soft_mask` or `-db_hard_mask`) each record also keeps its
     /// database's filtering algorithms (`NameRecord::mask_algorithms`): the one opening of each
     /// name of the formatter (`GetBlastDbInfo`).
-    pub fn read_name_records(&mut self, name: &str, masks: bool) -> Result<(), SeqDbError> {
+    pub fn read_name_records(&mut self, name: &[u8], masks: bool) -> Result<(), SeqDbError> {
         let names = alias::report_names(name);
         self.name_records = match names.as_slice() {
-            [one] if one == name => {
+            [one] if one.as_slice() == name => {
                 // The reports' database is this one opened again without the list: after a
                 // list, its walks of the counts meet their errors here (`check_alias_values`),
                 // unless its alias files make it scan the totals too, where the build of its OID
@@ -1454,7 +1462,7 @@ impl SeqDb {
                 };
                 let mut records = Vec::with_capacity(names.len());
                 for one in &names {
-                    let mut alone = Self::open_in(one.as_bytes(), self.seqtype, &path)?;
+                    let mut alone = Self::open_in(one, self.seqtype, &path)?;
                     alone.read_name_records(one, masks)?;
                     records.append(&mut alone.name_records);
                 }
@@ -1466,9 +1474,9 @@ impl SeqDb {
 
     /// What the reports read of this database under the name `name`, before any list; with
     /// `masks`, its filtering algorithms too ([`SeqDb::mask_algorithms`], a copy of the table).
-    fn name_record(&self, name: &str, masks: bool) -> NameRecord {
+    fn name_record(&self, name: &[u8], masks: bool) -> NameRecord {
         NameRecord {
-            name: name.to_string(),
+            name: name.to_vec(),
             title: self.title.clone(),
             date: self.date.clone(),
             num_seqs: self.printed_num_seqs(),

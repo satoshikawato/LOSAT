@@ -18,7 +18,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastpDatabase {
-    BlastpDatabase::open(&fixture(name), &ApplicationSettings::default(), "BLASTP")
+    BlastpDatabase::open(fixture(name), &ApplicationSettings::default(), "BLASTP")
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -164,7 +164,7 @@ fn database_numbers_come_from_the_index_files() {
     assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
     assert_eq!((shown.num_sequences, shown.total_letters), (10, 801));
     // The name is the `-db` value as given.
-    assert_eq!(database.name(), fixture("prot_mv"));
+    assert_eq!(database.name(), fixture("prot_mv").as_bytes());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
@@ -324,7 +324,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
             "LOSAT database error: Database name is required.\n".to_string()
         )
     );
-    let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings, "BLASTP") else {
+    let Err(error) = BlastpDatabase::open(fixture("no_such_database"), &settings, "BLASTP") else {
         panic!("a missing database opened")
     };
     let (exit, message) = native(error);
@@ -337,7 +337,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A database with parsed Seq-ids opens for BLASTP and psiblast.
     for program in ["BLASTP", "PSIBLAST"] {
-        BlastpDatabase::open(&fixture("prot_ids_v4"), &settings, program)
+        BlastpDatabase::open(fixture("prot_ids_v4"), &settings, program)
             .unwrap_or_else(|e| panic!("{program} opens a database with parsed Seq-ids: {e:#}"));
     }
 }
@@ -937,13 +937,13 @@ mod x_db_cut_blocks {
         std::fs::create_dir_all(&dir).unwrap();
         let name = dir.join("gen").to_str().unwrap().to_string();
         let args = crate::writedb::makeblastdb::MakedbArgs {
-            input: "-".to_string(),
+            input: std::ffi::OsString::from("-"),
             input_type: "fasta".to_string(),
             dbtype: "prot".to_string(),
-            title: Some("gen".to_string()),
-            out: Some(name.clone()),
+            title: Some(std::ffi::OsString::from("gen")),
+            out: Some(std::ffi::OsString::from(&name)),
             blastdb_version: 4,
-            max_file_sz: max_file_sz.to_string(),
+            max_file_sz: std::ffi::OsString::from(max_file_sz),
             metadata_output_prefix: None,
             oid_masks: None,
             logfile: None,
@@ -1363,7 +1363,7 @@ fn excluded_lists_leave_marks_of_their_places() {
             .collect()
     };
     let database = BlastpDatabase::open_restricted(
-        name,
+        name.as_bytes(),
         &settings,
         "BLASTP",
         Some(&negative),
@@ -2158,7 +2158,7 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         let database = BlastpDatabase {
             db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search)
                 .unwrap(),
-            name: "sprot_tax".to_string(),
+            name: b"sprot_tax".to_vec(),
             taxdb: shared::TaxdbRun::default(),
             program: "BLASTP",
             rps_units: None,

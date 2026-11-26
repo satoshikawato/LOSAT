@@ -1,0 +1,5 @@
+Warning: [tblastx] seg cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+BLAST query/options error: Word-size must be less than 6 for protein comparison
+Please refer to the BLAST+ user manual.

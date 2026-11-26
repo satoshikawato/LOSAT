@@ -21,6 +21,8 @@ use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::{parse_dust_filtering, DustSpec};
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -110,10 +112,12 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.mb_index_name = args
         .megablast_index_name()
         .map(|(name, _)| name.to_string());
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
     inputs
 }
 
@@ -519,6 +523,226 @@ pub(crate) fn write_blastn_archives(
             &mut *warnings.sink,
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:128-133
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// blastn's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options. The setters that act
+/// together (DUST, the repeat filter, the gapped algorithms, the discontiguous template) are set
+/// after the table (`finish`).
+impl import::StrategyArgs for BlastnArgs {
+    const PROGRAM: Program = Program::Blastn;
+
+    fn runs(program: EProgram) -> bool {
+        matches!(
+            program,
+            EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
+        )
+    }
+
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some() && self.import.is_none()
+    }
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("blastn")? {
+            crate::cli::Commands::Blastn(args) => Ok(args),
+            _ => unreachable!("the arguments of blastn"),
+        }
+    }
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        let mb_index = import::MbIndexRequest::of(
+            self.use_index,
+            &self.task,
+            self.subject.is_some(),
+            self.index_name.as_ref(),
+            self.db.as_ref(),
+        );
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: Some(self.strand),
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: self.id_scope,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            html: self.html,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(|n| n as i64),
+            formatting: self.formatting,
+            num_threads: self.num_threads as i64,
+            mt_mode: self.mt_mode,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: self.use_index == Some(true),
+            mb_index,
+        }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        if let Some(strand) = kept.strand {
+            self.strand = strand;
+        }
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.id_scope = kept.id_scope;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.html = kept.html;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| usize::try_from(n).unwrap_or(0));
+        self.formatting = kept.formatting;
+        self.num_threads = usize::try_from(kept.num_threads).unwrap_or(1);
+        self.mt_mode = kept.mt_mode;
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn set_task(&mut self, task: &str) {
+        self.task = task.to_string();
+    }
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
+        match setter {
+            Setter::EvalueThreshold(v) => self.evalue = Some(*v),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3832-3835
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1313-1319
+            // A size below 1 is 0 in the unsigned field, which the options' check after the
+            // import (`scoring.rs`) refuses as NCBI's refuses every size below 1.
+            Setter::WordSize(n) => self.word_size = Some(usize::try_from(*n).unwrap_or(0)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatchReward(n) => self.reward = Some(*n),
+            Setter::MismatchPenalty(n) => self.penalty = Some(*n),
+            Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => self.xdrop_gap_final = Some(*v),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
+            Setter::MaxHspsPerSubject(n) => {
+                self.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
+            }
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::PercentIdentity(v) => self.percent_identity = Some(*v),
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
+            Setter::GappedMode(gapped) => self.ungapped = !*gapped,
+            Setter::WindowMaskerTaxId(n) => self.window_masker_taxid = Some(*n),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:458-462
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1967-1993
+            // The strategy's query strand (`Blast4-strand-type`: forward 1, reverse 2, both 3)
+            // with the command line's `-strand`, which `keep` set: a strategy's single strand
+            // where the command line searches both, the command line's where the strategy
+            // searches both or the same one. LOSAT refuses the other combinations.
+            Setter::StrandOption(n) => match (*n, self.strand.as_str()) {
+                (3, _) => {}
+                (1, "both" | "plus") => self.strand = "plus".to_string(),
+                (2, "both" | "minus") => self.strand = "minus".to_string(),
+                _ => {
+                    return Err(import::Start::unported_setter(
+                        setter,
+                        Program::Blastn.name(),
+                    ))
+                }
+            },
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Blastn.name();
+        collected.no_seg(program)?;
+        collected.no_composition(program)?;
+        if let Some(value) = collected.dust.value() {
+            self.dust_filtering = Some(value);
+        }
+        // The repeat filter's database is `-filtering_db`'s (`repeat_filter`): the run looks it
+        // up as the command line's.
+        if let Some(database) = collected.repeat {
+            self.filtering_db = database;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:701-704
+        // `-no_greedy` sets both algorithms to dynamic programming; the greedy pair is
+        // megablast's default (the task's pair where the strategy sets one algorithm only).
+        let task_algorithm = i32::from(self.task == "megablast");
+        if collected.extension.is_some() || collected.traceback.is_some() {
+            match (
+                collected.extension.unwrap_or(task_algorithm),
+                collected.traceback.unwrap_or(task_algorithm),
+            ) {
+                (0, 0) => self.no_greedy = true,
+                (1, 1) if self.task == "megablast" => {}
+                pair => self.strategy_algorithms = Some(pair),
+            }
+        }
+        match (collected.template_type, collected.template_length) {
+            (None, None) => {}
+            (Some(kind), Some(length)) => {
+                self.template_type = Some(match kind {
+                    0 => super::disc_lookup::DiscWordType::Coding,
+                    1 => super::disc_lookup::DiscWordType::Optimal,
+                    2 => super::disc_lookup::DiscWordType::TwoTemplates,
+                    // NCBI's options check refuses it (`scoring::check_scoring_options`); the
+                    // search never starts.
+                    _ => {
+                        self.strategy_template_type = Some(kind);
+                        super::disc_lookup::DiscWordType::Coding
+                    }
+                });
+                self.template_length = Some(length);
+            }
+            _ => {
+                return Err(import::Start::unported(
+                    "a search strategy with a template type or length alone",
+                    program,
+                ))
+            }
+        }
+        Ok(())
+    }
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Blastn(self)
+    }
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ use losat::web_adapter::{
     RecordSource,
 };
 
+use crate::imported::Supplied;
 use crate::json;
 use crate::run::Program;
 use crate::scan;
@@ -383,7 +384,11 @@ pub fn register_inputs(
     query: &[u8],
     subject: &[u8],
 ) -> Result<(u32, u32, String), String> {
-    let (program, command) = crate::run::parse(words)?;
+    let (program, command, supplied) = crate::run::parse_imported(words)?;
+    // The handles belong to the argv's program, whose run takes them (`losat_web2_run`); the
+    // records are read as the program of the arguments reads them (with a search strategy of
+    // another program that the argv's runs, the strategy's).
+    let owner = Program::parse(words.first().copied().unwrap_or(""))?;
     let database = crate::run::searches_database(words);
     let file_query = crate::run::has_file_query(words);
     if database && !subject.is_empty() {
@@ -399,6 +404,25 @@ pub fn register_inputs(
         return Ok((0, 0, "{\"query\":null,\"subject\":null}".to_string()));
     }
     let data_loaders = crate::run::data_loaders(words)?;
+    // An argv with `-import_search_strategy` takes the inputs that the strategy carries and the
+    // argv does not override (`Supplied`), in place of the bytes that the host gives for them (it
+    // gives none: the argv has no `-query` or `-subject` of its own).
+    let texts = supplied.as_ref().map(Supplied::take).transpose()?;
+    let (query, subject) = match &texts {
+        Some(texts) => (
+            if texts.queries.is_empty() {
+                query
+            } else {
+                &texts.queries
+            },
+            if texts.subjects.is_empty() {
+                subject
+            } else {
+                &texts.subjects
+            },
+        ),
+        None => (query, subject),
+    };
     let read = |query: &[u8], subject: &[u8]| {
         losat::web_adapter::read_search_inputs(
             program.api(),
@@ -509,7 +533,7 @@ pub fn register_inputs(
             handle,
             Registered {
                 role,
-                program,
+                program: owner,
                 records,
                 end,
                 deflines: Vec::new(),

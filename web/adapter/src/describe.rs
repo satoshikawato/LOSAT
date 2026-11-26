@@ -28,10 +28,12 @@ const ADAPTER_OWNED: [&str; 6] = [
     "index_name",
 ];
 
-/// The options of `program` that the browser's searches of records take none of (tblastn's
-/// `-in_pssm`, which the browser refuses until line PS's PSW1): the browser's list
-/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out. The
-/// search strategy file `-export_search_strategy` is a file of the run (line RG's F1w), described.
+/// The options of `program` that the browser's searches of records take none of: the browser's
+/// list (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out
+/// (empty since line PS's PSW1 added `tblastn -in_pssm` and `psiblast`). The search strategy files
+/// are described: `-import_search_strategy`, a named input file of kind 3 (line RG's F2, for the
+/// five programs that import strategies), and `-export_search_strategy`, a file of the run (line
+/// RG's F1w).
 fn records_refused(program: Program) -> &'static [&'static str] {
     losat::web_adapter::records_refused_options(program.api())
 }
@@ -156,7 +158,10 @@ mod tests {
     }
 
     // Since line PS's PSW1, tblastn's `-in_pssm` and psiblast's PSSM/MSA options are described
-    // and supported in the browser; `records_refused` is empty for all programs.
+    // and supported in the browser; `records_refused` is empty for all six programs. The search
+    // strategy files are listed: `-export_search_strategy` (a file of the run, line RG's F1w) for
+    // all six programs, and `-import_search_strategy` (a named input file, line RG's F2) for the
+    // five programs that import strategies.
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
         for program in [
@@ -177,6 +182,12 @@ mod tests {
                 described.contains("\"-export_search_strategy\""),
                 "{program} does not list -export_search_strategy"
             );
+            if program != "psiblast" {
+                assert!(
+                    described.contains("\"-import_search_strategy\""),
+                    "{program} does not list -import_search_strategy"
+                );
+            }
         }
         let tblastn = describe("tblastn").unwrap();
         assert!(tblastn.contains("\"-in_pssm\""), "tblastn lists -in_pssm");

@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::range::{Handle, LiveHandles};
 use super::view::V;
-use super::{Refusal, Stop};
+use super::{RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::pssm::SeqEntry;
@@ -289,7 +289,7 @@ const SET_ID_DUPLICATE: ThrowSite = ThrowSite {
 /// (`CSeq_annot_Info::x_UpdateName`): its Annot-ids up to the first `other` one with an
 /// accession, every Annotdesc, and of a `user` one whose type is the string "AnnotationTrack" (until
 /// a zoom level was found) the fields up to the first labelled "ZoomLevel". The name changes no
-/// output of LOSAT's; an element stated as `NULL` there is dereferenced (`V::deref`).
+/// output of LOSAT's; an element stated as `NULL` there is dereferenced (`RefElement::deref`).
 fn annot_name(annot: V<'_>) -> Result<(), Stop> {
     for id in annot.get("id").into_iter().flat_map(V::items) {
         if let ("other", text) = id.deref()?.choice() {

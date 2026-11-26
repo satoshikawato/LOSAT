@@ -213,6 +213,9 @@ pub(crate) const BLASTP_TASK: TaskParser = task_parser("BLASTP", "blastp");
 // arguments are in `check_options`, in NCBI's order.
 #[derive(Debug, Clone)]
 pub struct BlastpArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    pub(crate) given: crate::cli::GivenArguments,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // `-` (the default) is standard input.
     pub query: PathBuf,
@@ -267,6 +270,13 @@ pub struct BlastpArgs {
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`import::apply`).
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
     pub max_target_seqs: Option<usize>,
@@ -408,6 +418,7 @@ impl BlastpArgs {
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(BlastpArgs {
+            given: crate::cli::GivenArguments::from_args(args),
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
@@ -427,6 +438,8 @@ impl BlastpArgs {
             mt_mode: args.given_option("mt_mode")?,
             out: args.given_option("out")?,
             export_search_strategy: args.given_option("export_search_strategy")?,
+            import_search_strategy: args.given_option("import_search_strategy")?,
+            import: Default::default(),
             max_target_seqs: args.given_option("max_target_seqs")?,
             num_descriptions: args.given_option("num_descriptions")?,
             num_alignments: args.given_option("num_alignments")?,
@@ -619,7 +632,12 @@ pub struct ResolvedBlastpArgs {
     /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
     /// (`BlastHitSavingParametersUpdate`).
     pub sum_stats: bool,
-    pub window_size: usize,
+    /// `-window_size` as the options hold it, a signed `Int4`: the command line takes 0 and more, a
+    /// search strategy any value, and NCBI runs it (blast_options.c has no check of it; a window
+    /// of 0 or less is the one-hit search: only a positive window sets the multiple-hit flag).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+    pub window_size: i32,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
@@ -830,6 +848,13 @@ impl BlastpArgs {
         if let Some(evalue) = self.evalue {
             options.evalue = evalue;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let (matrix_gap_open, matrix_gap_extend) = self
             .matrix
             .as_deref()
@@ -837,16 +862,16 @@ impl BlastpArgs {
             .unwrap_or((0, 0));
         match (self.gap_open, &self.matrix) {
             (Some(gap_open), _) => options.gap_open = gap_open,
-            (None, Some(_)) => options.gap_open = matrix_gap_open,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_open = matrix_gap_open,
+            (None, _) => {}
         }
         match (self.gap_extend, &self.matrix) {
             (Some(gap_extend), _) => options.gap_extend = gap_extend,
-            (None, Some(_)) => options.gap_extend = matrix_gap_extend,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_extend = matrix_gap_extend,
+            (None, _) => {}
         }
         if let Some(word_size) = self.word_size {
-            if word_size > 4 {
+            if word_size > 4 && command_line {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.threshold = 19.3;
                 if word_size > 5 {
@@ -874,23 +899,27 @@ impl BlastpArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
-        } else if options.threshold as i32 == 11 {
+        } else if command_line && options.threshold as i32 == 11 {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         options.window_size = match self.window_size {
             Some(window) => window,
-            None => suggested_window_size(&options.matrix_name),
+            None if command_line => suggested_window_size(&options.matrix_name),
+            None => options.window_size,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (blastp_args.cpp:44-120).
-        let query_range = crate::blastinput::seq_range::parse_optional_range(
-            self.query_loc.as_deref(),
-            crate::blastinput::seq_range::RangeRole::Query,
-        )?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2976 and
+        let query_range = match self.import.as_ref().and_then(|import| import.query_range) {
+            Some(range) => Some(range),
+            None => crate::blastinput::seq_range::parse_optional_range(
+                self.query_loc.as_deref(),
+                crate::blastinput::seq_range::RangeRole::Query,
+            )?,
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
         let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
@@ -898,9 +927,11 @@ impl BlastpArgs {
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
+        let request_kind = self.app.request_kind();
         let html = crate::blastinput::app::html_links(
             self.html,
-            self.app.request_kind(),
+            request_kind,
+            request_kind,
             self.db.as_deref().map(crate::seqdb::db_argument_name),
             &[choice.number],
         )?;
@@ -915,6 +946,11 @@ impl BlastpArgs {
             &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
+        // An imported strategy's warnings for the options it replaces
+        // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+        if let Some(import) = &self.import {
+            diagnostics.write_all(&import.option_warning_lines())?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // The unified P-values are blastp's only (`program` is `eBlastp`, blast_args.cpp:880-883).
@@ -1089,6 +1125,9 @@ impl BlastpArgs {
             x_dropoff: self
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (cited at
         // `blastx::args::blastx_matrix`)
@@ -1166,7 +1205,10 @@ impl BlastpArgs {
             searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
-            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+            old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+                self.import.as_ref(),
+                self.searchsp,
+            ),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -1208,7 +1250,7 @@ impl BlastpArgs {
                 .gap_trigger
                 .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
             sum_stats: self.sum_stats,
-            window_size: usize::try_from(options.window_size).unwrap_or(0),
+            window_size: options.window_size,
             matrix_name: options.matrix_name,
             unknown_matrix,
             matrix_file,

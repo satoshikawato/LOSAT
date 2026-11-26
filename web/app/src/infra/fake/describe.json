@@ -8,6 +8,11 @@
   ],
   "parameters": [
    {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
     "takes_value": true
@@ -469,6 +474,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
    {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
@@ -1100,6 +1110,11 @@
   ],
   "parameters": [
    {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
     "takes_value": true
@@ -1676,6 +1691,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
    {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
@@ -2254,6 +2274,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
    {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",

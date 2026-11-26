@@ -387,6 +387,9 @@ fn update<I: Input>(inp: I, class: u16, member: &'static Member) -> Read<Value> 
 /// each read hands back with the object, by default.
 pub(crate) struct ObjectStream<I: Input, P: PostSink = Vec<Post>> {
     reader: TypedReader<I, P>,
+    /// A read failed: NCBI's stream has its fail flags set, and its `EndOfData` is true from
+    /// then on.
+    failed: bool,
 }
 
 impl<S: AsnSource> ObjectStream<TextInput<S>> {
@@ -401,6 +404,7 @@ impl<S: AsnSource, P: PostSink> ObjectStream<TextInput<S>, P> {
     pub(crate) fn text_posting(src: S, names: Names, posts: P) -> Self {
         ObjectStream {
             reader: TypedReader::new(TextInput::new(src, names), names, posts),
+            failed: false,
         }
     }
 
@@ -416,6 +420,7 @@ impl<S: AsnSource> ObjectStream<BerReader<S>> {
     pub(crate) fn binary(src: S, names: Names) -> Self {
         ObjectStream {
             reader: TypedReader::new(BerReader::new(src, names), names, Vec::new()),
+            failed: false,
         }
     }
 
@@ -431,6 +436,7 @@ impl<S: AsnSource> ObjectStream<XmlInput<S>> {
     pub(crate) fn xml(src: S, style: XmlStyle, names: Names) -> Self {
         ObjectStream {
             reader: TypedReader::new(XmlInput::new(src, style, names), names, Vec::new()),
+            failed: false,
         }
     }
 }
@@ -442,6 +448,7 @@ impl<I: Input> ObjectStream<I> {
         reader.start_object();
         let value = reader.document(root, |r| r.read_value(root, false));
         reader.inp.drain_posts(&mut reader.posts);
+        self.failed |= value.is_err();
         (
             value.map_err(ReadError::from),
             std::mem::take(&mut reader.posts.sink),
@@ -459,15 +466,24 @@ impl<I: Input> ObjectStream<I> {
         reader.start_object();
         let value = reader.document(root, read).map_err(ReadError::from);
         reader.inp.drain_posts(&mut reader.posts);
+        self.failed |= value.is_err();
         (value, std::mem::take(&mut reader.posts.sink))
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
     /// `EndOfData()`: whether no object follows (`Input::end_of_data`), which a reader of objects
     /// one after another asks before each (a binary object that is not a SEQUENCE ends inside its
-    /// frames, where the end of the input is NCBI's `CSerialException`).
+    /// frames, where the end of the input is NCBI's `CSerialException`). True after a failed
+    /// read, whose fail flags NCBI's stream keeps.
     #[cfg(test)]
     pub(crate) fn end_of_data(&mut self) -> bool {
-        self.reader.inp.end_of_data()
+        self.failed || self.reader.inp.end_of_data()
+    }
+
+    /// The primitives of the stream after the objects read (`stream`: the text after them goes
+    /// back to the caller).
+    pub(crate) fn into_input(self) -> I {
+        self.reader.inp
     }
 }
 
@@ -985,13 +1001,14 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// root does not reach is one that the PSSM's read never builds, and nothing before the read
     /// builds it (psiblast and tblastn read `-in_pssm` during `SetOptions` before opening any
     /// database): "class not found" (NCBI 2.17.0 with a number that is not one inside
-    /// `:Blast4-cutoff`, `:Seq-submit`, `:Hit`, `:Blast-db-mask-info`, `:Blast-mask-list`,
-    /// `:Blast-def-line-set`, `:Blast-def-line`; probe D3c-3b probe9 and PR #1633 R2 probe). What
-    /// NCBI does only when it knows the class (a message posted while the value is read, an error
-    /// of another kind inside it: `:Object-id id x` is its exception report, exit status 255, in
-    /// probe9), a value of another class inside it, a skip (`SkipPointer` skips a class it knows
-    /// and stops at another) and the other streams (makeblastdb prints the exception's own text)
-    /// are LOSAT's refusal.
+    /// `:Blast4-cutoff`, `:Blast4-request`, `:Seq-submit`, `:Hit`, `:Blast-db-mask-info`,
+    /// `:Blast-mask-list`, `:Blast-def-line-set`, `:Blast-def-line`; probe D3c-3b probe9 and PR
+    /// #1633/#1640 R2 probes). What NCBI does only when it knows the class (a message posted while
+    /// the value is read, an error of another kind inside it: `:Object-id id x` is its exception
+    /// report, exit status 255, in probe9), a value of another class inside it, a skip
+    /// (`SkipPointer` skips a class it knows and stops at another) and the other streams
+    /// (makeblastdb and search-strategy import print the exception's own text, so
+    /// `own_serial_message` is false there) are LOSAT's refusal.
     #[cold]
     #[inline(never)]
     fn other_type(&mut self, name: &[u8], declared: &str, skip: bool) -> Fail {

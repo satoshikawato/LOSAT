@@ -584,6 +584,7 @@ fn tbx_hsp(
         num_positives: 20,
         comp_adjust: 0,
         ops: &[],
+        std_seg_nullb: None,
     }
 }
 

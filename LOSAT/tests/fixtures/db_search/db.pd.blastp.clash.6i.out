@@ -1,0 +1,51 @@
+ref|XP_000001.1|	ref|XP_000001.1|	ref|XP_000001.1|	N/A	N/A	140	N/A	8.89e-93
+ref|XP_000001.1|	gi|9002|emb|CAA90002.1|	ref|XP_900001.1|;gi|9002|emb|CAA90002.1|;sp|P90003.1|NAME3_HUMAN	first defline without a gi	first defline without a gi<>second defline with a gi<>third defline swissprot	137	0	2.82e-91
+ref|XP_000001.1|	gi|123456|ref|NP_000002.1|	gi|123456|ref|NP_000002.1|	gi plus ref protein	gi plus ref protein	137	10116	2.82e-91
+ref|XP_000001.1|	ref|XP_910001.1|	ref|XP_910001.1|;ref|XP_910002.1|;ref|XP_910003.1|;ref|XP_910004.1|;ref|XP_910005.1|;ref|XP_910006.1|;ref|XP_910007.1|;ref|XP_910008.1|;ref|XP_910009.1|;ref|XP_910010.1|;ref|XP_910011.1|;ref|XP_910012.1|	long title number 01 with many words so that it is longer than sixty characters in total	long title number 01 with many words so that it is longer than sixty characters in total<>long title number 02 with many words so that it is longer than sixty characters in total<>long title number 03 with many words so that it is longer than sixty characters in total<>long title number 04 with many words so that it is longer than sixty characters in total<>long title number 05 with many words so that it is longer than sixty characters in total<>long title number 06 with many words so that it is longer than sixty characters in total<>long title number 07 with many words so that it is longer than sixty characters in total<>long title number 08 with many words so that it is longer than sixty characters in total<>long title number 09 with many words so that it is longer than sixty characters in total<>long title number 10 with many words so that it is longer than sixty characters in total<>long title number 11 with many words so that it is longer than sixty characters in total<>long title number 12 with many words so that it is longer than sixty characters in total	137	0	1.86e-89
+ref|XP_000001.1|	sp|Q00003|ABC_MOUSE	sp|Q00003|ABC_MOUSE	swissprot without version	swissprot without version	137	0	1.86e-89
+ref|XP_000001.1|	emb|CAA00005.1|	emb|CAA00005.1|	emb protein	emb protein	137	0	2.87e-87
+ref|XP_000001.1|	ref|XP_920001.1|	ref|XP_920001.1|;emb|CAA92002.1|;dbj|BAA92003.1|	has a title	has a title<>N/A<>third has a title	137	0	7.61e-87
+ref|XP_000001.1|	tr|A0A000|A0A000_YEAST	tr|A0A000|A0A000_YEAST	trembl entry	trembl entry	137	0	7.61e-87
+ref|XP_000001.1|	pdb|1ABC|A	pdb|1ABC|A	Chain A, test structure	Chain A, test structure	137	0	1.32e-85
+ref|XP_000001.1|	dbj|BAA00006.1|	dbj|BAA00006.1|	dbj protein	dbj protein	137	0	6.77e-84
+ref|XP_000001.1|	pir||S00007	pir||S00007	pir protein	pir protein	137	0	3.33e-80
+ref|XP_000001.1|	prf||0008123A	prf||0008123A	prf protein	prf protein	137	0	1.46e-77
+ref|XP_000001.1|	myprot9	myprot9	local id protein	local id protein	137	0	3.48e-76
+ref|XP_000001.1|	gnl|mydb|prot10	gnl|mydb|prot10	general id protein	general id protein	137	0	1.74e-74
+ref|XP_000001.1|	ref|XP_000011.2|	ref|XP_000011.2|	bare refseq accession	bare refseq accession	137	0	1.01e-72
+ref|XP_000001.1|	sp|P00012|	sp|P00012|	bare uniprot-like accession	bare uniprot-like accession	137	0	3.29e-71
+ref|XP_000001.1|	myprot_13	myprot_13	bare non-accession word	bare non-accession word	137	0	4.56e-69
+ref|XP_000001.1|	gb|AAA00017.1|LOCUS17	gb|AAA00017.1|LOCUS17	gb with a locus name	gb with a locus name	137	0	4.66e-69
+ref|XP_000001.1|	gi|1818|gb|AAA00018.1|	gi|1818|gb|AAA00018.1|;gi|1819|emb|CAA00019.1|;gi|1820|ref|XP_000020.1|	N/A	N/A<>second defline<>third defline	137	562;9606	1.79e-65
+ref|XP_000001.1|	tpg|DAA00016.1|	tpg|DAA00016.1|	third-party protein	third-party protein	137	0	1.63e-64
+ref|XP_000001.1|	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	with taxid	with taxid	137	9606	2.83e-60
+ref|XP_000001.1|	unnamed	unnamed;tpg|DAA10016.1|	N/A	N/A<>tpa second	60	0	1.31e-40
+ref|XP_000001.1|	pdb|5ABC|D	pdb|5ABC|D;ref|XP_100015.1|	N/A	N/A<>second	60	0	1.31e-40
+ref|XP_000001.1|	ref|WP_100014.1|	ref|WP_100014.1|	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	ref|NC_100013.1|	ref|NC_100013.1|	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	tpe|BK100012.1|	tpe|BK100012.1|	tpe titled	tpe titled	60	0	1.31e-40
+ref|XP_000001.1|	pdb|4ABC| 	pdb|4ABC| ;pdb|4ABC|AA	no chain four	no chain four<>two chain four	60	0	1.31e-40
+ref|XP_000001.1|	unnamed	unnamed	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	pdb|3ABC|C	pdb|3ABC|C	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	tpg|DAA10008.1|	tpg|DAA10008.1|	tpa with subject	tpa with subject	60	0	1.31e-40
+ref|XP_000001.1|	subject	subject	subject seven title	subject seven title	60	0	1.31e-40
+ref|XP_000001.1|	ref|NP_100006.1|	ref|NP_100006.1|	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	pat|US|7654321|3	pat|US|7654321|3	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	pdb|2XYY| 	pdb|2XYY| 	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	pdb|2XYZ|B	pdb|2XYZ|B	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	tpg|DAA10002.1|	tpg|DAA10002.1|	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	tpg|DAA10001.1|	tpg|DAA10001.1|	tpa titled protein	tpa titled protein	60	0	1.31e-40
+ref|XP_000001.1|	sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN;titled	titled first	titled first<>second line	60	0	1.31e-40
+ref|XP_000001.1|	unnamed	unnamed	N/A	N/A	60	0	1.31e-40
+ref|XP_000001.1|	subject	subject	subject seven	subject seven	60	0	1.31e-40
+ref|XP_000001.1|	pat|EP|0238993|7	pat|EP|0238993|7	pre-grant patent	pre-grant patent	60	0	1.31e-40
+ref|XP_000001.1|	prf|ABC|DEF	prf|ABC|DEF	prf two fields	prf two fields	60	0	1.31e-40
+ref|XP_000001.1|	pat|EP|0123456A1|7	pat|EP|0123456A1|7	patent with letters	patent with letters	60	0	1.31e-40
+ref|XP_000001.1|	pat|US|RE33188|1	pat|US|RE33188|1	patent reissue	patent reissue	60	0	1.31e-40
+ref|XP_000001.1|	gnl|ti|123	gnl|ti|123	trace id	trace id	60	0	1.31e-40
+ref|XP_000001.1|	long1	long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	60	0	1.31e-40
+ref|XP_000001.1|	gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	big gi	big gi	60	0	1.31e-40
+ref|XP_000001.1|	bbm|123	bbm|123	gibbmt	gibbmt	60	0	1.31e-40
+ref|XP_000001.1|	gpp|GPP123|	gpp|GPP123|	genome pipeline	genome pipeline	60	0	1.31e-40
+ref|XP_000001.1|	tpd|BK000013.1|	tpd|BK000013.1|	third party ddbj	third party ddbj	60	0	1.31e-40
+ref|XP_000001.1|	tpe|BK000012.1|	tpe|BK000012.1|	third party embl	third party embl	60	0	1.31e-40

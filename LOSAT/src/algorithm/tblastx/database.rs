@@ -52,7 +52,7 @@ const PROGRAM: &str = "TBLASTX";
 /// (`TblastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct TblastxDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
     parsed: bool,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
@@ -66,6 +66,12 @@ impl TblastxDatabase {
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(crate) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
         self.db.oid_map()
+    }
+
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(crate) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
     }
 
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
@@ -101,8 +107,15 @@ impl TblastxDatabase {
     /// (`common::database::open_database`). The total length is NCBI's `Int8`, which the engine
     /// holds as such (`SubjectSetNumbers::total`) on every target.
     #[cfg(test)]
-    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), "tblastx")
+    pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            "tblastx",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -111,7 +124,7 @@ impl TblastxDatabase {
     /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
     /// run's posts, which is not TBLASTX's where the run is another program's strategy).
     pub(crate) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
@@ -135,14 +148,14 @@ impl TblastxDatabase {
         // (`context_cutoffs`, `shared::check_setup_count`).
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             parsed,
             taxdb: shared::TaxdbRun::running(app),
         })
     }
 
     /// The `-db` value (outfmt 7's `# Database:` line).
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -911,8 +924,8 @@ pub(crate) fn hit_identities(
 /// with the call's refusal over the `-outfmt` values of its other searches, `others`
 /// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
 /// (`TblastxArgs::html_links`, which the writer's `PairwiseConfig::html` gets too).
-pub(crate) fn after_throw<'a>(
-    outfmts: impl IntoIterator<Item = &'a str>,
+pub(crate) fn after_throw<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
     others: &[&str],
     html: bool,
 ) -> crate::report::db_subject::FormatThrow {
@@ -1057,6 +1070,56 @@ pub(crate) fn batches_prefetch(
     )
 }
 
+/// What the reports `formats` show of a reported sequence with parsed Seq-ids
+/// (`reported_subjects`, `report_stream`'s check of each format, the batches' refusal of a
+/// subject with the id of a query): the batches prefetch the subjects for the first format, as
+/// NCBI's prefetch asks it (`prefetch_format`).
+pub(crate) fn parsed_shown(
+    formats: &[super::report::TblastxOutputFormat],
+    prefetch_format: shared::PrefetchFormat,
+) -> ParsedShown {
+    let pairwise = formats.iter().any(|format| format.is_pairwise());
+    ParsedShown {
+        tabular: formats.iter().any(|format| format.tabular_reads_subject()),
+        stops_at_failed_lookup: formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::stops_at_lookup_failure_for(
+                    format.tabular_spec(),
+                    crate::blastinput::app::Program::Tblastx,
+                )
+        }),
+        stops_at_lineless: formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::stops_at_lineless_accession(format.tabular_spec())
+        }),
+        pairwise,
+        structured: formats.iter().any(|format| format.is_structured_xml()),
+        joined: pairwise
+            || formats
+                .iter()
+                .any(|format| format.is_structured_xml() || format.tabular_joins_subjects()),
+        sam: formats
+            .iter()
+            .any(|format| matches!(format, super::report::TblastxOutputFormat::Sam(_))),
+        taxonomy: formats.iter().any(|format| format.writes_taxonomy()),
+        words: formats.iter().fold(
+            crate::report::tabular::PrintedIds::default(),
+            |words, format| words.or(format.printed_ids()),
+        ),
+        prefetched: formats
+            .first()
+            .is_some_and(|format| format.prefetches_subjects())
+            && !shared::prefetch_always_off(prefetch_format),
+        one_by_one: shared::prefetch_may_be_off(prefetch_format),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Tblastx,
+            formats
+                .iter()
+                .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+        ),
+    }
+}
+
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
@@ -1086,6 +1149,7 @@ pub(crate) fn reported_subjects(
     identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,
     spans: &[std::ops::Range<usize>],
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
@@ -1103,6 +1167,23 @@ pub(crate) fn reported_subjects(
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
     let after = (after, pairwise, database.taxdb.calls_before());
     let loads = hit_loads(ordered, &prefetch, after, titles, identities);
+    let seen_all: std::collections::HashSet<u32> = if seen.any() {
+        ordinals
+            .iter()
+            .copied()
+            .filter(|&ordinal| {
+                seen.hides_ordinal(
+                    ordered
+                        .iter()
+                        .filter(|hsp| hsp.hit.s_idx == ordinal)
+                        .map(|hsp| hsp.hit.q_idx as usize),
+                    ordinal,
+                )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -1124,8 +1205,10 @@ pub(crate) fn reported_subjects(
         let title = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
+                    &database.db,
+                    ordinal,
                     stored.replaced_bytes,
-                    || database.db.oid(ordinal),
+                    shown.titles,
                     PROGRAM,
                 )?;
                 if shown.pairwise {
@@ -1146,6 +1229,7 @@ pub(crate) fn reported_subjects(
                     false,
                     taxdb,
                     ordinal,
+                    seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {

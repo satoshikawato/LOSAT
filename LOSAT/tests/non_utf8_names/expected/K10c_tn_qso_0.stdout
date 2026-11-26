@@ -1,0 +1,132 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: sé.fna).
+           3 sequences; 894 total letters
+
+
+
+Query= sp1 subject protein alpha
+
+Length=137
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qn1 plus strand gene                                                  204     6e-74
+qn2 minus strand gene                                                 132     3e-45
+
+
+> qn1 plus strand gene
+Length=366
+
+ Score = 204 bits (519),  Expect = 6e-74, Method: Compositional matrix adjust.
+ Identities = 98/108 (91%), Positives = 101/108 (94%), Gaps = 0/108 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVL+AVFAVRRKVMD PKIRDGP+AVMKGWEN+CWPANMSWKVLMKYEFSSDIHP
+Sbjct  37   MWMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWPANMSWKVLMKYEFSSDIHP  216
+
+Query  61   WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLR  108
+            WICWIPKEQQ PGWWKTDTLHMAEMGLWMHKYPKCMCVMV     SLR
+Sbjct  217  WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR  360
+
+
+> qn2 minus strand gene
+Length=378
+
+ Score = 132 bits (331),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 73/113 (65%), Positives = 80/113 (71%), Gaps = 9/113 (8%)
+ Frame = -3
+
+Query  8    LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHP---  60
+            L A +   RKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHP   
+Sbjct  364  LTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPCNQ  185
+
+Query  61   WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEIN  113
+            W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW+IN
+Sbjct  184  WTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKIN  32
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.135    0.490    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27846
+
+
+Query= sp2 subject protein beta, distant
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qn2 minus strand gene                                                 232     1e-84
+qn1 plus strand gene                                                  120     9e-41
+
+
+> qn2 minus strand gene
+Length=378
+
+ Score = 232 bits (591),  Expect = 1e-84, Method: Compositional matrix adjust.
+ Identities = 111/115 (97%), Positives = 111/115 (97%), Gaps = 0/115 (0%)
+ Frame = -3
+
+Query  6    SVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPC  65
+            S L AD LQLRKVMDDPKIRDGPMAVMKVWESYCFIL SIANMSAHVLMKYEFQSGIHPC
+Sbjct  370  SWLTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPC  191
+
+Query  66   NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  120
+            NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI
+Sbjct  190  NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  26
+
+
+> qn1 plus strand gene
+Length=366
+
+ Score = 120 bits (302),  Expect = 9e-41, Method: Compositional matrix adjust.
+ Identities = 70/114 (61%), Positives = 78/114 (68%), Gaps = 9/114 (8%)
+ Frame = +1
+
+Query  2    WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSG  61
+            WMEHSVL+A     RKVMD PKIRDGP+AVMK WE++C+     ANMS  VLMKYEF S 
+Sbjct  40   WMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWP----ANMSWKVLMKYEFSSD  207
+
+Query  62   IHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALR  113
+            IHP   W CWIPK    PGW  TDTLH++EMGLWMH  P  MC MV     +LR
+Sbjct  208  IHP---WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR  360
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.136    0.486    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29036
+
+
+  Database: User specified sequence set (Input: sé.fna).
+    Posted date:  Unknown
+  Number of letters in database: 894
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

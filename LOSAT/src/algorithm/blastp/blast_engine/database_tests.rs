@@ -18,7 +18,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastpDatabase {
-    BlastpDatabase::open(&fixture(name), &ApplicationSettings::default(), "BLASTP")
+    BlastpDatabase::open(fixture(name), &ApplicationSettings::default(), "BLASTP")
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -164,7 +164,7 @@ fn database_numbers_come_from_the_index_files() {
     assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
     assert_eq!((shown.num_sequences, shown.total_letters), (10, 801));
     // The name is the `-db` value as given.
-    assert_eq!(database.name(), fixture("prot_mv"));
+    assert_eq!(database.name(), fixture("prot_mv").as_bytes());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
@@ -324,7 +324,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
             "LOSAT database error: Database name is required.\n".to_string()
         )
     );
-    let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings, "BLASTP") else {
+    let Err(error) = BlastpDatabase::open(fixture("no_such_database"), &settings, "BLASTP") else {
         panic!("a missing database opened")
     };
     let (exit, message) = native(error);
@@ -337,7 +337,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A database with parsed Seq-ids opens for BLASTP and psiblast.
     for program in ["BLASTP", "PSIBLAST"] {
-        BlastpDatabase::open(&fixture("prot_ids_v4"), &settings, program)
+        BlastpDatabase::open(fixture("prot_ids_v4"), &settings, program)
             .unwrap_or_else(|e| panic!("{program} opens a database with parsed Seq-ids: {e:#}"));
     }
 }
@@ -937,13 +937,13 @@ mod x_db_cut_blocks {
         std::fs::create_dir_all(&dir).unwrap();
         let name = dir.join("gen").to_str().unwrap().to_string();
         let args = crate::writedb::makeblastdb::MakedbArgs {
-            input: "-".to_string(),
+            input: std::ffi::OsString::from("-"),
             input_type: "fasta".to_string(),
             dbtype: "prot".to_string(),
-            title: Some("gen".to_string()),
-            out: Some(name.clone()),
+            title: Some(std::ffi::OsString::from("gen")),
+            out: Some(std::ffi::OsString::from(&name)),
             blastdb_version: 4,
-            max_file_sz: max_file_sz.to_string(),
+            max_file_sz: std::ffi::OsString::from(max_file_sz),
             metadata_output_prefix: None,
             oid_masks: None,
             logfile: None,
@@ -1363,7 +1363,7 @@ fn excluded_lists_leave_marks_of_their_places() {
             .collect()
     };
     let database = BlastpDatabase::open_restricted(
-        name,
+        name.as_bytes(),
         &settings,
         "BLASTP",
         Some(&negative),
@@ -1375,12 +1375,16 @@ fn excluded_lists_leave_marks_of_their_places() {
     let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2]);
     assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
-    let mark = |query, position, best_evalue| FetchExcludedMatch {
+    let mark = |query, position, ordinal, best_evalue| FetchExcludedMatch {
         query,
         position,
+        ordinal,
         best_evalue,
     };
-    assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+    assert_eq!(
+        listed.fetch_excluded,
+        [mark(0, 2, 3, 0.04), mark(2, 0, 3, 1e-9)]
+    );
     // An ungapped search fetches no subject (`fetched` false): sx_frag stays in both lists, with
     // no mark (it leaves at the Seq-aligns, `drop_unaligned`).
     let mut lists = make();
@@ -1592,7 +1596,9 @@ fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
             &HitLoads::default(),
         )
         .unwrap();
-    titles.check_reported_titles(&hit_lists).unwrap();
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
 }
 
 // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are the records' titles, rank by rank,
@@ -1655,7 +1661,8 @@ fn lean_titles_are_the_records_titles_and_letters() {
         &HitLoads::default(),
     )
     .unwrap();
-    lean.check_reported_titles(&hit_lists).unwrap();
+    lean.check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
     assert_eq!(lean.stitles(), records.stitles());
     // Titles, flags and every letter against the stored residues.
     x_assert_same_titles_and_letters(&lean, &records);
@@ -1771,8 +1778,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
 }
 
 // NCBI BLAST+ 2.17.0 writes `Error: (803.7) [blastp] Blast-def-line-set.E.title`,
-// `Bad char [0xE9] in string at byte 21` and the stored title to standard error
-// each time its formatter reads such a definition line (`check_reported_titles`).
+// `Bad char [0xE9] in string at byte 24` and the stored title to standard error
+// each time it reads such a definition line past SeqDB's header cache
+// (`check_reported_titles`, `title_posts`).
 // (A path in the system's temporary directory or in an error text: Unix spelling.)
 #[cfg(unix)]
 #[test]
@@ -1810,7 +1818,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     let titles = listed
         .read_titles(&database, &hit_lists, (&[0], false))
         .unwrap();
-    titles.check_reported_titles(&hit_lists).unwrap();
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
     // The subject with the bad byte: read as `#`, and rejected when it is reported.
     let mut bad = BlastpHitList::new(10);
     bad.update(list(9));
@@ -1821,7 +1831,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .read_titles(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
-    let error = titles.check_reported_titles(&hit_lists).unwrap_err();
+    let error = titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap_err();
     assert!(
         format!("{error:#}")
             .starts_with("database sequence 9 has a stored title with a byte outside ' ' to '~'"),
@@ -1833,8 +1845,30 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(lean.title(1), b"p10 l#st protein");
-    let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();
+    let lean_error = lean
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap_err();
     assert_eq!(format!("{lean_error:#}"), format!("{error:#}"));
+    // Where only the Seq-aligns read the definition lines (outfmt 8, 9, 11 and 12), NCBI's
+    // posts are written instead: one per bad byte at the first read of the subject, none at a
+    // read that SeqDB's header cache answers.
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::SeqAligns)
+        .unwrap();
+    let posts = titles
+        .title_posts(&database, &hit_lists, [&(0..1)])
+        .unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].0, 0);
+    assert_eq!(
+        posts[0].1.text(),
+        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at \
+          byte 24\np10 l\xe9st protein\n"
+    );
+    assert!(titles
+        .title_posts(&database, &hit_lists, [&(0..1)])
+        .unwrap()
+        .is_empty());
     drop(database);
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -2128,7 +2162,7 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         let database = BlastpDatabase {
             db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search)
                 .unwrap(),
-            name: "sprot_tax".to_string(),
+            name: b"sprot_tax".to_vec(),
             taxdb: shared::TaxdbRun::default(),
             program: "BLASTP",
             rps_units: None,

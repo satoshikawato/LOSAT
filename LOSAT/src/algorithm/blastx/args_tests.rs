@@ -227,10 +227,10 @@ fn outfmt_and_fields_are_read_as_ncbi() {
             .tabular_report()
             .map(|spec| (spec.kind, spec.delimiter.clone()))
     };
-    assert_eq!(report("6"), Some((TabularKind::Tabular, "\t".to_string())));
+    assert_eq!(report("6"), Some((TabularKind::Tabular, b"\t".to_vec())));
     assert_eq!(
         report("7 std"),
-        Some((TabularKind::Commented, "\t".to_string()))
+        Some((TabularKind::Commented, b"\t".to_vec()))
     );
     assert_eq!(report("5"), None);
     // Words between single spaces; an empty word names no field.
@@ -251,18 +251,76 @@ fn outfmt_and_fields_are_read_as_ncbi() {
     }
     assert_eq!(
         tabular("6 std -evalue staxids"),
-        Some((TabularKind::Tabular, 12, "\t".to_string()))
+        Some((TabularKind::Tabular, 12, b"\t".to_vec()))
     );
     assert_eq!(
         tabular("7 delim=| std"),
-        Some((TabularKind::Commented, 12, "|".to_string()))
+        Some((TabularKind::Commented, 12, b"|".to_vec()))
     );
-    assert_eq!(tabular("10"), Some((TabularKind::Csv, 12, ",".to_string())));
+    assert_eq!(tabular("10"), Some((TabularKind::Csv, 12, b",".to_vec())));
     assert_eq!(
         tabular("20 qseqid"),
-        Some((TabularKind::CsvWithHeader, 1, ",".to_string()))
+        Some((TabularKind::CsvWithHeader, 1, b",".to_vec()))
     );
 }
+
+#[test]
+fn resolved_options_request_kind_matches_rpstblastn_presence() {
+    use crate::algorithm::common::database::PrefetchFormat;
+    use crate::report::archive::options::RequestKind;
+
+    let blastx = parse(&["-outfmt", "8"]).resolve().unwrap();
+    assert_eq!(blastx.request_kind(), RequestKind::Blastx);
+    assert_eq!(
+        blastx.prefetch_format(),
+        PrefetchFormat::of(8, RequestKind::Blastx)
+    );
+
+    #[derive(Debug)]
+    struct DummyRps;
+    impl RpsTblastnSearch for DummyRps {
+        fn for_database(
+            &self,
+            _: &ResolvedOptions,
+            _: Option<&crate::algorithm::blastx::database::BlastxDatabase>,
+            _: bool,
+        ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>> {
+            unreachable!()
+        }
+        fn run_query_batches(
+            &self,
+            _: &ResolvedOptions,
+            _: Option<&crate::algorithm::blastx::database::BlastxDatabase>,
+            _: &mut crate::algorithm::blastx::native::QueryBatchReader<'_>,
+            _: &mut dyn std::io::Write,
+            _: &dyn Fn(anyhow::Error) -> anyhow::Error,
+            _: &mut crate::algorithm::blastx::native::BatchRender<'_>,
+            _: &mut dyn FnMut(
+                &mut dyn std::io::Write,
+                &[crate::algorithm::blastx::input::FastaRecord],
+                usize,
+            ) -> Result<()>,
+        ) -> Result<usize> {
+            unreachable!()
+        }
+        fn handle_sets(&self) -> Vec<crate::report::archive::options::Param> {
+            Vec::new()
+        }
+        fn merges_volumes(&self) -> bool {
+            false
+        }
+    }
+
+    let mut args = parse(&["-outfmt", "8"]);
+    args.rpstblastn = Some(std::sync::Arc::new(DummyRps));
+    let rpst = args.resolve().unwrap();
+    assert_eq!(rpst.request_kind(), RequestKind::Rpstblastn);
+    assert_eq!(
+        rpst.prefetch_format(),
+        PrefetchFormat::of(8, RequestKind::Rpstblastn)
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
 // A negative window (a search strategy's: the command line takes `-window_size` from 0) carries
 // the diagonal table's state from one subject to the next, which the threads' timing would decide

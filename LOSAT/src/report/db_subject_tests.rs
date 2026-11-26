@@ -477,15 +477,21 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         .unwrap()
         .fetched(false, true, HitLoad::Loaded)
         .is_ok());
-    let replaced = DeflineSet {
+    // A stored title with a byte outside ' ' ..= '~' is read (its posts are the Seq-aligns',
+    // `ParsedSubject::replaced_title_bytes`); such a byte of a stored Seq-id is refused.
+    let replaced = |title, id| DeflineSet {
         deflines: vec![BlastDefline {
             ids: vec![ParsedSeqId::Gi(7)],
-            replaced_title_bytes: 1,
+            replaced_title_bytes: title,
+            replaced_id_bytes: id,
             ..BlastDefline::default()
         }],
         utf8: false,
     };
-    assert!(ParsedSubject::new(replaced).is_err());
+    assert!(ParsedSubject::new(replaced(1, 0))
+        .unwrap()
+        .replaced_title_bytes());
+    assert!(ParsedSubject::new(replaced(0, 1)).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
 }
 
@@ -1380,8 +1386,8 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sseqid ssciname".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sseqid ssciname".to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastp,
     )
@@ -2079,6 +2085,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
             lineless: false,
         })
     );
@@ -2855,6 +2862,239 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
     }
 }
 
+fn pdb_id(mol: &str, chain: Option<i32>, chain_id: Option<&str>) -> ParsedSeqId {
+    ParsedSeqId::Pdb(PdbSeqId {
+        mol: mol.as_bytes().to_vec(),
+        chain,
+        rel: None,
+        chain_id: chain_id.map(|c| c.as_bytes().to_vec()),
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:386-431
+// The data loader looks up the Seq-id of the Seq-align id's handle and keeps the sequence only
+// where one of its ids compares equal to it: a record whose only id is `pdb` with chain 321
+// (`char` 65 for the handle) is not served, and NCBI BLAST+ 2.17.0 writes the `catch` of each
+// read (line RG-KB item 12, `i12/ncbi`: `1AB1_A Unknown`, `Sequence with id 1AB1_A no longer
+// exists in database...alignment skipped`).
+#[test]
+fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert!(unserved.scope_finds_none());
+    assert_eq!(
+        unserved.loader_id().into_owned(),
+        pdb_id("1AB1", Some(65), None)
+    );
+    let (start, title, caught) = unserved.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "Unknown", true)
+    );
+    assert_eq!(
+        unserved.heading(true, false, None).unwrap(),
+        Err(b"1AB1_A".to_vec())
+    );
+    assert_eq!(
+        unserved.heading_skipped_id(true, false).as_deref(),
+        Some(&b"1AB1_A"[..])
+    );
+    assert!(matches!(unserved.prefetched(), Prefetched::Nothing));
+    // The record is not refused for what the lookup finds: the formats write the `catch`.
+    assert_eq!(unserved.fetched(true, false, HitLoad::Loaded), Ok(()));
+    // Chains that the handle keeps, and a second id that the handle's Seq-id matches, are served.
+    for served in [
+        lines(vec![vec![pdb_id("1AB1", Some(65), None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(-5), None)]]),
+        lines(vec![vec![pdb_id("1AB1", None, None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(66), Some("A"))]]),
+        lines(vec![vec![
+            gb("AB600001", 1),
+            pdb_id("1AB1", Some(321), None),
+        ]]),
+    ] {
+        assert!(!served.scope_finds_none(), "{:?}", served.alignment_id());
+        assert!(!served.description_line(true).2);
+    }
+    // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
+    // Bioseq NCBI builds is made of that line: the description line, the organism report and the
+    // heading's title of an untitled line show its title; the heading lists the sequence's own
+    // lines (review 2 of line RG-KB item 12, N3: probes `e15_twoline`, `e15nt`).
+    use crate::algorithm::common::database::description_line_refusal;
+    let two_lines = |first: Option<&[u8]>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                BlastDefline {
+                    title: first.map(<[u8]>::to_vec),
+                    ids: vec![pdb_id("1AB1", Some(321), None)],
+                    ..BlastDefline::default()
+                },
+                BlastDefline {
+                    title: Some(b"u".to_vec()),
+                    ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
+                    ..BlastDefline::default()
+                },
+            ],
+            utf8: false,
+        })
+        .unwrap()
+    };
+    let other_line = two_lines(Some(b"t"));
+    assert!(!other_line.scope_finds_none());
+    assert_eq!(
+        description_line_refusal(&other_line, HitLoad::Loaded, true),
+        None
+    );
+    let (start, title, caught) = other_line.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "u", false)
+    );
+    assert_eq!(
+        text(&other_line.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A t\n 1AB1_A u\n"
+    );
+    let untitled = two_lines(None);
+    assert_eq!(
+        text(&untitled.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A u\n 1AB1_A u\n"
+    );
+    assert_eq!(other_line.fetched(true, false, HitLoad::Loaded), Ok(()));
+    assert!(matches!(other_line.prefetched(), Prefetched::Itself));
+    // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
+    // the handle's, so its load throws: refused where a format reads the Bioseq or the prefetch
+    // reads it; the Seq-annots and the archive read nothing of it (outfmt 8 is NCBI's bytes).
+    let one_line = ParsedSubject::new(DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ids: vec![
+                pdb_id("1AB1", Some(321), None),
+                pdb_id("1AB1", Some(65), None),
+            ],
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    })
+    .unwrap();
+    assert!(one_line
+        .fetched(false, false, HitLoad::Loaded)
+        .unwrap_err()
+        .contains("its load throws"));
+    assert!(matches!(
+        one_line.prefetched(),
+        Prefetched::Failed(reason) if reason.contains("oid headers do not contain target gi/seq_id")
+    ));
+    assert!(one_line.pssm_read(false).is_err());
+    assert_eq!(
+        description_line_refusal(&one_line, HitLoad::Loaded, true),
+        None
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:886-892
+// The description line of a sequence whose Bioseq the scope does not get prints, with
+// `-show_gis`, a GI that NCBI never sets; a description id longer than 65 bytes pads the line
+// without end. Both are refused only for a sequence whose line a report prints (the first
+// `-num_descriptions`; review 1 of line RG-KB item 12, R1).
+#[test]
+fn a_description_line_is_refused_only_where_a_report_prints_it() {
+    use crate::algorithm::common::database::{
+        description_line_refusal, refuse_described_lines, refuse_described_records,
+    };
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert_eq!(
+        description_line_refusal(&unserved, HitLoad::Loaded, true),
+        None
+    );
+    let unserved = unserved.showing_gis(true);
+    assert!(description_line_refusal(&unserved, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("prints a GI that NCBI BLAST+ 2.17.0 never sets"));
+    let long = lines(vec![vec![ParsedSeqId::Local(ObjectId::Str(
+        "x".repeat(70).into_bytes(),
+    ))]]);
+    assert!(description_line_refusal(&long, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("longer than 65 bytes"));
+    let served = lines(vec![vec![pdb_id("1AB4", Some(65), None)]]);
+    let parsed = vec![
+        Some(std::sync::Arc::new(served)),
+        Some(std::sync::Arc::new(unserved)),
+    ];
+    let refuse = |described: Vec<u32>| {
+        refuse_described_lines(
+            1,
+            |_| vec![0, 1],
+            |_| Ok(described.clone()),
+            &parsed,
+            |_| HitLoad::Loaded,
+            crate::seqdb::Oid::of_unrestricted,
+            "BLASTP",
+        )
+    };
+    // `-num_descriptions 1`: rank 1 prints no line.
+    assert!(refuse(vec![0]).is_ok());
+    assert!(refuse(vec![]).is_ok());
+    let error = refuse(vec![0, 1]).unwrap_err().to_string();
+    assert!(error.contains("never sets"), "{error}");
+    // The `-subject` records whose ids `-parse_deflines` read, by subject index: the same rule
+    // (review 2 of line RG-KB item 12, N2; `-num_descriptions 0` prints no line).
+    let records = vec![None, Some(std::sync::Arc::new(long))];
+    let refuse_records = |described: Vec<u32>| {
+        refuse_described_records(
+            1,
+            |_| vec![1],
+            |_| Ok(described.clone()),
+            &records,
+            "BLASTP",
+        )
+    };
+    assert!(refuse_records(vec![]).is_ok());
+    let error = refuse_records(vec![1]).unwrap_err().to_string();
+    assert!(
+        error.contains("subject record") && error.contains("longer than 65 bytes"),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_scope_keys_of_a_pdb_id_are_its_handle() {
+    // `chain` 321 and 65, with or without the `chain-id` "A", are one handle; "B" is another.
+    let keys = |id: &ParsedSeqId| {
+        let mut keys = Vec::new();
+        crate::seqid::defline_set::scope_keys(id, &mut keys);
+        keys
+    };
+    let a = keys(&pdb_id("1AB1", Some(65), Some("A")));
+    assert_eq!(keys(&pdb_id("1AB1", Some(321), None)), a);
+    assert_eq!(keys(&pdb_id("1AB1", Some(65), None)), a);
+    assert_eq!(keys(&pdb_id("1ab1", Some(65), Some("A"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(66), Some("B"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(200), None)), a);
+}
+
+// RG-KB 9(b) review 1 (F2): a database with parsed Seq-ids (`tests/db_search/tchar/tc_ps_p`,
+// makeblastdb -parse_seqids) whose stored title holds 0xE9 is a subject, read as '#', whose
+// Seq-aligns NCBI makes as of the others (`db.tchar.*.ps.8`); a byte of a stored Seq-id is
+// refused.
+#[test]
+fn a_parsed_subject_with_a_replaced_title_byte_is_read() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_ps_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let replaced = ParsedSubject::new(db.defline_set(0).unwrap()).unwrap();
+    assert!(replaced.replaced_title_bytes());
+    assert_eq!(replaced.first_title(), b"fam#one");
+    let clean = ParsedSubject::new(db.defline_set(1).unwrap()).unwrap();
+    assert!(!clean.replaced_title_bytes());
+    let mut set = db.defline_set(1).unwrap();
+    set.deflines[0].replaced_id_bytes = 1;
+    let refusal = ParsedSubject::new(set).unwrap_err().to_string();
+    assert!(
+        refusal.contains("stored Seq-id with a byte outside"),
+        "{refusal}"
+    );
+}
+
 // Review 1 of line DBID pfoff-4, H1 and H2 (`R/pfoff/p4/review1`, cases `*.scope.*` and
 // `*.scopef.*`): a subject whose lookup fails on a file is held where the run loaded another
 // sequence that holds its Seq-align id before the subject's load, in NCBI's order (the reports
@@ -3433,14 +3673,13 @@ fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
 // When a subject's description title throws (`UnknownEncoding`), NCBI's catch puts the Seq-align
 // id on the description line and pads/wraps using that id rather than the display id. The 65-byte
-// length check in `check_shown_parsed_subject` must measure the Seq-align id for both protein and
+// length check in `description_line_refusal` must measure the Seq-align id for both protein and
 // nucleotide databases (display <= 65 & alignment > 65 refuses; display > 65 & alignment <= 65
 // passes), and must also cover an empty nucleotide title whose source name throws.
 #[test]
 fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
-    use crate::algorithm::common::database::check_shown_parsed_subject;
+    use crate::algorithm::common::database::description_line_refusal;
     use crate::report::defline::SourceTaxname;
-    let oid = || crate::seqdb::Oid::of_unrestricted(0);
     let long_acc = "X".repeat(66);
     let long_local = ParsedSeqId::Local(ObjectId::Str(vec![b'a'; 66]));
 
@@ -3457,10 +3696,9 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
         .unwrap()
     };
 
-    let assert_long_id = |subject: &ParsedSubject, protein: bool, taxdb: bool, program: &str| {
-        let err = check_shown_parsed_subject(subject, protein, taxdb, oid, program)
-            .unwrap_err()
-            .to_string();
+    let assert_long_id = |subject: &ParsedSubject, protein: bool, program: &str| {
+        let err = description_line_refusal(subject, HitLoad::Loaded, protein)
+            .unwrap_or_else(|| panic!("{program}: expected 65-byte description-line refusal"));
         assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
     };
     let long_align_ids = vec![long_local.clone(), gb("NP_000001", 1)];
@@ -3471,23 +3709,26 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
         let long_align_throwing = make(long_align_ids.clone(), Some(b"bad\x81"), None);
         assert!(long_align_throwing.description_start().len() <= 65);
         assert!(long_align_throwing.description_line(protein).0.len() > 65);
-        assert_long_id(&long_align_throwing, protein, false, program);
+        assert_long_id(&long_align_throwing, protein, program);
 
         let long_align_ok = make(long_align_ids.clone(), Some(b"ok"), None);
-        assert!(check_shown_parsed_subject(&long_align_ok, protein, false, oid, program).is_ok());
+        assert_eq!(
+            description_line_refusal(&long_align_ok, HitLoad::Loaded, protein),
+            None
+        );
 
         // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
         let long_display_throwing = make(long_display_ids.clone(), Some(b"bad\x81"), None);
         assert!(long_display_throwing.description_start().len() > 65);
         assert!(long_display_throwing.description_line(protein).0.len() <= 65);
-        assert!(
-            check_shown_parsed_subject(&long_display_throwing, protein, false, oid, program)
-                .is_ok(),
+        assert_eq!(
+            description_line_refusal(&long_display_throwing, HitLoad::Loaded, protein),
+            None,
             "{program}: throwing title uses short Seq-align id"
         );
 
         let long_display_ok = make(long_display_ids.clone(), Some(b"ok"), None);
-        assert_long_id(&long_display_ok, protein, false, program);
+        assert_long_id(&long_display_ok, protein, program);
     }
 
     // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
@@ -3496,5 +3737,5 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
             SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
         });
     assert!(nucl_source_throwing.description_may_throw());
-    assert_long_id(&nucl_source_throwing, false, true, "BLASTN");
+    assert_long_id(&nucl_source_throwing, false, "BLASTN");
 }

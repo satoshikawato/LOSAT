@@ -1544,15 +1544,18 @@ impl<'a> DatabaseHeading<'a> {
         DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1952-1981
     /// The heading of a subject with parsed Seq-ids as `parsed` makes it, or `Skipped` with its
-    /// Seq-align id where its load throws (`thrown`, `x_pairwise_par::QuerySections::thrown`).
+    /// Seq-align id where its load throws (`thrown`, `x_pairwise_par::QuerySections::thrown`) or
+    /// its scope gets no Bioseq (`ParsedSubject::scope_finds_none`: the alignment's handle throws
+    /// before any heading starts, so that none counts in the ranks of the headings after it).
     fn loaded(
         subject: &'a crate::report::db_subject::ParsedSubject,
         gapped: bool,
         hsps: usize,
         thrown: bool,
     ) -> Self {
-        if thrown {
+        if thrown || subject.scope_finds_none() {
             return DatabaseHeading::Skipped(subject.skipped_id());
         }
         Self::parsed(subject, gapped, hsps)
@@ -3364,11 +3367,14 @@ struct BlastpSections<'a> {
 /// its rows' strands and query frame of (`seqalign::protein_row_segments`,
 /// `nucleotide_row_segments`, `translated_row_segments`); the subjects shown in one hit (copies of
 /// a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope; `is_query`
-/// tells the subject that is the query's own Bioseq.
+/// tells the subject that is the query's own Bioseq. A subject whose Bioseq NCBI's scope does not
+/// get (`parsed`, by subject index: `ParsedSubject::scope_finds_none`) is left out, and counted
+/// among the first `num_alignments`.
 fn section_hsps(
     mut hsps: super::query_anchored::Hsps,
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     is_query: impl Fn(u32) -> bool,
     mut segments_of: impl FnMut(
         &PairwiseHit,
@@ -3377,6 +3383,10 @@ fn section_hsps(
 ) -> super::query_anchored::Hsps {
     let mut segments = super::serial::seqalign::Segments::default();
     for &s_idx in group.aligned(num_alignments) {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
+        if finds_no_bioseq(parsed, s_idx) {
+            continue;
+        }
         if is_query(s_idx) {
             hsps.set_query_bioseq(s_idx);
         }
@@ -3392,12 +3402,14 @@ fn section_hsps(
 fn blastp_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     is_query: impl Fn(u32) -> bool,
 ) -> super::query_anchored::Hsps {
     section_hsps(
         super::query_anchored::Hsps::default(),
         num_alignments,
         group,
+        parsed,
         is_query,
         |hit, segments| blastp_row_segments(&hit.hit, segments),
     )
@@ -3418,12 +3430,14 @@ fn blastp_row_segments(
 pub(crate) fn blastn_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     is_query: impl Fn(u32) -> bool,
 ) -> super::query_anchored::Hsps {
     section_hsps(
         super::query_anchored::Hsps::default(),
         num_alignments,
         group,
+        parsed,
         is_query,
         |hit, segments| match hit.left_of_record() {
             Some(left) if hit.hit.gap_info.is_none() => {
@@ -3443,11 +3457,13 @@ pub(crate) fn blastn_section_hsps(
 fn blastx_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
 ) -> super::query_anchored::Hsps {
     section_hsps(
         super::query_anchored::Hsps::of_translated_query(),
         num_alignments,
         group,
+        parsed,
         |_| false,
         blastx_row_segments,
     )
@@ -3585,6 +3601,7 @@ fn blastx_anchored_stop(
         && super::query_anchored::section_frees(&blastx_section_hsps(
             options.num_alignments,
             group,
+            &[],
         ))?;
     Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment))
 }
@@ -3608,7 +3625,7 @@ pub(crate) fn blastp_section_aborts(
         rows,
         subject_titles,
         &is_query,
-        |group| blastp_section_hsps(num_alignments, group, &is_query),
+        |group| blastp_section_hsps(num_alignments, group, &[], &is_query),
     )
 }
 
@@ -3634,7 +3651,9 @@ pub(crate) fn blastp_section_frees(
     else {
         return Ok(false);
     };
-    super::query_anchored::section_frees(&blastp_section_hsps(num_alignments, &group, |_| false))
+    super::query_anchored::section_frees(&blastp_section_hsps(num_alignments, &group, &[], |_| {
+        false
+    }))
 }
 
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
@@ -3915,9 +3934,12 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
         write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
-            blastp_section_hsps(self.report.num_alignments, group, |s_idx| {
-                sequences.subject_is_query(q_idx, s_idx)
-            })
+            blastp_section_hsps(
+                self.report.num_alignments,
+                group,
+                self.parsed_subjects,
+                |s_idx| sequences.subject_is_query(q_idx, s_idx),
+            )
         })
     }
 
@@ -4333,6 +4355,16 @@ impl SortColumnValues {
 
 /// The subject of `s_idx` among `parsed` when it has parsed Seq-ids (not a `-subject` record shown
 /// as one without `-parse_deflines`, `ParsedSubject::shown_as_record`).
+/// Whether NCBI's scope gets no Bioseq for subject `s_idx` of a report whose subjects with parsed
+/// Seq-ids are `parsed` (by subject index; `ParsedSubject::scope_finds_none`).
+fn finds_no_bioseq(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> bool {
+    parsed_subject(parsed, s_idx)
+        .is_some_and(crate::report::db_subject::ParsedSubject::scope_finds_none)
+}
+
 fn parsed_subject(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     s_idx: u32,
@@ -5105,9 +5137,12 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
         write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
-            blastn_section_hsps(self.report.num_alignments, group, |s_idx| {
-                sequences.subject_is_query(q_idx, s_idx)
-            })
+            blastn_section_hsps(
+                self.report.num_alignments,
+                group,
+                &self.report.parsed_subjects,
+                |s_idx| sequences.subject_is_query(q_idx, s_idx),
+            )
         })
     }
 
@@ -5710,6 +5745,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
                 super::query_anchored::Hsps::of_translated_nucleotides(),
                 self.report.num_alignments,
                 group,
+                &self.report.parsed_subjects,
                 |s_idx| sequences.subject_is_query(q_idx, s_idx),
                 |hit, segments| tblastx_row_segments(hit, query_length, segments),
             )
@@ -6100,6 +6136,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 super::query_anchored::Hsps::of_translated_subjects(),
                 self.report.num_alignments,
                 group,
+                self.parsed_subjects,
                 |_| false,
                 tblastn_row_segments,
             )
@@ -6448,6 +6485,17 @@ impl BlastxSections<'_> {
     }
 }
 
+impl BlastxSections<'_> {
+    /// The subjects with parsed Seq-ids by subject index: the database's, or the `-subject`
+    /// records'.
+    fn database_parsed(&self) -> &[Option<Arc<crate::report::db_subject::ParsedSubject>>] {
+        match self.database {
+            Some((_, _, parsed, _)) => parsed,
+            None => self.records_parsed,
+        }
+    }
+}
+
 impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     fn num_alignments(&self) -> usize {
         self.options.num_alignments
@@ -6572,11 +6620,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     }
 
     fn alignment_id_is_local(&self, s_idx: u32) -> bool {
-        let parsed = match self.database {
-            Some((_, _, parsed, _)) => parsed,
-            None => self.records_parsed,
-        };
-        alignment_id_local(parsed, s_idx)
+        alignment_id_local(self.database_parsed(), s_idx)
     }
 
     // Each HSP's Dense-seg is made after its subject's read, before the section's first byte and
@@ -6612,7 +6656,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
         write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
-            blastx_section_hsps(self.options.num_alignments, group)
+            blastx_section_hsps(self.options.num_alignments, group, self.database_parsed())
         })
     }
 
@@ -6843,5 +6887,20 @@ pub(crate) fn scan_mode_definition(tag: &str) -> String {
         "User specified sequence set".to_string()
     } else {
         format!("User specified sequence set (Input: {tag})")
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
+/// Byte-preserving form of [`scan_mode_definition`] for subject tags that may not be UTF-8.
+pub(crate) fn scan_mode_definition_bytes(tag: &[u8]) -> Vec<u8> {
+    if tag.is_empty() {
+        b"User specified sequence set".to_vec()
+    } else {
+        [
+            b"User specified sequence set (Input: ".as_slice(),
+            tag,
+            b")",
+        ]
+        .concat()
     }
 }

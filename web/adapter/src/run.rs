@@ -151,7 +151,7 @@ pub fn outputs(program: Program, requested: &Requested) -> Vec<Output> {
 }
 
 /// The `-outfmt` value of the program's arguments.
-fn outfmt_of(command: &mut Commands) -> &mut String {
+fn outfmt_of(command: &mut Commands) -> &mut std::ffi::OsString {
     match command {
         Commands::Blastp(a) => &mut a.outfmt,
         Commands::Tblastn(a) => &mut a.outfmt,
@@ -335,7 +335,9 @@ fn read_outfmt(
 ) -> Result<(Program, Commands, Requested), String> {
     use losat::web_adapter::EarlyFormat;
     let strategy = losat::web_adapter::export_search_strategy_of(&command).is_some();
-    let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
+    let outfmt = std::mem::replace(outfmt_of(&mut command), std::ffi::OsString::from("0"))
+        .into_string()
+        .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?;
     let early = losat::web_adapter::early_format_choice(&outfmt, strategy)
         .map_err(|error| format!("{error:#}"))?;
     // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
@@ -351,7 +353,7 @@ fn read_outfmt(
         // The value stays the arguments' and is the run's one output, which the engine's
         // formatting handler reads again (line RG F1w review 2, S-a).
         EarlyFormat::Deferred => {
-            outfmt.clone_into(outfmt_of(&mut command));
+            *outfmt_of(&mut command) = std::ffi::OsString::from(&outfmt);
             let requested = Requested {
                 custom: Some(outfmt),
                 number: None,
@@ -398,7 +400,10 @@ fn read_outfmt(
         // number, which NCBI and the CLI drop (`FormatChoice::normalized`). The engine's library
         // drops them as well (`parse_formatting_string`; BLASTP's since line RG F/d36), so this
         // only gives the output one spelling of its number.
-        1..=4 => Some(choice.normalized()),
+        1..=4 => Some(
+            String::from_utf8(choice.normalized())
+                .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?,
+        ),
         _ => Some(outfmt),
     };
     let number = Some(choice.number as u32);
@@ -460,7 +465,7 @@ pub fn enter_run_directory() {
 /// The database of the arguments `command` (`-db NAME`), which the run opens by name as the command
 /// line opens it, from the files of the run's working directory that the host gives the engine
 /// (docs/web/abi_v2.md §3, §4; line WQA D12a, 2026-11-20). `None` for a search of `-subject`.
-fn database_of(command: &Commands) -> Option<&str> {
+fn database_of(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(args) => args.db.as_deref(),
         Commands::Tblastn(args) => args.db.as_deref(),
@@ -535,18 +540,22 @@ struct SearchRunFiles {
     read: Vec<Vec<u8>>,
 }
 
-/// The names of the search's files that the host holds outside `/work` and the list files of a
-/// `-db` search that the run opens for reading (line WQA D19 rounds R1 and R2):
+/// The names of the search's files that the host holds outside `/work` and the files of a `-db`
+/// or `-filtering_db` search that the run opens or checks for reading (line WQA D19 rounds R1 and
+/// R2, D19b):
 /// - `registered`: `-query` and `-subject` (unless `-`), BLASTN's `-window_masker_db` or
 ///   `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`) when registered as kind 1,
 ///   and the kind-2 registry files of `registry` that this run's start reads (`.ncbirc`, and
 ///   without a version word either the registered file of `-conffile` or `<program>.ini`);
 /// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
 ///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
-///   `-negative_taxidlist`), kept apart from `registered` so a missing list file does not make
-///   its parent folders present.
+///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
+///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
+///   `registered` so a missing file does not make its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
-    use losat::web_adapter::{preparse, scan_program_argv, Preparsed, RegistryFiles as _};
+    use losat::web_adapter::{
+        preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
+    };
     use std::path::Path;
 
     let (program_name, arguments) = words.split_first().unwrap_or((&"", &[]));
@@ -582,9 +591,17 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     // one (even when it starts with `-`).
     let mut registered: Vec<Vec<u8>> = Vec::new();
     let mut list_files: Vec<Vec<u8>> = Vec::new();
-    let mut has_db = false;
+    let mut dbs: Vec<String> = Vec::new();
+    let mut filtering_dbs: Vec<String> = Vec::new();
+    let mut outfmt: Option<String> = None;
+    let mut has_taxids = false;
+    let mut no_taxid_expansion = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
+        if name == "no_taxid_expansion" && value.is_none() {
+            no_taxid_expansion = true;
+            return;
+        }
         let Some(value) = value else {
             return;
         };
@@ -592,9 +609,18 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "query" | "subject" => push_input(&mut registered, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
-            "db" => has_db = true,
+            "db" => dbs.push(value.to_string()),
+            "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "outfmt" => outfmt = Some(value.to_string()),
+            "taxids" | "negative_taxids" => has_taxids = true,
+            "taxidlist" | "negative_taxidlist" => {
+                has_taxids = true;
+                if !value.is_empty() {
+                    list_files.push(value.as_bytes().to_vec());
+                }
+            }
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
+            | "negative_seqidlist" => {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
@@ -620,10 +646,23 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
-    SearchRunFiles {
-        registered,
-        read: if has_db { list_files } else { Vec::new() },
-    }
+    let mut read = if !dbs.is_empty() {
+        list_files
+    } else {
+        Vec::new()
+    };
+    let db_refs: Vec<&str> = dbs.iter().map(String::as_str).collect();
+    let filtering_db_refs: Vec<&str> = filtering_dbs.iter().map(String::as_str).collect();
+    read.extend(search_database_read_files(
+        program.api(),
+        arguments,
+        registry,
+        &db_refs,
+        &filtering_db_refs,
+        outfmt.as_deref().unwrap_or("0"),
+        has_taxids && !no_taxid_expansion,
+    ));
+    SearchRunFiles { registered, read }
 }
 
 /// The names of the search's files that the host holds outside `/work` (`search_run_files`).
@@ -787,6 +826,17 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
     Ok(started.settings()?.data_loaders)
 }
 
+/// The reader settings that *validation* reports for an argv (docs/web/abi_v2.md §9): whether the
+/// run reads its inputs with NCBI's data loaders on (`[BLAST] DATA_LOADERS` of its registry) and,
+/// when the argv parses (`parse_printing` succeeds or a version word stops start), whether it
+/// parses Seq-ids from deflines (`-parse_deflines`, matching [`inputs_together`]); `None` when the
+/// argv does not parse so the host keeps its previous `-parse_deflines` setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Validation {
+    pub data_loaders: bool,
+    pub parse_deflines: Option<bool>,
+}
+
 /// `validate`: the application start (`start`: its errors are the command line's first), then
 /// `parse`, the settings that LOSAT refuses, and nothing more for a dry run (`-dryrun`); then the
 /// syntax of `-subject_loc` and `-query_loc`, BLASTN's
@@ -800,35 +850,61 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
 /// `search_all`), as the CLI checks the argv's `-outfmt` alone.
 /// The other search's rejection fails only its formats, which the argv does not ask for.
 /// `run` leaves the other checks to the engine, which reports them as the CLI does.
-/// Returns whether the run reads its inputs with NCBI's data loaders on (`data_loaders`), which
-/// the host gives `register` and `scan_begin` (line WQA's D16, 2026-11-20).
-pub fn validate(words: &[&str]) -> Result<bool, String> {
+/// Returns the [`Validation`] settings that the host gives `register` and `scan_begin`
+/// (line WQA's D16, 2026-11-20; line RG-XT item X7-5, 2026-11-25).
+pub fn validate(words: &[&str]) -> Result<Validation, String> {
     validate_with(words, &mut |_| ())
 }
 
-/// `validate`, which also gives `known` the data loaders of the argv's registry as soon as the
-/// start has read it and LOSAT takes its settings, before the checks of the arguments and the
-/// options: the setting does not depend on them, so it is known while another option is refused
-/// (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings fail.
-pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
+/// `validate`, which also gives `known` the reader settings of the argv as soon as the start has
+/// read its registry and LOSAT takes its settings, before the checks of the arguments and the
+/// options: the settings do not depend on those checks, so they are known while another option is
+/// refused (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings
+/// fail.
+pub fn validate_with(
+    words: &[&str],
+    known: &mut dyn FnMut(Validation),
+) -> Result<Validation, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let registry = crate::files::registry_files();
     let run_names = search_run_files(words, &registry);
     let no_files = RunFiles::Receiver(Arc::new(NoFiles(run_names)));
     let started =
         start(words, &registry, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
+    let parse_deflines = if started.version().is_some() {
+        Some(false)
+    } else {
+        match parse_printing(words, None) {
+            Ok(Parsed::Prints(_)) => Some(false),
+            Ok(Parsed::Command(_, command, _)) => {
+                Some(!started.dry_run() && losat::web_adapter::parse_deflines_of(&command))
+            }
+            Err(_) => None,
+        }
+    };
     if let Ok(settings) = started.settings() {
-        known(settings.data_loaders);
+        known(Validation {
+            data_loaders: settings.data_loaders,
+            parse_deflines,
+        });
     }
     let (program, command, requested) = match started_command(words, &started, &no_files, false)? {
         Next::Search(parsed, _) => *parsed,
         // A run that prints reads no input; the command line prints before it refuses settings.
         Next::Prints(_) => {
-            return Ok(started
-                .settings()
-                .is_ok_and(|settings| settings.data_loaders))
+            return Ok(Validation {
+                data_loaders: started
+                    .settings()
+                    .is_ok_and(|settings| settings.data_loaders),
+                parse_deflines: Some(false),
+            })
         }
-        Next::Ends => return Ok(started.settings()?.data_loaders),
+        Next::Ends => {
+            return Ok(Validation {
+                data_loaders: started.settings()?.data_loaders,
+                parse_deflines: Some(false),
+            })
+        }
     };
     let custom = requested.custom.as_deref();
     let settings = started.settings()?;
@@ -836,7 +912,7 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
     // `run`, which has them.
-    let subject_range = |subject_loc: Option<&str>| {
+    let subject_range = |subject_loc: Option<&std::ffi::OsStr>| {
         parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
     let groups = search_groups(&outputs(program, &requested), &command);
@@ -851,7 +927,9 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     // checks it and as the CLI does, whose hit list check (`No hits are being saved`) comes before
     // the e-value's (line WQA's sweep, D3 review r2, 2026-11-19: with format 0's size, `-outfmt 6
     // -num_alignments 0 -evalue 0` gave the e-value's error).
-    let with_own = |outfmt: &mut String| own[0].outfmt.clone_into(outfmt);
+    let with_own = |outfmt: &mut std::ffi::OsString| {
+        *outfmt = std::ffi::OsString::from(&own[0].outfmt);
+    };
     // The CLI checks the thread count before the options (`validate_threads`), the checks of the
     // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
     if custom_rejected {
@@ -908,7 +986,10 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
         }
         _ => {}
     }
-    Ok(settings.data_loaders)
+    Ok(Validation {
+        data_loaders: settings.data_loaders,
+        parse_deflines,
+    })
 }
 
 /// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
@@ -1095,7 +1176,10 @@ impl FormatObserver for RangeRecorder {
 /// run before any hit.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
-fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
+fn searched_queries(
+    query_loc: Option<&std::ffi::OsStr>,
+    records: &[FastaRecord],
+) -> Option<Vec<usize>> {
     use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
     let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;
     Some(
@@ -1432,7 +1516,7 @@ fn search(
                 .zip(writers.iter_mut())
                 .zip(archives.iter_mut())
                 .map(|((format, writer), archive)| FormatOutput {
-                    outfmt: &format.outfmt,
+                    outfmt: format.outfmt.as_bytes(),
                     refusal: if format.requested {
                         FormatRefusal::FailsCall
                     } else {
@@ -1739,7 +1823,7 @@ fn link_format0(
 /// without the options is validated as before named input files.
 fn validates_window_masker(args: &losat::web_adapter::BlastnArgs) -> bool {
     match args.window_masker_db.as_deref() {
-        Some(name) => crate::files::registered(name),
+        Some(name) => name.to_str().is_some_and(crate::files::registered),
         None => args.window_masker_taxid.is_some(),
     }
 }
@@ -2719,7 +2803,14 @@ mod tests {
                 &["-reward", "5", "-penalty", "-1"],
                 &["-reward", "2", "-penalty", "-1"],
             ] {
-                assert_eq!(with(base, pair), Ok(true), "{base:?} {pair:?}");
+                assert_eq!(
+                    with(base, pair),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: Some(false),
+                    }),
+                    "{base:?} {pair:?}"
+                );
             }
         }
         // The checks of the options stand: NCBI's and LOSAT's refusals.
@@ -2827,16 +2918,36 @@ mod tests {
     fn parse_deflines_reads_the_inputs_together() {
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
-            assert_eq!(validate(&words), Ok(true));
+            assert_eq!(
+                validate(&words),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: Some(true)
+                })
+            );
             assert!(inputs_together(&words), "{program}");
             assert!(start_json(&words)
                 .unwrap()
                 .ends_with(",\"register_inputs\":true,\"prints\":null,\"database\":false}"));
             let dry = [&words[..], &["-dryrun"]].concat();
+            assert_eq!(
+                validate(&dry),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: Some(false)
+                })
+            );
             assert!(!inputs_together(&dry), "{program}");
             assert!(start_json(&dry)
                 .unwrap()
                 .ends_with(",\"register_inputs\":false,\"prints\":null,\"database\":false}"));
+            assert_eq!(
+                validate(&words[..5]),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: Some(false)
+                })
+            );
             assert!(!inputs_together(&words[..5]), "{program}");
             assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }
@@ -3078,10 +3189,10 @@ mod tests {
     // after the batches before, as the CLI's batches do (line WQA's D10, 2026-11-19; before,
     // `register` refused the input and `register_inputs` failed before the run, with the reader's
     // error where the CLI ends with an error of an earlier batch): a line that is not plausible data
-    // (`register`), and under `-parse_deflines` an id of the other molecule (`register_inputs`, whose
-    // response lists the scan's records past the error without a `shown_id`). BLASTP reads 10000
-    // letters a batch: 10 records of 1100 fill the first. A failed run emits no report (the host
-    // discards it); the library's tests compare the reports before the error with the CLI's
+    // (`register`), and under `-parse_deflines` a refused database-ordinal id (`register_inputs`,
+    // whose response lists the scan's records past the error without a `shown_id`). BLASTP reads
+    // 10000 letters a batch: 10 records of 1100 fill the first. A failed run emits no report (the
+    // host discards it); the library's tests compare the reports before the error with the CLI's
     // (`LOSAT/src/api/reader_end_tests.rs`).
     #[test]
     fn a_query_reader_error_ends_the_run_in_its_batch() {
@@ -3108,7 +3219,7 @@ mod tests {
         bad.extend_from_slice(b">bad\nMKVL%%%%\n");
         let line = bad.iter().filter(|&&b| b == b'\n').count();
         let cli = ncbi_in_losat_words(&format!("BLAST query error: CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."));
-        let (handle, response) = crate::store::register("blastp", 0, true, &bad).unwrap();
+        let (handle, response) = crate::store::register("blastp", 0, true, false, &bad).unwrap();
         crate::store::release(handle).unwrap();
         assert!(
             response.contains(r#"{"index":10,"id":"q11","length":1100}],"reader_error":""#),
@@ -3118,16 +3229,13 @@ mod tests {
         let (result, _) = registered_run(&words, &bad, &subject).unwrap();
         assert_eq!(result.unwrap_err(), format!("{cli}\n"));
 
-        // `-parse_deflines`: the record `ref|NM_000001.1|` names a nucleotide sequence, in batch 2.
+        // `-parse_deflines`: the record `gnl|BL_ORD_ID|1` names a database ordinal, in batch 2.
         let parse = [&words[..], &["-parse_deflines"]].concat();
         let mut other = fasta(&names);
-        other.extend_from_slice(&fasta(&["ref|NM_000001.1|", "q12"]));
+        other.extend_from_slice(&fasta(&["gnl|BL_ORD_ID|1", "q12"]));
         let (result, _) = registered_run(&parse, &other, &subject).unwrap();
         let error = result.unwrap_err();
-        assert!(
-            error.contains("names the other molecule under -parse_deflines"),
-            "{error}"
-        );
+        assert!(error.contains("names a database ordinal"), "{error}");
         let (query, subject_handle, response) =
             crate::store::register_inputs(&parse, &other, &subject).unwrap();
         crate::store::release(query).unwrap();
@@ -3135,7 +3243,7 @@ mod tests {
         let split = response.find(",\"subject\":").unwrap();
         let listed = &response[..split];
         assert!(
-            listed.contains(r#"{"index":11,"id":"ref|NM_000001.1|","length":1100,"shown_id":null},{"index":12,"id":"q12","length":1100,"shown_id":null}],"reader_error":""#),
+            listed.contains(r#"{"index":11,"id":"gnl|BL_ORD_ID|1","length":1100,"shown_id":null},{"index":12,"id":"q12","length":1100,"shown_id":null}],"reader_error":""#),
             "{listed}"
         );
         assert!(
@@ -3146,11 +3254,11 @@ mod tests {
             "{listed}"
         );
         // Two records of one id in batch 1 end the run there, before the reading of batch 2 meets
-        // the record of the other molecule, as on the CLI.
+        // the refused database-ordinal id, as on the CLI.
         let mut dup_names = names.clone();
         dup_names[1] = "q1";
         let mut dup = fasta(&dup_names);
-        dup.extend_from_slice(&fasta(&["ref|NM_000001.1|"]));
+        dup.extend_from_slice(&fasta(&["gnl|BL_ORD_ID|1"]));
         let (result, _) = registered_run(&parse, &dup, &subject).unwrap();
         let error = result.unwrap_err();
         assert!(
@@ -3185,7 +3293,7 @@ mod tests {
         let bytes = std::fs::read(dir.join(query)).unwrap();
         // The query is read with the data loaders of the argv, as the host reads it (abi_v2.md §9).
         let loaders = data_loaders(&words)?;
-        let (handle, _) = crate::store::register(words[0], 0, loaders, &bytes)?;
+        let (handle, _) = crate::store::register(words[0], 0, loaders, false, &bytes)?;
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
         let program = Program::parse(words[0]).unwrap();
         let result = crate::store::with_inputs(
@@ -3290,8 +3398,8 @@ mod tests {
         let words = ["blastp", "-db", "d", "-query", "q"];
         // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1).
         let protein = b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ\n";
-        let (query, _) = crate::store::register("blastp", 0, true, protein).unwrap();
-        let (subject, _) = crate::store::register("blastp", 1, true, protein).unwrap();
+        let (query, _) = crate::store::register("blastp", 0, true, false, protein).unwrap();
+        let (subject, _) = crate::store::register("blastp", 1, true, false, protein).unwrap();
         let refused = crate::store::with_inputs(
             Program::Blastp,
             query,
@@ -3373,9 +3481,9 @@ mod tests {
         assert_eq!(data_loaders(&on), Ok(true));
         let seq_id = b"2HHB\nMKTAYIAKQR\n";
         // The host registers the query with the data loaders of each argv's `validate`.
-        let (query, response) = crate::store::register("blastp", 0, false, seq_id).unwrap();
+        let (query, response) = crate::store::register("blastp", 0, false, false, seq_id).unwrap();
         assert!(response.contains(r#""length":13"#), "{response}");
-        let error = crate::store::register("blastp", 0, true, seq_id).unwrap_err();
+        let error = crate::store::register("blastp", 0, true, false, seq_id).unwrap_err();
         assert!(
             error.contains("the first line of the query (\"2HHB\")"),
             "{error}"
@@ -3461,8 +3569,8 @@ mod tests {
         // batch warning after the engine prefix (as on the CLI; under WebAssembly its search path
         // names `/work::`, abi_v2.md §3).
         let dna = b">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        let (q_nuc, _) = crate::store::register("blastn", 0, true, dna).unwrap();
-        let (s_nuc, _) = crate::store::register("blastn", 1, true, dna).unwrap();
+        let (q_nuc, _) = crate::store::register("blastn", 0, true, false, dna).unwrap();
+        let (s_nuc, _) = crate::store::register("blastn", 1, true, false, dna).unwrap();
         let missing_repeats = crate::store::with_inputs(
             Program::Blastn,
             q_nuc,
@@ -3537,7 +3645,7 @@ mod tests {
         assert!(q_idx(&words).iter().all(|&index| index == 1));
         let ranged = [&words[..], &["-query_loc", "5-40"]].concat();
         assert!(q_idx(&ranged).iter().all(|&index| index == 1));
-        let ordinals = searched_queries(Some("5-40"), &query).unwrap();
+        let ordinals = searched_queries(Some(std::ffi::OsStr::new("5-40")), &query).unwrap();
         assert_eq!(ordinals, vec![2]);
         assert_eq!(searched_queries(None, &query), None);
     }
@@ -3814,7 +3922,14 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
+                assert_eq!(
+                    validate(&words),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: Some(false),
+                    }),
+                    "{program} {outfmt:?}"
+                );
             }
             // Every program writes the query-anchored formats 1 to 4 (line RG T3: BLASTP in T3a,
             // BLASTN and TBLASTN in T3b, BLASTX and TBLASTX in T3c), each an output of its own
@@ -3836,7 +3951,14 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
+                assert_eq!(
+                    validate(&words),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: Some(false),
+                    }),
+                    "{program} {outfmt:?}"
+                );
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
@@ -3965,9 +4087,9 @@ mod tests {
             let (query, subject, _) = crate::store::register_inputs(words, query, subject)?;
             (query, subject)
         } else {
-            let (query, _) = crate::store::register(words[0], 0, true, query)?;
-            let (subject, _) =
-                crate::store::register(words[0], 1, true, subject).inspect_err(|_| {
+            let (query, _) = crate::store::register(words[0], 0, true, false, query)?;
+            let (subject, _) = crate::store::register(words[0], 1, true, false, subject)
+                .inspect_err(|_| {
                     crate::store::release(query).unwrap();
                 })?;
             (query, subject)
@@ -5166,7 +5288,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 60 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 61 rows of the manifest that a
     // run takes (not the one with a `>?` gap line, which the store refuses: maintainer decision 3),
     // stream 4 and stream 3 (NCBI's standard error, then the lines that the run's outfmt 0, 6 and 7
     // add: `and_the_lines_of`).
@@ -5187,7 +5309,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 60);
+        assert_eq!(rows.len(), 61);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
@@ -5227,8 +5349,9 @@ mod tests {
     #[test]
     fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
         let fasta: &[u8] = b">a one\r\nACGT\n>b\twith tab\nGG\n>  c\nTT\n>d \nAA\n>e\r\nCC\n";
-        let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
-        let (subject, _) = crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
+        let (handle, _) = crate::store::register("blastn", 0, true, false, fasta).unwrap();
+        let (subject, _) =
+            crate::store::register("blastn", 1, true, false, b">s\nACGTACGT\n").unwrap();
         let sources = |whole: bool| {
             crate::store::with_inputs(
                 Program::Blastn,
@@ -5279,9 +5402,9 @@ mod tests {
                 vec![b">a ".to_vec(), b"".to_vec()],
             ),
         ] {
-            let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
+            let (handle, _) = crate::store::register("blastn", 0, true, false, fasta).unwrap();
             let (subject, _) =
-                crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
+                crate::store::register("blastn", 1, true, false, b">s\nACGTACGT\n").unwrap();
             let defline = |whole: bool| {
                 crate::store::with_inputs(
                     Program::Blastn,
@@ -5904,7 +6027,10 @@ mod tests {
         let records = text(&ranged[&1]);
         assert_eq!(records.lines().count(), 1);
         assert!(records.contains("\"q_idx\":1"), "{records}");
-        assert_eq!(searched_queries(Some("31-198"), &query), Some(vec![1]));
+        assert_eq!(
+            searched_queries(Some(std::ffi::OsStr::new("31-198")), &query),
+            Some(vec![1])
+        );
         // The errors of the argv, as the run reports them.
         for extra in [
             &["-subject_loc", "5-2", "-query_loc", "9-1"][..],

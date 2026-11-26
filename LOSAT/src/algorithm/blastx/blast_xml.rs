@@ -1490,9 +1490,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         return Ok(());
     };
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,

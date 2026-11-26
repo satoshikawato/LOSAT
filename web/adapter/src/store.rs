@@ -46,6 +46,9 @@ pub struct Registered {
     /// too; read with them off, such a line is data, which a run with them on refuses
     /// (`with_inputs`).
     pub data_loaders: bool,
+    /// Whether the reader read the records with `-parse_deflines` on: a handle from `register`
+    /// with `parse_deflines` on is used by the form's input check and refused by a plain run.
+    pub parse_deflines: bool,
 }
 
 #[derive(Default)]
@@ -214,11 +217,12 @@ pub fn register(
     program: &str,
     role: u32,
     data_loaders: bool,
+    parse_deflines: bool,
     bytes: &[u8],
 ) -> Result<(u32, String), String> {
     let program = Program::parse(program)?;
     let role_name = role_name(role)?;
-    let config = reader_config(program, role, data_loaders);
+    let config = reader_config(program, role, data_loaders).with_parse_deflines(parse_deflines);
     // The reader's refusal, in its words: the reader refuses there too, after it held what it read
     // of the record (a record of 2^31 letters does not fit in the browser).
     let scanned = scan::scan_ncbi(bytes, config).map_err(|error| error.message().to_string())?;
@@ -237,8 +241,13 @@ pub fn register(
         (records, QueryEnd::Input)
     };
     check_scan(role_name, &scanned, &records, &end)?;
-    let deflines =
-        read_deflines(bytes, config, &scanned.records, &records).map_err(reader_error)?;
+    let deflines = read_deflines(
+        bytes,
+        config.with_archive_unknown(),
+        &scanned.records,
+        &records,
+    )
+    .map_err(reader_error)?;
     let mut response = String::new();
     let mut store = store().lock().expect("input store");
     let handle = store.next_handle()?;
@@ -260,6 +269,7 @@ pub fn register(
             deflines,
             run: None,
             data_loaders,
+            parse_deflines,
         },
     );
     Ok((handle, response))
@@ -362,7 +372,7 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 ///
 /// The errors are the CLI's texts, in the CLI's order. A subject's error fails here, as the CLI
 /// reads every subject before any query. The query's records are those that the CLI's query
-/// batches read before a reader's error (an id of the other molecule under `-parse_deflines`, a
+/// batches read before a reader's error (a refused id under `-parse_deflines`, a
 /// line that is not plausible data), and the error is kept with the query handle (`QueryEnd`): the
 /// run meets it in the batch that reads the record, after the reports of the batches before, as
 /// the CLI does (review of line WQA's D7, L1, 2026-11-19; line WQA's D10). The reader has NCBI's
@@ -423,9 +433,13 @@ pub fn register_inputs(
         )
         .map_err(|error| error.to_string())
     };
+    let parse_deflines = losat::web_adapter::parse_deflines_of(&command);
     let scan = |role: u32| {
         let bytes = if role == ROLE_QUERY { query } else { subject };
-        scan::scan_ncbi(bytes, reader_config(program, role, data_loaders))
+        scan::scan_ncbi(
+            bytes,
+            reader_config(program, role, data_loaders).with_parse_deflines(parse_deflines),
+        )
     };
     // A database is read by the run, not here: its subject scan is empty and is not checked.
     let subject_scan = if database {
@@ -512,6 +526,7 @@ pub fn register_inputs(
                 deflines: Vec::new(),
                 run: Some(run.clone()),
                 data_loaders,
+                parse_deflines,
             },
         );
     }
@@ -519,11 +534,11 @@ pub fn register_inputs(
 }
 
 /// Fails unless the index scan found the reader's records: for each record the same ID, length and
-/// residue counts (the stored residues upper-cased; plan TD-8), and the same number, or where the
+/// residue counts (the stored residues upper-cased; plan TD-8) and the same number, or where the
 /// reader's error ended the records (`end`), at least as many: the scan's records past an error
-/// that it does not meet (an id under `-parse_deflines`), before its own stop (`Scanned::stop`) or
-/// without one, and as many where the scan met the reader's own error. A reader that stops where
-/// the scan reads on has no error (review M1, 2026-11-20).
+/// that it does not meet (an id under `-parse_deflines`), before its own stop (`Scanned::stop`)
+/// or without one, and as many where the scan met the reader's own error. A reader that stops
+/// where the scan reads on has no error (review M1, 2026-11-20).
 fn check_scan(
     role: &str,
     scanned: &scan::Scanned,
@@ -629,6 +644,11 @@ pub fn with_inputs<R>(
         if data_loaders == Some(true) && !entry.data_loaders {
             return Err(format!(
                 "{name} handle {handle} was read with the data loaders off (DATA_LOADERS=none), which this run has on"
+            ));
+        }
+        if entry.parse_deflines && entry.run.is_none() && !crate::run::inputs_together(words) {
+            return Err(format!(
+                "{name} handle {handle} was read with -parse_deflines, which this run does not have"
             ));
         }
     }
@@ -763,7 +783,7 @@ mod tests {
 
     /// The `records` of a *register* response.
     fn records(program: &str, role: u32, bytes: &[u8]) -> String {
-        let (_, response) = register(program, role, true, bytes).unwrap();
+        let (_, response) = register(program, role, true, false, bytes).unwrap();
         let at = response.find("\"records\":").unwrap();
         response[at..].to_string()
     }
@@ -841,7 +861,7 @@ mod tests {
             ("eol_mixed_lf_crlf_cr.q.prot.faa", "tblastn", ROLE_QUERY),
         ] {
             let bytes = std::fs::read(format!("{fixtures}/{name}")).unwrap();
-            let (handle, _) = register(program, role, true, &bytes)
+            let (handle, _) = register(program, role, true, false, &bytes)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
             release(handle).unwrap();
         }
@@ -875,19 +895,20 @@ mod tests {
     // that may be a Seq-id is data, as the CLI reads it (D16).
     #[test]
     fn register_refuses_what_the_cli_refuses_in_its_words() {
-        let seq_id = register("tblastx", ROLE_QUERY, true, b"AB123456\nACGT\n").unwrap_err();
+        let seq_id = register("tblastx", ROLE_QUERY, true, false, b"AB123456\nACGT\n").unwrap_err();
         assert_eq!(
             seq_id,
             "the first line of the query (\"AB123456\") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's TBLASTX (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)"
         );
-        let subject = register("blastp", ROLE_SUBJECT, true, b"2HHB\nMKTAYIAKQR\n").unwrap_err();
+        let subject =
+            register("blastp", ROLE_SUBJECT, true, false, b"2HHB\nMKTAYIAKQR\n").unwrap_err();
         assert!(
             subject.contains("the first line of the subject (\"2HHB\")")
                 && subject.contains("LOSAT's BLASTP"),
             "{subject}"
         );
         let (handle, response) =
-            register("blastp", ROLE_SUBJECT, false, b"2HHB\nMKTAYIAKQR\n").unwrap();
+            register("blastp", ROLE_SUBJECT, false, false, b"2HHB\nMKTAYIAKQR\n").unwrap();
         assert!(
             response.ends_with(r#""records":[{"index":0,"id":"","length":13}]}"#),
             "{response}"
@@ -898,10 +919,10 @@ mod tests {
         let cli = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         let bad = b">p\nMKV\n>q\n1234567890123456789012345\n>r\nMKV\n";
         assert_eq!(
-            register("blastp", ROLE_SUBJECT, true, bad).unwrap_err(),
+            register("blastp", ROLE_SUBJECT, true, false, bad).unwrap_err(),
             cli
         );
-        let (handle, response) = register("blastp", ROLE_QUERY, true, bad).unwrap();
+        let (handle, response) = register("blastp", ROLE_QUERY, true, false, bad).unwrap();
         assert_eq!(
             &response[response.find("\"records\":").unwrap()..],
             format!(r#""records":[{{"index":0,"id":"p","length":3}}],"reader_error":"{cli}"}}"#)
@@ -911,10 +932,11 @@ mod tests {
         // a subject's fails `register`, a query's is its first record's error.
         let data = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         assert_eq!(
-            register("blastn", ROLE_SUBJECT, false, b"NM_000518.5\n").unwrap_err(),
+            register("blastn", ROLE_SUBJECT, false, false, b"NM_000518.5\n").unwrap_err(),
             data
         );
-        let (handle, response) = register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap();
+        let (handle, response) =
+            register("blastn", ROLE_QUERY, false, false, b"NM_000518.5\n").unwrap();
         assert!(
             response.ends_with(&format!(r#""records":[],"reader_error":"{data}"}}"#)),
             "{response}"
@@ -956,8 +978,8 @@ mod tests {
         );
         release(query_handle).unwrap();
         release(subject_handle).unwrap();
-        let (query_handle, _) = register("blastp", ROLE_QUERY, false, query).unwrap();
-        let (subject_handle, _) = register("blastp", ROLE_SUBJECT, false, subject).unwrap();
+        let (query_handle, _) = register("blastp", ROLE_QUERY, false, false, query).unwrap();
+        let (subject_handle, _) = register("blastp", ROLE_SUBJECT, false, false, subject).unwrap();
         let plain = ["blastp", "-query", "q", "-subject", "s"];
         let refused = with_inputs(
             Program::Blastp,
@@ -1037,8 +1059,9 @@ mod tests {
             error.contains("are not the inputs that register_inputs read for this argv"),
             "{error}"
         );
-        let (plain_query, _) = register("blastp", ROLE_QUERY, true, query_bytes).unwrap();
-        let (plain_subject, _) = register("blastp", ROLE_SUBJECT, true, subject_bytes).unwrap();
+        let (plain_query, _) = register("blastp", ROLE_QUERY, true, false, query_bytes).unwrap();
+        let (plain_subject, _) =
+            register("blastp", ROLE_SUBJECT, true, false, subject_bytes).unwrap();
         let mixed = with_inputs(
             Program::Blastp,
             plain_query,
@@ -1073,18 +1096,18 @@ mod tests {
     }
 
     // Under `-parse_deflines` the reader's error can come before the scan's own stop (review M1,
-    // 2026-11-20): a Seq-id of the other molecule (`blastp -parse_deflines`: "Error: the Seq-id …
-    // names the other molecule" on the command line), or a first record without a defline, before
-    // a line that the scan stops at too. The inputs register with the reader's error, as the
-    // command line ends there.
+    // 2026-11-20): a refused database-ordinal Seq-id (`blastp -parse_deflines`: "Error: the query
+    // Seq-id ... names a database ordinal" on the command line), or a first record without a
+    // defline, before a line that the scan stops at too. The inputs register with the reader's
+    // error, as the command line ends there.
     #[test]
     fn the_readers_error_can_come_before_the_scans_stop() {
         let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
         let subject = b">s1\nMKVLAAGIVA\n";
         let cases: [(&[u8], &str, usize); 2] = [
             (
-                b">p1\nMKVLAAGIVA\n>ref|NM_000001.1|\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
-                "names the other molecule",
+                b">p1\nMKVLAAGIVA\n>gnl|BL_ORD_ID|1\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "names a database ordinal",
                 1,
             ),
             (
@@ -1121,11 +1144,315 @@ mod tests {
         }
     }
 
+    // Under `-parse_deflines`, a Seq-id that names the other molecule is read with that molecule's
+    // alphabet (line RG-XT item X7-5): `check_scan` accepts the resulting length and counts, and
+    // the response reports the reader's length.
+    #[test]
+    fn other_molecule_parse_deflines_registers_with_readers_length() {
+        let bp_words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let (qh, sh, resp) = register_inputs(
+            &bp_words,
+            b">p1\nMKVLAAGIVA\n",
+            b">gnl|TI|12345 trace\nMKVLEFAAGIVA\n",
+        )
+        .unwrap();
+        // M, K, V, A, A, G, V, A kept (8); L, E, F, I dropped by nucleotide alphabet.
+        assert!(resp.contains(r#""length":8"#), "blastp: {resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        let bn_words = ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let (qh, sh, resp) = register_inputs(
+            &bn_words,
+            b">n1\nACGTACGT\n",
+            b">sp|P99995.1|NAME_W\nACGEFLPQ\n",
+        )
+        .unwrap();
+        // All 8 letters kept by protein alphabet; E, F, L, P, Q become N.
+        assert!(resp.contains(r#""length":8"#), "blastn: {resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        // Protein-only letters on the first data line of a protein-named nucleotide record fill
+        // `m_SeqData`, so a later non-plausible line skips `CheckDataLine` (NCBI exit 0).
+        let (qh, sh, resp) = register_inputs(
+            &bn_words,
+            b">sp|P99995.1|NAME_W\nEEEEEE\n%%%%%%\n",
+            b">sp|P99996.1|NAME_S\nEEEEEE\n%%%%%%\n",
+        )
+        .unwrap();
+        assert!(resp.contains(r#""length":6"#), "{resp}");
+        assert!(!resp.contains("reader_error"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        // Conversely, a nucleotide-named protein record drops `EEEEEE` (`m_SeqData` stays empty),
+        // so `%%%%%%` triggers `CheckDataLine` (subject fails registration; query records error).
+        let bad_ti = b">gnl|TI|12345 trace\nEEEEEE\n%%%%%%\n";
+        assert!(register_inputs(&bp_words, b">p1\nMKVLAAGIVA\n", bad_ti).is_err());
+        let (qh, sh, resp) = register_inputs(&bp_words, bad_ti, b">p1\nMKVLAAGIVA\n").unwrap();
+        assert!(resp.contains("doesn't look like plausible data"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+    }
+
+    // Finding 2 (line RG-XT item X7-5 round R1): with `-parse_deflines`, the index scan stops at
+    // `CheckDataLine` exactly where NCBI's reader stops for every Seq-id class (local/no-molecule,
+    // same-molecule, other-molecule in nucleotide and protein programs), and without
+    // `-parse_deflines` keeps the program-alphabet scan. Also checks R0's `s_sp_nucx_bn.fa` and
+    // `s_ti_prot.fa` against the engine's reader.
+    #[test]
+    fn parse_deflines_scan_matches_reader_stops_and_lengths() {
+        let local_junk = b">n1\nEEEEEE\n%%%%%%\n";
+        let ti_junk = b">gnl|TI|1\nEEEEEE\n%%%%%%\n";
+        let bp_ti_junk = b">gnl|TI|12400\nEEEEEE\n%%%%%%\n";
+        let sp_junk = b">sp|P99987.1|NAME_J\nEEEEEE\n%%%%%%\n";
+
+        let bn_words = ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let bp_words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+
+        // 1. BLASTN local (`>n1`): E dropped -> m_SeqData empty -> CheckDataLine stops on line 3.
+        let scanned = scan::scan_ncbi(
+            local_junk,
+            reader_config(Program::Blastn, ROLE_QUERY, true).with_parse_deflines(true),
+        )
+        .unwrap();
+        assert!(scanned.records.is_empty());
+        assert!(scanned
+            .stop
+            .as_ref()
+            .is_some_and(|s| s.message.contains("Near line 3")));
+        let (qh, sh, resp) = register_inputs(&bn_words, local_junk, b">s\nACGTACGT\n").unwrap();
+        assert!(resp.contains("Near line 3"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+        assert!(register_inputs(&bn_words, b">q\nACGTACGT\n", local_junk).is_err());
+
+        // 2. BLASTN nucleotide-named (`>gnl|TI|1`): same stop on line 3.
+        let scanned = scan::scan_ncbi(
+            ti_junk,
+            reader_config(Program::Blastn, ROLE_QUERY, true).with_parse_deflines(true),
+        )
+        .unwrap();
+        assert!(scanned.records.is_empty());
+        assert!(scanned
+            .stop
+            .as_ref()
+            .is_some_and(|s| s.message.contains("Near line 3")));
+        let (qh, sh, resp) = register_inputs(&bn_words, ti_junk, b">s\nACGTACGT\n").unwrap();
+        assert!(resp.contains("Near line 3"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+        assert!(register_inputs(&bn_words, b">q\nACGTACGT\n", ti_junk).is_err());
+
+        // 3. BLASTP nucleotide-named (`>gnl|TI|12400`): E dropped -> stop on line 3 under
+        //    `-parse_deflines`; without `-parse_deflines`, protein scan keeps E (length 6, no stop).
+        let scanned_pd = scan::scan_ncbi(
+            bp_ti_junk,
+            reader_config(Program::Blastp, ROLE_QUERY, true).with_parse_deflines(true),
+        )
+        .unwrap();
+        assert!(scanned_pd.records.is_empty());
+        assert!(scanned_pd
+            .stop
+            .as_ref()
+            .is_some_and(|s| s.message.contains("Near line 3")));
+        let scanned_plain =
+            scan::scan_ncbi(bp_ti_junk, reader_config(Program::Blastp, ROLE_QUERY, true)).unwrap();
+        assert_eq!(scanned_plain.records.len(), 1);
+        assert_eq!(scanned_plain.records[0].length, 6);
+        assert!(scanned_plain.stop.is_none());
+        let (qh, sh, resp) = register_inputs(&bp_words, bp_ti_junk, b">p\nMKVLAAGIVA\n").unwrap();
+        assert!(resp.contains("Near line 3"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+        assert!(register_inputs(&bp_words, b">p\nMKVLAAGIVA\n", bp_ti_junk).is_err());
+
+        // 4. BLASTN protein-named (`>sp|P99987.1|NAME_J`): E kept as N under `-parse_deflines`
+        //    (length 6, no stop); without `-parse_deflines`, nucleotide scan drops E and stops.
+        let scanned_pd = scan::scan_ncbi(
+            sp_junk,
+            reader_config(Program::Blastn, ROLE_QUERY, true).with_parse_deflines(true),
+        )
+        .unwrap();
+        assert_eq!(scanned_pd.records.len(), 1);
+        assert_eq!(scanned_pd.records[0].length, 6);
+        assert_eq!(scanned_pd.records[0].residue_counts[b'N' as usize], 6);
+        assert!(scanned_pd.stop.is_none());
+        let scanned_plain =
+            scan::scan_ncbi(sp_junk, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
+        assert!(scanned_plain.records.is_empty());
+        assert!(scanned_plain
+            .stop
+            .as_ref()
+            .is_some_and(|s| s.message.contains("Near line 3")));
+        let (qh, sh, resp) = register_inputs(&bn_words, sp_junk, sp_junk).unwrap();
+        assert!(!resp.contains("reader_error"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        // R0's inputs: scan with `-parse_deflines` equals the engine reader's exact lengths and
+        // residue counts, while scan without `-parse_deflines` matches the plain reader.
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        for (program, path) in [
+            (
+                Program::Blastn,
+                "tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa",
+            ),
+            (Program::Blastp, "tests/fasta/outfmt0/pd_mol/s_ti_prot.fa"),
+        ] {
+            let bytes = std::fs::read(format!("{root}/{path}")).unwrap();
+            for parse_deflines in [false, true] {
+                let config =
+                    reader_config(program, ROLE_SUBJECT, true).with_parse_deflines(parse_deflines);
+                let scanned = scan::scan_ncbi(&bytes, config).unwrap();
+                let records = read_all(
+                    &mut FastaInputSource::from_bytes(&bytes, config),
+                    &mut |_| Ok(()),
+                )
+                .unwrap();
+                check_scan("subject", &scanned, &records, &QueryEnd::Input).unwrap();
+            }
+            let plain_lens: Vec<u64> =
+                scan::scan_ncbi(&bytes, reader_config(program, ROLE_SUBJECT, true))
+                    .unwrap()
+                    .records
+                    .iter()
+                    .map(|r| r.length)
+                    .collect();
+            let pd_lens: Vec<u64> = scan::scan_ncbi(
+                &bytes,
+                reader_config(program, ROLE_SUBJECT, true).with_parse_deflines(true),
+            )
+            .unwrap()
+            .records
+            .iter()
+            .map(|r| r.length)
+            .collect();
+            assert_ne!(
+                plain_lens, pd_lens,
+                "{path}: parse_deflines changes lengths"
+            );
+        }
+
+        // Finding 3: `-parse_deflines` as an option's value (e.g. `-query -parse_deflines`) is
+        // not the `-parse_deflines` flag; `register_inputs` reads from the parsed command so scan
+        // and reader agree (plain nucleotide length 287, not 300).
+        let sp_bytes =
+            std::fs::read(format!("{root}/tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa")).unwrap();
+        let value_words = ["blastn", "-query", "-parse_deflines", "-subject", "s"];
+        let (qh, sh, resp) = register_inputs(&value_words, &sp_bytes, b">s\nACGTACGT\n").unwrap();
+        assert!(resp.contains("\"length\":287"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+    }
+
+    // Finding 2 (line RG-XT item X7-5 round R2): `register` with `parse_deflines` gives the same
+    // refusal, reader_error and record lengths as `register_inputs`, while `parse_deflines = false`
+    // keeps the plain reading; handles registered with `parse_deflines = true` are refused by a
+    // plain run.
+    #[test]
+    fn register_with_parse_deflines_matches_register_inputs() {
+        let sp_junk = b">sp|P99987.1|NAME_J\nEEEEEE\n%%%%%%\n";
+        let sp_p53 =
+            b">sp|P99995.1|X\nMEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDIEQWFTEDPGP\n";
+        let ti_junk = b">gnl|TI|12400\nEEEEEE\n%%%%%%\n";
+        let bn = ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let bp = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let nq = b">q\nACGTACGTACGTACGTACGT\n";
+        let pq = b">p\nMKVLAAGIVAMKVLAAGIVA\n";
+
+        let reg_ok = |prog: &str, role: u32, pd: bool, bytes: &[u8]| -> String {
+            let (h, resp) = register(prog, role, true, pd, bytes).unwrap();
+            release(h).unwrap();
+            resp
+        };
+        let run_ok = |words: &[&str], q: &[u8], s: &[u8]| -> String {
+            let (qh, sh, resp) = register_inputs(words, q, s).unwrap();
+            release(qh).unwrap();
+            release(sh).unwrap();
+            resp
+        };
+
+        // Rows 1 & 2: blastn -subject and -query sp_junk — read (length 6, no reader_error) with
+        // parse_deflines; without it subject is refused and query ends with reader_error.
+        for (role, q, s) in [
+            (ROLE_SUBJECT, &nq[..], &sp_junk[..]),
+            (ROLE_QUERY, &sp_junk[..], &nq[..]),
+        ] {
+            let check_resp = reg_ok("blastn", role, true, sp_junk);
+            let run_resp = run_ok(&bn, q, s);
+            for resp in [&check_resp, &run_resp] {
+                assert!(
+                    resp.contains(r#""id":"sp|P99987.1|NAME_J","length":6"#)
+                        && !resp.contains("reader_error"),
+                    "role={role}: {resp}"
+                );
+            }
+        }
+        let plain_subj_err = register("blastn", ROLE_SUBJECT, true, false, sp_junk).unwrap_err();
+        assert!(plain_subj_err.contains("Near line 3"), "{plain_subj_err}");
+        let plain_query_resp = reg_ok("blastn", ROLE_QUERY, false, sp_junk);
+        assert!(
+            plain_query_resp.contains(r#""records":[]"#)
+                && plain_query_resp.contains("Near line 3"),
+            "{plain_query_resp}"
+        );
+
+        // Row 3: blastn -subject sp_p53 — length 60 with parse_deflines, length 28 without.
+        let p53_check = reg_ok("blastn", ROLE_SUBJECT, true, sp_p53);
+        let p53_run = run_ok(&bn, nq, sp_p53);
+        assert!(p53_check.contains(r#""length":60"#), "{p53_check}");
+        assert!(p53_run.contains(r#""length":60"#), "{p53_run}");
+        let p53_plain = reg_ok("blastn", ROLE_SUBJECT, false, sp_p53);
+        assert!(p53_plain.contains(r#""length":28"#), "{p53_plain}");
+
+        // Row 4: blastp -subject and -query ti_junk — Near line 3 with parse_deflines, length 6
+        // without.
+        let ti_subj_err = register("blastp", ROLE_SUBJECT, true, true, ti_junk).unwrap_err();
+        let ti_run_err = register_inputs(&bp, pq, ti_junk).unwrap_err();
+        assert_eq!(ti_subj_err, ti_run_err);
+        assert!(ti_subj_err.contains("Near line 3"), "{ti_subj_err}");
+        let ti_query_pd = reg_ok("blastp", ROLE_QUERY, true, ti_junk);
+        assert!(
+            ti_query_pd.contains(r#""records":[]"#) && ti_query_pd.contains("Near line 3"),
+            "{ti_query_pd}"
+        );
+        for role in [ROLE_SUBJECT, ROLE_QUERY] {
+            let ti_plain = reg_ok("blastp", role, false, ti_junk);
+            assert!(
+                ti_plain.contains(r#""length":6"#) && !ti_plain.contains("reader_error"),
+                "role={role}: {ti_plain}"
+            );
+        }
+
+        // A ranged Seq-id (`>x:10-40`) under `-parse_deflines` is accepted by `register` (the
+        // archive-only refusal applies only when outfmt 11 is requested).
+        let (h, resp) =
+            register("blastn", ROLE_SUBJECT, true, true, b">x:10-40\nACGTACGT\n").unwrap();
+        assert!(resp.contains(r#""length":8"#), "{resp}");
+        // A handle registered with `parse_deflines = true` cannot enter a plain run.
+        let (qh, _) = register("blastn", ROLE_QUERY, true, false, nq).unwrap();
+        let plain_words = ["blastn", "-query", "q", "-subject", "s"];
+        let refused = with_inputs(
+            Program::Blastn,
+            qh,
+            h,
+            &plain_words,
+            Some(true),
+            |_, _, _| (),
+        )
+        .unwrap_err();
+        assert!(refused.contains("read with -parse_deflines"), "{refused}");
+        release(qh).unwrap();
+        release(h).unwrap();
+    }
+
     // Another program's handle cannot bring a record to a run.
     #[test]
     fn a_handle_belongs_to_its_program() {
-        let (query, _) = register("blastp", ROLE_QUERY, true, b">q t\nACXGT\n").unwrap();
-        let (subject, _) = register("blastn", ROLE_SUBJECT, true, b">s\nACGT\n").unwrap();
+        let (query, _) = register("blastp", ROLE_QUERY, true, false, b">q t\nACXGT\n").unwrap();
+        let (subject, _) = register("blastn", ROLE_SUBJECT, true, false, b">s\nACGT\n").unwrap();
         let words = ["blastn", "-query", "q", "-subject", "s"];
         let error = with_inputs(
             Program::Blastn,

@@ -31,7 +31,7 @@ pub enum ParamValue {
     /// `real`.
     Real(f64),
     /// `string`.
-    Str(String),
+    Str(Vec<u8>),
     /// `integer-list`.
     IntegerList(Vec<i32>),
     /// `strand-type` (`Blast4-strand-type`: forward 1, reverse 2, both 3).
@@ -126,7 +126,7 @@ impl From<crate::blastinput::value_parsers::SegSpec> for Filter {
 
 /// The filter of a `-seg` value as given (`app::parse_seg_option`), `None` for a value that NCBI's
 /// filtering handler refuses (no request is written then).
-pub fn seg_filter(value: &str) -> Option<Filter> {
+pub fn seg_filter(value: impl AsRef<[u8]>) -> Option<Filter> {
     crate::blastinput::app::parse_seg_option(value)
         .ok()
         .map(Filter::from)
@@ -271,7 +271,7 @@ pub struct OptionInputs {
     pub gapextend: Option<i32>,
     /// The `-matrix` name as typed when given (NCBI records it so, `blosum62` included; the
     /// suggestions below compare it without case, as NCBI's `strcasecmp` does).
-    pub matrix: Option<String>,
+    pub matrix: Option<Vec<u8>>,
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
     pub word_size: Option<i32>,
@@ -290,9 +290,9 @@ pub struct OptionInputs {
     /// `-dust` (BLASTN), only when given.
     pub dust: Option<Filter>,
     /// `-filtering_db` (BLASTN) as given.
-    pub filtering_db: Option<String>,
+    pub filtering_db: Option<Vec<u8>>,
     /// `-window_masker_db` (BLASTN) as given.
-    pub window_masker_db: Option<String>,
+    pub window_masker_db: Option<Vec<u8>>,
     /// `-window_masker_taxid` (BLASTN) as given.
     pub window_masker_taxid: Option<i32>,
     pub threshold: Option<i32>,
@@ -308,7 +308,7 @@ pub struct OptionInputs {
     pub no_greedy: bool,
     /// The name of the MegaBLAST index that a BLASTN run asked for (`-use_index true`, task
     /// megablast: the `-index_name` value, else `-db`; `blastn::blast_engine::mb_index`).
-    pub mb_index_name: Option<String>,
+    pub mb_index_name: Option<Vec<u8>>,
     pub max_intron_length: i32,
     pub query_gencode: i32,
     pub db_gencode: i32,
@@ -401,13 +401,13 @@ impl OptionInputs {
 /// the matrix's default row, which BLOSUM45 puts at 14 / 2). A matrix that NCBI does not know
 /// leaves both at 0 (blast_stat.c:3383-3384), which NCBI BLAST+ 2.17.0 records in the search
 /// strategy of a tblastx run whose search then fails on that matrix (RG-F1 probe 5 `mat`).
-fn matrix_gaps(matrix: &str) -> (i32, i32) {
+fn matrix_gaps(matrix: &[u8]) -> (i32, i32) {
     crate::stats::protein_options::protein_gap_existence_extend_params(matrix).unwrap_or((0, 0))
 }
 
 /// The word threshold the matrix suggests before the program's addition
 /// (`BLAST_GetSuggestedThreshold`, blast_options.c:1174-1209; `protein_options`).
-fn suggested_threshold(matrix: &str) -> i32 {
+fn suggested_threshold(matrix: &[u8]) -> i32 {
     crate::stats::protein_options::suggested_threshold(
         crate::stats::protein_options::SuggestionProgram::Protein,
         matrix,
@@ -416,7 +416,7 @@ fn suggested_threshold(matrix: &str) -> i32 {
 
 /// The window size the matrix suggests (`BLAST_GetSuggestedWindowSize`,
 /// blast_options.c:1211-1236; `protein_options`).
-fn suggested_window(matrix: &str) -> i32 {
+fn suggested_window(matrix: &[u8]) -> i32 {
     crate::stats::protein_options::suggested_window_size(matrix)
 }
 
@@ -468,7 +468,7 @@ fn task_calls(task: &str) -> Vec<Param> {
         }
         "blastp-short" => vec![
             p(fields::EVALUE_THRESHOLD, Evalue(20000.0)),
-            p(fields::MATRIX_NAME, Str("PAM30".to_string())),
+            p(fields::MATRIX_NAME, Str(b"PAM30".to_vec())),
             p(fields::GAP_OPENING_COST, Integer(9)),
             p(fields::GAP_EXTENSION_COST, Integer(1)),
             p(fields::WORD_SIZE, Integer(2)),
@@ -643,13 +643,12 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     if let Some(imported) = &inputs.imported {
         return replayed_options(list, imported, inputs);
     }
-    let matrix = inputs.matrix.clone().unwrap_or_else(|| {
+    let matrix: Vec<u8> = inputs.matrix.clone().unwrap_or_else(|| {
         if inputs.task == "blastp-short" {
-            "PAM30"
+            b"PAM30".to_vec()
         } else {
-            "BLOSUM62"
+            b"BLOSUM62".to_vec()
         }
-        .to_string()
     });
     // NCBI's `CGenericSearchArgs` of BLASTX is made with the flag that turns the word threshold
     // rule on, as BLASTP's and TBLASTN's are (probes `opt_ws5` .. `opt_ws7`).

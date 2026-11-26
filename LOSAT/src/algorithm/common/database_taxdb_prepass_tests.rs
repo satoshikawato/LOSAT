@@ -226,7 +226,7 @@ fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
         subject.found(),
         Some(FoundInstead::HoldersUnknown { instead: Some(other), .. }) if other.ordinal() == 0
     ));
-    let thrown = prefetch_reads(&db, 1, &subject, false, "BLASTP")
+    let thrown = prefetch_reads(&db, 1, &subject, false, false, "BLASTP")
         .unwrap()
         .unwrap_err();
     assert!(
@@ -238,7 +238,16 @@ fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
     for (taxdb, refused) in [("good", false), ("bad_magic", true)] {
         let db = open("l5c l5e", Some(taxdb));
         for ordinal in [0, 1] {
-            match prefetch_reads(&db, ordinal, &subject_of(&db, ordinal), true, "BLASTP").unwrap() {
+            match prefetch_reads(
+                &db,
+                ordinal,
+                &subject_of(&db, ordinal),
+                true,
+                false,
+                "BLASTP",
+            )
+            .unwrap()
+            {
                 Ok(blob) => {
                     assert!(!refused, "{taxdb} {ordinal}");
                     assert_eq!(blob, Some(ordinal), "{taxdb} {ordinal}");
@@ -468,7 +477,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
         };
         match (
-            prefetch_reads(&db, ordinal, &subject, false, "BLASTP").unwrap(),
+            prefetch_reads(&db, ordinal, &subject, false, false, "BLASTP").unwrap(),
             want,
         ) {
             (Ok(got), Ok(want)) => assert_eq!(got, want, "{name} {ordinal}"),
@@ -478,7 +487,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
             (got, _) => panic!("{name} {ordinal}: {got:?}"),
         }
         // A lookup that fails is the batch's warning (`batch_prefetch`), not a refusal.
-        let check = check_prefetched_parsed(&db, &subject, ordinal, "BLASTP");
+        let check = check_prefetched_parsed(&db, &subject, ordinal, false, "BLASTP");
         assert_eq!(
             check.is_err(),
             want.is_err() && !subject.prefetch_fails(),
@@ -506,7 +515,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     };
     assert!(subject.unfetchable());
     assert_eq!(
-        prefetch_reads(&db, 0, &subject, true, "TBLASTX").unwrap(),
+        prefetch_reads(&db, 0, &subject, true, false, "TBLASTX").unwrap(),
         Ok(Some(0))
     );
     let run = TaxdbRun::default();
@@ -3713,7 +3722,7 @@ fn scope_lifetime_audit_invariants_hold() {
     assert_eq!(Throw::scope_flags(Some("5 ")), (true, true));
     assert_eq!(Throw::scope_flags(Some("6")), (false, true));
     assert_eq!(Throw::scope_flags(Some("15")), (false, false));
-    assert_eq!(Throw::scope_flags(None), (false, false));
+    assert_eq!(Throw::scope_flags(None::<&str>), (false, false));
     for outfmt in ["13", "14", "15", "16", "15 "] {
         assert!(Throw::is_xml2(outfmt), "{outfmt}");
     }

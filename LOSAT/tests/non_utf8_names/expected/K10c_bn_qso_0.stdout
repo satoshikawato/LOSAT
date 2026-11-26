@@ -1,0 +1,175 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input: sé.fa).
+           3 sequences; 894 total letters
+
+
+
+Query= qn1 plus strand gene
+
+Length=366
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qn1 plus strand gene                                                  676     0.0  
+
+
+> qn1 plus strand gene
+Length=366
+
+ Score = 676 bits (366),  Expect = 0.0
+ Identities = 366/366 (100%), Gaps = 0/366 (0%)
+ Strand=Plus/Plus
+
+Query  1    GTGGATGGAGGTATAAAGGTCTGGCTTCCTCATAGTATGTGGATGGAGCACAGTGTACTC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    GTGGATGGAGGTATAAAGGTCTGGCTTCCTCATAGTATGTGGATGGAGCACAGTGTACTC  60
+
+Query  61   AGAGCCGTTTTCGCAGTTAGGCGAAAAGTCATGGACTTCCCCAAAATCAGAGATGGTCCC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AGAGCCGTTTTCGCAGTTAGGCGAAAAGTCATGGACTTCCCCAAAATCAGAGATGGTCCC  120
+
+Query  121  ATAGCCGTAATGAAGGGCTGGGAGAACCATTGTTGGCCCGCAAATATGTCCTGGAAAGTT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  ATAGCCGTAATGAAGGGCTGGGAGAACCATTGTTGGCCCGCAAATATGTCCTGGAAAGTT  180
+
+Query  181  TTAATGAAGTATGAATTTTCTTCAGACATTCACCCTTGGATCTGTTGGATTCCCAAAGAA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TTAATGAAGTATGAATTTTCTTCAGACATTCACCCTTGGATCTGTTGGATTCCCAAAGAA  240
+
+Query  241  CAACAACAGCCAGGTTGGTGGAAGACGGATACACTCCATATGGCTGAAATGGGGTTATGG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  CAACAACAGCCAGGTTGGTGGAAGACGGATACACTCCATATGGCTGAAATGGGGTTATGG  300
+
+Query  301  ATGCATAAGTACCCAAAGTGTATGTGTGTGATGGTTCACCCGGGGCATCCGTCACTTCGG  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  ATGCATAAGTACCCAAAGTGTATGTGTGTGATGGTTCACCCGGGGCATCCGTCACTTCGG  360
+
+Query  361  CCCACC  366
+            ||||||
+Sbjct  361  CCCACC  366
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 305655
+
+
+Query= qn2 minus strand gene
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qn2 minus strand gene                                                 699     0.0  
+
+
+> qn2 minus strand gene
+Length=378
+
+ Score = 699 bits (378),  Expect = 0.0
+ Identities = 378/378 (100%), Gaps = 0/378 (0%)
+ Strand=Plus/Plus
+
+Query  1    CTATTGCTGAATCAATTCTAAGGTTTATCTCATTGATTTTCCAATGGCGGAGGGCATGCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CTATTGCTGAATCAATTCTAAGGTTTATCTCATTGATTTTCCAATGGCGGAGGGCATGCG  60
+
+Query  61   TGGTTTCCCGGACCATGTGACACATAGGTTCGCAATGCATCCAGAGCCCCATCTCGCTAA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TGGTTTCCCGGACCATGTGACACATAGGTTCGCAATGCATCCAGAGCCCCATCTCGCTAA  120
+
+Query  121  CGTGAAGTGTATCCGTAGGGCACCAGCCGGGGACGGCCATGTACTTTGGTATCCAACACG  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  CGTGAAGTGTATCCGTAGGGCACCAGCCGGGGACGGCCATGTACTTTGGTATCCAACACG  180
+
+Query  181  TCCATTGGTTACACGGGTGAATTCCGGACTGAAATTCGTATTTCATTAAGACGTGAGCTG  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TCCATTGGTTACACGGGTGAATTCCGGACTGAAATTCGTATTTCATTAAGACGTGAGCTG  240
+
+Query  241  ACATATTAGCTATAGACGTTAAGATGAAGCAGTATGACTCCCATACTTTCATGACGGCCA  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241  ACATATTAGCTATAGACGTTAAGATGAAGCAGTATGACTCCCATACTTTCATGACGGCCA  300
+
+Query  301  TCGGTCCATCTCTGATCTTCGGATCATCCATAACCTTCCTTAACTGGAGCCAGTCTGCTG  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  TCGGTCCATCTCTGATCTTCGGATCATCCATAACCTTCCTTAACTGGAGCCAGTCTGCTG  360
+
+Query  361  TAAGCCACGATGGTGGAG  378
+            ||||||||||||||||||
+Sbjct  361  TAAGCCACGATGGTGGAG  378
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 315987
+
+
+Query= qn3 no hits
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qn3 no hits                                                           278     2e-79
+
+
+> qn3 no hits
+Length=150
+
+ Score = 278 bits (150),  Expect = 2e-79
+ Identities = 150/150 (100%), Gaps = 0/150 (0%)
+ Strand=Plus/Plus
+
+Query  1    GCAGGGCAAATCGCAGTTTTCTAATACGAGACCTAGGGGAGAACGTCACTGGGGCAATGA  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    GCAGGGCAAATCGCAGTTTTCTAATACGAGACCTAGGGGAGAACGTCACTGGGGCAATGA  60
+
+Query  61   CTCCCGGGTGAGCCGACAGTCCTAATGGGTCATAAGATCTGTTGCACTGCTCTTGCTTCA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   CTCCCGGGTGAGCCGACAGTCCTAATGGGTCATAAGATCTGTTGCACTGCTCTTGCTTCA  120
+
+Query  121  ATGCAGGAAGATCTCTTGCACAAGTTCGGT  150
+            ||||||||||||||||||||||||||||||
+Sbjct  121  ATGCAGGAAGATCTCTTGCACAAGTTCGGT  150
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 120960
+
+
+  Database: User specified sequence set (Input: sé.fa).
+    Posted date:  Unknown
+  Number of letters in database: 894
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

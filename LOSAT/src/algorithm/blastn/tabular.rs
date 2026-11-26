@@ -52,7 +52,7 @@ pub(crate) struct BlastnTabular<'a> {
     /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
-    pub database: &'a str,
+    pub database: &'a [u8],
     pub subjects: TabularSubjects<'a>,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
@@ -120,10 +120,11 @@ pub(crate) fn write_blastn_tabular(
         != crate::report::tabular::SubjectFetch::Never;
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are the reader's (`ShownSubjects`).
-    for hit_list in hit_lists.iter().flatten().filter(|_| needs.all_deflines) {
-        for hsp_list in &hit_list.hsplist_array {
+    for (q_idx, hit_list) in hit_lists.iter().enumerate().filter(|_| needs.all_deflines) {
+        for hsp_list in hit_list.iter().flat_map(|hit_list| &hit_list.hsplist_array) {
             if let Some(first) = hsp_list.hsps.first() {
-                tab.subjects.values(first.s_idx as usize, spec, PROGRAM)?;
+                tab.subjects
+                    .values_for(q_idx, first.s_idx as usize, spec, PROGRAM)?;
             }
         }
     }
@@ -173,7 +174,7 @@ pub(crate) fn write_blastn_tabular(
             tab.query_titles
                 .get(q_idx)
                 .map_or(&b"unknown"[..], |title| title.as_ref()),
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched.get(q_idx).copied().unwrap_or(false))
                 .then(|| blastn_hsp_count(hit_list)),
         )?;
@@ -220,7 +221,7 @@ pub(crate) fn write_blastn_tabular(
                 continue;
             };
             let s_idx = first.s_idx as usize;
-            let values = tab.subjects.values(s_idx, spec, PROGRAM)?;
+            let values = tab.subjects.values_for(q_idx, s_idx, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once).
@@ -253,7 +254,7 @@ pub(crate) fn write_blastn_tabular(
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
                 Some(kept) if table.fails(&subject) => {
-                    Some(tab.subjects.values(kept, spec, PROGRAM)?)
+                    Some(tab.subjects.values_for(q_idx, kept, spec, PROGRAM)?)
                 }
                 _ => None,
             };

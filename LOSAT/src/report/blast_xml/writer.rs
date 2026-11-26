@@ -223,7 +223,7 @@ fn write_header(
     string_member(&mut enc, "program", 0, run.program.as_bytes());
     string_member(&mut enc, "version", 1, run.version.as_bytes());
     string_member(&mut enc, "reference", 2, run.reference.as_bytes());
-    string_member(&mut enc, "db", 3, run.db_name.as_bytes());
+    string_member(&mut enc, "db", 3, run.db_name);
     string_member(&mut enc, "query-ID", 4, first.id);
     string_member(&mut enc, "query-def", 5, query_def(first.title));
     int_member(&mut enc, "query-len", 6, first.len);
@@ -636,7 +636,9 @@ impl<'a> HspSink<'a> {
 
     /// Whether the writer reads the alignment of each HSP of the `Hit` being written (its
     /// coordinates, frames and rows): not in outfmt 5's `Hit` of a subject whose lookup throws,
-    /// whose HSPs NCBI writes with their Seq-align scores alone (`Xml5Hsps`). The program then
+    /// nor in the `Hit` of a subject whose Bioseq NCBI's scope does not get (`XmlHit::unloaded`,
+    /// outfmt 5, XML2 and JSON), whose HSPs NCBI writes with their Seq-align scores alone
+    /// (`write_caught_hsp`). The program then
     /// hands each HSP as `XmlHsp::unaligned` (`HspSink::unaligned`), and reads nothing of the
     /// subject for it (its letters, its rows, the checks of its rows).
     pub fn reads_alignment(&self) -> bool {
@@ -700,8 +702,9 @@ impl HitWrite for Xml5Hits<'_> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407
             // NCBI's catch writes 0: of a `-subject` record whose `GenerateDefline` threw
             // (`SubjectNames::of_unknown`), and of a database sequence whose lookup of its
-            // Seq-align id throws (`SubjectNames::of_thrown`), whose HSPs are the catch's too.
-            let thrown = hit.lookup_throws.is_some();
+            // Seq-align id throws (`SubjectNames::of_thrown`) or whose Bioseq the scope does not
+            // get (`XmlHit::unloaded`), whose HSPs are the catch's too.
+            let thrown = hit.lookup_throws.is_some() || hit.unloaded;
             let len = if hit.defline_thrown || thrown {
                 0
             } else {
@@ -753,7 +756,8 @@ impl HitWrite for Xml5Hits<'_> {
 }
 
 /// The HSP level of outfmt 5. `thrown`: the `Hit`'s subject's lookup throws
-/// (`XmlHit::lookup_throws`), so each HSP's lookup in NCBI's `try` throws too.
+/// (`XmlHit::lookup_throws`) or its Bioseq handle is empty (`XmlHit::unloaded`), so each HSP's
+/// reads in NCBI's `try` throw too (`write_caught_hsp`).
 struct Xml5Hsps<'a, 'o> {
     run: &'a XmlRun<'a>,
     masks: &'a [QueryMask],
@@ -761,6 +765,44 @@ struct Xml5Hsps<'a, 'o> {
     scratch: &'a mut Scratch,
     hsps: i32,
     thrown: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:114-165
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:130-153
+/// The `Hsp` number `number` that the `catch` of its subject's reads adds, in outfmt 5 (a subject
+/// whose lookup throws, `XmlHit::lookup_throws`, or whose Bioseq NCBI's scope does not get,
+/// `XmlHit::unloaded`) and, with `xml2`, in XML2 and JSON (the latter only, with their members'
+/// tags and order): the number, the Seq-align's scores as `GetAlnScores` reads them (the bit score and
+/// the e-value rounded to six digits as every HSP's), the Seq-align's `num_ident`
+/// (`XmlHsp::alignment_identities`), the four coordinates 0 and empty rows; no frames, strands,
+/// positives, gaps, length or midline.
+pub(crate) fn write_caught_hsp<E: Encoder>(enc: &mut E, number: i32, hsp: &XmlHsp<'_>, xml2: bool) {
+    let (identity, coordinates, rows) = if xml2 {
+        (4, [9, 10, 13, 14], [19, 20])
+    } else {
+        (12, [4, 5, 6, 7], [17, 18])
+    };
+    enc.element();
+    enc.begin_sequence("Hsp");
+    int_member(enc, "num", 0, number);
+    real_member(enc, "bit-score", 1, round6(hsp.bit_score));
+    real_member(enc, "score", 2, f64::from(hsp.score));
+    real_member(enc, "evalue", 3, round6(hsp.evalue));
+    if xml2 {
+        int_member(enc, "identity", identity, hsp.alignment_identities);
+    }
+    for (name, tag) in ["query-from", "query-to", "hit-from", "hit-to"]
+        .into_iter()
+        .zip(coordinates)
+    {
+        int_member(enc, name, tag, 0);
+    }
+    if !xml2 {
+        int_member(enc, "identity", identity, hsp.alignment_identities);
+    }
+    string_member(enc, "qseq", rows[0], b"");
+    string_member(enc, "hseq", rows[1], b"");
+    enc.end_sequence();
 }
 
 /// The Dense-seg segments of an edit script as inclusive column ranges (`GetAlnStart` /
@@ -895,7 +937,7 @@ impl HspWrite for Xml5Hsps<'_, '_> {
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
         if self.thrown {
-            self.thrown_hsp(hsp);
+            write_caught_hsp(&mut *self.hit, self.hsps, hsp, false);
             return Ok(());
         }
         let run = self.run;
@@ -930,32 +972,6 @@ impl HspWrite for Xml5Hsps<'_, '_> {
         string_member(enc, "midline", 19, &scratch.midline);
         enc.end_sequence();
         Ok(())
-    }
-}
-
-impl Xml5Hsps<'_, '_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:114-164
-    /// The `Hsp` that the `catch` of its subject's lookup adds (the HSP of a `Hit` whose
-    /// subject's lookup throws, `thrown`): its number, the Seq-align's scores as `GetAlnScores`
-    /// reads them (the bit score and the e-value rounded to six digits as every HSP's), the four
-    /// coordinates 0, the Seq-align's `num_ident` (`XmlHsp::alignment_identities`) and empty rows;
-    /// no frames, positives, gaps, length or midline.
-    fn thrown_hsp(&mut self, hsp: &XmlHsp<'_>) {
-        let enc = &mut *self.hit;
-        enc.element();
-        enc.begin_sequence("Hsp");
-        int_member(enc, "num", 0, self.hsps);
-        real_member(enc, "bit-score", 1, round6(hsp.bit_score));
-        real_member(enc, "score", 2, f64::from(hsp.score));
-        real_member(enc, "evalue", 3, round6(hsp.evalue));
-        int_member(enc, "query-from", 4, 0);
-        int_member(enc, "query-to", 5, 0);
-        int_member(enc, "hit-from", 6, 0);
-        int_member(enc, "hit-to", 7, 0);
-        int_member(enc, "identity", 12, hsp.alignment_identities);
-        string_member(enc, "qseq", 17, b"");
-        string_member(enc, "hseq", 18, b"");
-        enc.end_sequence();
     }
 }
 

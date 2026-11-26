@@ -542,6 +542,16 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         in_names!(self, ty, self.string(kind, false))
     }
 
+    /// A string of the type `ty`, with NCBI's posts, kept even while the reader discards other
+    /// values ([`super::read::ObjectStream::read_typed_member`]).
+    #[inline(always)]
+    pub(crate) fn text_kept(&mut self, ty: u16) -> R<Vec<u8>> {
+        let Kind::String(kind) = resolved(ty).kind else {
+            unreachable!("{} is a string", type_info(ty).name())
+        };
+        in_names!(self, ty, self.string_kept(kind))
+    }
+
     /// A BOOLEAN (`ReadBool`).
     #[inline(always)]
     pub(crate) fn boolean(&mut self) -> R<bool> {

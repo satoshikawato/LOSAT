@@ -1932,13 +1932,6 @@ impl ReportWrite for CutBuffer {
 }
 
 impl CutBuffer {
-    /// Empties bytes and cuts while keeping their allocated capacities.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.bytes.clear();
-        self.cuts.0.clear();
-    }
-
     /// An insertion of NCBI's of `bytes` (`operator<<` of a string or a number): its end is cut.
     #[inline]
     pub fn insertion(&mut self, bytes: &[u8]) {

@@ -10358,12 +10358,15 @@ fn read_db_seq_ranges(
     Some(none)
 }
 
-/// Restricts the batch's masks to the query parts of one chunk (`chunk_parts`, each mapped to its
+/// Appends the chunk's `-window_masker_taxid` registry load posts (`WindowMasker::load_posts`),
+/// restricts the batch's masks to the query parts of one chunk (`chunk_parts`, each mapped to its
 /// index in `query_masks`, `query_offsets`, `lower_case_before` and `masks_outside`), computes
 /// `parts_outside` for `-filtering_db`, and delegates to `chunk_query_masks`. Shared by
 /// `search_query_chunks` and `refused_batch_setup_error` so both paths apply identical chunk
-/// masking.
+/// registry loads and masking.
 ///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:411-422
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:171-180
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
@@ -10377,7 +10380,14 @@ fn chunk_part_masks<'a>(
     lower_case_before: &[bool],
     masks_outside: &[MasksOutside],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    posts: &mut Posts,
 ) -> Result<Vec<Vec<MaskedInterval>>> {
+    // The chunk's query source loads the registry of `-window_masker_taxid` before it
+    // makes the masks (`WindowMasker::load_posts`): after the posts of the batch's set-up and
+    // of the chunks before, and before every error of the chunk's search.
+    if let Some(window_masker) = &args.window_masker {
+        posts.append(window_masker.load_posts(false));
+    }
     if parts.is_empty() {
         return Ok(Vec::new());
     }
@@ -10574,6 +10584,7 @@ fn refused_batch_setup_error(
             &letter_before,
             &outside,
             parallel_pool,
+            posts,
         ) {
             Ok(masks) => masks,
             Err(error) => return Some(error),
@@ -11698,12 +11709,6 @@ fn search_query_chunks(
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
-        // The chunk's query source loads the registry of `-window_masker_taxid` before it
-        // makes the masks (`WindowMasker::load_posts`): after the posts of the batch's set-up and
-        // of the chunks before, and before every error of the chunk's search.
-        if let Some(window_masker) = &args.window_masker {
-            posts.append(window_masker.load_posts(false));
-        }
         let part_masks = chunk_part_masks(
             args,
             &parts,
@@ -11713,6 +11718,7 @@ fn search_query_chunks(
             lower_case_before,
             masks_outside,
             parallel_pool,
+            posts,
         )?;
         let batch = search_query_batch_inner::<false>(
             args,

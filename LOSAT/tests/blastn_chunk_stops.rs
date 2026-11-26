@@ -534,4 +534,52 @@ fn window_masker_registry_loads_follow_ncbis_split_step_order() {
         5,
         "gapvalid avg2p32 masks both chunks before traceback setup fails: {gv_avg_err}"
     );
+
+    // Refused split duplicate-id batch (`q_dup300.fna`, `CHUNK_SIZE=150 OVERLAP_CHUNK_SIZE=10`):
+    // the refused duplicate-id batch loads chunk 0's registry as NCBI does, so it posts 4 times
+    // before emitting NCBI's error on `avg2p32`, `nonsq`, and `e_nF`, and posts 4 times before
+    // LOSAT's duplicate-id refusal on `tfn`.
+    let q_dup300 = manifest_path("tests/fasta/xchunk/q_dup300.fna");
+    let db_nonsq = manifest_path("tests/db_search/arch_tbn_snucl_nonsq");
+    for (tag, db_path, expected_rc, expected_err) in [
+        (
+            "avg2p32",
+            &db_avg,
+            3,
+            "The average subject length is too short",
+        ),
+        ("nonsq", &db_nonsq, 3, "Database memory map file error"),
+        ("e_nF", &db_enf, 3, "Database memory map file error"),
+        ("tfn", &db, 1, "two query records have the Seq-id lcl|dup"),
+    ] {
+        let out = run_blastn(
+            &[
+                "-task",
+                "blastn",
+                "-parse_deflines",
+                "-db",
+                db_path.to_str().unwrap(),
+                "-query",
+                q_dup300.to_str().unwrap(),
+                "-window_masker_taxid",
+                "9606",
+                "-outfmt",
+                "7",
+            ],
+            &[("CHUNK_SIZE", "150"), ("OVERLAP_CHUNK_SIZE", "10")],
+            Some(&dir.0),
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(expected_rc),
+            "dup300 {tag}: {stderr}"
+        );
+        assert!(stderr.contains(expected_err), "dup300 {tag}: {stderr}");
+        assert_eq!(
+            count_posts(&out.stderr),
+            4,
+            "dup300 {tag} loads chunk 0 registry as NCBI does: {stderr}"
+        );
+    }
 }

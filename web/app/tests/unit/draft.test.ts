@@ -747,7 +747,7 @@ describe('SearchDraft inputs', () => {
       ]);
     });
 
-    it('preserves exclusions by record offset across -parse_deflines changes and drops gone records (Finding 4)', async () => {
+    it('keeps exclusions in excludedKeys across -parse_deflines changes (Finding 4)', async () => {
       const { draft, data } = setup({
         validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
       });
@@ -766,7 +766,8 @@ describe('SearchDraft inputs', () => {
       };
       // Source without other-molecule records: 2 exclusions survive adding and removing -parse_deflines.
       draft.setPaste('query', '>q1\nACGT\n>q2\nCCCC\n>q3\nGGGG\n');
-      // Source with an other-molecule record whose length changes and a trailing record that disappears.
+      // Source with an other-molecule record whose length changes and a trailing record that disappears
+      // under -parse_deflines (s3 leaves the table and comes back excluded, per line WQA D16).
       draft.setPaste('subject', '>sp|P99995.1|X\nACGT\n>s1\nCCCC\n>s2\nGGGG\n>s3\nTTTT\n');
       await draft.idle();
       draft.setIncluded('query', sourceOf(draft, 'query').key, [0, 1], false);
@@ -778,7 +779,7 @@ describe('SearchDraft inputs', () => {
 
       for (const [extra, wantPd, wantSubj] of [
         ['-parse_deflines', true, [1]],
-        ['', false, [1]],
+        ['', false, [1, 3]],
       ] as const) {
         draft.setExtra(extra);
         await draft.idle();
@@ -788,6 +789,39 @@ describe('SearchDraft inputs', () => {
           wantSubj,
         ]);
       }
+    });
+
+    it('keeps the key of a record absent from the current table across a -parse_deflines change (D16 + X7-5)', async () => {
+      const { draft } = setup({
+        validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
+      });
+      const ids = () => sourceOf(draft, 'query').base!.records.map((r) => r.id);
+      const excluded = () => sourceOf(draft, 'query').excluded;
+      draft.setPaste('query', '>r0\nACGT\n>r1\nEFFILP\n@@@@@@\n>r2\nACGT\n');
+      await draft.idle();
+      draft.setProgram('blastp');
+      await draft.idle();
+      expect(ids()).toEqual(['r0', 'r1', 'r2']);
+      draft.setIncluded('query', 'paste', [2], false);
+      await draft.idle();
+      draft.setProgram('blastn');
+      await draft.idle();
+      expect(ids()).toEqual(['r0']);
+      draft.setIncluded('query', 'paste', [0], false);
+      await draft.idle();
+      expect(excluded()).toEqual([0]);
+      // Control without the toggle: back to blastp keeps r0 and r2.
+      draft.setProgram('blastp');
+      await draft.idle();
+      const control = [...excluded()];
+      draft.setProgram('blastn');
+      await draft.idle();
+      draft.setExtra('-parse_deflines');
+      await draft.idle();
+      expect([draft.state.get().parseDeflines, excluded()]).toEqual([true, [0]]);
+      draft.setProgram('blastp');
+      await draft.idle();
+      expect({ control, afterToggle: excluded() }).toEqual({ control: [0, 2], afterToggle: [0, 2] });
     });
   });
 

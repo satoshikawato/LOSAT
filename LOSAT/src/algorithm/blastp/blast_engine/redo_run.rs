@@ -533,10 +533,6 @@ pub(super) fn plan_redo_and_expand_lists<P>(
 /// Plans the redo path (`plan_redo_and_expand_lists`) and runs it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
 pub(super) fn run_redo<P>(
     redo: &RedoInputs<'_, P>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -548,6 +544,10 @@ where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
     match plan_redo_and_expand_lists(redo, preliminary_hit_lists, x_compact_hit_lists) {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         RedoPath::Windows => x_windows_redo(
             redo,
             preliminary_hit_lists,
@@ -555,9 +555,17 @@ where
             redone_matches,
             x_prelim_freed,
         ),
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         RedoPath::MatchParallel(q_idx) => {
             match_parallel_redo(redo, q_idx, preliminary_hit_lists, redone_matches)
         }
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         RedoPath::QueryParallel(kappa_parallel_query_indices) => query_parallel_redo(
             redo,
             &kappa_parallel_query_indices,
@@ -571,42 +579,11 @@ where
             redone_matches,
             x_prelim_freed,
         ),
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
         RedoPath::SwC0Windows => super::sw_c0::sw_c0_windows(
-            redo,
-            preliminary_hit_lists,
-            x_compact_hit_lists,
-            redone_matches,
-            x_prelim_freed,
-        ),
-        RedoPath::SwC0OneThread => super::sw_c0::sw_c0_one_thread(
-            redo,
-            preliminary_hit_lists,
-            x_compact_hit_lists,
-            redone_matches,
-            x_prelim_freed,
-        ),
-    }
-}
-
-/// Plans the redo path (`plan_redo_and_expand_lists`) and runs it (serial build).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
-#[cfg(any(
-    not(feature = "parallel"),
-    all(target_arch = "wasm32", not(feature = "wasm-threads"))
-))]
-pub(super) fn run_redo<P>(
-    redo: &RedoInputs<'_, P>,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    redone_matches: &mut [BlastCompoHeap],
-    x_prelim_freed: &mut usize,
-) -> Result<()>
-where
-    P: Fn(usize) -> Result<BlastRedoAlignParams>,
-{
-    match plan_redo_and_expand_lists(redo, preliminary_hit_lists, x_compact_hit_lists) {
-        RedoPath::OneThread => one_thread_redo(
             redo,
             preliminary_hit_lists,
             x_compact_hit_lists,

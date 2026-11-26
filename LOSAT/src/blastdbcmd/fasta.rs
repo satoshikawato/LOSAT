@@ -461,6 +461,7 @@ fn write_sequence_direct(
     changes: impl FnOnce() -> Vec<usize>,
     out: &mut StreamInserter<'_>,
 ) -> std::io::Result<()> {
+    let width_u32 = width;
     let width = width.max(1) as usize;
     let len = letters.len();
     if len == 0 {
@@ -495,10 +496,7 @@ fn write_sequence_direct(
                 let batch_letters = take_lines * width + if take_tail { tail_letters } else { 0 };
                 let slice = &letters[pos..pos + batch_letters];
                 if out.push_within_room(batch_bytes, |dst| {
-                    for line in slice.chunks(width) {
-                        dst.extend_from_slice(line);
-                        dst.push(b'\n');
-                    }
+                    crate::sequence::write_fasta_lines(slice, width_u32, dst);
                 })? {
                     pos += batch_letters;
                     continue;

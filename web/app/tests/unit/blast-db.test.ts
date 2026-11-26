@@ -623,17 +623,18 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expectReady(draft);
 
     // Turning on soft mask without an algorithm blocks run until filled.
+    const expectSoftMissing = () => expect(draft.readiness()).toBe(dbMaskMissingMessage('soft'));
     draft.setDatabaseMask('soft');
     await draft.idle();
     expect(maskPair()).toEqual(['', undefined]);
-    expect(draft.readiness()).toBe('Enter a database soft mask algorithm ID or name.');
+    expectSoftMissing();
 
     // Typing a leading space keeps the raw text in the draft while still blocking run and omitting argv.
     draft.setDatabaseMaskAlgorithm(' ');
     await draft.idle();
     expect(maskPair()).toEqual([' ', undefined]);
     expect(dbMaskState(draft.state.get().database.filterValues).value).toBe(' ');
-    expect(draft.readiness()).toBe('Enter a database soft mask algorithm ID or name.');
+    expectSoftMissing();
     expect(draft.parameters().some(([flag]) => flag === DB_SOFT_MASK_FLAG)).toBe(false);
 
     draft.setDatabaseMaskAlgorithm(' 11 ');
@@ -747,18 +748,26 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     draft.setProgram('blastp');
     draft.setSubjectSource('database');
     await draft.setSubjectDatabaseFiles([fileWithRelPath('protdb/p.pin', 'pin')]);
-    draft.setDatabaseFilter('-taxids', '9606');
-    draft.setDatabaseFilter('-negative_taxids', '10090');
+    for (const [flag, val] of [
+      ['-taxids', '9606'],
+      ['-negative_taxids', '10090'],
+      [NO_TAXID_EXPANSION_FLAG, true],
+    ] as const) {
+      draft.setDatabaseFilter(flag, val);
+    }
     draft.setDatabaseMask('soft', '21');
-    draft.setDatabaseFilter(NO_TAXID_EXPANSION_FLAG, true);
-    draft.setDatabaseFilterFile('-negative_ipglist', diskFile('neg_ipg.txt', '1\n'));
-    draft.setDatabaseFilterFile('-ipglist', diskFile('ipg.txt', '2\n'));
-    draft.setDatabaseFilterFile('-negative_gilist', diskFile('neg_gi.txt', '3\n'));
-    draft.setDatabaseFilterFile('-gilist', diskFile('gi.txt', '4\n'));
-    draft.setDatabaseFilterFile('-negative_taxidlist', diskFile('neg_tax.txt', '5\n'));
-    draft.setDatabaseFilterFile('-taxidlist', diskFile('tax.txt', '6\n'));
-    draft.setDatabaseFilterFile('-negative_seqidlist', diskFile('neg_seq.txt', '7\n'));
-    draft.setDatabaseFilterFile('-seqidlist', diskFile('seq.txt', '8\n'));
+    for (const [flag, name] of [
+      ['-negative_ipglist', 'neg_ipg.txt'],
+      ['-ipglist', 'ipg.txt'],
+      ['-negative_gilist', 'neg_gi.txt'],
+      ['-gilist', 'gi.txt'],
+      ['-negative_taxidlist', 'neg_tax.txt'],
+      ['-taxidlist', 'tax.txt'],
+      ['-negative_seqidlist', 'neg_seq.txt'],
+      ['-seqidlist', 'seq.txt'],
+    ] as const) {
+      draft.setDatabaseFilterFile(flag, diskFile(name, `${name}\n`));
+    }
     await draft.idle();
 
     expect(draft.parameters()).toEqual([

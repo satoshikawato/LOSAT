@@ -51,10 +51,12 @@ const expectWmConflict = (page: Page, visible: boolean) =>
     ? expect(page.getByTestId('param-window_masker_db-no-taxid-conflict')).toBeVisible()
     : expect(page.getByTestId('param-window_masker_db-no-taxid-conflict')).toHaveCount(0);
 
+const toggleDbFilters = (page: Page) => page.getByTestId('subject-db-filters-toggle').click();
+
 async function openDbFilters(page: Page): Promise<void> {
   const details = page.getByTestId('subject-db-filters');
   if ((await details.getAttribute('open')) === null) {
-    await page.getByTestId('subject-db-filters-toggle').click();
+    await toggleDbFilters(page);
   }
 }
 
@@ -209,11 +211,13 @@ test.describe('WW4 database masking & WindowMasker -db form controls', () => {
 
     await selectDbMaskMode(page, 'soft');
     const maskAlg = page.getByTestId('db-mask-algorithm');
+    const maskMissing = page.getByTestId('db-mask-missing');
+    const expectSoftMissing = () => expect(maskMissing).toHaveText('Enter a database soft mask algorithm ID or name.');
     await expect(maskAlg).toBeVisible();
     await expect(maskAlg).toHaveAttribute('placeholder', '11 or dust');
-    await expect(page.getByTestId('db-mask-missing')).toHaveText('Enter a database soft mask algorithm ID or name.');
+    await expectSoftMissing();
     // Closing Database masking and filters and clicking Run auto-opens it to reveal the missing field.
-    await page.getByTestId('subject-db-filters-toggle').click();
+    await toggleDbFilters(page);
     await expect(maskAlg).toBeHidden();
     await submit(page);
     await expect(page.getByTestId('search-message')).toHaveText('Enter a database soft mask algorithm ID or name.');
@@ -223,10 +227,10 @@ test.describe('WW4 database masking & WindowMasker -db form controls', () => {
     // Typing a leading space does not vanish while editing; blank text still prompts until a value is entered.
     await maskAlg.fill(' ');
     await expect(maskAlg).toHaveValue(' ');
-    await expect(page.getByTestId('db-mask-missing')).toHaveText('Enter a database soft mask algorithm ID or name.');
+    await expectSoftMissing();
 
     await maskAlg.fill('30');
-    await expect(page.getByTestId('db-mask-missing')).toHaveCount(0);
+    await expect(maskMissing).toHaveCount(0);
     await expectFilterCount(page, 1);
 
     // Switching Soft -> Hard keeps the algorithm value and enforces mutual exclusion.

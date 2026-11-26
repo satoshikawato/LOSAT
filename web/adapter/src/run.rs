@@ -299,7 +299,7 @@ fn read_outfmt(
     let strategy = losat::web_adapter::export_search_strategy_of(&command).is_some();
     let outfmt = std::mem::replace(outfmt_of(&mut command), std::ffi::OsString::from("0"))
         .into_string()
-        .expect("web argv words are UTF-8");
+        .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?;
     let early = losat::web_adapter::early_format_choice(&outfmt, strategy)
         .map_err(|error| format!("{error:#}"))?;
     // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
@@ -361,7 +361,10 @@ fn read_outfmt(
         // number, which NCBI and the CLI drop (`FormatChoice::normalized`). The engine's library
         // drops them as well (`parse_formatting_string`; BLASTP's since line RG F/d36), so this
         // only gives the output one spelling of its number.
-        1..=4 => Some(choice.normalized()),
+        1..=4 => Some(
+            String::from_utf8(choice.normalized())
+                .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?,
+        ),
         _ => Some(outfmt),
     };
     let number = Some(choice.number as u32);

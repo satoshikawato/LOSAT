@@ -420,3 +420,14 @@ fn a_directory_reached_through_a_link_is_the_same_directory() {
         &format!("\"{}\" and \"{linked}\"", base_in(&out, "x")),
     );
 }
+
+#[test]
+fn lowercase_utf8_bytes_keeps_distinct_invalid_bytes_apart() {
+    use super::lowercase_utf8_bytes;
+    assert_eq!(lowercase_utf8_bytes(b"Gm\xffA"), b"gm\xffa");
+    assert_eq!(lowercase_utf8_bytes(b"Gm\xfeA"), b"gm\xfea");
+    assert_ne!(
+        lowercase_utf8_bytes(b"a\xff"),
+        lowercase_utf8_bytes(b"a\xfe")
+    );
+}

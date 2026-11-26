@@ -821,10 +821,7 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
 /// subjects are read and the query is opened, before the options are processed): `inaccessible`
 /// when it cannot be made. The command line's programs (`open_out_file`) and the library's
 /// `run_to_file` (`api::local_blast::OutFile`) make the file here.
-pub(crate) fn create_out_file(
-    path: &std::path::Path,
-    _program: Option<&str>,
-) -> anyhow::Result<std::fs::File> {
+pub(crate) fn create_out_file(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
     std::fs::File::create(path).map_err(|_| inaccessible("out", path))
 }
 

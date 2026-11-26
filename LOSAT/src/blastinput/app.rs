@@ -232,12 +232,13 @@ impl FormatChoice {
     }
 
     /// The format as LOSAT's reports read it: the number and the custom fields.
-    pub fn normalized(&self) -> String {
-        if self.spec.is_empty() {
-            self.number.to_string()
-        } else {
-            format!("{} {}", self.number, String::from_utf8_lossy(&self.spec))
+    pub fn normalized(&self) -> Vec<u8> {
+        let mut out = self.number.to_string().into_bytes();
+        if !self.spec.is_empty() {
+            out.push(b' ');
+            out.extend_from_slice(&self.spec);
         }
+        out
     }
 }
 

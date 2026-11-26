@@ -4575,7 +4575,7 @@ pub fn run(
             if parsed.delimiter.is_empty()
                 || super::tabular::custom_tabular_spec(&outfmt_bytes, args.app).is_none() =>
         {
-            parsed.normalized().into_bytes()
+            parsed.normalized()
         }
         _ => outfmt_bytes.clone(),
     };
@@ -4678,7 +4678,7 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some(args.app.name())))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 

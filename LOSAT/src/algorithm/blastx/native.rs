@@ -285,7 +285,7 @@ fn run_inner(
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
     // The `-out` file, where NCBI opens it (`cli::create_out_file`, one owner with the library).
-    let create = |path: &Path| crate::cli::create_out_file(path, None);
+    let create = |path: &Path| crate::cli::create_out_file(path);
     let mut held = None;
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
@@ -2405,7 +2405,7 @@ fn write_run_error_archive(
         return;
     };
     let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-        Some(path) => match crate::cli::create_out_file(path, None) {
+        Some(path) => match crate::cli::create_out_file(path) {
             Ok(file) => Some(file),
             Err(_) => return,
         },

@@ -6395,7 +6395,7 @@ fn open_out_file(args: &BlastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 

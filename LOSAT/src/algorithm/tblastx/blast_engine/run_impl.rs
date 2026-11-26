@@ -1047,7 +1047,7 @@ pub fn run(
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
     // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers (`search_cli`).
     let outfmt: Vec<u8> = match choice.parsed() {
-        Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized().into_bytes(),
+        Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
         _ => outfmt_bytes.clone(),
     };
     let mut stream = crate::cli::ReportStream::of_cli(
@@ -1149,7 +1149,7 @@ fn open_out_file(args: &TblastxArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 

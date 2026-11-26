@@ -376,17 +376,25 @@ BLAST+.
    Since version 1.34 the same holds for `losat makeprofiledb` (probes against official NCBI
    BLAST+ 2.17.0 makeprofiledb, 2026-11-26). A fresh `-dbtype rps` build writes nothing to
    standard output and finishes with exit status 0 on a closed standard-output pipe in both NCBI
-   and LOSAT. Overwriting an existing database of the same name deletes the old database
-   (`s_DeleteMakeprofileDb`) and then writes `Deleted existing BLAST database with identical name.`
-   with `endl` to `m_LogFile` (standard output unless `-logfile` names a file, `makeprofiledb.cpp:1331-1333`):
-   when that stream is a closed pipe outside Windows (stdout, `-logfile -`, `-logfile /dev/stdout`,
-   or a closed named pipe), NCBI 2.17.0 is ended by SIGPIPE (141) before building any new volume,
-   and LOSAT stops at once with exit status 0 and no message. When `CWriteDB` writes an
-   `ib=...,n4sz=...` line to `cout` (`writedb_convert.cpp:464-466`) on a closed standard-output
-   pipe (even with `-logfile`), NCBI 2.17.0 is ended by SIGPIPE inside `AddSequence` without
-   closing the writer or running `~CMakeProfileDBApp`, and LOSAT stops there with exit status 0
-   and no message. Non-pipe write failures (`/dev/full`) and `-logfile` naming a regular file
-   complete with exit status 0 in both.
+   and LOSAT. For `-dbtype delta`, exclusion lines are written without `endl` to `m_LogFile`
+   (`cout` by default or with `-logfile -`, 4,096-byte pipe buffer; `OfStream` with
+   `-logfile /dev/stdout`, 8,191-byte put area, `makeprofiledb.cpp:1804-1816`): exclusion text
+   within the stream buffer stays buffered while every volume is built (all 14 files; NCBI hits
+   SIGPIPE on the exit flush, LOSAT exits with status 0), whereas exclusion text that overflows
+   the buffer hits the closed pipe before any volume is created (0 files; NCBI SIGPIPE 141,
+   LOSAT exit status 0). Overwriting an existing database of the same name deletes the old
+   database (`s_DeleteMakeprofileDb`) and then writes `Deleted existing BLAST database with
+   identical name.` with `endl` to `m_LogFile` (standard output unless `-logfile` names a file,
+   `makeprofiledb.cpp:1331-1333`): when that stream is a closed pipe outside Windows (stdout,
+   `-logfile -`, `-logfile /dev/stdout`, or a closed named pipe), NCBI 2.17.0 is ended by
+   SIGPIPE (141) before building any new volume, and LOSAT stops at once with exit status 0 and
+   no message. When `CWriteDB` writes an `ib=...,n4sz=...` line to `cout`
+   (`writedb_convert.cpp:464-466`) on a closed standard-output pipe (even with `-logfile`), NCBI
+   2.17.0 is ended by SIGPIPE inside `AddSequence` without closing the writer, flushing buffered
+   `-logfile` bytes, or running `~CMakeProfileDBApp`, and LOSAT stops there with exit status 0,
+   no message, and unflushed `-logfile` bytes discarded (`OfStream::discard_unflushed`). Non-pipe
+   write failures (`/dev/full`) and `-logfile` naming a regular file complete with exit status 0
+   in both.
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
    (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
@@ -397,7 +405,8 @@ BLAST+.
    and `writedb::makeblastdb::CoutLog` for makeblastdb's log; `makembindex::work::run`
    (`Failure::ClosedPipe`), `dbindex::factory::make_index` (`Stop::ClosedPipe`) and
    `dbindex::format::SuperHeader::save` for makembindex; `makeprofiledb::work::run`
-   (`RunError::ClosedPipe`, `write_line_or_closed_pipe`, `post_writer`) for makeprofiledb. Tests:
+   (`RunError::ClosedPipe`, `writedb::cout::cout`, `writedb::ofstream::Stream::discard_unflushed`,
+   `post_writer`) for makeprofiledb. Tests:
    `tests/makeblastdb_closed_pipe.rs` (`a_closed_pipe_at_the_first_line_makes_no_file`,
    `an_old_database_of_the_name_is_left_as_it_was`, `logfile_builds_with_the_pipe_closed`,
    `a_logfile_that_is_the_closed_pipe_makes_no_file`), `writedb/tests.rs`
@@ -413,8 +422,14 @@ BLAST+.
    `overwrite_on_closed_stdout_pipe_stops_after_deleting_existing_db`,
    `overwrite_with_regular_logfile_or_dev_full_completes`,
    `writer_cout_on_closed_stdout_pipe_stops_without_cleanup_even_with_logfile`,
-   `help_version_and_dryrun_on_closed_stdout_pipe`) and `makeprofiledb/work_tests.rs`
-   (`write_line_or_closed_pipe_maps_broken_pipe_only_off_windows`). Release-notes sentence: When the reader of `losat
+   `help_version_and_dryrun_on_closed_stdout_pipe`,
+   `delta_buffered_exclusion_completes_on_closed_stdout_pipe`,
+   `delta_exclusion_overflow_matches_ncbi_buffer_boundaries`,
+   `delta_overwrite_plus_exclusion_stops_at_delete_line`,
+   `delta_writer_closed_pipe_does_not_flush_regular_logfile`,
+   `delta_buffered_exclusion_before_error_on_closed_stdout_pipe`), `makeprofiledb/work_tests.rs`
+   (`cout_log_buffers_exclusion_lines_until_flush_or_overflow`) and
+   `writedb/ofstream_fixture_tests.rs` (`discard_unflushed_drops_held_bytes_without_writing_them`). Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output, of `losat makeblastdb`'s log, of `losat makembindex`'s `-show_filters`, `-stat`, or index outputs that are named pipes, or of `losat makeprofiledb`'s log or writer output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 11. **BLASTN's progress bar on a terminal** (version 1.22, 2026-11-20, recorded for the v0.2.0

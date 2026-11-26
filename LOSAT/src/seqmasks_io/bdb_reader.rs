@@ -22,7 +22,7 @@ use crate::report::defline::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
 use crate::seqdb::alias::SearchPath;
 use crate::seqdb::{NucleotideAmbiguity, SeqDb, SeqDbError, SeqType};
-use crate::seqid::ParsedSeqId;
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
 /// One sequence of the database (`CBioseq`).
 pub(crate) struct BdbRecord {
@@ -92,6 +92,8 @@ pub(crate) struct MaskBdbReader {
     /// for which NCBI posts its warning 803.10 (`take_utf8_header`): it met one, or it failed (the
     /// record is read again to see whether one came before the failure).
     utf8_header: bool,
+    /// Kept header-set buffers reused across sequential OID reads (`SeqDb::defline_set_in`).
+    kept_set: DeflineSet,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -128,6 +130,7 @@ impl MaskBdbReader {
             path,
             get_title: false,
             utf8_header: false,
+            kept_set: DeflineSet::default(),
         })
     }
 
@@ -197,6 +200,18 @@ impl MaskBdbReader {
         &mut self,
         letters: bool,
     ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
+        let mut set = std::mem::take(&mut self.kept_set);
+        let result = self.next_record_in(letters, &mut set);
+        self.kept_set = set;
+        result
+    }
+
+    /// [`MaskBdbReader::next_record_of`] reusing `set` as its header buffer.
+    fn next_record_in(
+        &mut self,
+        letters: bool,
+        set: &mut DeflineSet,
+    ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
         self.utf8_header = false;
         if self.oid >= self.db.num_seqs() {
             return Ok(None);
@@ -207,9 +222,9 @@ impl MaskBdbReader {
         let error = |error| database_error(error, program);
         // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
         self.db.build_oid_list().map_err(error)?;
-        let set = self.db.defline_set(oid);
-        self.utf8_header = set.as_ref().map_or(true, |set| set.utf8);
-        let set = set.map_err(error)?;
+        let read = self.db.defline_set_in(oid, set);
+        self.utf8_header = read.is_err() || set.utf8;
+        read.map_err(error)?;
         if set
             .deflines
             .iter()
@@ -282,7 +297,7 @@ impl MaskBdbReader {
         if has_letters {
             texts = self
                 .taxdb
-                .bioseq_texts(&self.db, oid, &set, None)
+                .bioseq_texts(&self.db, oid, set, None)
                 .map_err(|error| lookup_refusal(oid, error))?;
         }
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
@@ -301,7 +316,7 @@ impl MaskBdbReader {
         let any_source = set.first_source_taxid(None).is_some();
         let has_source = source_shown && any_source;
         let taxname = if has_source {
-            self.source_taxname(oid, &set)?
+            self.source_taxname(oid, set)?
         } else {
             None
         };
@@ -312,7 +327,7 @@ impl MaskBdbReader {
                 &ids,
                 &title,
                 any_source,
-                || self.source_taxname(oid, &set),
+                || self.source_taxname(oid, set),
             )?)
         } else {
             None

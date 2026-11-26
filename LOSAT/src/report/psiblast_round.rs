@@ -16,11 +16,10 @@ use super::{
     alignment_id_local, blastp_family_program, database_description_label, shown_hsp, table_scores,
     write_blast_database_header, write_blastp_database_header_spacing,
     write_blastp_query_footer_spacing, write_blastp_query_header, write_blastp_subject_part,
-    write_database_subject_alignments_part, write_decorated_alignment, write_description_row_start,
-    write_description_table, write_hsp_info, write_no_hits_found, write_prolog, write_spaces,
-    write_subject_alignments_part, write_tblastn_unsearched_query_footer_spacing,
-    BlastpPairwiseQuery, BlastpPairwiseReport, DatabaseHeading, HtmlRowMasks, HtmlRows,
-    PairwiseConfig, PairwiseDatabase, PairwiseHit, PairwiseView, RowDecoration,
+    write_description_row_start, write_description_table, write_no_hits_found, write_prolog,
+    write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
+    BlastpPairwiseReport, HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit,
+    PairwiseView, RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::ReportWrite;
@@ -341,6 +340,7 @@ impl<'a> RoundSections<'a> {
     }
     /// The alignments of the subject `s_idx` in a PHI-BLAST round (`phi_round`): all its HSPs,
     /// their rows with the query feature of `decoration` (`phi_round::PatternRow`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2142-2189
     fn phi_subject<W: crate::report::ostream::ReportWrite, D: RowDecoration>(
         &self,
         writer: &mut W,
@@ -349,75 +349,22 @@ impl<'a> RoundSections<'a> {
         s_idx: u32,
         decoration: &D,
     ) -> io::Result<()> {
-        let config = self.config;
-        let hsps = group.subject_hits[&s_idx].len();
-        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                DatabaseHeading::Skipped(&id),
-                true,
-                self.parsed_subjects,
-                None,
-                s_idx,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                0..hsps,
-                None,
-                &mut |_, _| Ok(()),
-                |_, _, _| unreachable!("a skipped alignment is written by its line"),
-            );
-        }
-        let parsed = self.parsed(s_idx);
-        if self.database.is_some() || parsed.is_some() {
-            let heading = match parsed {
-                Some(subject) => DatabaseHeading::loaded(
-                    subject,
-                    true,
-                    group.own_hsps(s_idx),
-                    self.thrown(s_idx).is_some(),
-                ),
-                None => DatabaseHeading::Title(
-                    &group.subject_titles[&s_idx],
-                    super::stored_source(self.subject_sources, s_idx),
-                ),
-            };
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                heading,
-                true,
-                self.parsed_subjects,
-                None,
-                s_idx,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                0..hsps,
-                None,
-                &mut |_, _| Ok(()),
-                |writer, hit, _| {
-                    write_hsp_info(writer, hit, config)?;
-                    // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the rows have no spans.
-                    write_decorated_alignment(writer, hit, None, config, decoration)
-                },
-            );
-        }
-        write_subject_alignments_part(
+        // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the rows have no spans, and
+        // `phi_round` places the subject's load posts itself.
+        write_blastp_subject_part(
             writer,
             probe,
-            s_idx,
+            self.config,
+            self.database.is_some(),
             self.parsed_subjects,
-            &group.subject_titles[&s_idx],
-            true,
-            &group.subject_hits[&s_idx],
-            &group.subject_hit_indices[&s_idx],
-            0..hsps,
-            None,
+            self.subject_sources,
+            self.loads,
+            group,
+            s_idx,
+            0..group.subject_hits[&s_idx].len(),
+            HtmlRowMasks::new(None, 0),
             &mut |_, _| Ok(()),
-            |writer, hit, _| {
-                write_hsp_info(writer, hit, config)?;
-                write_decorated_alignment(writer, hit, None, config, decoration)
-            },
+            decoration,
         )
     }
 
@@ -544,6 +491,7 @@ impl QuerySections for RoundSections<'_> {
             part,
             HtmlRowMasks::new(None, 0),
             place,
+            &super::PlainRows,
         )
     }
 

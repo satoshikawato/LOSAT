@@ -1076,11 +1076,13 @@ fn write_subject_part<'h, W: Write>(
     }
 }
 
-/// One subject's alignments in a BLASTP or PSIBLAST pairwise report (`BlastpSections::subject`
-/// and `psiblast_round::RoundSections::subject`): an unreadable query's skipped lines, or the
-/// subject's heading (`group_heading`) and HSPs (`write_hsp_info` + `write_alignment`).
+/// One subject's alignments in a BLASTP, PSIBLAST, or PHI-BLAST pairwise report
+/// (`BlastpSections::subject`, `psiblast_round::RoundSections::subject`, and
+/// `psiblast_round::RoundSections::phi_subject`): an unreadable query's skipped lines, or the
+/// subject's heading (`group_heading`) and HSPs (`write_hsp_info` + `write_decorated_alignment`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1557,2142-2189
 #[allow(clippy::too_many_arguments)]
-fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
+fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite, D: RowDecoration>(
     writer: &mut W,
     probe: Option<&mut FormatProbe<'_>>,
     config: &PairwiseConfig,
@@ -1093,6 +1095,7 @@ fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
     part: std::ops::Range<usize>,
     row_masks: HtmlRowMasks<'_>,
     place: super::query_warnings::ReportHook<'_, W>,
+    decoration: &D,
 ) -> io::Result<()> {
     if let Some(id) = config.unreadable_query_id(parsed_subjects, s_idx) {
         return write_database_subject_alignments_part(
@@ -1135,7 +1138,7 @@ fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
         place,
         |writer, hit, hsp_index| {
             write_hsp_info(writer, hit, config)?;
-            write_alignment(writer, hit, row_masks.of(hsp_index), config)
+            write_decorated_alignment(writer, hit, row_masks.of(hsp_index), config, decoration)
         },
     )
 }
@@ -3999,6 +4002,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             part,
             self.row_masks,
             place,
+            &PlainRows,
         )
     }
 

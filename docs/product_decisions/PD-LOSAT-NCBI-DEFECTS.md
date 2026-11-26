@@ -818,16 +818,16 @@
   NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
-  1.114 2026-11-25 (approved exception 32, megablast greedy gap costs above 32767 and up to
+  1.114 2026-11-26 (approved exception 32, megablast greedy gap costs above 32767 and up to
   `Int4` maximum, line RG item G1: the rule-3 explicit rejection of megablast gap costs above
   32767 is removed; affine greedy gap-cost and distance arithmetic are widened to 64 bits over
   non-empty distances so every gap cost accepted by the nucleotide Karlin-Altschul tables runs
-  without NCBI's signed 32-bit overflow or dense-table memory exhaustion; proposed under the
-  standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10
-  「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, pending the
-  maintainer marking the PR ready for review; numbered after 1.113 at the merge of dev f17536f02
-  that brought psiblast line item PS14's 1.113; first 1.105, then 1.106, 1.107, 1.108 and 1.113;
-  exception 31 until the 1.113 merge)
+  without NCBI's signed 32-bit overflow or dense-table memory exhaustion; approved by the Owner
+  on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A to accept megablast gap costs above
+  32767 as an approved exception under the Owner's rules of 2026-10-10 「NCBI のバグを再現する
+  必要はない」 and 2026-10-22 「広い型になおしましょう」); numbered after 1.113 at the merge of
+  dev f17536f02 that brought psiblast line item PS14's 1.113; first 1.105, then 1.106, 1.107,
+  1.108 and 1.113; exception 31 until the 1.113 merge)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4768,11 +4768,13 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
 
 ## Approved exception 32 (megablast greedy gap costs past `Int4`, line RG item G1, version 1.114)
 
-Version 1.114, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the
+Version 1.114, decided by the Owner on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A:
+accept megablast gap costs above 32767 up to 2147483647 as an approved exception, following the
 Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22
-「広い型になおしましょう」, pending the maintainer marking the PR ready for review. Its version is
-in the list at the top; elsewhere it is cited by its number and name, "approved exception 32
-(megablast greedy gap costs past `Int4`)". Line RG item G1.
+「広い型になおしましょう」; not taken: option C, refusing values above NCBI's
+input-length-dependent 32-bit overflow boundary). Its version is in the list at the top;
+elsewhere it is cited by its number and name, "approved exception 32 (megablast greedy gap costs
+past `Int4`)". Line RG item G1.
 
 32. **Megablast affine greedy alignment with gap costs whose 32-bit setup or distance arithmetic
     overflows or exhausts dense-table memory.** `s_BlastGreedyAlignMemAlloc`

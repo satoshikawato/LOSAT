@@ -172,7 +172,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_stored_gaps: Vec::new(),
         query_case: Default::default(),
         seqalign_num_ident: 60,
-        query_left_of_record: false,
+        edge: crate::report::pairwise::PairwiseEdge::Normal,
     }
 }
 

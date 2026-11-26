@@ -2007,6 +2007,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4506,6 +4507,7 @@ fn finish_local_ungapped(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4701,6 +4703,7 @@ fn finish_local_mode0_no_sum_stats(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

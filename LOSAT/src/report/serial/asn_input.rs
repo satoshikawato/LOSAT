@@ -206,6 +206,7 @@ impl Names {
         reader: "PSSM reader",
         input: "file",
         allocator: "makeprofiledb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
@@ -214,6 +215,7 @@ impl Names {
         reader: "binary definition lines reader",
         input: "binary header",
         allocator: "makeprofiledb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
@@ -231,6 +233,7 @@ impl Names {
         reader: "bioseq reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
@@ -239,6 +242,7 @@ impl Names {
         reader: "Blast-def-line-set reader",
         input: "header",
         allocator: "makeblastdb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
@@ -247,6 +251,7 @@ impl Names {
         reader: "rpsbproc",
         input: "input",
         allocator: "NCBI's rpsbproc",
+        one_stream: false,
         own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
@@ -276,7 +281,7 @@ impl Names {
     /// (exit status 1), a value of another class (`:Object-id`, `:No-such-type`, `:Seq-entry`) in
     /// the messages, the algorithm options and the alignments too (NCBI 2.17.0, line RG item F3,
     /// agent C8, 2026-11-24).
-    pub(crate) const ARCHIVE: Names = Names {
+    pub(crate) const BLAST_ARCHIVE: Names = Names {
         document: "ASN.1 text",
         reader: "ASN.1 text reader",
         input: "input",

@@ -25,7 +25,6 @@ use super::search_program::{blast_type, program_type};
 use super::{Options, PROGRAM};
 use crate::algorithm::common::database::{
     database_error, database_error_of, list_warning_line, open_search_database, pairwise_database,
-    refusal, DatabaseOpenError,
 };
 use crate::blastinput::app::{
     engine_error, options_error_bytes, output_format, prefetch_seqs_limit, xinclude_check_for,
@@ -414,7 +413,7 @@ impl<'r, 'o> Run<'r, 'o> {
             Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
             Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
         }
-        let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+        let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -1005,11 +1004,8 @@ fn open_database(
     } else {
         SeqType::Nucleotide
     };
-    let mut db: SeqDb = match open_search_database(text, seqtype, settings) {
-        Ok(db) => db,
-        Err(DatabaseOpenError::Registry(reason)) => return Err(refusal(&reason, PROGRAM)),
-        Err(DatabaseOpenError::Reader(error)) => return Err(remote_database(&error, text)),
-    };
+    let mut db: SeqDb = open_search_database(text, seqtype, settings)
+        .map_err(|error| remote_database(&error, text))?;
     if let Some(taxids) = options
         .taxid_list
         .as_ref()

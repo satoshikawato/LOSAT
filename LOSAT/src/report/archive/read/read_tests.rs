@@ -34,7 +34,7 @@ fn fixture(name: &str) -> Vec<u8> {
 fn archives(text: &[u8]) -> (Vec<Archive>, Option<ReadError>) {
     let guessed = guess_encoding(text);
     assert_eq!(guessed.encoding.as_ref().ok(), Some(&Encoding::Text));
-    let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+    let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
     let mut out = Vec::new();
     while let Some((archive, posts)) = reader.next_archive() {
         assert!(posts.is_empty(), "{posts:?}");
@@ -204,7 +204,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                 continue;
             }
             if cut_by_its_writer(&text) {
-                let mut stream = text_stream(&text[..], b"", Names::ARCHIVE);
+                let mut stream = text_stream(&text[..], b"", Names::BLAST_ARCHIVE);
                 if stream.read_object(named::BLAST4_ARCHIVE).0.is_ok() {
                     failures.push(format!("{}: a cut archive read whole", path.display()));
                 }
@@ -212,7 +212,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                 continue;
             }
             files += 1;
-            let mut stream = text_stream(&text[..], b"", Names::ARCHIVE);
+            let mut stream = text_stream(&text[..], b"", Names::BLAST_ARCHIVE);
             let mut out = Vec::new();
             let mut error = None;
             while !stream.end_of_data() {
@@ -293,7 +293,7 @@ fn outcome(text: &[u8]) -> Result<(usize, End), Encoding> {
         Ok(other) => return Err(*other),
         Err(stop) => panic!("{stop:?}"),
     }
-    let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+    let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
     let mut count = 0;
     while let Some((archive, _)) = reader.next_archive() {
         match archive {
@@ -421,7 +421,7 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
 /// class where an element of the algorithm options, the alignments or the messages belongs
 /// (`:Object-id`, a class NCBI does not have, `:Seq-entry`) and `@0` end with "Invalid input
 /// format for BLAST Archive." and exit status 1 before anything is formatted, the reader's
-/// `CSerialException` (`Names::ARCHIVE`); a value stated with its own class is read as without
+/// `CSerialException` (`Names::BLAST_ARCHIVE`); a value stated with its own class is read as without
 /// it (NCBI's output equal to the archive's); an element stated as `NULL` there is NCBI's
 /// null-pointer report with the addresses of its stack, exit status 255: refused
 /// (`Stop::NullElement`), before the messages are posted.

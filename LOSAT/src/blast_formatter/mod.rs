@@ -150,7 +150,7 @@ fn run_body(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    if let Some(archive) = args.value("archive") {
+    if let Some(archive) = args.os_value("archive") {
         let mut archive = match files::open_input_file("archive", archive, input) {
             Ok(stream) => stream,
             Err(error) => {

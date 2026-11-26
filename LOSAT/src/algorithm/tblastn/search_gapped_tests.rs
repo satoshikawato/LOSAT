@@ -5196,3 +5196,82 @@ fn short_alignment_starting_before_chunk_uses_middle_and_refuses_ncbi_crashes() 
         assert_eq!(ps, want, "pssm ({s_start})");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515,2973-2995
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.117 (rule 3): ungapped one-hit chunk merges whose query lengths
+// sum to 0 refuse with a typed `ShortChunkSeedRefusal` naming the subject OID and reading frame.
+#[test]
+fn merge_adjusted_chunk_refuses_zero_length_sum_with_oid_and_frame() {
+    let chunk = TranslatedChunk::new(100, 300);
+    let zero_len = |s_start: i32| {
+        (
+            0usize,
+            GappedHsp {
+                frame: -2,
+                score: 20,
+                q_start: 50,
+                q_end: 50,
+                q_gapped_start: 50,
+                s_start,
+                s_end: s_start,
+                s_gapped_start: s_start,
+            },
+        )
+    };
+    let error = merge_adjusted_chunk(
+        vec![zero_len(120)],
+        vec![zero_len(20)],
+        chunk,
+        i32::MAX as usize,
+        false,
+        17,
+        -2,
+    )
+    .expect_err("zero query-length sum must be refused");
+    assert!(
+        error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+        "expected ShortChunkSeedRefusal, got {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 17, frame -2"),
+        "{text}"
+    );
+    assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
+
+    // Positive-length + negative-length one-hit pair whose query lengths sum to 0.
+    let pos = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 25,
+            q_start: 50,
+            q_end: 52,
+            q_gapped_start: 51,
+            s_start: 120,
+            s_end: 122,
+            s_gapped_start: 121,
+        },
+    );
+    let neg = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 15,
+            q_start: 52,
+            q_end: 50,
+            q_gapped_start: 51,
+            s_start: 22,
+            s_end: 20,
+            s_gapped_start: 21,
+        },
+    );
+    let error = merge_adjusted_chunk(vec![pos], vec![neg], chunk, i32::MAX as usize, false, 9, 1)
+        .expect_err("cancelling positive/negative query lengths must be refused");
+    assert!(error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>());
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 9, frame 1"),
+        "{text}"
+    );
+}

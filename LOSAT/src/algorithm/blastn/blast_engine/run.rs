@@ -3388,13 +3388,13 @@ fn merge_prelim_hit_lists(
     split: HspListSplit,
     chunk_overlap_size: usize,
     allow_gap: bool,
-) -> Vec<PrelimHit> {
+) -> std::result::Result<Vec<PrelimHit>, crate::core::blast_hits::ChunkMergeUndefined> {
     if incoming.is_empty() {
-        return incoming;
+        return Ok(incoming);
     }
     if combined.is_empty() {
         combined.append(&mut incoming);
-        return incoming;
+        return Ok(incoming);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2890-2945
@@ -3466,8 +3466,7 @@ fn merge_prelim_hit_lists(
                         &mut combined[index1],
                         &incoming[index2],
                         allow_gap,
-                    )
-                    .expect("BLASTN HSPs have positive length")
+                    )?
                 {
                     deleted[index2] = true;
                 }
@@ -3483,7 +3482,7 @@ fn merge_prelim_hit_lists(
         });
     }
 
-    append_prelim_hit_list(combined, incoming)
+    Ok(append_prelim_hit_list(combined, incoming))
 }
 
 /// NCBI's `s_BlastHSPListsCombineByScore` when every HSP is kept (`hsp_num_max` is
@@ -11966,7 +11965,7 @@ fn merge_query_chunk(
             &mut merged[part.query],
             split_points,
             chunk_overlap_size,
-        );
+        )?;
     }
     for hit_list in merged.iter_mut().flatten() {
         for list in &mut hit_list.hsplist_array {
@@ -11988,10 +11987,10 @@ fn merge_prelim_hit_list(
     combined: &mut Option<HitList<PrelimHspList>>,
     split_offsets: [i32; 2],
     chunk_overlap_size: i32,
-) {
+) -> Result<()> {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
-        return;
+        return Ok(());
     };
     let mut new_hitlist = HitList::new(hitlist1.hsplist_max);
     // The subjects of a hit list are distinct, so the sort order is total.
@@ -12021,7 +12020,12 @@ fn merge_prelim_hit_list(
                     },
                     chunk_overlap_size as usize,
                     true,
-                );
+                )
+                .map_err(|_| {
+                    crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+                        list2.oid, None, "BLASTN",
+                    )
+                })?;
             } else {
                 append_prelim_hit_list(&mut list2.hsps, list1.hsps);
             }
@@ -12032,6 +12036,7 @@ fn merge_prelim_hit_list(
         new_hitlist.update(list);
     }
     *combined = Some(new_hitlist);
+    Ok(())
 }
 
 #[cfg(test)]

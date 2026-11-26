@@ -1582,8 +1582,15 @@ fn x_preliminary_protein_hsps_by_unit<
             if hard_start.is_some() && chunk.overlap_past_list && !per_frame.is_empty() {
                 x_check_hard_merge_overlap(subject, chunk, &per_frame, &unit_hsps)?;
             }
-            per_frame =
-                merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max, !UNGAPPED)?;
+            per_frame = merge_adjusted_chunk(
+                per_frame,
+                unit_hsps,
+                chunk,
+                profile.hsp_num_max,
+                !UNGAPPED,
+                x_subject_oid_value(subject),
+                plan.subject.frames[frame_index].frame,
+            )?;
             #[cfg(test)]
             probe_push(|| {
                 PreliminaryEvent::Merged(
@@ -1816,14 +1823,19 @@ fn x_run_one_word_unit<S: super::score::TbnScore, const UNGAPPED: bool>(
     Ok(purge_preliminary_common_endpoints(results))
 }
 
-/// Database OID label of `target` for refusal messages (`"0"` for in-memory subjects).
-fn x_subject_oid(target: super::x_subject_store::XPrelimSubject<'_>) -> String {
+/// Database OID of `target` for refusal messages (`0` for in-memory subjects).
+fn x_subject_oid_value(target: super::x_subject_store::XPrelimSubject<'_>) -> u32 {
     match target {
         super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
-            stream.seqdb().oid(ordinal as u32).to_string()
+            stream.seqdb().oid(ordinal as u32).get()
         }
-        super::x_subject_store::XPrelimSubject::Nt(_) => "0".to_string(),
+        super::x_subject_store::XPrelimSubject::Nt(_) => 0,
     }
+}
+
+/// Database OID label of `target` for refusal messages (`"0"` for in-memory subjects).
+fn x_subject_oid(target: super::x_subject_store::XPrelimSubject<'_>) -> String {
+    x_subject_oid_value(target).to_string()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586
@@ -2435,6 +2447,8 @@ fn merge_adjusted_chunk(
     chunk: TranslatedChunk,
     hsp_num_max: usize,
     allow_gap: bool,
+    subject_oid: u32,
+    frame: i8,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let offset = i32::try_from(chunk.offset)?;
     for (_, hsp) in &mut incoming {
@@ -2465,9 +2479,10 @@ fn merge_adjusted_chunk(
         |a, b| compare_gapped_score(&a.1, &b.1),
     )
     .map_err(|_| {
-        anyhow::anyhow!(
-            "TBLASTN: alignments across a subject chunk overlap have undefined merged score in \
-             NCBI BLAST+ (zero query-length sum or out-of-range scaled score)"
+        crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+            subject_oid,
+            Some(frame),
+            "TBLASTN",
         )
     })?;
     Ok(per_frame)

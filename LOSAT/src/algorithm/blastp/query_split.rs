@@ -170,8 +170,10 @@ fn query_hsp_lists_merge(
                 let start_diag = (hsp2.q_start as i64 - 1) - (hsp2.s_start as i64 - 1);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
                 if (end_diag - start_diag).abs() < 10
-                    && crate::core::blast_hits::merge_two_chunk_hsps(hsp1, hsp2, true)
-                        .expect("gapped split-query HSPs have positive length")
+                    && crate::core::blast_hits::merge_two_chunk_hsps(hsp1, hsp2, true).expect(
+                        "gapped split-query protein HSPs have positive length and score bounded by \
+                         length * matrix max (< Int4::MAX)",
+                    )
                 {
                     *slot = None;
                 }

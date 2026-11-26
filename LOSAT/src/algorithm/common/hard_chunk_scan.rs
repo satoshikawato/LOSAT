@@ -368,22 +368,27 @@ pub(crate) fn last_range_overlap_merge_refusal(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515, 1526
-// Merging two one-hit ungapped HSPs whose query lengths sum to 0 divides by zero (`score_density`)
-// or converts an out-of-range float to `Int4`, which is undefined behavior in NCBI BLAST+.
-/// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where merging two
-/// one-hit ungapped alignments across a hard-chunk overlap produces a zero query-length sum or an
-/// out-of-range scaled score (`core::blast_hits::ChunkMergeUndefined`).
+// Merging two HSPs across a chunk overlap whose query lengths sum to 0 divides by zero
+// (`score_density`), or whose density-scaled score leaves `Int4` invokes undefined float-to-int
+// conversion in NCBI BLAST+.
+/// LOSAT's refusal (in `program`'s name) of a sequence of OID `oid` (and optional translated
+/// reading `frame`), where merging two alignments across a chunk overlap produces a zero
+/// query-length sum or an out-of-range scaled score (`core::blast_hits::ChunkMergeUndefined`).
 #[cold]
 #[inline(never)]
 pub(crate) fn chunk_merge_undefined_refusal(
     oid: impl std::fmt::Display,
+    frame: Option<i8>,
     program: &str,
 ) -> anyhow::Error {
+    let target = match frame {
+        Some(frame) => format!("sequence of OID {oid}, frame {frame}"),
+        None => format!("sequence of OID {oid}"),
+    };
     ShortChunkSeedRefusal(format!(
-        "-db_hard_mask: the sequence of OID {oid} has alignments across a chunk overlap whose \
-         merged score calculation is undefined in NCBI BLAST+ (zero query-length sum or \
-         out-of-range scaled score); LOSAT's {program} does not search such a database with \
-         -db_hard_mask"
+        "{program}: {target} has alignments across a chunk overlap whose merged score calculation \
+         is undefined in NCBI BLAST+ (zero query-length sum or out-of-range scaled score); \
+         LOSAT's {program} does not support it"
     ))
     .into()
 }

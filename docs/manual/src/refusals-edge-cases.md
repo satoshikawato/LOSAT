@@ -104,6 +104,7 @@ Strategy files:
 - LOSAT refuses before it writes anything, and the error names the first such sequence by its position in the database.
 - `-db_soft_mask` or `-db_hard_mask` on a volume without the algorithm (a database whose volumes give the algorithm differently), or on a volume whose masks have only their big-endian file (`.nab` without `.nac`), is refused. NCBI reads masks of another algorithm or reversed numbers.
 - `-window_masker_taxid` with an optimized ascii counts file is refused when the third line, which holds the hash parameters, leaves a value unread that NCBI then checks uninitialised.
+- Merging two alignments across a subject or query chunk overlap whose density-scaled score leaves 32-bit integers (`Int4`) is refused when the search reaches it, naming the sequence by OID (exit status 1); NCBI's float-to-int conversion is undefined there.
 
 ## blastp
 
@@ -159,6 +160,7 @@ Strategy files:
 - With `-in_pssm` and a PSSM whose `-` column scores above NCBI's minimum, a one-hit alignment whose gapped start lies past the end of NCBI's translation of the subject (after its last frame). NCBI's gapped alignment reads the byte after its end, which it never sets, or past it.
 - A one-hit alignment whose gapped start lies after the end of its frame's translation and that reaches NCBI's traceback. NCBI reads a byte its translation does not set there.
 - The report of a one-hit alignment whose traceback starts on the end marker. NCBI places its column past the subject's end, and LOSAT does not reproduce that result yet. Such alignments that NCBI drops before its reports give NCBI's output (apart from the version line, which names LOSAT).
+- With `-ungapped -window_size 0`, two one-hit alignments merged across a subject-chunk overlap (a reading frame longer than 5,000,000 residues, or `-db_hard_mask`) whose query lengths sum to 0 or whose density-scaled score leaves 32-bit integers (`Int4`): NCBI divides by zero or converts an out-of-range float to `Int4`, so its result is undefined. LOSAT stops with exit status 1 when the search reaches the sequence, naming it by OID and reading frame.
 - For each of these `-window_size 0` refusals but the last, LOSAT writes the results of the query batches before (with `-in_pssm`, one batch: the report's header) and then stops with the error.
 - With `-db_hard_mask`, where a sequence's masks leave a reading frame an empty part at its start (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example [1200, 1202) of 1,202 bases, or an empty mask at its start), NCBI searches the next part as the whole frame, then frees memory that it did not allocate and crashes in every run. LOSAT searches the frame as outside the mask; see [Differences](differences.md).
 - Where a frame's first part, from the frame's first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).

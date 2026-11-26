@@ -606,7 +606,10 @@ fn query_hsp_lists_merge(
                         &candidate.hsp,
                         true,
                     )
-                    .expect("gapped split-query HSPs have positive length")
+                    .expect(
+                        "gapped split-query protein HSPs have positive length and score bounded by \
+                         length * matrix max (< Int4::MAX)",
+                    )
                 {
                     *slot = None;
                 }

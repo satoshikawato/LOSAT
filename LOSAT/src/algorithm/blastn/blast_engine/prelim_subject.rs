@@ -1013,6 +1013,25 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.117 (rule 3): records the earliest subject OID whose
+// subject-chunk merge produces an undefined scaled score (outside `Int4`) or zero length sum.
+#[cold]
+#[inline(never)]
+fn record_chunk_merge_error(
+    error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+    s_idx: usize,
+) {
+    let oid = s_idx as u32;
+    let error = crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+        oid, None, "BLASTN",
+    );
+    let mut first = error_cell.lock().expect("the error cell is not poisoned");
+    if first.as_ref().is_none_or(|(smallest, _)| oid < *smallest) {
+        *first = Some((oid, error));
+    }
+}
+
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that
 /// `split_state` cuts (`SubjectSplitState::next_chunk`, skipping a chunk without a range), each
 /// searched by `prelim_chunk_hits` with the subject's scratches on this thread, or, with a pool of
@@ -1166,7 +1185,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         let hits = if hits.is_empty() {
                             hits
                         } else {
-                            let hits = merge_prelim_hit_lists(
+                            let hits = match merge_prelim_hit_lists(
                                 &mut combined_prelim_hits,
                                 hits,
                                 HspListSplit::Subject {
@@ -1174,7 +1193,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                                 },
                                 chunk.overlap,
                                 !UNGAPPED,
-                            );
+                            ) {
+                                Ok(hits) => hits,
+                                Err(_) => {
+                                    record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                                    return Vec::new();
+                                }
+                            };
                             if subject_besthit {
                                 prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                             }
@@ -1234,13 +1259,18 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         if hits.is_empty() {
                             continue;
                         }
-                        let _ = merge_prelim_hit_lists(
+                        if merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
                             HspListSplit::Subject { offset },
                             overlap,
                             !UNGAPPED,
-                        );
+                        )
+                        .is_err()
+                        {
+                            record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                            return Vec::new();
+                        }
                         if subject_besthit {
                             prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                         }
@@ -1291,7 +1321,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     let hits = if hits.is_empty() {
                         hits
                     } else {
-                        let hits = merge_prelim_hit_lists(
+                        let hits = match merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
                             HspListSplit::Subject {
@@ -1299,7 +1329,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             },
                             chunk.overlap,
                             !UNGAPPED,
-                        );
+                        ) {
+                            Ok(hits) => hits,
+                            Err(_) => {
+                                record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                                return Vec::new();
+                            }
+                        };
                         if subject_besthit {
                             prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                         }

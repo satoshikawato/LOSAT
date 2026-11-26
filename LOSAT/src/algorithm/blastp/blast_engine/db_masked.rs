@@ -298,7 +298,7 @@ impl<'a> BlastpDbMasking<'a> {
                             last_range_overlap_merge_refusal(oid, self.program)
                         }
                         ShortChunkRefusal::UndefinedMerge => {
-                            chunk_merge_undefined_refusal(oid, self.program)
+                            chunk_merge_undefined_refusal(oid, None, self.program)
                         }
                     },
                 );

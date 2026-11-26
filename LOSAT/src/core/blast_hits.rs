@@ -221,10 +221,12 @@ pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow:
 /// `Blast_HSPListsMerge` to attempt a merge across a subject-chunk overlap (`OVERLAP_DIAG_CLOSE`).
 const OVERLAP_DIAG_CLOSE: i64 = 10;
 
-/// Returned by [`merge_subject_chunk_hsps`] when two HSPs in a subject-chunk overlap have query
-/// lengths summing to 0 (or a scaled merged score outside NCBI's `Int4`), where NCBI's
-/// `s_BlastMergeTwoHSPs` divides by zero or converts an out-of-range float to `Int4` (undefined
-/// behavior; only reachable with `-ungapped -window_size 0` one-hit HSPs of length 0 or less).
+/// Returned by [`merge_two_chunk_hsps`] and [`merge_subject_chunk_hsps`] when two HSPs in a chunk
+/// overlap have query lengths summing to 0 or a density-scaled merged score outside NCBI's `Int4`,
+/// where NCBI's `s_BlastMergeTwoHSPs` divides by zero or converts an out-of-range float to `Int4`
+/// (undefined behavior: zero length sum is reachable with `-ungapped -window_size 0` one-hit HSPs
+/// of length 0 or less; out-of-range scaled score is reachable when merging very long high-scoring
+/// alignments whose summed score exceeds `Int4::MAX`, e.g. in BLASTN).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ChunkMergeUndefined;
 

@@ -471,7 +471,11 @@ impl Masked<'_> {
             )
             .is_err()
             {
-                return Err(chunk_merge_undefined_refusal(db.oid(oid as u32), PROGRAM));
+                return Err(chunk_merge_undefined_refusal(
+                    db.oid(oid as u32),
+                    None,
+                    PROGRAM,
+                ));
             }
             if options.subject_besthit {
                 subject_besthit_preliminary(&mut purged);

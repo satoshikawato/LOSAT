@@ -819,8 +819,9 @@ fn load_nonasc_expected(name: &str) -> (Vec<u8>, Vec<u8>, i32) {
 fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>, Vec<u8>, i32) {
     let home = root.join("home");
     fs::create_dir_all(&home).unwrap();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
-    cmd.arg(sub)
+    let mut sub_cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
+    sub_cmd
+        .arg(sub)
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
@@ -832,9 +833,9 @@ fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>,
         .env("NCBI_CONFIG_PATH", &home)
         .env("BLAST_USAGE_REPORT", "false");
     if let Some(log) = std::env::var_os("LOSAT_BLASTX_WORKER_LOG") {
-        cmd.env("LOSAT_BLASTX_WORKER_LOG", log);
+        sub_cmd.env("LOSAT_BLASTX_WORKER_LOG", log);
     }
-    let out = cmd.output().unwrap();
+    let out = sub_cmd.output().unwrap();
     (
         with_run(&out.stdout, root),
         with_run(&out.stderr, root),

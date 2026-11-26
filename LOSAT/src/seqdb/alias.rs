@@ -1222,6 +1222,36 @@ pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1999-2090
+/// Collects the filter list file paths referenced by `PATH_KEYS` (`OIDLIST`, `GILIST`, `TILIST`,
+/// `SEQIDLIST`, `TAXIDLIST`) across the alias tree under `node`, resolved against each alias
+/// file's directory (and, for `OIDLIST`, also the directory of the node's first volume, matching
+/// `compute_masks`).
+pub(super) fn collect_alias_list_files(
+    node: &AliasNode,
+    out: &mut std::collections::BTreeSet<Vec<u8>>,
+) {
+    for &key in &PATH_KEYS {
+        let Some(value) = node.value(key) else {
+            continue;
+        };
+        if value.is_empty() {
+            continue;
+        }
+        if key == "OIDLIST" || !value.contains(&b' ') {
+            out.insert(combine_path(&node.db_path, value));
+        }
+        if key == "OIDLIST" {
+            if let Some(first) = node.vol_names.first() {
+                out.insert(combine_path(dir_name(first), value));
+            }
+        }
+    }
+    for subnode in &node.subnodes {
+        collect_alias_list_files(subnode, out);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1517-1532
 // The only caller is the removal of an existing database before a build
 // (`DeleteBlastDb`), and for that use LOSAT departs from NCBI on purpose in

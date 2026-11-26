@@ -510,9 +510,8 @@ fn register_counts(name: &str) -> u32 {
 fn the_search_receiver_reads_logfile_against_registered_files() {
     let refusal = |program: &str, name: &str| {
         format!(
-            "a -logfile file '{name}' that is a file of the run's directory (the command line \
-             appends its messages to it; LOSAT Web reads the run's files and writes none of \
-             them) is not supported by LOSAT's {}",
+            "a -logfile file '{name}' that is a file of the run's directory (LOSAT Web reads the \
+             run's files and writes none of them) is not supported by LOSAT's {}",
             program.to_ascii_uppercase()
         )
     };

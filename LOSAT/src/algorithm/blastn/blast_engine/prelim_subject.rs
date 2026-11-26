@@ -1089,7 +1089,8 @@ fn record_chunk_merge_error(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-585
+// Wraps `record_chunk_merge_error` with the batch's `OidMap` (or identity for `-subject`).
 #[cold]
 #[inline(never)]
 fn record_batch_chunk_merge_error(batch: &PrelimBatch<'_>, s_idx: usize) {

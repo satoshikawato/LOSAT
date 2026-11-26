@@ -456,12 +456,13 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## makeprofiledb
 
-`makeprofiledb` runs every option of its `-help` for `-dbtype rps` (`-xmlhelp` on the command line only).
+`makeprofiledb` runs every option of its `-help` for `-dbtype rps` and `-dbtype delta` (`-xmlhelp` on the command line only).
 
 | Input | What happens |
 | :--- | :--- |
 | `SERIAL_VERIFY_DATA_READ` set to `NO`, `NEVER`, `DEFVALUE` or `DEFVALUE_ALWAYS` with a profile, or binary definition lines (a `user` object `ASN1_BlastDefLine`), that lacks a member NCBI's reader requires | Refused where NCBI's error would stop the build. NCBI reports the member as missing and goes on. Other runs with these values are answered as NCBI does. |
-| `-dbtype delta`, `-dbtype cobalt` | Refused. |
+| `-dbtype cobalt` | Refused. |
+| With `-dbtype delta`: a profile stored by row (`byRow TRUE`), a profile with `numRows < 28` and non-empty `weightedResFreqsPerPos`, an empty `numIndeptObsr` list, a `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums within `0.0001` of `1.0`, a `weightedResFreqsPerPos` or `numIndeptObsr` value whose scaled conversion to `Uint4` is out of range or `NaN`, or a missing or unwritable temporary directory (`TMPDIR`) | Refused. NCBI's `makeprofiledb` copies into an empty `std::list::begin()`, dereferences or increments past `end()`, performs undefined floating-point-to-unsigned conversions, or stops with a `mkstemp()` error containing its process ID. |
 | A query with `iupacna` data holding a byte `>= 0x80` in a pair position (`0..(len & !1)`, before any odd overhang byte) | Refused. NCBI's `makeprofiledb` indexes its `iupacna`-to-`ncbi4na` table with a signed `char` and reads before the table. Bytes `< 0x80`, the final odd overhang byte, and `mol na` (which stops with NCBI's molecule error first) match NCBI. |
 | A query in a nucleotide coding with fewer bytes than its length needs: `ncbi2na` of fewer than a byte per 4 bases, `ncbi4na` of fewer than a byte per 2 bases, `iupacna` four letters or more short of an even length (three of an odd one) | Refused. NCBI's `makeprofiledb` reads past the query's data (its database then depends on memory outside the data, or it crashes). A query of enough bytes is built as NCBI builds it, and with frequency ratios only stops with NCBI's conversion error. |
 | In a profile with frequency ratios only, a query whose `seq-data` is a `gap` | Refused. NCBI's `makeprofiledb` reads past its table of sequence codings. A query in any other coding gets NCBI's result: its conversion error for a nucleotide coding (`ncbi8na` too), the codes of `ncbi8aa`, NCBI's unknown exception for `ncbipna` and `ncbipaa`. |
@@ -504,7 +505,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 ## On the list for a later release
 
 - The programs `deltablast` and `blast_formatter`.
-- `makeprofiledb -dbtype delta` or `cobalt`.
+- `makeprofiledb -dbtype cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `13` to `16`.
 - `-html` in `psiblast`.

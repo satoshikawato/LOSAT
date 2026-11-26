@@ -1,0 +1,274 @@
+name: Web deploy
+
+# Builds and deploys LOSAT Web (`web/app/dist/`) to Cloudflare Workers Static Assets using the
+# Cloudflare CLI (`cf`). Pull requests and pushes to `dev`/`main` touching these files run only
+# the fast tooling tests (`tooling-tests`, no credentials and no Rust build).
+#
+# Deployment is strictly manual (`workflow_dispatch`, matching `manual.yml`):
+#  - `target: dry-run` (default): builds the real Wasm reactors and `web/app/dist/`, runs the
+#    pre-deploy bundle checks (`check_web_dist.mjs`: real Wasm present, < 25 MiB per file,
+#    `_headers` sync, no build-machine path leaks), and uploads nothing.
+#  - `target: preview`: runs the same build and checks, deploys an isolated Worker Preview with
+#    `cf previews deploy ../app/dist --preview-name <preview_name>`, and runs post-deploy HTTP
+#    and `304 Not Modified` header checks (`check_deploy_headers.mjs --expect-noindex`) against
+#    the live preview URL.
+#  - `target: production`: allowed only on `main` or a `v*` release tag; deploys production with
+#    `cf deploy ../app/dist` (binding `vars.LOSAT_WEB_DOMAINS`, e.g. `losat.app`, when configured)
+#    and checks the live URL headers and `304` responses.
+#
+# Required repository secrets for `preview` and `production`:
+#   - `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Account Settings: Read)
+#   - `CLOUDFLARE_ACCOUNT_ID`
+# Optional repository variables:
+#   - `LOSAT_WEB_WORKER_NAME` (defaults to `losat-web`)
+#   - `LOSAT_WEB_DOMAINS` (comma-separated production custom domains, e.g. `losat.app`)
+#   - `LOSAT_WEB_WORKERS_DEV` (`true` to keep `workers.dev` active alongside custom domains)
+#   - `LOSAT_WEB_WORKERS_DEV_URL` (production `https://<worker>.<subdomain>.workers.dev` URL
+#     used for post-deploy checks when `LOSAT_WEB_DOMAINS` is unset; `cf deploy` writes no JSON)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/web-deploy.yml"
+      - "web/deploy/**"
+      - "web/tools/check_web_dist.mjs"
+      - "web/tools/check_deploy_headers.mjs"
+      - "web/tools/test_web_deploy_tools.js"
+      - "web/app/build/headers.ts"
+      - "web/app/public/_headers"
+  push:
+    branches: [dev, main]
+    paths:
+      - ".github/workflows/web-deploy.yml"
+      - "web/deploy/**"
+      - "web/tools/check_web_dist.mjs"
+      - "web/tools/check_deploy_headers.mjs"
+      - "web/tools/test_web_deploy_tools.js"
+      - "web/app/build/headers.ts"
+      - "web/app/public/_headers"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target (dry-run builds and checks dist without uploading; production requires main or a v* tag)"
+        type: choice
+        options:
+          - dry-run
+          - preview
+          - production
+        default: dry-run
+      preview_name:
+        description: "Worker Preview name when target=preview (lowercase letters, digits, hyphens)"
+        type: string
+        default: preview
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CF_CLI_VERSION: "1.0.0-rc.5"
+  CF_SEND_TELEMETRY: "false"
+  CLOUDFLARE_DEPENDENCIES_INSTRUMENTATION: "false"
+
+jobs:
+  tooling-tests:
+    name: deploy tooling tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Run deploy tooling tests
+        run: node --test web/tools/test_web_deploy_tools.js
+
+  build:
+    name: build and check web bundle
+    needs: [tooling-tests]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Guard production ref
+        env:
+          DEPLOY_TARGET: ${{ inputs.target }}
+          GITHUB_REF_FULL: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_TARGET" = "production" ]; then
+            case "$GITHUB_REF_FULL" in
+              refs/heads/main|refs/tags/v*) ;;
+              *)
+                echo "::error::target=production is allowed only on main or a v* release tag (got $GITHUB_REF_FULL)"
+                exit 1
+                ;;
+            esac
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Build Wasm reactors
+        run: |
+          set -euo pipefail
+          python3 web/adapter/tools/build_reactors.py \
+            --target-dir "$RUNNER_TEMP/adapter-target" \
+            --output-dir "$RUNNER_TEMP/reactors"
+
+      - name: Build LOSAT Web static assets
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm ci
+          LOSAT_WEB_REACTORS="$RUNNER_TEMP/reactors" npm run build -w losat-web
+
+      - name: Check built bundle (real Wasm, 25 MiB limit, _headers, privacy)
+        run: |
+          set -euo pipefail
+          args=(
+            --dist web/app/dist
+            --headers web/app/public/_headers
+            --forbid-path "$GITHUB_WORKSPACE"
+            --forbid-path "$HOME"
+            --forbid-path "$RUNNER_TEMP"
+          )
+          if [ -n "${CARGO_HOME:-}" ]; then
+            args+=(--forbid-path "$CARGO_HOME")
+          fi
+          node web/tools/check_web_dist.mjs "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep built web dist artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: losat-web-dist
+          path: web/app/dist
+          retention-days: 3
+
+  deploy:
+    name: deploy to Cloudflare Workers Static Assets
+    needs: [build]
+    if: github.event_name == 'workflow_dispatch' && inputs.target != 'dry-run'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: losat-web-dist
+          path: web/app/dist
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Check deployment inputs and credentials
+        env:
+          DEPLOY_TARGET: ${{ inputs.target }}
+          PREVIEW_NAME: ${{ inputs.preview_name }}
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          LOSAT_WEB_DOMAINS: ${{ vars.LOSAT_WEB_DOMAINS }}
+          LOSAT_WEB_WORKERS_DEV_URL: ${{ vars.LOSAT_WEB_WORKERS_DEV_URL }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_ACCOUNT" != "true" ]; then
+            echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repository Secrets before deploying."
+            exit 1
+          fi
+          if [ "$DEPLOY_TARGET" = "preview" ]; then
+            if ! [[ "$PREVIEW_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
+              echo "::error::preview_name must match ^[a-z0-9][a-z0-9-]{0,62}$ (got: $PREVIEW_NAME)"
+              exit 1
+            fi
+          elif [ "$DEPLOY_TARGET" = "production" ]; then
+            FIRST_DOMAIN=$(printf '%s' "$LOSAT_WEB_DOMAINS" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF { print; exit }')
+            WORKERS_DEV_URL=$(printf '%s' "$LOSAT_WEB_WORKERS_DEV_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            if [ -z "$FIRST_DOMAIN" ] && [ -z "$WORKERS_DEV_URL" ]; then
+              echo "::error::Set repository variable LOSAT_WEB_DOMAINS (e.g. losat.app) or LOSAT_WEB_WORKERS_DEV_URL (e.g. https://losat-web.<subdomain>.workers.dev) for production post-deploy checks."
+              exit 1
+            fi
+          fi
+
+      - name: Install pinned Cloudflare CLI (cf)
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/cf-cli" --no-save "cf@${CF_CLI_VERSION}"
+          "$RUNNER_TEMP/cf-cli/node_modules/.bin/cf" --version
+
+      - name: Deploy static assets with cf
+        working-directory: web/deploy
+        env:
+          DEPLOY_TARGET: ${{ inputs.target }}
+          PREVIEW_NAME: ${{ inputs.preview_name }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LOSAT_WEB_WORKER_NAME: ${{ vars.LOSAT_WEB_WORKER_NAME }}
+          LOSAT_WEB_DOMAINS: ${{ vars.LOSAT_WEB_DOMAINS }}
+          LOSAT_WEB_WORKERS_DEV: ${{ vars.LOSAT_WEB_WORKERS_DEV }}
+        run: |
+          set -euo pipefail
+          CF_BIN="$RUNNER_TEMP/cf-cli/node_modules/.bin/cf"
+          if [ "$DEPLOY_TARGET" = "preview" ]; then
+            "$CF_BIN" previews deploy ../app/dist --preview-name "$PREVIEW_NAME" > "$RUNNER_TEMP/cf-preview.json"
+          else
+            # `cf deploy` writes progress to stderr and emits no JSON on stdout.
+            "$CF_BIN" deploy ../app/dist
+          fi
+
+      - name: Check live headers, 304 revalidation, and Wasm assets
+        env:
+          DEPLOY_TARGET: ${{ inputs.target }}
+          LOSAT_WEB_DOMAINS: ${{ vars.LOSAT_WEB_DOMAINS }}
+          LOSAT_WEB_WORKERS_DEV_URL: ${{ vars.LOSAT_WEB_WORKERS_DEV_URL }}
+        run: |
+          set -euo pipefail
+          args=(
+            --dist web/app/dist
+            --headers web/app/public/_headers
+            --write-url-file "$RUNNER_TEMP/deploy-url.txt"
+          )
+          if [ "$DEPLOY_TARGET" = "preview" ]; then
+            args+=(
+              --cf-json "$RUNNER_TEMP/cf-preview.json"
+              --expect-noindex
+            )
+          else
+            FIRST_DOMAIN=$(printf '%s' "$LOSAT_WEB_DOMAINS" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF { print; exit }')
+            if [ -n "$FIRST_DOMAIN" ]; then
+              FIRST_DOMAIN="${FIRST_DOMAIN#https://}"
+              FIRST_DOMAIN="${FIRST_DOMAIN#http://}"
+              FIRST_DOMAIN="${FIRST_DOMAIN%/}"
+              PROD_URL="https://${FIRST_DOMAIN}"
+            else
+              PROD_URL=$(printf '%s' "$LOSAT_WEB_WORKERS_DEV_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              PROD_URL="${PROD_URL%/}"
+            fi
+            args+=(--url "$PROD_URL")
+          fi
+          node web/tools/check_deploy_headers.mjs "${args[@]}"
+          DEPLOY_URL=$(cat "$RUNNER_TEMP/deploy-url.txt")
+          {
+            echo "### LOSAT Web deploy (${DEPLOY_TARGET})"
+            echo ""
+            echo "- URL: ${DEPLOY_URL}"
+            echo "- Headers, 304 revalidation, immutable \`/engine/*.wasm\`, license texts, and 404 checks passed."
+          } >> "$GITHUB_STEP_SUMMARY"

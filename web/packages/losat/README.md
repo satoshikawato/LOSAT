@@ -124,7 +124,7 @@ arrived holds the warnings that the command line writes to its standard error be
 Linux reads it in a working directory holding the run's files (the run directory's files, plus a
 search's `-query`, `-subject`, `-conffile` and `-window_masker_db` names): a name in a folder that
 is missing (`logs/run.log` without `logs`) or naming a folder gives no file and keeps its messages
-on stream 3; a name that is an existing file of the run or a file the run opens for reading even when that file is missing (`q.fa`, `.ncbirc`, `/tmp/q.fa`, a `-db` list file, an input of `windowmasker`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
+on stream 3; a name that is an existing file of the run or a file the run opens or checks for reading even when that file is missing (`q.fa`, `.ncbirc`, `/tmp/q.fa`, a `-db` list file, a database lookup file of `-db`, `-filtering_db` or `windowmasker -infmt blastdb`, `taxdb.bti` when `-outfmt` consults the taxonomy database, an input of `windowmasker` including entries listed by `-fa_list true`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
 made, its name is the command line's file name (`run.log` for ` run.log` and `./run.log`, `logs` for
 `logs/`, `sub/run.log` when `sub` is a folder of the run, `/tmp/run.log` outside the working
 directory, and `/dev/stdout` for a search's `/dev/stdout`); show and save it as a name, not as a
@@ -230,7 +230,7 @@ fails: `-in <folder>` ends as the command line does, with "Is a directory". The 
 exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
 in the order the run opened them, under the command line's file name: `x.counts` for `./x.counts`, `logs` for `-logfile logs/`,
 `sub/x` when `sub` is a folder of the directory; `-logfile /dev/stdout` writes diagnostic messages into `stdout` in the command
-line's order, and a `-logfile` naming an existing file or an input the run reads, or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `-fa_list true` entries and `-infmt blastdb` database lookup files), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
 (a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
 malformed (a `-conffile`, or a `windowmasker.ini` in the directory, with a bad section or entry line) is status 2; their text
 is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as

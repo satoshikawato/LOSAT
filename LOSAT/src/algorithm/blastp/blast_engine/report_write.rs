@@ -17,7 +17,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
-//! `query_record_masks`, `set_row_masks`, `blastp_scan_mode_definition`,
+//! `result_query_masks`, `set_row_masks`,
 //! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
 //! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
@@ -29,9 +29,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_rows,
-    result_query_masks, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject,
-    BlastpRanges, BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
+    anchored, database, psi_round, pssm_hooks, query_rows, result_query_masks, set_row_masks,
+    write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges, BlastpReport, BlastpReports,
+    ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -97,7 +97,7 @@ pub(super) struct ReportView<'a> {
     pub(super) listed_sources: &'a [SourceTaxname],
     pub(super) pairwise_database: &'a Option<PairwiseDatabase>,
     pub(super) shown_database: &'a Option<PairwiseDatabase>,
-    pub(super) subject_input_label: &'a str,
+    pub(super) subject_input_label: &'a [u8],
     /// NCBI's `Int8` (`report_prep::ReportLabels`).
     pub(super) shown_num_sequences: i64,
     pub(super) shown_total_letters: i64,
@@ -580,7 +580,7 @@ pub(super) fn write_xml(
         searched_lengths: query_lengths,
         placements: &ranges.query_input.placements,
     };
-    let db_name = database.map(|database| database.name().to_string());
+    let db_name = database.map(|database| database.name().to_vec());
     // `BlastOutput_program` and `_version` name the application: `blastp`, `rpsblast`
     // (`Blast_ProgramNameFromType` of its search's program, `RPSBLAST 2.17.0+`).
     let version = format!(
@@ -600,12 +600,13 @@ pub(super) fn write_xml(
     let xml = blast_xml::BlastpXml {
         run: crate::report::blast_xml::XmlRun {
             program: args.app.ncbi_name(),
+            app: args.app.ncbi_name(),
             version: &version,
             reference: match args.app {
                 BlastpApp::Psiblast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
                 _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             },
-            db_name: db_name.as_deref().unwrap_or(""),
+            db_name: db_name.as_deref().unwrap_or(b""),
             matrix: Some(&args.matrix_name),
             expect: args.evalue,
             gap_open: args.scoring.gap_open,
@@ -856,7 +857,7 @@ pub(super) fn write_pairwise(
         .collect();
     let pairwise_report = BlastpPairwiseReport {
         version: crate::wording::REPORT_VERSION.to_string(),
-        database_name: blastp_scan_mode_definition(subject_input_label).into(),
+        database_name: crate::report::pairwise::scan_mode_definition_bytes(subject_input_label),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
@@ -865,7 +866,7 @@ pub(super) fn write_pairwise(
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
         word_threshold: args.threshold,
-        window_size: args.window_size as i32,
+        window_size: args.window_size,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
         gapped: !args.ungapped,

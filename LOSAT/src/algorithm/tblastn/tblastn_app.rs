@@ -308,6 +308,8 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
+        // An `-import_search_strategy` was imported by the caller (`import::apply`), before the
+        // run.
         args.id_scope = args.parse_deflines.then(Default::default);
         // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and
         // `SERIAL_VERIFY_DATA_GET`, which `-in_pssm`'s reader reads
@@ -329,7 +331,8 @@ impl TblastnArgs {
             args.export_search_strategy.as_deref(),
             "TBLASTN",
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -340,7 +343,7 @@ impl TblastnArgs {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         // The search strategy's request, with the archive's options handle.
         args.strategy = strategy_file.map(|file| {
             crate::report::archive::strategy::StrategyExport::for_args(
@@ -364,6 +367,10 @@ impl TblastnArgs {
             }
             None => &mut stderr,
         };
+        // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+        if let Some(import) = &args.import {
+            diagnostics.write_all(&import.warning_lines())?;
+        }
         // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
         // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
         // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -396,13 +403,20 @@ impl TblastnArgs {
             Ok(if args.db.is_some() {
             (Vec::new(), seq_range::Placements::default(), None)
         } else {
-            let Some(subject_path) = args.subject.clone() else {
-                return Err(app::missing_subject_error());
+            // An imported strategy's subject Bioseqs (`import::apply`) stand for
+            // `-subject`.
+            let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
+            let subject_path = match (&args.subject, imported) {
+                (_, Some(_)) => std::path::PathBuf::new(),
+                (Some(path), None) => path.clone(),
+                (None, None) => return Err(app::missing_subject_error()),
             };
             // Web ABI v1's subjects are the call's bytes: no file to name or open.
             let subject_input = match &io {
+                RunIo::Files if imported.is_some() => Input::File(
+                    crate::report::archive::read::import::ImportRun::input_of("subject", imported.expect("imported subjects"))?,
+                ),
                 RunIo::Files => {
-                    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
                     Input::File(input_files::open_input(&subject_path, "subject", "TBLASTN")?)
                 }
                 RunIo::Memory { subject, .. } => Input::Bytes(subject),
@@ -501,10 +515,13 @@ impl TblastnArgs {
             // (`check_options`); NCBI opens the default `-query -` and never reads it.
             RunIo::Files if args.in_pssm.is_some() => Input::Bytes(&[]),
             RunIo::Files => {
-                input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
                 // NCBI opens the query file inside `Run` too: its error is saved and an error
                 // archive follows.
-                match input_files::open_input(&args.query, "query", "TBLASTN") {
+                match crate::report::archive::read::import::ImportRun::open_query(
+                    args.import.as_ref(),
+                    &args.query,
+                    "TBLASTN",
+                ) {
                     Ok(file) => Input::File(file),
                     Err(error) => {
                         write_run_error_archive(&args, &io, archive.as_ref(), &error);
@@ -519,9 +536,9 @@ impl TblastnArgs {
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
         // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
-        let outfmt = match choice.parsed() {
+        let outfmt: Vec<u8> = match choice.parsed() {
             Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
-            _ => args.outfmt.clone(),
+            _ => outfmt_bytes,
         };
         let strategy = args.strategy.clone();
         let result = {
@@ -711,7 +728,7 @@ fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::Repor
         RunIo::Files => crate::cli::ReportStream::of_cli(
             open_out_file(args)?,
             "tblastn",
-            &args.outfmt,
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
             args.strategy.as_ref(),
         ),
         RunIo::Memory { report, .. } => {
@@ -725,7 +742,7 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -753,7 +770,7 @@ fn open_search_database(
                 outputs.formats.first().map(|format| format.outfmt),
             );
             let database = super::database::TblastnDatabase::open_restricted(
-                name,
+                &name,
                 settings,
                 list,
                 args.db_mask.option().as_ref(),
@@ -773,7 +790,7 @@ fn open_search_database(
                 database.list_taxids(),
                 &database.statistics(),
                 true,
-                args.searchsp.is_some_and(|space| space > 0),
+                args.searchsp.is_some_and(|space| space != 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTN",
             )?;
@@ -875,7 +892,8 @@ fn search_cli(
     };
     let resolved = args.check_options(outputs.diagnostics)?;
     // The options' handlers have read a value that the early reading left to them (`Deferred`).
-    let choice = &choice.at_formatting_handler(&args.outfmt)?;
+    let choice =
+        &choice.at_formatting_handler(crate::utils::os_bytes::os_str_bytes(&args.outfmt))?;
     let joins_scope = resolved
         .pssm
         .as_deref()
@@ -1441,7 +1459,7 @@ fn write_first_batch_prologs(
     // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
     html: Option<&crate::report::html_ids::HtmlLinks>,
 ) -> Result<()> {
-    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
+    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // The subject set's total as NCBI's `Int8`.
     let total: i64 = match database {
@@ -1680,7 +1698,10 @@ fn search(
         searchsp: args.searchsp,
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
-        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+        old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+            args.import.as_ref(),
+            args.searchsp,
+        ),
         read_fails: None,
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
@@ -1689,8 +1710,17 @@ fn search(
     // (`stage_d_pipeline::run_local_search_with_pool`).
     let pairwise_database =
         database.map(|database| database.pairwise_database_masked(resolved.db_mask.as_ref()));
+    // An imported strategy's subjects have no input file (an empty tag).
+    let no_input = std::path::PathBuf::new();
     let subject_path = match database {
         Some(_) => None,
+        None if args
+            .import
+            .as_ref()
+            .is_some_and(|run| run.subjects.is_some()) =>
+        {
+            Some(&no_input)
+        }
         None => Some(
             args.subject
                 .as_ref()
@@ -2790,7 +2820,13 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
-            prefetch_posts,
+            // The posts of the titles that the batches' Seq-aligns read come before their
+            // prefetches' (a stable sort by the batch's first query).
+            reads
+                .take_title_posts()
+                .into_iter()
+                .chain(prefetch_posts)
+                .collect(),
             |query| batches.warnings[query].len(),
             reads.header_read(queries.len()),
         );

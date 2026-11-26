@@ -10,6 +10,7 @@ pub mod defaults;
 pub mod describe;
 pub mod emit;
 pub mod files;
+pub mod imported;
 pub mod inflate;
 pub mod json;
 pub mod run;
@@ -191,7 +192,9 @@ pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usiz
                 None => format!("{{\"data_loaders\":{}}}", validation.data_loaders),
             };
             emit(STREAM_RESPONSE, response.as_bytes());
-        })?;
+        })
+        // A refused argv starts no run: its import of a search strategy is dropped.
+        .inspect_err(|_| imported::end_run())?;
         Ok(0)
     })
 }
@@ -261,7 +264,9 @@ pub unsafe extern "C" fn losat_web2_register_inputs(
             &argv,
             bytes(query_ptr, query_len),
             bytes(subject_ptr, subject_len),
-        )?;
+        )
+        // Inputs that fail to read start no run: the import's texts are dropped.
+        .inspect_err(|_| imported::end_run())?;
         emit(STREAM_RESPONSE, response.as_bytes());
         Ok(0)
     })

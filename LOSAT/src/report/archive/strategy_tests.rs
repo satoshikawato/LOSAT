@@ -78,7 +78,7 @@ fn export(searchsp: Option<i64>) -> (StrategyExport, Sink) {
     let export = StrategyExport::new(
         Box::new(sink.clone()),
         &inputs,
-        Some("in/db/bp"),
+        Some(b"in/db/bp"),
         OptionsHandle::default(),
     );
     (export, sink)
@@ -192,7 +192,7 @@ fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
     let dbsize = StrategyExport::new(
         Box::new(sink.clone()),
         &inputs,
-        Some("in/db/bp"),
+        Some(b"in/db/bp"),
         OptionsHandle::default(),
     );
     assert!(dbsize.write_request(0..1, &request(&queries, &[])).unwrap());
@@ -292,14 +292,14 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
     let export = StrategyExport::new(
         Box::new(sink.clone()),
         &OptionInputs::new(Program::Blastp, "blastp"),
-        Some("in/db/bp"),
+        Some(b"in/db/bp"),
         handle.options().clone(),
     );
     assert!(export.options().same(handle.options()));
-    let list = crate::report::archive::options::Param {
-        name: "TaxidList",
-        value: crate::report::archive::options::ParamValue::IntegerList(vec![9606]),
-    };
+    let list = crate::report::archive::options::Param::new(
+        crate::report::archive::fields::TAXID_LIST,
+        crate::report::archive::options::ParamValue::IntegerList(vec![9606]),
+    );
     handle
         .options()
         .set_database_filter(
@@ -443,7 +443,7 @@ fn a_pssm_query_is_the_pssm_as_read() {
         let export = StrategyExport::new(
             Box::new(sink.clone()),
             &inputs,
-            Some(database),
+            Some(database.as_bytes()),
             OptionsHandle::default(),
         );
         let request = RequestInputs {
@@ -584,7 +584,7 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
             OptionInputs::new(Program::Blastp, "blastp"),
             None,
             HitlistArgs::default(),
-            Some("in/db/bp"),
+            Some(b"in/db/bp"),
             &OptionsHandle::default(),
         )
     };

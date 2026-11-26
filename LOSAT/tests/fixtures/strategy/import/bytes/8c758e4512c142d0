@@ -1,0 +1,3 @@
+Warning: [blastp] The parameter -line_length is not applicable for output formats > 4 .
+Warning: [blastp] line_length cannot be overridden when using a search strategy
+Warning: [blastp] mt_mode cannot be overridden when using a search strategy

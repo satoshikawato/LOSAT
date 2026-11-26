@@ -3713,7 +3713,7 @@ fn scope_lifetime_audit_invariants_hold() {
     assert_eq!(Throw::scope_flags(Some("5 ")), (true, true));
     assert_eq!(Throw::scope_flags(Some("6")), (false, true));
     assert_eq!(Throw::scope_flags(Some("15")), (false, false));
-    assert_eq!(Throw::scope_flags(None), (false, false));
+    assert_eq!(Throw::scope_flags(None::<&str>), (false, false));
     for outfmt in ["13", "14", "15", "16", "15 "] {
         assert!(Throw::is_xml2(outfmt), "{outfmt}");
     }

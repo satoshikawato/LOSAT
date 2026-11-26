@@ -93,7 +93,7 @@ pub(super) fn write_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
+    write_taxdb_warning(program.app, spec, taxdb_found, writer, diagnostics)?;
     TabularWriter::new(spec, program_version(program), None).prolog(writer)?;
     Ok(())
 }
@@ -110,7 +110,7 @@ pub(super) fn write_epilog_warning(
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind == TabularKind::Commented {
-        write_taxdb_warning(program.lower, spec, taxdb_found, writer, diagnostics)?;
+        write_taxdb_warning(program.app, spec, taxdb_found, writer, diagnostics)?;
     }
     Ok(())
 }
@@ -382,7 +382,7 @@ pub(super) fn write_blastx_tabular(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1311
     let database: Vec<u8> = match shown {
         ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
-        ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
+        ShownSubjects::Database { name, .. } => name.to_vec(),
     };
     let names = match shown {
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
@@ -413,7 +413,7 @@ pub(super) fn write_blastx_tabular(
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
             write_taxdb_warning(
-                options.program().lower,
+                options.app_name,
                 spec,
                 options.taxdb_found,
                 &mut *writer,
@@ -912,7 +912,7 @@ fn write_blastx_tax_report(
     let subject_names = options
         .subject_taxdb
         .as_ref()
-        .map(|taxdb| taxdb.report_names(program));
+        .map(|taxdb| taxdb.report_names(options.app_name));
     let names = match shown {
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
         ShownSubjects::Fasta { .. } => subject_names.as_ref(),
@@ -929,6 +929,7 @@ fn write_blastx_tax_report(
         loads,
         names,
         program,
+        options.app_name,
         options.is_html,
     )?;
     let mut q_idx = 0;

@@ -1,0 +1,9 @@
+# RPSBLAST 2.17.0+
+# Query: q1 query
+# Database: dé/db
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q1	pf	29.167	24	15	1	349	370	5	28	0.92	14.3
+q1	pf	28.571	21	15	0	262	282	8	28	0.93	14.3
+q1	pc	26.316	19	14	0	238	256	6	24	5.9	12.3
+# BLAST processed 1 queries

@@ -358,6 +358,7 @@ pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::ap
 pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm_database(&'a std::path::Path, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::query_end(self, &'a losat::api::QueryEnd) -> Self
+pub fn losat::api::Inputs<'a>::strategy(&'a losat::api::Strategy) -> Self
 impl<'a> core::clone::Clone for losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::clone(&self) -> losat::api::Inputs<'a>
 impl<'a> core::fmt::Debug for losat::api::Inputs<'a>
@@ -522,6 +523,8 @@ impl losat::api::Search
 pub fn losat::api::Search::argv(&self) -> &[alloc::string::String]
 pub fn losat::api::Search::dry_run(&self) -> bool
 pub fn losat::api::Search::program(&self) -> losat::api::Program
+impl losat::api::Search
+pub fn losat::api::Search::read_strategy(&self, &[u8]) -> core::result::Result<losat::api::Strategy, losat::api::Error>
 impl core::clone::Clone for losat::api::Search
 pub fn losat::api::Search::clone(&self) -> losat::api::Search
 impl core::cmp::Eq for losat::api::Search
@@ -537,6 +540,16 @@ impl core::marker::Unpin for losat::api::Search
 impl core::marker::UnsafeUnpin for losat::api::Search
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Search
 impl core::panic::unwind_safe::UnwindSafe for losat::api::Search
+pub struct losat::api::Strategy
+impl core::fmt::Debug for losat::api::Strategy
+pub fn losat::api::Strategy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for losat::api::Strategy
+impl core::marker::Send for losat::api::Strategy
+impl core::marker::Sync for losat::api::Strategy
+impl core::marker::Unpin for losat::api::Strategy
+impl core::marker::UnsafeUnpin for losat::api::Strategy
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Strategy
+impl core::panic::unwind_safe::UnwindSafe for losat::api::Strategy
 #[non_exhaustive] pub struct losat::api::SubjectHits<'a>
 pub losat::api::SubjectHits::hsps: &'a [losat::api::HspRecord]
 pub losat::api::SubjectHits::q_idx: usize

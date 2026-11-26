@@ -34,16 +34,17 @@ pub struct FormattingMatrix {
 /// The packed matrix of `data4xmlformat.cpp`'s `x_FillScoreMatrix` by name, compared with
 /// `strcmp` (so `blosum62` has none and a protein program's XML stops with "unsupported score
 /// matrix").
-fn packed_matrix(name: &str) -> Option<ScoringMatrix> {
+fn packed_matrix(name: impl AsRef<[u8]>) -> Option<ScoringMatrix> {
+    let name = name.as_ref();
     ScoringMatrix::ALL
         .into_iter()
-        .find(|matrix| matrix.ncbi_name() == name)
+        .find(|matrix| matrix.ncbi_name().as_bytes() == name)
 }
 
 /// Whether `outfmt` is a format of the BLAST XML family, whose report data takes the formatting
 /// matrix: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13), read as NCBI reads
 /// `-outfmt` (`parse_formatting_string`).
-pub fn is_structured_xml(outfmt: &str) -> bool {
+pub fn is_structured_xml(outfmt: impl AsRef<[u8]>) -> bool {
     use crate::blastinput::app::ReportFormat;
     crate::blastinput::app::parse_formatting_string(outfmt)
         .ok()
@@ -90,9 +91,9 @@ pub enum XmlMatrixFailure {
 /// (`unsupported_score_matrix`) and the search strategy's last request
 /// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX; the query
 /// whose batch fails is the run's (`query_batch::QueryScopes::xml_failing_query`).
-pub fn xml_formatting_failure<'a>(
-    outfmts: impl IntoIterator<Item = &'a str>,
-    matrix_name: &str,
+pub fn xml_formatting_failure<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
+    matrix_name: impl AsRef<[u8]>,
     subject_search: bool,
     iterative: bool,
 ) -> Option<XmlMatrixFailure> {
@@ -102,9 +103,9 @@ pub fn xml_formatting_failure<'a>(
     let holds_back = crate::report::blast_xml2::reports_held(subject_search, iterative);
     outfmts
         .into_iter()
-        .filter(|outfmt| is_structured_xml(outfmt))
+        .filter(|outfmt| is_structured_xml(outfmt.as_ref()))
         .map(|outfmt| {
-            if holds_back && !is_blast_xml(outfmt) {
+            if holds_back && !is_blast_xml(outfmt.as_ref()) {
                 XmlMatrixFailure::SecondQueryOrEnd
             } else {
                 XmlMatrixFailure::FirstQuery
@@ -115,7 +116,7 @@ pub fn xml_formatting_failure<'a>(
 }
 
 /// Whether `outfmt` is BLAST XML (5), whose report is never held (blast_format.cpp:707-743).
-fn is_blast_xml(outfmt: &str) -> bool {
+fn is_blast_xml(outfmt: impl AsRef<[u8]>) -> bool {
     crate::blastinput::app::parse_formatting_string(outfmt)
         .ok()
         .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
@@ -134,7 +135,7 @@ pub fn unsupported_score_matrix() -> anyhow::Error {
 
 impl FormattingMatrix {
     /// The matrix of the score matrix `name` (`CCmdLineBlastXMLReportData::x_FillScoreMatrix`).
-    pub fn new(name: &str) -> Option<Self> {
+    pub fn new(name: impl AsRef<[u8]>) -> Option<Self> {
         let matrix = packed_matrix(name)?;
         let mut scores = vec![i32::MIN; 256 * 256].into_boxed_slice();
         for &row in IUPACAA_LETTERS {

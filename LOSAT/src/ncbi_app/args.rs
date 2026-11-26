@@ -178,6 +178,15 @@ impl Arguments {
         aliases.map(|&(alias, name)| (alias.get(), name.get()))
     }
 
+    /// The keys of `AddDefaultKey` with their defaults, in the order of `m_Args`: the values that
+    /// NCBI's `CArgs` holds for those the command line does not give (the import of a search
+    /// strategy compares them with the strategy's, `report::archive::read::import`).
+    pub(crate) fn defaults(self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        self.descs()
+            .iter()
+            .filter_map(|desc| Some((desc.name(), desc.default()?)))
+    }
+
     /// The entries of `m_Dependencies`: (first name, dependency, second name).
     pub(crate) fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
@@ -346,12 +355,6 @@ pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
 // constructor), `FILE_ARGUMENTS` those of every application after them (`AddDefaultFileArguments`:
 // `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
-
-/// Whether `name` is one of the arguments that every NCBI application has after its own
-/// (`FILE_ARGUMENTS`: `-logfile`, `-conffile`), which the application start reads.
-pub(crate) fn is_file_argument(name: &str) -> bool {
-    FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
-}
 
 /// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
 pub(crate) fn arguments(program: &str) -> Option<Arguments> {
@@ -658,11 +661,6 @@ impl Args {
         self.given.iter().map(|&name| (name, self.os_value(name)))
     }
 
-    /// Whether the value of the key `name` is not UTF-8.
-    pub(crate) fn is_bytes(&self, name: &str) -> bool {
-        matches!(self.values.get(name), Some(Some(Value::Bytes(_))))
-    }
-
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
     /// `args[name]` (and `AsBoolean`) of the flag `name`: whether its word was given.
     pub(crate) fn flag(&self, name: &'static str) -> bool {
@@ -730,21 +728,6 @@ impl Args {
     #[cfg(test)]
     pub(crate) fn names_read(&self) -> BTreeSet<&'static str> {
         self.read.lock().unwrap().clone()
-    }
-
-    /// The arguments with the value of each key that `lossy` takes and that is not UTF-8 read as
-    /// text, each byte that is not UTF-8 replaced (U+FFFD): what a dry run's caller, which ends
-    /// before LOSAT's refusal of such a value (`cli::reader::refusal_after_read`), reads.
-    pub(crate) fn with_lossy_text(&self, lossy: impl Fn(&str) -> bool) -> Args {
-        let mut args = self.clone();
-        for (name, value) in &mut args.values {
-            if let Some(Value::Bytes(bytes)) = value {
-                if lossy(name) {
-                    *value = Some(Value::Text(bytes.to_string_lossy().into_owned()));
-                }
-            }
-        }
-        args
     }
 
     /// `args[name].AsString()` inside `Run`: the value of the key `name`, or NCBI's exception
@@ -1041,9 +1024,9 @@ pub(crate) fn parse_in(
     })
 }
 
-// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT Web
-// scans the argv before parsing so both parsed and unparsed argvs use one reader backed by the
-// program's own argument definitions (`arguments`, `resolve_known_desc`).
+// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT scans
+// the raw argv through the program's own argument definitions (`arguments`, `resolve_known_desc`)
+// so both parsed and unparsed argvs skip option values accurately (line WQA D19/D23).
 /// Scans `words` (the command line after the program's name) using `program`'s argument
 /// definitions (`arguments`), calling `visit(canonical_name, value)` for each recognized option
 /// before `--`: `None` for a flag (`Kind::Flag`, without `=`), `Some(value)` for an option that
@@ -1053,6 +1036,16 @@ pub(crate) fn scan_argv<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
     mut visit: impl FnMut(&'static str, Option<&OsStr>),
+) {
+    scan_argv_kinds(program, words, |name, _kind, value| visit(name, value));
+}
+
+/// Like [`scan_argv`], also passing each recognized option's [`Kind`] so callers can identify
+/// `Kind::InputFile` options across every program without duplicating option lists.
+pub(crate) fn scan_argv_kinds<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    mut visit: impl FnMut(&'static str, Kind, Option<&OsStr>),
 ) {
     let Some(arguments) = arguments(program) else {
         return;
@@ -1077,15 +1070,15 @@ pub(crate) fn scan_argv<S: AsRef<OsStr>>(
             if let Some(desc) = desc {
                 if desc.kind == Kind::Flag {
                     if eq_value.is_none() {
-                        visit(desc.name(), None);
+                        visit(desc.name(), desc.kind, None);
                     }
                 } else if let Some(val_bytes) = eq_value {
                     // SAFETY: `val_bytes` follows an ASCII `=` in `word`, so it starts on a
                     // valid encoded boundary and ends at the end of `word`.
                     let val = unsafe { OsStr::from_encoded_bytes_unchecked(val_bytes) };
-                    visit(desc.name(), Some(val));
+                    visit(desc.name(), desc.kind, Some(val));
                 } else if let Some(next) = words.get(at + 1) {
-                    visit(desc.name(), Some(next.as_ref()));
+                    visit(desc.name(), desc.kind, Some(next.as_ref()));
                     at += 2;
                     continue;
                 }

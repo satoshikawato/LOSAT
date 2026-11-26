@@ -1,0 +1,172 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfn"
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q1",
+          "query_len": 50,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "ENST00000251595.11",
+                  "accession": "ENST00000251595.11",
+                  "title": "cdna chromosome:GRCh38:16:172876:173710:1 gene:ENSG00000188536.15 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA2 description:hemoglobin subunit alpha 2 [Source:HGNC Symbol;Acc:HGNC:4824]",
+                  "taxid": 9606
+                }
+              ],
+              "len": 576,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 91.4547,
+                  "score": 100,
+                  "evalue": 1.16988e-22,
+                  "identity": 50,
+                  "query_from": 1,
+                  "query_to": 50,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 50,
+                  "hit_strand": "Plus",
+                  "align_len": 50,
+                  "gaps": 0,
+                  "qseq": "ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTC",
+                  "hseq": "ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "ENST00000320868.9",
+                  "accession": "ENST00000320868.9",
+                  "title": "cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]",
+                  "taxid": 9606
+                },
+                {
+                  "id": "ENSDART00000101734.5",
+                  "accession": "ENSDART00000101734.5",
+                  "title": "cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:hbae1.2 description:hemoglobin, alpha embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]",
+                  "taxid": 7955
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 91.4547,
+                  "score": 100,
+                  "evalue": 1.16988e-22,
+                  "identity": 50,
+                  "query_from": 1,
+                  "query_to": 50,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 50,
+                  "hit_strand": "Plus",
+                  "align_len": 50,
+                  "gaps": 0,
+                  "qseq": "ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTC",
+                  "hseq": "ACTCTTCTGGTCCCCACAGACTCAGAGAGAACCCACCATGGTGCTGTCTC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "ENST00000292901.8",
+                  "accession": "ENST00000292901.8",
+                  "title": "cdna chromosome:GRCh38:11:5232678:5234658:-1 gene:ENSG00000223609.12 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBD description:hemoglobin subunit delta [Source:HGNC Symbol;Acc:HGNC:4829]",
+                  "taxid": 9606
+                }
+              ],
+              "len": 661,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 21.1234,
+                  "score": 22,
+                  "evalue": 0.173778,
+                  "identity": 11,
+                  "query_from": 34,
+                  "query_to": 44,
+                  "query_strand": "Plus",
+                  "hit_from": 222,
+                  "hit_to": 232,
+                  "hit_strand": "Plus",
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "CACCATGGTGC",
+                  "hseq": "CACCATGGTGC",
+                  "midline": "|||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "ENST00000335295.4",
+                  "accession": "ENST00000335295.4",
+                  "title": "cdna chromosome:GRCh38:11:5225464:5227071:-1 gene:ENSG00000244734.6 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBB description:hemoglobin subunit beta [Source:HGNC Symbol;Acc:HGNC:4827]",
+                  "taxid": 9606
+                }
+              ],
+              "len": 628,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 21.1234,
+                  "score": 22,
+                  "evalue": 0.173778,
+                  "identity": 11,
+                  "query_from": 34,
+                  "query_to": 44,
+                  "query_strand": "Plus",
+                  "hit_from": 47,
+                  "hit_to": 57,
+                  "hit_strand": "Plus",
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "CACCATGGTGC",
+                  "hseq": "CACCATGGTGC",
+                  "midline": "|||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 16,
+            "db_len": 10937,
+            "hsp_len": 13,
+            "eff_space": 396973,
+            "kappa": 0.41,
+            "lambda": 0.625,
+            "entropy": 0.78
+          }
+        }
+      }
+    }
+  }

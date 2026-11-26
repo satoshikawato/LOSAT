@@ -184,12 +184,18 @@ fn argument_dependencies_follow_ncbis_order() {
 
 #[test]
 fn input_names_split_at_spaces_and_quotes() {
-    assert_eq!(split_quoted("a.fa"), ["a.fa"]);
-    assert_eq!(split_quoted("a.fa b.fa"), ["a.fa", "b.fa"]);
-    assert_eq!(split_quoted("\"a b.fa\""), ["a b.fa"]);
-    assert_eq!(split_quoted("\"a b.fa\" c.fa"), ["a b.fa", "c.fa"]);
-    assert_eq!(split_quoted("  a.fa  "), ["a.fa"]);
-    assert!(split_quoted("").is_empty());
+    assert_eq!(split_quoted(b"a.fa"), [b"a.fa".as_slice()]);
+    assert_eq!(
+        split_quoted(b"a.fa b.fa"),
+        [b"a.fa".as_slice(), b"b.fa".as_slice()]
+    );
+    assert_eq!(split_quoted(b"\"a b.fa\""), [b"a b.fa".as_slice()]);
+    assert_eq!(
+        split_quoted(b"\"a b.fa\" c.fa"),
+        [b"a b.fa".as_slice(), b"c.fa".as_slice()]
+    );
+    assert_eq!(split_quoted(b"  a.fa  "), [b"a.fa".as_slice()]);
+    assert!(split_quoted(b"").is_empty());
 }
 
 #[test]
@@ -229,7 +235,7 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
     std::fs::write(&name, b"before\n").unwrap();
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
     assert!(matches!(target, DiagTarget::File(_)));
-    let mut log = log_of(&name).expect("the log of a file that opens");
+    let mut log = log_of(std::ffi::OsStr::new(&name)).expect("the log of a file that opens");
     let mut stderr = Vec::new();
     {
         let mut diag = DiagStream {
@@ -247,7 +253,10 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
         b"before\nlog 1\ndiagnostic\nlog 2\ndiagnostic 2\n"
     );
     for missing in [String::new(), base_in(&tmp, "nodir/mk.log")] {
-        assert!(log_of(&missing).is_none(), "{missing:?}");
+        assert!(
+            log_of(std::ffi::OsStr::new(&missing)).is_none(),
+            "{missing:?}"
+        );
     }
 }
 
@@ -265,7 +274,7 @@ fn the_log_is_the_name_as_the_system_opens_it() {
     std::os::unix::fs::symlink(tmp.join("sub/deep"), tmp.join("a")).unwrap();
     let name = base_in(&tmp, "a/../mk.log");
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
-    let mut log = log_of(&name).expect("the log of a file that opens");
+    let mut log = log_of(std::ffi::OsStr::new(&name)).expect("the log of a file that opens");
     target.write_text(b"diagnostic\n", &mut std::io::sink());
     log.write_all(b"log\n").unwrap();
     assert_eq!(std::fs::read(tmp.join("mk.log")).unwrap(), b"diagnostic\n");
@@ -276,7 +285,7 @@ fn the_log_is_the_name_as_the_system_opens_it() {
         DiagTarget::File(_)
     ));
     assert!(tmp.join("logs").is_file());
-    assert!(log_of(&name).is_none());
+    assert!(log_of(std::ffi::OsStr::new(&name)).is_none());
 }
 
 #[test]

@@ -3,35 +3,36 @@ use super::*;
 // Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:444-498`) and D6 GI/IPG lists.
 #[test]
 fn the_archive_parameter_follows_the_list_option() {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let filter = |taxids: bool, negative: bool| DbFilterArgs {
-        taxids: (taxids && !negative).then(|| "1".to_string()),
-        negative_taxids: (taxids && negative).then(|| "1".to_string()),
-        seqidlist: (!taxids && !negative).then(|| "f".to_string()),
-        negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
+        taxids: (taxids && !negative).then(|| std::ffi::OsString::from("1")),
+        negative_taxids: (taxids && negative).then(|| std::ffi::OsString::from("1")),
+        seqidlist: (!taxids && !negative).then(|| std::ffi::OsString::from("f")),
+        negative_seqidlist: (!taxids && negative).then(|| std::ffi::OsString::from("f")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         filter(true, false).archive_parameters(&[], &[9606, 10090]),
-        vec![Param {
-            name: "TaxidList",
-            value: ParamValue::IntegerList(vec![9606, 10090]),
-        }]
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(vec![9606, 10090]),
+        )]
     );
     // A missing taxonomy file: the list object of NCBI has no id.
     assert_eq!(
         filter(true, false).archive_parameters(&[], &[]),
-        vec![Param {
-            name: "TaxidList",
-            value: ParamValue::IntegerList(Vec::new()),
-        }]
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
     );
     assert_eq!(
         filter(false, true).archive_parameters(&[], &[]),
-        vec![Param {
-            name: "NegativeTaxidList",
-            value: ParamValue::IntegerList(Vec::new()),
-        }]
+        vec![Param::new(
+            fields::NEGATIVE_TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
     );
     assert!(DbFilterArgs::default()
         .archive_parameters(&[], &[])
@@ -40,87 +41,78 @@ fn the_archive_parameter_follows_the_list_option() {
     // Positive and negative GI lists write GiList/NegativeGiList + empty TaxidList/NegativeTaxidList,
     // and a 0-GI file writes only the empty TaxidList/NegativeTaxidList.
     let pos_gi = DbFilterArgs {
-        gilist: Some("g.gil".to_string()),
+        gilist: Some(std::ffi::OsString::from("g.gil")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         pos_gi.archive_parameters(&[101, 102], &[]),
         vec![
-            Param {
-                name: "GiList",
-                value: ParamValue::BigIntegerList(vec![101, 102]),
-            },
-            Param {
-                name: "TaxidList",
-                value: ParamValue::IntegerList(Vec::new()),
-            },
+            Param::new(
+                fields::GI_LIST_INT8,
+                ParamValue::BigIntegerList(vec![101, 102]),
+            ),
+            Param::new(fields::TAXID_LIST, ParamValue::IntegerList(Vec::new())),
         ]
     );
     assert_eq!(
         pos_gi.archive_parameters(&[], &[]),
-        vec![Param {
-            name: "TaxidList",
-            value: ParamValue::IntegerList(Vec::new()),
-        }]
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
     );
     let neg_gi = DbFilterArgs {
-        negative_gilist: Some("g.gil".to_string()),
+        negative_gilist: Some(std::ffi::OsString::from("g.gil")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         neg_gi.archive_parameters(&[102, 101], &[]),
         vec![
-            Param {
-                name: "NegativeGiList",
-                value: ParamValue::BigIntegerList(vec![102, 101]),
-            },
-            Param {
-                name: "NegativeTaxidList",
-                value: ParamValue::IntegerList(Vec::new()),
-            },
+            Param::new(
+                fields::NEGATIVE_GI_LIST_INT8,
+                ParamValue::BigIntegerList(vec![102, 101]),
+            ),
+            Param::new(
+                fields::NEGATIVE_TAXID_LIST,
+                ParamValue::IntegerList(Vec::new()),
+            ),
         ]
     );
 
     // IPG lists write empty TaxidList / NegativeTaxidList; other lists take precedence over IPG.
     let pos_ipg = DbFilterArgs {
-        ipglist: Some("p.ipg".to_string()),
-        negative_ipglist: Some("n.ipg".to_string()),
+        ipglist: Some(std::ffi::OsString::from("p.ipg")),
+        negative_ipglist: Some(std::ffi::OsString::from("n.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         pos_ipg.archive_parameters(&[], &[]),
-        vec![Param {
-            name: "TaxidList",
-            value: ParamValue::IntegerList(Vec::new()),
-        }]
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
     );
     let neg_ipg = DbFilterArgs {
-        negative_ipglist: Some("n.ipg".to_string()),
+        negative_ipglist: Some(std::ffi::OsString::from("n.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         neg_ipg.archive_parameters(&[], &[]),
-        vec![Param {
-            name: "NegativeTaxidList",
-            value: ParamValue::IntegerList(Vec::new()),
-        }]
+        vec![Param::new(
+            fields::NEGATIVE_TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
     );
     let gi_and_ipg = DbFilterArgs {
-        gilist: Some("g.gil".to_string()),
-        ipglist: Some("p.ipg".to_string()),
+        gilist: Some(std::ffi::OsString::from("g.gil")),
+        ipglist: Some(std::ffi::OsString::from("p.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
         gi_and_ipg.archive_parameters(&[101], &[]),
         vec![
-            Param {
-                name: "GiList",
-                value: ParamValue::BigIntegerList(vec![101]),
-            },
-            Param {
-                name: "TaxidList",
-                value: ParamValue::IntegerList(Vec::new()),
-            },
+            Param::new(fields::GI_LIST_INT8, ParamValue::BigIntegerList(vec![101])),
+            Param::new(fields::TAXID_LIST, ParamValue::IntegerList(Vec::new())),
         ]
     );
 }

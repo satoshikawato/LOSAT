@@ -2464,6 +2464,16 @@ pub(crate) fn subject_set_name(subject: &std::path::Path) -> Vec<u8> {
     .concat()
 }
 
+/// The definition of a subject set in the pairwise report: [`subject_set_name`], or, for the
+/// subjects of an imported strategy (an empty path: they name no input), [`scan_mode_definition`]'s
+/// definition without an input.
+pub(crate) fn subject_set_definition(subject: &std::path::Path) -> Vec<u8> {
+    if subject.as_os_str().is_empty() {
+        return scan_mode_definition("").into_bytes();
+    }
+    subject_set_name(subject)
+}
+
 fn ensure_trailing_period(text: &[u8]) -> std::borrow::Cow<'_, [u8]> {
     if text.ends_with(b".") {
         std::borrow::Cow::Borrowed(text)
@@ -3983,7 +3993,7 @@ pub struct BlastnPairwiseReport {
     /// the PMID 10890397 value (NCBI compares the task name, `m_Program`).
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
-    pub window_size: usize,
+    pub window_size: i32,
     /// A gapped search (the options' gapped mode); an ungapped (`-ungapped`) search has no
     /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
     pub gapped: bool,
@@ -5195,7 +5205,7 @@ pub struct TblastxPairwiseReport {
     pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
     pub word_threshold: f64,
-    pub window_size: usize,
+    pub window_size: i32,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -6823,3 +6833,30 @@ fn percent_match_matches_independent_pinned_cpp_edges() {
 #[cfg(test)]
 #[path = "pairwise_tblastx_tests.rs"]
 mod tblastx_tests;
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
+/// The definition of a subject set in the pairwise report (`FillScanModeBlastDbInfo`), without
+/// its period, which the writers add: an empty tag (an imported strategy's subjects) names no
+/// input.
+pub(crate) fn scan_mode_definition(tag: &str) -> String {
+    if tag.is_empty() {
+        "User specified sequence set".to_string()
+    } else {
+        format!("User specified sequence set (Input: {tag})")
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
+/// Byte-preserving form of [`scan_mode_definition`] for subject tags that may not be UTF-8.
+pub(crate) fn scan_mode_definition_bytes(tag: &[u8]) -> Vec<u8> {
+    if tag.is_empty() {
+        b"User specified sequence set".to_vec()
+    } else {
+        [
+            b"User specified sequence set (Input: ".as_slice(),
+            tag,
+            b")",
+        ]
+        .concat()
+    }
+}

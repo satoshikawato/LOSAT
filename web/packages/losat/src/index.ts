@@ -13,6 +13,7 @@ export {
   EngineCallError,
   EngineStoppedError,
   FILE_REGISTRY,
+  FILE_SEARCH_STRATEGY,
   FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
@@ -34,6 +35,7 @@ export {
   type FileLoader,
   type RegistryFileInfo,
   type RegisteredInput,
+  type StrategyFileInfo,
   type StreamSink,
   type ToolSink,
 } from './infra/reactor/abi.js';

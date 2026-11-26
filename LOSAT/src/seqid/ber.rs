@@ -502,6 +502,9 @@ pub(crate) struct Reader<'a> {
     utf8: bool,
     /// Whether such a string stops the read (`Failure::Utf8`; `utf8_string_path`).
     find_utf8: bool,
+    /// Where the read keeps the titles that hold a byte outside ' ' ..= '~' (the range of each
+    /// stored string in the record; `title_replaced_chars`), else `None`.
+    replaced_titles: Option<Vec<std::ops::Range<usize>>>,
 }
 
 impl<'a> Reader<'a> {
@@ -511,6 +514,18 @@ impl<'a> Reader<'a> {
             pos: 0,
             utf8: false,
             find_utf8: false,
+            replaced_titles: None,
+        }
+    }
+
+    /// The title just read (`length` bytes before the position) holds a byte that its read
+    /// replaced: kept where the read keeps such titles (`title_replaced_chars`).
+    #[cold]
+    #[inline(never)]
+    fn note_replaced_title(&mut self, length: usize) {
+        let end = self.pos;
+        if let Some(titles) = self.replaced_titles.as_mut() {
+            titles.push(end - length..end);
         }
     }
 
@@ -1314,6 +1329,56 @@ pub fn utf8_string_path(record: &[u8]) -> Option<String> {
     }
 }
 
+/// The member path of NCBI's post of a byte that its read of a title replaces
+/// (`title_replaced_chars`: `GetStackTrace` of the read, `Blast-def-line-set.E.title`).
+const TITLE_TRACE: &str = "Blast-def-line-set.E.title";
+
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
+/// What NCBI's read of `record` (a `Blast-def-line-set`, as `decode_full_set` reads it) posts for
+/// the bytes outside ' ' ..= '~' of its titles: for each such byte, in the order of the read, the
+/// byte, the position of the stream after the whole string (the same for every byte of one
+/// string) and the string as it is when NCBI posts it, the bytes before replaced by '#' and this
+/// one and those after still stored (`FixVisibleChars`, whose one port is
+/// `report::serial::asn_ber_reader::fix_visible_chars`; `report::serial::encoder::ReplacedChar`,
+/// whose `post` is the text). The record is read again up to a failure (NCBI posts what it read
+/// before it). Asked at each read of a record that the model of NCBI's cache of header records
+/// does not answer, once a title with such a byte was read (`SeqDb::title_posts_at`), and of a
+/// read that failed (`blastinput::app::ErrorAfterBatchReports::title_posts`): a record whose
+/// titles hold none returns nothing.
+#[cold]
+#[inline(never)]
+pub fn title_replaced_chars(record: &[u8]) -> Vec<crate::report::serial::encoder::ReplacedChar> {
+    use crate::report::serial::asn_input::StringPost;
+    use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
+    let mut ber = Reader::new(record);
+    ber.replaced_titles = Some(Vec::new());
+    let _ = read_set(&mut ber, &mut Vec::new());
+    let mut posts = Vec::new();
+    for range in ber.replaced_titles.take().unwrap_or_default() {
+        let end = StreamPosition::Byte(range.end as u64);
+        crate::report::serial::asn_ber_reader::fix_visible_chars(
+            &mut record[range].to_vec(),
+            end,
+            &mut |post| {
+                if let StringPost::BadChar {
+                    position,
+                    byte,
+                    string,
+                } = post
+                {
+                    posts.push(ReplacedChar {
+                        trace: TITLE_TRACE.to_string(),
+                        byte,
+                        position,
+                        string: string.into(),
+                    });
+                }
+            },
+        );
+    }
+    posts
+}
+
 /// NCBI's warning of a UTF8String read where a VisibleString is expected (cited at
 /// `utf8_string_path`), whose member is `path`, as the diagnostics of the program with the post
 /// prefix `prefix` (`SetDiagPostPrefix`: `[blastp]`, `[blastdbcmd]`) print it: `Warning:
@@ -1352,7 +1417,11 @@ fn decode_defline(ber: &mut Reader<'_>, defline: &mut BlastDefline) -> Result<()
     read_class(ber, &BLAST_DEF_LINE, |ber, member| {
         match member {
             DEFLINE_TITLE => {
-                defline.replaced_title_bytes = ber.fixed_string_in(&mut title)?;
+                let replaced = ber.fixed_string_in(&mut title)?;
+                if replaced > 0 {
+                    ber.note_replaced_title(title.len());
+                }
+                defline.replaced_title_bytes = replaced;
                 has_title = true;
             }
             DEFLINE_SEQID => {

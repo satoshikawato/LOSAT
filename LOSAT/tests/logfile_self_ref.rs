@@ -524,6 +524,86 @@ fn tools_refuse_self_referencing_logfile() {
     );
     assert_refused_and_unchanged(&out_db_comp, &[(&nhr, &nhr_snap)], "blastn -db component");
 
+    // Masked nucleotide DB: `-db_soft_mask 11 -logfile masked_db.naa` must refuse before modifying
+    // the mask column index `.naa`, while a distinct logfile succeeds.
+    let dust_asnb = run_in(
+        &dir,
+        &[
+            "dustmasker",
+            "-in",
+            "in.fa",
+            "-outfmt",
+            "maskinfo_asn1_bin",
+            "-out",
+            "dust.asnb",
+        ],
+        &[],
+    );
+    assert_eq!(dust_asnb.status.code(), Some(0));
+    let build_masked = run_in(
+        &dir,
+        &[
+            "makeblastdb",
+            "-in",
+            "in.fa",
+            "-dbtype",
+            "nucl",
+            "-mask_data",
+            "dust.asnb",
+            "-out",
+            "masked_db",
+            "-logfile",
+            "mk_masked.log",
+        ],
+        &[],
+    );
+    assert_eq!(build_masked.status.code(), Some(0));
+    let naa = dir.join("masked_db.naa");
+    let naa_snap = snapshot(&naa);
+    let out_db_mask = run_in(
+        &dir,
+        &[
+            "blastn",
+            "-query",
+            "in.fa",
+            "-db",
+            "masked_db",
+            "-db_soft_mask",
+            "11",
+            "-logfile",
+            "masked_db.naa",
+        ],
+        &[],
+    );
+    assert_refused_and_unchanged(
+        &out_db_mask,
+        &[(&naa, &naa_snap)],
+        "blastn -db_soft_mask .naa",
+    );
+    let out_db_mask_ok = run_in(
+        &dir,
+        &[
+            "blastn",
+            "-query",
+            "in.fa",
+            "-db",
+            "masked_db",
+            "-db_soft_mask",
+            "11",
+            "-outfmt",
+            "6",
+            "-logfile",
+            "masked_ok.log",
+        ],
+        &[],
+    );
+    assert_eq!(
+        out_db_mask_ok.status.code(),
+        Some(0),
+        "blastn -db_soft_mask with distinct logfile failed: {}",
+        String::from_utf8_lossy(&out_db_mask_ok.stderr)
+    );
+
     // Alias pointing to `mydb` via DBLIST: both target volume (`mydb.nhr`) and alias file itself
     // (`myalias.nal`) must be refused, including when resolved through `BLASTDB`.
     let alias_nal = dir.join("myalias.nal");

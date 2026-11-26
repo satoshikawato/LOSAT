@@ -39,11 +39,71 @@ use crate::utils::os_bytes::path_of_bytes;
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:124-133
 /// The extensions of the index, offset and data files that a host of this byte order reads; their
 /// arrays are in the host's order.
-const EXTENSIONS: [&str; 3] = if cfg!(target_endian = "little") {
+pub(super) const EXTENSIONS: [&str; 3] = if cfg!(target_endian = "little") {
     ["gni", "gno", "gnd"]
 } else {
     ["gmi", "gmo", "gmd"]
 };
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:200-218
+/// Reads `num_vols` from the first 8 bytes of a version-1 GI-mask index file, or `None` if the
+/// file cannot be read or is not version 1.
+fn read_num_vols(path: &Path) -> Option<i32> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 8];
+    std::io::Read::read_exact(&mut file, &mut header).ok()?;
+    let mut blob = Blob::new(&header, 0);
+    if blob.read_i32().ok()? != 1 {
+        return None;
+    }
+    blob.read_i32().ok()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:137-178
+/// Collects the index, offset, and data file paths that `GiMaskFiles::open` reads for the
+/// GI-mask `name` along `search` (`<name>.gni`/`.gno`/`.gnd` or `<name>.NN.gnd`, or the
+/// big-endian equivalents on big-endian hosts). When a file does not exist yet on `search`, the
+/// relative file name is recorded so `-logfile` cannot create it.
+pub(super) fn read_paths(
+    name: &[u8],
+    search: &SearchPath,
+    out: &mut std::collections::BTreeSet<Vec<u8>>,
+) {
+    let file_name = |extension: &str| [name, b".", extension.as_bytes()].concat();
+    let index_file = file_name(EXTENSIONS[0]);
+    let index_resolved = search.resolve_file(&index_file);
+    out.insert(index_resolved.clone().unwrap_or(index_file));
+
+    let offset_file = file_name(EXTENSIONS[1]);
+    out.insert(search.resolve_file(&offset_file).unwrap_or(offset_file));
+
+    let num_vols = index_resolved
+        .as_deref()
+        .and_then(|path| read_num_vols(&path_of_bytes(path)));
+    match num_vols {
+        Some(1) => {
+            let data_file = file_name(EXTENSIONS[2]);
+            out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
+        }
+        Some(n) if n > 1 => {
+            let cap = n.min(10_000);
+            for vol in 0..cap {
+                let data_file = file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
+                out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
+            }
+        }
+        _ => {
+            let data_file = file_name(EXTENSIONS[2]);
+            out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
+            for vol in 0..100u32 {
+                let data_file = file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
+                if let Some(resolved) = search.resolve_file(&data_file) {
+                    out.insert(resolved);
+                }
+            }
+        }
+    }
+}
 
 /// The bytes of the fixed fields at the start of an index file (`kFixedFieldBytes`).
 const FIXED_FIELD_BYTES: u64 = 32;

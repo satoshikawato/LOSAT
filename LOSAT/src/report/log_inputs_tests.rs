@@ -161,41 +161,111 @@ fn detects_database_component_files() {
     let dir = fresh_dir("db-comp");
     let nin = dir.join("mydb.nin");
     let nhr = dir.join("mydb.nhr");
+    let naa = dir.join("mydb.naa");
+    let shd = dir.join("mydb.shd");
+    let idx00 = dir.join("mydb.00.idx");
+    let bogus_nma = dir.join("mydb.nma");
     let other = dir.join("mydb.log");
     std::fs::write(&nin, b"index").unwrap();
     std::fs::write(&nhr, b"header").unwrap();
+    std::fs::write(&naa, b"mask").unwrap();
+    std::fs::write(&shd, b"shd").unwrap();
+    std::fs::write(&idx00, b"idx").unwrap();
+    std::fs::write(&bogus_nma, b"not-ncbi").unwrap();
     std::fs::write(&other, b"log").unwrap();
     let db = dir.join("mydb");
     let words: Vec<OsString> = vec!["-db".into(), db.as_os_str().to_os_string()];
     let start = blastn_start(&words);
-    assert!(check_disk_logfile("blastn", &words, &start, Some(nhr.as_os_str())).is_err());
-    assert!(check_disk_logfile("blastn", &words, &start, Some(other.as_os_str())).is_ok());
+    for refused in [&nhr, &naa, &shd, &idx00] {
+        assert!(
+            check_disk_logfile("blastn", &words, &start, Some(refused.as_os_str())).is_err(),
+            "expected blastn refusal for {}",
+            refused.display()
+        );
+    }
+    for allowed in [&other, &bogus_nma] {
+        assert!(
+            check_disk_logfile("blastn", &words, &start, Some(allowed.as_os_str())).is_ok(),
+            "expected blastn to allow {}",
+            allowed.display()
+        );
+    }
+    // Non-blastn nucleotide search (tblastx) does not read MegaBLAST index files.
+    let tbx_start = ApplicationStart::of_process("tblastx", &words);
+    assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(naa.as_os_str())).is_err());
+    assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(shd.as_os_str())).is_ok());
+    assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(idx00.as_os_str())).is_ok());
 
-    // Alias pointing via DBLIST to a differently named volume: both the alias file itself and the
-    // target volume's component files must be refused.
+    // Protein volume: PIG ISAM (.ppi/.ppd), mask column (.paa), RPS (.rps), and bogus .pma allowed.
+    let pin = dir.join("protdb.pin");
+    let ppi = dir.join("protdb.ppi");
+    let paa = dir.join("protdb.paa");
+    let rps = dir.join("protdb.rps");
+    let bogus_pma = dir.join("protdb.pma");
+    for f in [&pin, &ppi, &paa, &rps, &bogus_pma] {
+        std::fs::write(f, b"x").unwrap();
+    }
+    let prot_words: Vec<OsString> =
+        vec!["-db".into(), dir.join("protdb").as_os_str().to_os_string()];
+    let bp_start = ApplicationStart::of_process("blastp", &prot_words);
+    for refused in [&ppi, &paa, &rps] {
+        assert!(
+            check_disk_logfile("blastp", &prot_words, &bp_start, Some(refused.as_os_str()))
+                .is_err(),
+            "expected blastp refusal for {}",
+            refused.display()
+        );
+    }
+    assert!(check_disk_logfile(
+        "blastp",
+        &prot_words,
+        &bp_start,
+        Some(bogus_pma.as_os_str())
+    )
+    .is_ok());
+
+    // Alias pointing via DBLIST to a differently named volume, with GILIST, OIDLIST, and MASKLIST:
+    // alias file, target volume components, list files, GI-mask files, and old-style `<alias>.00.idx`
+    // (when `-index_name` is absent) must all be refused.
     let real_nin = dir.join("real_db.nin");
     let real_nhr = dir.join("real_db.nhr");
+    let gi_file = dir.join("alias_gis.txt");
+    let oid_file = dir.join("alias_oids.msk");
+    let mask_gni = dir.join("mymask.gni");
+    let mask_gnd = dir.join("mymask.gnd");
+    let alias_idx = dir.join("myalias.00.idx");
     let alias_nal = dir.join("myalias.nal");
-    std::fs::write(&real_nin, b"index").unwrap();
-    std::fs::write(&real_nhr, b"header").unwrap();
-    std::fs::write(&alias_nal, b"TITLE my alias\nDBLIST real_db\n").unwrap();
+    for f in [
+        &real_nin, &real_nhr, &gi_file, &oid_file, &mask_gni, &mask_gnd, &alias_idx,
+    ] {
+        std::fs::write(f, b"x").unwrap();
+    }
+    std::fs::write(
+        &alias_nal,
+        format!(
+            "TITLE my alias\nDBLIST real_db\nGILIST alias_gis.txt\nOIDLIST alias_oids.msk\nMASKLIST {}\n",
+            dir.join("mymask").display()
+        ),
+    )
+    .unwrap();
     let alias_db = dir.join("myalias");
     let alias_words: Vec<OsString> = vec!["-db".into(), alias_db.as_os_str().to_os_string()];
     let alias_start = blastn_start(&alias_words);
-    assert!(check_disk_logfile(
-        "blastn",
-        &alias_words,
-        &alias_start,
-        Some(real_nhr.as_os_str())
-    )
-    .is_err());
-    assert!(check_disk_logfile(
-        "blastn",
-        &alias_words,
-        &alias_start,
-        Some(alias_nal.as_os_str())
-    )
-    .is_err());
+    for refused in [
+        &real_nhr, &alias_nal, &gi_file, &oid_file, &mask_gni, &mask_gnd, &alias_idx,
+    ] {
+        assert!(
+            check_disk_logfile(
+                "blastn",
+                &alias_words,
+                &alias_start,
+                Some(refused.as_os_str())
+            )
+            .is_err(),
+            "expected alias blastn refusal for {}",
+            refused.display()
+        );
+    }
     assert!(check_disk_logfile(
         "blastn",
         &alias_words,

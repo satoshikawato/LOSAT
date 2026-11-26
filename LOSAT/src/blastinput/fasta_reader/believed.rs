@@ -12,7 +12,7 @@
 //! the first's letters twice, and it shows a database sequence with the id of such a query as that
 //! query (probe of 2026-10-30; per batch: series Q of line RG, Q1c, `query_batch::QueryScopes`).
 //! When an id's accession names the other molecule (`named_molecule`), LOSAT reproduces NCBI's
-//! deterministic reading (`fasta_reader::reader::scan_data_line`, line RG-XT item X7-5).
+//! deterministic reading (`fasta_reader::reader::FastaReader::parse_data_line`, line RG-XT item X7-5).
 
 use std::collections::HashSet;
 

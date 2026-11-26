@@ -772,32 +772,64 @@ impl<R: Read> FastaReader<R> {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
-        let gap_offset = self.total_gap_length;
-        let mask_range_start = &mut self.mask_range_start;
-        let mask = &mut self.mask;
-        // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:291-292
-        // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-516
-        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1092
-        // `x_OpenMask` starts at the masked residue (`start + gap_offset`), and `CloseMask`
-        // closes at the residue before the unmasked one (`start + gap_offset - 1`).
-        let outcome = scan_data_line(
-            s,
-            DataLineAlphabet::new(self.believed_molecule, self.config.protein),
-            self.lines.bulk(),
-            &mut self.seq_data,
-            &mut self.bad_positions,
-            |masked, start, _| {
-                if masked {
-                    if mask_range_start.is_none() {
-                        *mask_range_start = Some(start as u32 + gap_offset);
-                    }
-                } else if let Some(open) = mask_range_start.take() {
-                    mask.push((open, start as u32 + gap_offset - 1));
+        let parse_protein =
+            DataLineAlphabet::new(self.believed_molecule, self.config.protein).is_protein();
+        let (types, residues, masked) = if parse_protein {
+            (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
+        } else {
+            (
+                &NUCLEOTIDE_CHAR_TYPES,
+                &NUCLEOTIDE_RESIDUES,
+                &NUCLEOTIDE_MASKED,
+            )
+        };
+        let mut hyphen_seen = false;
+        self.bad_positions.clear();
+        let bulk = self.lines.bulk();
+        let mut pos = 0;
+        while pos < s.len() {
+            let c = s[pos];
+            match types[c as usize] {
+                // After the first residue of a run, `CloseMask` (`OpenMask`) has nothing
+                // left to do for the others, which are copied at once (LOSAT's speed).
+                CharType::Residue => {
+                    self.seq_data.push(c);
+                    self.close_mask();
+                    let rest = &s[pos + 1..];
+                    let run = if !bulk {
+                        0
+                    } else if parse_protein {
+                        run_length(rest, residues, sure_protein)
+                    } else {
+                        run_length(rest, residues, sure_nucleotide)
+                    };
+                    self.seq_data.extend_from_slice(&s[pos + 1..pos + 1 + run]);
+                    pos += run;
                 }
-            },
-        );
+                CharType::MaskedResidue => {
+                    self.seq_data.push(c.to_ascii_uppercase());
+                    self.open_mask();
+                    let rest = &s[pos + 1..];
+                    let run = if !bulk {
+                        0
+                    } else if parse_protein {
+                        run_length(rest, masked, sure_protein_masked)
+                    } else {
+                        run_length(rest, masked, sure_nucleotide_masked)
+                    };
+                    self.seq_data
+                        .extend(s[pos + 1..pos + 1 + run].iter().map(u8::to_ascii_uppercase));
+                    pos += run;
+                }
+                CharType::HyphenToIgnoreAndWarn => hyphen_seen = true,
+                CharType::Comment => break,
+                CharType::Space => {}
+                CharType::Bad => self.bad_positions.push(pos as u32),
+            }
+            pos += 1;
+        }
         self.check_length()?;
-        if outcome.hyphen_seen {
+        if hyphen_seen {
             let line = self.line_number();
             self.post_warning(
                 Problem::IgnoredResidue,
@@ -834,6 +866,30 @@ impl<R: Read> FastaReader<R> {
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:502-516
     fn current_pos_with_gaps(&self) -> u32 {
         self.seq_data.len() as u32 + self.total_gap_length
+    }
+
+    /// The mask is always recorded (LOSAT marks the masked residues by case, and the
+    /// programs apply the mask only with `-lcase_masking`, where NCBI's
+    /// `x_FastaToSeqLoc` calls `SaveMask` before the record is read).
+    ///
+    /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-499
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1083
+    /// `x_OpenMask` runs before `m_CurrentPos` is incremented, so the start is the masked residue.
+    fn open_mask(&mut self) {
+        if self.mask_range_start.is_none() {
+            self.mask_range_start = Some(self.current_pos_with_gaps() - 1);
+        }
+    }
+
+    /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:291-292
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1085-1092
+    /// In `ParseDataLine` `CloseMask` runs after the residue is stored and before
+    /// `m_CurrentPos` is incremented: the interval ends before the residue that closes it (LOSAT has
+    /// already pushed that residue, hence the `- 2`). `AssembleSeq` closes it at the end.
+    fn close_mask(&mut self) {
+        if let Some(start) = self.mask_range_start.take() {
+            self.mask.push((start, self.current_pos_with_gaps() - 2));
+        }
     }
 
     /// `ParseGapLine` (`gap_line_size`): the gap of the line, as a run of `N` or `X` that
@@ -1040,11 +1096,6 @@ impl<R: Read> FastaReader<R> {
     }
 }
 
-/// Outcome of scanning one FASTA data line (`scan_data_line`).
-pub(crate) struct DataLineOutcome {
-    pub hyphen_seen: bool,
-}
-
 /// The alphabet molecule `CFastaReader::ParseDataLine` checks a line against: the Seq-id's
 /// named molecule when set (`xSetSeqMol`), otherwise the program's.
 ///
@@ -1066,78 +1117,6 @@ impl DataLineAlphabet {
     pub fn is_protein(self) -> bool {
         self.parse_protein
     }
-}
-
-/// Scans one FASTA data line `s` under `alphabet`, appending kept upper-case residues to
-/// `seq_data`, recording 0-based invalid positions in `bad_positions`, and calling
-/// `on_run(masked, start, count)` for each contiguous masked or unmasked residue run.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-1016
-#[inline]
-pub(crate) fn scan_data_line(
-    s: &[u8],
-    alphabet: DataLineAlphabet,
-    bulk: bool,
-    seq_data: &mut Vec<u8>,
-    bad_positions: &mut Vec<u32>,
-    mut on_run: impl FnMut(bool, usize, usize),
-) -> DataLineOutcome {
-    let parse_protein = alphabet.parse_protein;
-    let (types, residues, masked) = if parse_protein {
-        (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
-    } else {
-        (
-            &NUCLEOTIDE_CHAR_TYPES,
-            &NUCLEOTIDE_RESIDUES,
-            &NUCLEOTIDE_MASKED,
-        )
-    };
-    let mut hyphen_seen = false;
-    bad_positions.clear();
-    let mut pos = 0;
-    while pos < s.len() {
-        let c = s[pos];
-        match types[c as usize] {
-            // After the first residue of a run, `CloseMask` (`OpenMask`) has nothing
-            // left to do for the others, which are copied at once (LOSAT's speed).
-            CharType::Residue => {
-                let start = seq_data.len();
-                seq_data.push(c);
-                let rest = &s[pos + 1..];
-                let run = if !bulk {
-                    0
-                } else if parse_protein {
-                    run_length(rest, residues, sure_protein)
-                } else {
-                    run_length(rest, residues, sure_nucleotide)
-                };
-                seq_data.extend_from_slice(&s[pos + 1..pos + 1 + run]);
-                on_run(false, start, 1 + run);
-                pos += run;
-            }
-            CharType::MaskedResidue => {
-                let start = seq_data.len();
-                seq_data.push(c.to_ascii_uppercase());
-                let rest = &s[pos + 1..];
-                let run = if !bulk {
-                    0
-                } else if parse_protein {
-                    run_length(rest, masked, sure_protein_masked)
-                } else {
-                    run_length(rest, masked, sure_nucleotide_masked)
-                };
-                seq_data.extend(s[pos + 1..pos + 1 + run].iter().map(u8::to_ascii_uppercase));
-                on_run(true, start, 1 + run);
-                pos += run;
-            }
-            CharType::HyphenToIgnoreAndWarn => hyphen_seen = true,
-            CharType::Comment => break,
-            CharType::Space => {}
-            CharType::Bad => bad_positions.push(pos as u32),
-        }
-        pos += 1;
-    }
-    DataLineOutcome { hyphen_seen }
 }
 
 /// How `CSeqportUtil::Pack` maps upper-case residues read under a protein Seq-id into a

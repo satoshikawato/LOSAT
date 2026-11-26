@@ -87,6 +87,7 @@ impl RpsDiagTable {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-62
     /// The table has `length` entries (`diag_table_length`).
+    #[cfg(test)]
     pub(crate) fn reset_for(&mut self, length: i32, window: i32) {
         self.array = vec![0u32; length as usize];
         self.mask = length - 1;

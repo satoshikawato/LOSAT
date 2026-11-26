@@ -358,7 +358,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_string_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, true)
         }
     }
 
@@ -373,12 +373,26 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_fasta_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, false)
         }
     }
 
-    fn nucleotide_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
+    fn nucleotide_letters(
+        &self,
+        oid: u32,
+        range: Option<(u32, u32)>,
+        error_when_empty: bool,
+    ) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
+        if self.db.nucleotide_length_i32_at(at)? < 1 {
+            return if error_when_empty {
+                Err(Stop::Ncbi(
+                    "Error: could not get sequence or range.".to_string(),
+                ))
+            } else {
+                Ok(Vec::new())
+            };
+        }
         Ok(match range {
             Some((from, to)) => {
                 self.db

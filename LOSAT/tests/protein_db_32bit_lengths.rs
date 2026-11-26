@@ -705,8 +705,13 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
         assert_rc_err(&out, 3, "LOSAT engine error: Unknown error code 1\n", db);
     }
 
-    // Combined & single-volume mixed DBs find hits on `small` identically at 1 and 2 threads
+    // Combined & single-volume mixed DBs: at 1 thread all 4 skip the non-positive OID and find
+    // hits on `small`. At 2 threads (DB-split), NCBI's `CSeqDBImpl::x_FillSeqBuffer`
+    // (`seqdbimpl.cpp:699-700`) stops at the first negative-length OID, so `dba` and `db_mix1`
+    // (OID 0 = -2147483648) return 0 hits, while `dba0` (OID 0 = 0) and `db_mix2` (OID 0 = 400)
+    // still find `small`.
     for db in COMBINED_DBS {
+        let mt_stops_before_small = matches!(db, "dba" | "db_mix1");
         for base in [
             vec![
                 "blastp",
@@ -758,11 +763,15 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
             let r1 = fx.run(&a1);
             let r2 = fx.run(&a2);
             assert_eq!(r1.status.code(), Some(0), "{a1:?}: {r1:?}");
-            assert_eq!(
-                (r1.status.code(), &r1.stdout, &r1.stderr),
-                (r2.status.code(), &r2.stdout, &r2.stderr),
-                "mt {base:?}"
-            );
+            if mt_stops_before_small {
+                assert_ok_empty(&r2, &a2);
+            } else {
+                assert_eq!(
+                    (r1.status.code(), &r1.stdout, &r1.stderr),
+                    (r2.status.code(), &r2.stdout, &r2.stderr),
+                    "mt {base:?}"
+                );
+            }
             let hits = out_str(&r1.stdout);
             assert!(hits.contains("\tsmall\t100.000\t60\t"), "{base:?}: {hits}");
         }

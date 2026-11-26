@@ -1862,14 +1862,11 @@ impl Volume {
     ) -> Result<NucleotideAmbiguity, SeqDbError> {
         let length_i32 = self.nucleotide_length_i32(oid, named)?;
         let file = self.seq_file()?;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
         if length_i32 < 1 {
-            return Err(SeqDbError::Format {
-                path: file.path().to_path_buf(),
-                message: "Error: could not get sequence or range.".to_string(),
-            });
+            return Ok(NucleotideAmbiguity::new(0, u64::from(seq[0]), Vec::new()));
         }
         let length = length_i32 as usize;
-        let seq = self.index.sequence_offsets(oid, oid + 1)?;
         let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
         let (packed_start, amb_start, next) = (seq[0], amb[0], seq[1]);
         if amb_start > next {

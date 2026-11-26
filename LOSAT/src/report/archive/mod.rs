@@ -7,9 +7,13 @@
 //! holds for its other formats.
 //!
 //! - `options`: the request's `algorithm-options` (the fold of NCBI's `Set*` calls);
+//! - `fields`: the Blast4 parameters' names and value types, which the writer and the reader share;
 //! - `bioseq`: the Bioseq of a query or subject record;
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
-//! - `writer`: the document.
+//! - `writer`: the document;
+//! - `read`: the reader of an archive file (`blast_formatter -archive`): its objects one after
+//!   another, each as the typed request and results NCBI's `CRemoteBlast` reads; and what NCBI
+//!   makes of a stored request (the options and queries of a search strategy).
 //!
 //! What a run keeps from one archive to the next is `RunState`: the diagnostics saved since the
 //! last archive (`DiagLog`) and what the searches have set in the options handle so far
@@ -18,8 +22,10 @@
 //! - `requests`: the request inputs of a batch from its records.
 
 pub mod bioseq;
+pub mod fields;
 pub mod masks;
 pub mod options;
+pub(crate) mod read;
 pub mod requests;
 pub mod strategy;
 pub mod writer;
@@ -140,7 +146,7 @@ impl ArchiveEncoding {
     /// Whether the string values of `params` are written as they are (`writes_text`).
     pub fn writes_params(self, params: &[options::Param]) -> bool {
         params.iter().all(|param| match &param.value {
-            options::ParamValue::Str(value) => self.writes_text(value.as_bytes()),
+            options::ParamValue::Str(value) => self.writes_text(value),
             _ => true,
         })
     }
@@ -153,9 +159,9 @@ impl ArchiveEncoding {
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
 /// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
-pub fn writes_error_archive(outfmt: &str) -> bool {
+pub fn writes_error_archive(outfmt: impl AsRef<[u8]>) -> bool {
     use crate::ncbi_str::{string_to_int, truncate_spaces};
-    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+    string_to_int(truncate_spaces(outfmt.as_ref()), 0)
         .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
@@ -185,7 +191,7 @@ pub struct ArchiveRequest {
 impl ArchiveRequest {
     /// The request of a run of `inputs.kind`: `database` is the `-db` argument as typed (`None`
     /// for `-subject`).
-    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
+    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&[u8]>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
@@ -195,10 +201,12 @@ impl ArchiveRequest {
             .filter(|&iterations| iterations != 0 && database.is_some());
         Self {
             program: inputs.kind.program(),
-            application: inputs.kind.application(),
+            application: inputs
+                .application
+                .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
-            database: database.map(|name| name.as_bytes().to_vec()),
+            database: database.map(<[u8]>::to_vec),
             step_number,
         }
     }
@@ -431,11 +439,11 @@ impl OptionsHandle {
         let mut sets = options::ParamList::default();
         if let Some(search) = self.0.search.get() {
             for param in &search.before_batches {
-                sets.set(param.name, param.value.clone());
+                sets.set(param.field(), param.value.clone());
             }
         }
         for param in carry.0.params() {
-            sets.set(param.name, param.value.clone());
+            sets.set(param.field(), param.value.clone());
         }
         sets.into_params()
     }
@@ -450,7 +458,7 @@ impl OptionsHandle {
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
-                carry.0.set(param.name, param.value.clone());
+                carry.0.set(param.field(), param.value.clone());
             }
         }
         if let Some(context0) = searched {
@@ -460,7 +468,7 @@ impl OptionsHandle {
                 .get()
                 .map_or(RequestLength::Search, |filter| filter.request_length);
             carry.0.set(
-                "EffectiveSearchSpace",
+                fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
         }
@@ -523,7 +531,7 @@ impl ArchiveHandle {
     /// (made once per run; its search strategy shares it).
     pub fn for_program(
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, options)
@@ -533,7 +541,7 @@ impl ArchiveHandle {
     pub fn for_encoding(
         encoding: ArchiveEncoding,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::new(
@@ -568,7 +576,7 @@ impl ArchiveHandle {
     /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
     /// The archives of the batches are not affected.
     #[must_use]
-    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+    pub fn with_outfmt_text(self, outfmt: impl AsRef<[u8]>) -> Self {
         self.0
             .error_archive
             .store(writes_error_archive(outfmt), Ordering::Relaxed);

@@ -14,7 +14,7 @@ use std::ffi::OsString;
 
 use super::Commands;
 use crate::blastinput::ncbi_environment::{preparse, DiagTarget, Preparsed};
-use crate::ncbi_app::args::{is_file_argument, refusal, Args, NotConverted, Refusal};
+use crate::ncbi_app::args::{refusal, Args, NotConverted, Refusal};
 use crate::ncbi_app::{Diag, ReadEnd, Tool};
 
 /// A `Tool` of a program on this reader: NCBI's frozen `-help` text, no diagnostic prefix, no
@@ -138,53 +138,25 @@ pub(crate) fn named_refusal(tool: &Tool, name: &str) -> Option<String> {
     ))
 }
 
-/// Whether LOSAT refuses a value of `tool`'s argument `name` that is not UTF-8: every value of
-/// makeblastdb, whose arguments are text; every value of the search programs but the file names
-/// that keep their bytes (`-query`, `-subject`, `-out`: `check_utf8_file_name`); none of rpsbproc,
-/// whose file names keep their bytes and whose other keys take a value of their constraint. The
-/// application start reads `-logfile` and `-conffile` by their bytes, before the reader.
-fn refuses_bytes(tool: &Tool, name: &str) -> bool {
-    match tool.program {
-        "makeblastdb" => true,
-        "rpsbproc" => false,
-        _ => !is_file_argument(name) && !matches!(name, "query" | "subject" | "out"),
-    }
-}
-
 // No NCBI counterpart: LOSAT's refusals of what it does not run (AGENTS.md rule 2), after NCBI's
 // reader, so that NCBI's errors, help and `-dryrun` come first (line RG DECISIONS K4i-2 D4,
 // K4i-2b-2 (1)).
 /// LOSAT's refusal of the arguments `args` that `tool`'s reader read: the first given argument, in
-/// the command line's order, that LOSAT refuses by name (`named_refusal`), or whose value is not
-/// UTF-8 where LOSAT reads it as text (`cli::non_utf8_value_refusal`); `None` when it runs them.
-/// The command line writes it as its refusals (`Error: ` and the text, exit status 1); the library
-/// API's error is `Error::Argv` of the text.
+/// the command line's order, that LOSAT refuses by name (`named_refusal`); `None` when it runs
+/// them. The command line writes it as its refusals (`Error: ` and the text, exit status 1); the
+/// library API's error is `Error::Argv` of the text.
 pub(crate) fn refusal_after_read(tool: &Tool, args: &Args) -> Option<String> {
-    args.given_values().find_map(|(name, _)| {
-        named_refusal(tool, name).or_else(|| {
-            (args.is_bytes(name) && refuses_bytes(tool, name))
-                .then(|| super::non_utf8_value_refusal(tool.refusal_name, name))
-        })
-    })
+    args.given_values()
+        .find_map(|(name, _)| named_refusal(tool, name))
 }
 
 // No NCBI counterpart: NCBI's `CArgs` is the program's arguments; LOSAT's programs read theirs into
 // their own option types (line RG DECISIONS K4i-3-1).
-/// The options of `tool`'s arguments `args` (each program's `from_args`); `dry_run` for a caller
-/// that ends before LOSAT's refusals, which reads a value that LOSAT refuses for not being UTF-8 as
-/// its lossy text (`Args::with_lossy_text`). A key that the option's type does not hold is LOSAT's
-/// error (`not_converted`).
-pub(crate) fn options(tool: &Tool, args: &Args, dry_run: bool) -> Result<Commands, String> {
+/// The options of `tool`'s arguments `args` (each program's `from_args`). A key that the option's
+/// type does not hold is LOSAT's error (`not_converted`).
+pub(crate) fn options(tool: &Tool, args: &Args) -> Result<Commands, String> {
     use crate::algorithm::{
         blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
-    };
-    let lossy;
-    let args = match dry_run {
-        true => {
-            lossy = args.with_lossy_text(|name| refuses_bytes(tool, name));
-            &lossy
-        }
-        false => args,
     };
     let options = match tool.program {
         "blastx" => blastx::BlastxArgs::from_args(args).map(Commands::Blastx),
@@ -338,7 +310,7 @@ pub(crate) fn read_argv(
             return Err(ArgvError::Refused(reason));
         }
     }
-    options(tool, &args, dry_run).map_err(ArgvError::Refused)
+    options(tool, &args).map_err(ArgvError::Refused)
 }
 
 #[cfg(test)]

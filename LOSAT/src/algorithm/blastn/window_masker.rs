@@ -27,7 +27,7 @@ pub struct WindowMasker {
     /// The counts file: the value of `-window_masker_db` as given (BLAST XML's filter string
     /// `W -d <name>;`, the archive's `WindowMaskerDatabase`), or the file of
     /// `-window_masker_taxid` (empty when there is none, as in NCBI).
-    pub name: String,
+    pub name: Vec<u8>,
     /// The value of `-window_masker_taxid` (not 0; the filter string's `W -t <taxid>;`, the
     /// archive's `WindowMaskerTaxId`), or `None` for `-window_masker_db`.
     pub taxid: Option<i32>,
@@ -39,17 +39,19 @@ pub struct WindowMasker {
     /// (`UnitCounts::warnings`, at every load).
     first_load: Posts,
     later_loads: Posts,
+    /// The running application (`BlastnArgs::app`), the prefix of the warnings of a load.
+    app: &'static str,
 }
 
 /// The posts of a load of the masker: those of the registry (`registry`), then the counts
 /// reader's warnings when the masker was made (NCBI 2.17.0, line NP M3d: an ascii file's
 /// second, higher `>t_low` writes its warning at each load, after the post of a malformed
 /// `.ncbirc`).
-fn load_posts(registry: &Posts, masker: &Result<SeqMasker, WinMaskError>) -> Posts {
+fn load_posts(registry: &Posts, masker: &Result<SeqMasker, WinMaskError>, app: &str) -> Posts {
     let mut posts = registry.clone();
     if let Ok(masker) = masker {
         for warning in masker.warnings() {
-            posts.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
+            posts.lines(format!("Warning: [{app}] {warning}\n").as_bytes());
         }
     }
     posts
@@ -71,8 +73,13 @@ impl fmt::Debug for WindowMasker {
 /// line); a format other than the two binary ones is the input error of the filtering options
 /// (exit 1). LOSAT's check reads the file on the stream functions NCBI's does; its other
 /// errors (the stream could not seek) give the unknown format, as NCBI's stream failure does.
-pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker, NativeError> {
-    match source.discover(name) {
+pub(crate) fn open(
+    name: &[u8],
+    source: &dyn CountsSource,
+    app: &'static str,
+) -> Result<WindowMasker, NativeError> {
+    let path = crate::utils::os_bytes::path_of_bytes(name);
+    match source.discover(&path) {
         Ok(found) if matches!(found.stat_type, StatType::OBinary | StatType::Binary) => {}
         Err(error) if error.discover_exception().is_some() => {
             return Err(NativeError::exception(
@@ -90,23 +97,24 @@ pub(crate) fn open(name: &str, source: &dyn CountsSource) -> Result<WindowMasker
             });
         }
     }
-    let masker = build(name, source);
-    let posts = load_posts(&Posts::new(), &masker);
+    let masker = build(&path, source);
+    let posts = load_posts(&Posts::new(), &masker, app);
     Ok(WindowMasker {
-        name: name.to_string(),
+        name: name.to_vec(),
         taxid: None,
         masker,
         first_load: posts.clone(),
         later_loads: posts,
+        app,
     })
 }
 
-/// `s_BuildSeqMasker` of `lstat`: the masker made from the counts file `name`, or its error.
-fn build(name: &str, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskError> {
+/// `s_BuildSeqMasker` of `lstat`: the masker made from the counts file `path`, or its error.
+fn build(path: &std::path::Path, source: &dyn CountsSource) -> Result<SeqMasker, WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:99-109
     let params = MaskerParams::default();
     source
-        .counts(name, &params)
+        .counts(path, &params)
         .and_then(|counts| SeqMasker::new(counts, &params))
 }
 
@@ -126,6 +134,7 @@ pub(crate) fn open_taxid(
     taxid: i32,
     registry: &WindowMaskerRegistry,
     source: &dyn CountsSource,
+    app: &'static str,
 ) -> anyhow::Result<WindowMasker> {
     let directory = registry.path.as_deref();
     let file = crate::utils::winmask::taxid_stat_file(directory, taxid, source).map_err(|error| {
@@ -133,16 +142,12 @@ pub(crate) fn open_taxid(
             "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's BLASTN"
         )
     })?;
-    let name = match file {
-        Some(path) => path.into_os_string().into_string().map_err(|path| {
-            anyhow::anyhow!(
-                "-window_masker_taxid {taxid}: the path of the counts file {} is not valid UTF-8; this is not supported by LOSAT's BLASTN",
-                std::path::Path::new(&path).display()
-            )
-        })?,
-        None => String::new(),
+    let name = match &file {
+        Some(path) => crate::utils::os_bytes::path_bytes(path).into_owned(),
+        None => Vec::new(),
     };
-    let masker = build(&name, source);
+    let path = file.unwrap_or_default();
+    let masker = build(&path, source);
     // The counts that only LOSAT refuses (NCBI's result is undefined there) are refused when
     // the options are read, before any output.
     if let Err(error @ (WinMaskError::UnitSize { .. } | WinMaskError::UnsetHashParameter { .. })) =
@@ -150,9 +155,9 @@ pub(crate) fn open_taxid(
     {
         return Err(rejection(&name, error));
     }
-    let first_load = load_posts(&registry.load_posts, &masker);
+    let first_load = load_posts(&registry.load_posts, &masker, app);
     let later_loads = if registry.posts_once {
-        load_posts(&Posts::new(), &masker)
+        load_posts(&Posts::new(), &masker, app)
     } else {
         first_load.clone()
     };
@@ -162,6 +167,7 @@ pub(crate) fn open_taxid(
         masker,
         first_load,
         later_loads,
+        app,
     })
 }
 
@@ -209,6 +215,7 @@ impl WindowMasker {
             queries,
             self.load_posts(first),
             self.load_posts(false),
+            self.app,
         )
     }
 
@@ -279,6 +286,7 @@ pub(crate) fn batch_error(
     queries: usize,
     first_load: &Posts,
     later_loads: &Posts,
+    app: &str,
 ) -> Option<(Posts, NativeError)> {
     let text = match error {
         WinMaskError::BadIndex { .. } => error.to_string().into_bytes(),
@@ -290,7 +298,7 @@ pub(crate) fn batch_error(
     for query in 0..queries {
         warnings.append(if query == 0 { first_load } else { later_loads });
         for warning in error.warnings() {
-            warnings.lines(format!("Warning: [blastn] {warning}\n").as_bytes());
+            warnings.lines(format!("Warning: [{app}] {warning}\n").as_bytes());
         }
         message.extend_from_slice(b"Warning: ");
         message.extend_from_slice(&text);
@@ -306,9 +314,10 @@ pub(crate) fn batch_error(
 /// query of 2^32 letters or more, an error of a counts source of LOSAT Web, and an error of the
 /// masks of a chunk of a split batch whose whole queries were masked (NCBI masks each chunk
 /// when it searches it, after the batch's set-up).
-pub(crate) fn rejection(name: &str, error: &WinMaskError) -> anyhow::Error {
+pub(crate) fn rejection(name: &[u8], error: &WinMaskError) -> anyhow::Error {
     anyhow::anyhow!(
-        "the windowmasker unit counts {name} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN"
+        "the windowmasker unit counts {} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN",
+        String::from_utf8_lossy(name)
     )
 }
 

@@ -109,14 +109,15 @@ pub(crate) fn run_ending_exception(
 /// `document`): `Ok(None)` where the report is written; where it raised an exception that NCBI's
 /// report function catches (`CaughtException`: the stream forms of the XML2 and JSON documents,
 /// outfmt 16 and 15, leave the report out, `blast_xml2::Xml2Document::report`), `Ok(Some)` with
-/// the program's post of it (`ERR_POST` at the Error level after the prefix `[program] `,
+/// the post of it (`ERR_POST` at the Error level after the prefix `[app] `, the running
+/// application's name `app`,
 /// `StructuredXml::caught_message`), which comes after the posts of the loads that the report made
 /// before it (`query_warnings::HitPosts::caught`); any other error is returned, and the caller
 /// drops what the failed report left in its buffer.
 pub fn caught_post<D: StructuredXml + ?Sized>(
     written: Result<()>,
     document: &D,
-    program: &str,
+    app: &str,
 ) -> Result<Option<Vec<u8>>> {
     match written {
         Ok(()) => Ok(None),
@@ -124,7 +125,7 @@ pub fn caught_post<D: StructuredXml + ?Sized>(
             Ok(super::CaughtException(exception)) => {
                 Ok(Some(crate::ncbi_exception::error_post_line(
                     None,
-                    Some(program),
+                    Some(app),
                     &document.caught_message(&exception),
                 )))
             }
@@ -194,13 +195,13 @@ impl std::error::Error for IterationThrew {}
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:740-764
 /// The post of an exception in an `Iteration` or one of its `Hit`s: each query is formatted by
 /// itself (`CCmdLineBlastXMLReportData` of one result), so the label is always `Q(0/1` (sic).
-fn iteration_post(at: usize, program: &str, thrown: &XmlThrow) -> DocumentPost {
+fn iteration_post(at: usize, app: &str, thrown: &XmlThrow) -> DocumentPost {
     let message = thrown
         .exception()
         .what_after(b"Failed s_BlastXMLAddIteration Q(0/1");
     DocumentPost {
         at,
-        text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
+        text: crate::ncbi_exception::error_post_line(None, Some(app), &message),
     }
 }
 
@@ -222,7 +223,7 @@ fn write_header(
     string_member(&mut enc, "program", 0, run.program.as_bytes());
     string_member(&mut enc, "version", 1, run.version.as_bytes());
     string_member(&mut enc, "reference", 2, run.reference.as_bytes());
-    string_member(&mut enc, "db", 3, run.db_name.as_bytes());
+    string_member(&mut enc, "db", 3, run.db_name);
     string_member(&mut enc, "query-ID", 4, first.id);
     string_member(&mut enc, "query-def", 5, query_def(first.title));
     int_member(&mut enc, "query-len", 6, first.len);
@@ -231,7 +232,7 @@ fn write_header(
     let header_posts = enc.take_posts();
     let thrown = enc.take_thrown();
     let error = enc.error();
-    posts.extend(replaced_posts(header_posts, run.program, |_| start));
+    posts.extend(replaced_posts(header_posts, run.app, |_| start));
     if let Some(error) = error {
         out.truncate(start);
         return match thrown {
@@ -486,7 +487,7 @@ impl StructuredXml for BlastXmlWriter {
         let error = enc.error();
         self.posts
             .posts
-            .extend(replaced_posts(iteration_posts, run.program, |_| start));
+            .extend(replaced_posts(iteration_posts, run.app, |_| start));
         if let Some(error) = error {
             out.truncate(start);
             let Some(thrown) = thrown else {
@@ -494,7 +495,7 @@ impl StructuredXml for BlastXmlWriter {
             };
             self.posts
                 .posts
-                .push(iteration_post(start, run.program, &thrown));
+                .push(iteration_post(start, run.app, &thrown));
             // No `Hit` of the query is made, so none of its subjects is loaded.
             self.posts.cut = true;
             self.scratch.tail = tail;
@@ -728,15 +729,14 @@ impl HitWrite for Xml5Hits<'_> {
             let at = self.out.len();
             if enc.has_posts() {
                 self.posts
-                    .extend(replaced_posts(enc.take_posts(), self.run.program, |_| at));
+                    .extend(replaced_posts(enc.take_posts(), self.run.app, |_| at));
             }
             let Some(error) = enc.error() else {
                 return Ok(());
             };
             match (error, enc.take_thrown()) {
                 (_, Some(thrown)) => {
-                    self.posts
-                        .push(iteration_post(at, self.run.program, &thrown));
+                    self.posts.push(iteration_post(at, self.run.app, &thrown));
                     Err(IterationThrew.into())
                 }
                 (error, None) => Err(error.into()),

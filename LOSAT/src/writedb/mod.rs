@@ -114,6 +114,9 @@ pub enum WriteDbError {
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
+    /// `Options` whose text holds bytes that are not UTF-8 (a file name of `-in`), which
+    /// makeblastdb prints as they are.
+    OptionsBytes(Vec<u8>),
     /// An exception of NCBI's C++ Toolkit that makeblastdb reports through the `CException`
     /// clause of its general handler: "Error: " and the exception's report
     /// (`CException::what()`), exit status 255.
@@ -199,6 +202,7 @@ impl WriteDbError {
                   puts past the end of the empty list",
             ),
             WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
+            WriteDbError::OptionsBytes(message) => losat(OPTIONS_ERROR, message),
             WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.

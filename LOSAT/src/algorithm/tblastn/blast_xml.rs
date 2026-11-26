@@ -92,7 +92,7 @@ pub(super) struct PreparedXml {
     matrix_name: String,
     gap_open: i32,
     gap_extend: i32,
-    db_name: String,
+    db_name: Vec<u8>,
     db_num: i64,
     db_len: i64,
     db_len_overflow: bool,
@@ -333,9 +333,9 @@ pub(super) fn prepare(
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,
@@ -472,6 +472,7 @@ impl PreparedXml {
         let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program,
+            app: "tblastn",
             version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
@@ -761,7 +762,7 @@ impl PreparedXml {
             // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
             // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, "tblastn")?
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.app)?
             {
                 posts.caught(post);
             }

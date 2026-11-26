@@ -99,6 +99,11 @@ t_nul.doms	compare	-	-	-i t_nul.asn -d data -t doms
 t_tab_title2.doms	compare	-	-	-i t_tab_title2.asn -d data -t doms
 t_tab_delayed.doms	compare	-	-	-i t_tab_delayed.asn -d data -t doms
 t_cr_typed.doms	compare	-	-	-i t_cr_typed.asn -d data -t doms
+annot_title_prot.doms	compare	-	-	-i annot_title_prot.asn -d data -t doms
+annot_title_prot.full	compare	-	-	-i annot_title_prot.asn -d data -m full
+annot_title_na.doms	compare	-	-	-i annot_title_na.asn -d data -t doms
+refuse_annot_null.doms	refuse	-	-	-i refuse_annot_null.asn -d data -t doms
+refuse_ftable_null.doms	refuse	-	-	-i refuse_ftable_null.asn -d data -t doms
 d_acc0	compare	-	data-with:d_acc0	-i arch/three.asn -d d_acc0 -m rep -t doms -f
 d_annot10	compare	-	data-with:d_annot10	-i arch/three.asn -d d_annot10 -m rep -t doms -f
 d_bs12	compare	-	data-with:d_bs12	-i arch/three.asn -d d_bs12 -m rep -t doms -f

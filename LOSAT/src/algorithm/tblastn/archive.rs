@@ -27,6 +27,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{OptionInputs, RequestKind};
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -41,7 +43,7 @@ use crate::utils::seg::SegParams;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for TblastnArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -71,7 +73,10 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.xdrop_gap = args.xdrop_gap;
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
@@ -91,19 +96,22 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = args.soft_masking;
-    inputs.seg = args
-        .seg
-        .as_deref()
-        .and_then(crate::report::archive::options::seg_filter);
+    inputs.seg = args.seg.as_deref().and_then(|v| {
+        crate::report::archive::options::seg_filter(crate::utils::os_bytes::os_str_bytes(v))
+    });
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
-    if let Ok((mode, _)) =
-        crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, false, false)
-    {
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
+    if let Ok((mode, _)) = crate::blastinput::app::parse_comp_based_stats(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+        false,
+        false,
+    ) {
         inputs.comp_based_stats = mode as i32;
     }
     inputs
@@ -123,7 +131,7 @@ pub(crate) fn handle_for(
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }
@@ -434,6 +442,157 @@ pub(super) fn write_tblastn_archives(
             &mut *warnings.sink,
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:123-128
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// tblastn's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options.
+impl import::StrategyArgs for TblastnArgs {
+    const PROGRAM: Program = Program::Tblastn;
+
+    fn runs(program: EProgram) -> bool {
+        program == EProgram::Tblastn
+    }
+
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some() && self.import.is_none()
+    }
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("tblastn")? {
+            crate::cli::Commands::Tblastn(args) => Ok(args),
+            _ => unreachable!("the arguments of tblastn"),
+        }
+    }
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: None,
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: self.id_scope,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            html: self.html,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(|n| n as i64),
+            formatting: self.formatting,
+            num_threads: self.num_threads as i64,
+            mt_mode: self.mt_mode,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: false,
+            mb_index: import::MbIndexRequest::None,
+        }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.id_scope = kept.id_scope;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.html = kept.html;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| usize::try_from(n).unwrap_or(0));
+        self.formatting = kept.formatting;
+        self.num_threads = usize::try_from(kept.num_threads).unwrap_or(1);
+        self.mt_mode = kept.mt_mode;
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn set_task(&mut self, task: &str) {
+        self.task = task.to_string();
+    }
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
+        let program = Program::Tblastn.name();
+        match setter {
+            Setter::EvalueThreshold(v) => self.evalue = Some(*v),
+            Setter::WordSize(n) => self.word_size = Some(*n),
+            Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
+            Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => self.xdrop_gap_final = Some(*v),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
+            Setter::MaxHspsPerSubject(n) => {
+                self.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
+            }
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
+            Setter::GappedMode(gapped) => self.ungapped = !*gapped,
+            Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
+            Setter::DbGeneticCode(n) => {
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
+            }
+            Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
+            Setter::SmithWatermanMode(false) | Setter::OutOfFrameMode(false) => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Tblastn.name();
+        collected.no_dust(program)?;
+        collected.no_repeat(program)?;
+        collected.no_nucleotide_algorithms(program)?;
+        if let Some(value) = collected.seg.value() {
+            self.seg = Some(value.into());
+        }
+        if let Some(value) = collected.composition_value(false, program)? {
+            self.comp_based_stats = value.into();
+        }
+        Ok(())
+    }
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Tblastn(self)
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKLV" } }
+      }
+    }

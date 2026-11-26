@@ -1,0 +1,2 @@
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+BLAST engine error: Empty CBlastQueryVector

@@ -72,7 +72,7 @@ Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the
 
 ## What LOSAT refuses
 
-`rpsbproc` refuses inputs on which NCBI's program reads outside its buffers or crashes. Examples are motif checks that depend on bytes past a site, sites outside the query, and archives with parts LOSAT does not read, such as Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg`. It also refuses file names that are not UTF-8 and a `[datafiles]` entry in a registry file. For the full list, see [What LOSAT refuses](../refusals.md).
+`rpsbproc` refuses inputs on which NCBI's program reads outside its buffers or crashes. Examples are motif checks that depend on bytes past a site, sites outside the query, and archives with parts LOSAT does not read, such as Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg`. It also refuses a `[datafiles]` entry in a registry file. For the full list, see [What LOSAT refuses](../refusals.md).
 
 ## Examples
 

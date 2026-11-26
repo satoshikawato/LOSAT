@@ -94,8 +94,8 @@ fn archive_format_is_read_like_print_archive() {
 fn a_request_tells_whether_its_strings_are_written_as_they_are() {
     let as_is = |encoding, path: Option<&str>, db: Option<&str>| {
         let mut inputs = OptionInputs::new(Program::Blastn, "megablast");
-        inputs.window_masker_db = path.map(str::to_string);
-        ArchiveRequest::for_inputs(&inputs, db).written_as_is(encoding)
+        inputs.window_masker_db = path.map(|s| s.as_bytes().to_vec());
+        ArchiveRequest::for_inputs(&inputs, db.map(str::as_bytes)).written_as_is(encoding)
     };
     for encoding in [
         ArchiveEncoding::Text,
@@ -227,7 +227,7 @@ fn the_search_space_option_carries_over_unsearched_batches() {
 /// The `EffectiveSearchSpace` option among a request's sets.
 pub(super) fn search_space(sets: &[options::Param]) -> Option<i64> {
     sets.iter()
-        .find(|param| param.name == "EffectiveSearchSpace")
+        .find(|param| param.name() == "EffectiveSearchSpace")
         .map(|param| match param.value {
             options::ParamValue::BigInteger(space) => space,
             ref other => panic!("EffectiveSearchSpace {other:?}"),
@@ -243,19 +243,13 @@ fn the_handle_sets_fold_in_ncbis_order() {
     let handle = OptionsHandle::default();
     handle
         .set_search_sets(
-            vec![Param {
-                name: "CompositionBasedStats",
-                value: ParamValue::Integer(0),
-            }],
+            vec![Param::new(
+                fields::COMPOSITION_BASED_STATS,
+                ParamValue::Integer(0),
+            )],
             vec![
-                Param {
-                    name: "DbLength",
-                    value: ParamValue::BigInteger(560),
-                },
-                Param {
-                    name: "MatrixName",
-                    value: ParamValue::Str("BLOSUM62".to_string()),
-                },
+                Param::new(fields::DB_LENGTH, ParamValue::BigInteger(560)),
+                Param::new(fields::MATRIX_NAME, ParamValue::Str(b"BLOSUM62".to_vec())),
             ],
         )
         .unwrap();
@@ -265,7 +259,7 @@ fn the_handle_sets_fold_in_ncbis_order() {
         handle
             .request_sets(carry)
             .iter()
-            .map(|param| param.name)
+            .map(|param| param.name())
             .collect()
     };
     assert_eq!(names(&carry), ["CompositionBasedStats"]);
@@ -416,7 +410,7 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
     ] {
         let handle = ArchiveHandle::new(
             encoding,
-            ArchiveRequest::for_inputs(&inputs, Some("in/db/bp")),
+            ArchiveRequest::for_inputs(&inputs, Some(b"in/db/bp")),
             OptionsHandle::default(),
         );
         let batch = BatchArchive {
@@ -498,7 +492,7 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
     let archive = |database: Option<&str>, round: Option<writer::ArchiveRound>| {
         let handle = ArchiveHandle::new(
             ArchiveEncoding::Text,
-            ArchiveRequest::for_inputs(&inputs, database),
+            ArchiveRequest::for_inputs(&inputs, database.map(str::as_bytes)),
             OptionsHandle::default(),
         );
         let batch = BatchArchive {

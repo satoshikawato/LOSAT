@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::bitmagic::{self, BitVector, Fail};
 use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
-use super::{Event, Indexer, Refusal, Stop};
+use super::{Event, Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 // `ThrowUnassigned`, the getter of a member that is not set: the get check that
 // `SERIAL_VERIFY_DATA_GET` turns off (the refusal of `super::index_entry`).

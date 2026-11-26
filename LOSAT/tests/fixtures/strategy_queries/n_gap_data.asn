@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "gapdata" }, inst { repr raw, mol na, length 4, seq-data gap { type unknown } } }
+      }
+    }

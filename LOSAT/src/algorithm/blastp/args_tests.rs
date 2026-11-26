@@ -19,6 +19,20 @@ fn task_check_reads_the_name_as_ncbis_options_factory() {
     assert_eq!(message("BlastQ"), "'blastq' is not a supported task");
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+// A search strategy can carry a negative `WindowSize` (the command line takes 0 and more) and NCBI
+// runs it: the resolved window keeps the sign (the report's footer prints it, and the search is
+// one-hit), where it was 0.
+#[test]
+fn a_negative_window_of_a_strategy_resolves_signed() {
+    let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
+    let TestCommand::Blastp(mut args) = cli.command;
+    for window in [-1, -40, i32::MIN] {
+        args.window_size = Some(window);
+        assert_eq!(args.resolve().unwrap().window_size, window);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
 // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).
 #[test]
@@ -39,7 +53,11 @@ fn the_database_name_loses_the_white_space_at_its_ends() {
         ("   ", ""),
         ("\u{a0}db", "\u{a0}db"),
     ] {
-        assert_eq!(resolved_name(given).as_deref(), Some(kept), "{given:?}");
+        assert_eq!(
+            resolved_name(given).as_deref(),
+            Some(kept.as_bytes()),
+            "{given:?}"
+        );
     }
 }
 

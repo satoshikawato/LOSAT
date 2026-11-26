@@ -708,3 +708,120 @@ fn the_grammar_names_are_the_tables() {
     assert_eq!(values(member(named::SEQ_INST, "mol")), SEQ_INST_MOL);
     assert_eq!(values(member(named::SEQ_ALIGN, "type")), SEQ_ALIGN_TYPE);
 }
+
+// `GetDescrTitleFromBioseq` (biodata_core.cpp:297-366) on title-less annotated queries: protein
+// (`aa`, `not-set`, `other`) takes the first `Prot-ref.name` element (skipping non-prot features,
+// `Prot-ref` without `name`, and empty `name {}`, stopping at empty `""`); nucleotide (`dna`,
+// `rna`, `na`) takes `Gene-ref.desc` (skipping non-gene features and `Gene-ref` without `desc`,
+// stopping at empty `""`); bytes outside 0x20..0x7E are replaced with `#` and post 803.7; a
+// `NULL` `Seq-annot` or `Seq-feat` reached before a match records `AnnotTitle::NullElement`,
+// while one after a match or with a `title` descriptor does not.
+#[test]
+fn annot_title_extraction_and_posts() {
+    let make = |mol: &str, descr: &str, annot: &str| -> Vec<u8> {
+        let mut s = String::from(
+            "Blast4-archive ::= {\n  request {\n    ident \"2.17.0+\",\n    body queue-search {\n\
+             program \"blastp\",\n      service \"rpsblast\",\n      queries bioseq-set {\n\
+             seq-set {\n          seq {\n            id { local str \"Query_1\" },\n",
+        );
+        if !descr.is_empty() {
+            s.push_str(&format!("            descr {{ {descr} }},\n"));
+        }
+        s.push_str(&format!(
+            "            inst {{ repr raw, mol {mol}, length 4, seq-data ncbieaa \"MKTW\" }},\n\
+             annot {{ {annot} }}\n          }}\n        }}\n      }},\n\
+             subject database \"Cdd\"\n    }}\n  }},\n  results {{ alignments {{}} }}\n}}\n"
+        ));
+        s.into_bytes()
+    };
+    let read_one = |bytes: &[u8]| -> (Query, Vec<String>) {
+        let (mut objs, posts) = read_with_posts(bytes);
+        assert_eq!(objs.len(), 1);
+        let archive = objs.pop().unwrap().unwrap();
+        let RequestBody::QueueSearch(search) = archive.body else {
+            panic!("queue-search");
+        };
+        let Queries::BioseqSet(mut entries) = search.queries else {
+            panic!("bioseq-set");
+        };
+        let SeqEntry::Seq(query) = entries.pop().unwrap() else {
+            panic!("seq");
+        };
+        (query, posts)
+    };
+
+    // Protein: skips locs, gene, prot without name, prot with empty name {}, takes first name.
+    let (q, posts) = read_one(&make(
+        "aa",
+        "name \"ignored\"",
+        "{ data locs {} }, { data ftable { \
+         { data gene { desc \"g\" }, location null NULL }, \
+         { data prot { desc \"d\" }, location null NULL }, \
+         { data prot { name {} }, location null NULL }, \
+         { data prot { name { \"alpha\", \"beta\" } }, location null NULL, title \"feat-title\" }, \
+         NULL } }, NULL",
+    ));
+    assert_eq!(q.annot_title, AnnotTitle::Title(b"alpha".to_vec()));
+    assert!(posts.is_empty());
+
+    // Protein: empty first name wins and stops before later prot feature.
+    let (q, _) = read_one(&make(
+        "aa",
+        "",
+        "{ data ftable { \
+         { data prot { name { \"\", \"second\" } }, location null NULL }, \
+         { data prot { name { \"later\" } }, location null NULL } } }",
+    ));
+    assert_eq!(q.annot_title, AnnotTitle::Title(Vec::new()));
+
+    // Protein with non-visible byte in Prot-ref.name: replaced with '#' and 803.7 posted.
+    let mut bad_prot = make(
+        "aa",
+        "",
+        "{ data ftable { { data prot { name { \"aXb\" } }, location null NULL } } }",
+    );
+    let pos = bad_prot.windows(3).position(|w| w == b"aXb").unwrap() + 1;
+    bad_prot[pos] = 0xE9;
+    let (q, posts) = read_one(&bad_prot);
+    assert_eq!(q.annot_title, AnnotTitle::Title(b"a#b".to_vec()));
+    assert_eq!(posts.len(), 1);
+    assert!(
+        posts[0].contains("seq.annot.E.data.ftable.E.data.prot.name.E\nBad char [0xE9]"),
+        "{:?}",
+        posts
+    );
+
+    // DNA/RNA/NA take Gene-ref.desc; not-set and other take Prot-ref.name.
+    for mol in ["dna", "rna", "na"] {
+        let (q, _) = read_one(&make(
+            mol,
+            "",
+            "{ data ftable { \
+             { data prot { name { \"p\" } }, location null NULL }, \
+             { data gene { locus \"loc\" }, location null NULL }, \
+             { data gene { desc \"gdesc\" }, location null NULL } } }",
+        ));
+        assert_eq!(q.annot_title, AnnotTitle::Title(b"gdesc".to_vec()), "{mol}");
+    }
+    for mol in ["not-set", "other"] {
+        let (q, _) = read_one(&make(
+            mol,
+            "",
+            "{ data ftable { \
+             { data gene { desc \"gdesc\" }, location null NULL }, \
+             { data prot { name { \"pname\" } }, location null NULL } } }",
+        ));
+        assert_eq!(q.annot_title, AnnotTitle::Title(b"pname".to_vec()), "{mol}");
+    }
+
+    // Empty title descriptor wins even when annot has NULL.
+    let (q, _) = read_one(&make("aa", "title \"\"", "NULL"));
+    assert_eq!(q.title, Some(Vec::new()));
+    assert_eq!(q.annot_title, AnnotTitle::None);
+
+    // NULL Seq-annot or Seq-feat before a match records NullElement.
+    let (q, _) = read_one(&make("aa", "", "NULL"));
+    assert!(matches!(q.annot_title, AnnotTitle::NullElement(_)));
+    let (q, _) = read_one(&make("aa", "", "{ data ftable { NULL } }"));
+    assert!(matches!(q.annot_title, AnnotTitle::NullElement(_)));
+}

@@ -31,7 +31,6 @@ pub(crate) fn ncbi_effective_threads(num_threads: usize) -> usize {
     num_threads.min(cpus)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173

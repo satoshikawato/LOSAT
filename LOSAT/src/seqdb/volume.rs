@@ -302,6 +302,19 @@ impl Volume {
         self.index.sequence_range(oid)
     }
 
+    /// Opens the volume's sequence file and refuses 0-byte files where NCBI maps a null pointer.
+    fn open_non_empty_seq_file(&self) -> Result<&DbFile, SeqDbError> {
+        let file = self.seq_file()?;
+        if file.is_empty() {
+            return Err(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
+                    .to_string(),
+            });
+        }
+        Ok(file)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:755-758
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
@@ -330,7 +343,7 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:694-710
     /// Relative index of the first nucleotide in `first..end` whose NCBI `x_GetSequence` length is
     /// negative, or `None`. Validates only the `file[start + whole_bytes]` byte NCBI reads when
     /// `whole_bytes` is negative or overflows 32-bit `whole_bytes * 4`.
@@ -350,17 +363,9 @@ impl Volume {
         for (i, &amb) in amb_offsets.iter().enumerate() {
             let start = seq_offsets[i];
             let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
-            if whole_bytes < 0 {
+            if whole_bytes < 0 || whole_bytes >= (1 << 29) {
                 let last_pos = i64::from(start) + i64::from(whole_bytes);
-                let file = self.seq_file()?;
-                if file.is_empty() {
-                    return Err(SeqDbError::NcbiCrashes {
-                        path: file.path().to_path_buf(),
-                        message:
-                            "the sequence file has no bytes, which NCBI maps as a null pointer"
-                                .to_string(),
-                    });
-                }
+                let file = self.open_non_empty_seq_file()?;
                 if last_pos < 0 {
                     return Err(SeqDbError::NcbiCrashes {
                         path: file.path().to_path_buf(),
@@ -371,19 +376,9 @@ impl Volume {
                         ),
                     });
                 }
-                file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
-                return Ok(Some(i as u32));
-            }
-            if whole_bytes >= (1 << 29) {
-                let last_pos = i64::from(start) + i64::from(whole_bytes);
-                let file = self.seq_file()?;
-                if file.is_empty() {
-                    return Err(SeqDbError::NcbiCrashes {
-                        path: file.path().to_path_buf(),
-                        message:
-                            "the sequence file has no bytes, which NCBI maps as a null pointer"
-                                .to_string(),
-                    });
+                if whole_bytes < 0 {
+                    file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
+                    return Ok(Some(i as u32));
                 }
                 let last = file.with_range(last_pos as u64, last_pos as u64 + 1, |b| b[0])?;
                 let len_i32 = whole_bytes
@@ -397,7 +392,6 @@ impl Volume {
         Ok(None)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
     /// Opens the volume's sequence file (matching `x_OpenSeqFile` before `x_GetSequence`) and
     /// returns an empty `SequenceBlock` marked `stopped_at_negative`.
@@ -406,19 +400,12 @@ impl Volume {
         first_ordinal: u32,
         first_oid: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        let file = self.seq_file()?;
-        if file.is_empty() {
-            return Err(SeqDbError::NcbiCrashes {
-                path: file.path().to_path_buf(),
-                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
-                    .to_string(),
-            });
-        }
+        let path = self.open_non_empty_seq_file()?.path().to_path_buf();
         Ok(SequenceBlock::empty_stopped(
             self.index.seqtype,
             first_ordinal,
             first_oid,
-            file.path().to_path_buf(),
+            path,
         ))
     }
 
@@ -436,7 +423,6 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1804
-    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:755-758
     /// Opens `.psq` and returns NCBI's `x_GetSequence` signed 32-bit length for protein `oid`
     /// (volume-relative). When `length <= 0`, NCBI performs only pointer arithmetic without
     /// dereferencing `.psq`; when `length > 0`, `start == 0` is refused because the consumer reads
@@ -447,15 +433,9 @@ impl Volume {
             self.index.seqtype == SeqType::Protein,
             "protein sequence length of a nucleotide volume"
         );
-        let (start, end) = self.protein_seq_bounds(oid)?;
-        let file = self.seq_file()?;
-        if file.is_empty() {
-            return Err(SeqDbError::NcbiCrashes {
-                path: file.path().to_path_buf(),
-                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
-                    .to_string(),
-            });
-        }
+        let bounds = self.protein_seq_bounds(oid)?;
+        let (start, end) = bounds;
+        let file = self.open_non_empty_seq_file()?;
         let len = (end as i32).wrapping_sub(1).wrapping_sub(start as i32);
         if len <= 0 {
             return Ok(len);
@@ -500,14 +480,7 @@ impl Volume {
         );
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.sequence_range(oid)?;
-        let file = self.seq_file()?;
-        if file.is_empty() {
-            return Err(SeqDbError::NcbiCrashes {
-                path: file.path().to_path_buf(),
-                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
-                    .to_string(),
-            });
-        }
+        let file = self.open_non_empty_seq_file()?;
         let len = (end as i32).wrapping_sub(1).wrapping_sub(start as i32);
         if len <= 0 {
             return Ok(());
@@ -859,13 +832,7 @@ impl Volume {
         // iteration in multithreaded DB-split mode (`seqdbimpl.cpp:699-707`), length 0 is skipped
         // in both single-thread and multithreaded modes, and positive length with `start == 0` is
         // refused because the consumer reads the leading sentinel before the mapping.
-        if file.is_empty() {
-            return Err(SeqDbError::NcbiCrashes {
-                path: file.path().to_path_buf(),
-                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
-                    .to_string(),
-            });
-        }
+        let file = self.open_non_empty_seq_file()?;
         let count = seq_offsets.len() - 1;
         let mut data = vec![0u8];
         let mut packed_offsets = Vec::with_capacity(seq_offsets.len());
@@ -951,8 +918,7 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841
     /// [`Self::read_nucleotide_search_block_mt`] reusing the caller's buffer `kept`.
     pub(super) fn x_read_nucleotide_search_block_into_mt(
         &self,
@@ -973,7 +939,7 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841,2350-2363
     /// [`Self::read_nucleotide_search_block_mt`] into a mapped buffer for traceback / retrieval.
     pub(super) fn x_read_nucleotide_search_block_mapped(
         &self,
@@ -992,8 +958,7 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1839
     fn read_nucleotide_search_block_in(
         &self,
         first: u32,
@@ -1034,8 +999,8 @@ impl Volume {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841,2350-2363
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841,2358-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
     fn read_nucleotide_irregular_block(
         &self,
         first_ordinal: u32,
@@ -1044,14 +1009,7 @@ impl Volume {
         amb_offsets: &[u32],
         stop_at_negative: bool,
     ) -> Result<SequenceBlock, SeqDbError> {
-        let file = self.seq_file()?;
-        if file.is_empty() {
-            return Err(SeqDbError::NcbiCrashes {
-                path: file.path().to_path_buf(),
-                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
-                    .to_string(),
-            });
-        }
+        let file = self.open_non_empty_seq_file()?;
         let count = seq_offsets.len() - 1;
         let mut data = Vec::new();
         let mut packed_seq = Vec::with_capacity(seq_offsets.len());
@@ -2846,13 +2804,12 @@ impl SequenceBlock {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
-    /// Marks this block as having stopped a multithreaded DB-split scan at a negative-length OID.
+    /// Marks this block as having stopped a multithreaded DB-split scan at a negative-length OID
+    /// (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
     pub(super) fn set_stopped_at_negative(&mut self, stopped: bool) {
         self.stopped_at_negative = stopped;
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
     /// Whether a multithreaded DB-split scan stopped at a negative-length sequence before the
     /// end of the requested range (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
     pub fn stopped_at_negative(&self) -> bool {

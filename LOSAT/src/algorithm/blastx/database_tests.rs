@@ -376,12 +376,21 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
         gi_mask_name: None,
         randomize: false,
     };
+    let now = crate::writedb::time::LocalTime {
+        year: 2026,
+        month: 11,
+        day: 25,
+        hour: 12,
+        minute: 0,
+        second: 0,
+        unix_seconds: 1_795_575_600,
+    };
     let (mut log, mut messages) = (Vec::new(), Vec::new());
     let mut fasta: &[u8] = b">\nMDIVWSTFSARIQFAQYVPP\n";
     let status = crate::writedb::makeblastdb::run_with(
         &bare_args,
         &ApplicationSettings::default(),
-        None,
+        Some(&now),
         crate::writedb::Platform::host(),
         &mut fasta,
         &mut log,

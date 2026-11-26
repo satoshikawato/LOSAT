@@ -1076,6 +1076,70 @@ fn write_subject_part<'h, W: Write>(
     }
 }
 
+/// One subject's alignments in a BLASTP or PSIBLAST pairwise report (`BlastpSections::subject`
+/// and `psiblast_round::RoundSections::subject`): an unreadable query's skipped lines, or the
+/// subject's heading (`group_heading`) and HSPs (`write_hsp_info` + `write_alignment`).
+#[allow(clippy::too_many_arguments)]
+fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
+    writer: &mut W,
+    probe: Option<&mut FormatProbe<'_>>,
+    config: &PairwiseConfig,
+    database: bool,
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    subject_sources: &[super::defline::SourceTaxname],
+    loads: &crate::report::db_subject::HitLoads,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    s_idx: u32,
+    part: std::ops::Range<usize>,
+    row_masks: HtmlRowMasks<'_>,
+    place: super::query_warnings::ReportHook<'_, W>,
+) -> io::Result<()> {
+    if let Some(id) = config.unreadable_query_id(parsed_subjects, s_idx) {
+        return write_database_subject_alignments_part(
+            writer,
+            probe,
+            DatabaseHeading::Skipped(&id),
+            true,
+            parsed_subjects,
+            None,
+            s_idx,
+            &group.subject_hits[&s_idx],
+            &group.subject_hit_indices[&s_idx],
+            part,
+            None,
+            place,
+            |_, _, _| unreachable!("a skipped alignment is written by its line"),
+        );
+    }
+    write_subject_part(
+        writer,
+        probe,
+        group,
+        s_idx,
+        part,
+        true,
+        config.html.as_ref(),
+        parsed_subjects,
+        None,
+        |subject| {
+            group_heading(
+                group,
+                parsed_subjects,
+                subject_sources,
+                database,
+                true,
+                thrown_load(loads, parsed_subjects, subject).is_some(),
+                subject,
+            )
+        },
+        place,
+        |writer, hit, hsp_index| {
+            write_hsp_info(writer, hit, config)?;
+            write_alignment(writer, hit, row_masks.of(hsp_index), config)
+        },
+    )
+}
+
 /// The heading `lines` of a subject (each line ending with a newline), `Length=` when the length
 /// is known, and one blank line.
 fn write_heading_lines<W: Write>(
@@ -3810,52 +3874,19 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
-        let config = self.config;
-        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
-            return write_database_subject_alignments_part(
-                writer,
-                probe,
-                DatabaseHeading::Skipped(&id),
-                true,
-                self.parsed_subjects,
-                None,
-                s_idx,
-                &group.subject_hits[&s_idx],
-                &group.subject_hit_indices[&s_idx],
-                part,
-                None,
-                place,
-                |_, _, _| unreachable!("a skipped alignment is written by its line"),
-            );
-        }
-        let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
-        let database = self.database.is_some();
-        write_subject_part(
+        write_blastp_subject_part(
             writer,
             probe,
+            self.config,
+            self.database.is_some(),
+            self.parsed_subjects,
+            self.subject_sources,
+            self.loads,
             group,
             s_idx,
             part,
-            true,
-            config.html.as_ref(),
-            parsed,
-            None,
-            |subject| {
-                group_heading(
-                    group,
-                    parsed,
-                    sources,
-                    database,
-                    true,
-                    self.thrown(subject).is_some(),
-                    subject,
-                )
-            },
+            self.row_masks,
             place,
-            |writer, hit, hsp_index| {
-                write_hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, self.row_masks.of(hsp_index), config)
-            },
         )
     }
 
@@ -4180,23 +4211,15 @@ fn write_description_table<W: Write>(
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
         super::x_pairwise_par::end_here(end, index)?;
         let bits = format_bitscore_ncbi(table_scores(*best).0);
-        match html {
-            None => {
-                label_of(*s_idx).write_cut(writer)?;
-                write!(writer, "  {bits:<max_score$}")?;
-            }
-            Some(html) => {
-                let rank = (*s_idx, index + 1);
-                html.write_start(
-                    writer,
-                    &label_of(*s_idx),
-                    rank,
-                    &bits,
-                    max_score,
-                    &mut *place,
-                )?;
-            }
-        }
+        write_description_row_start(
+            writer,
+            &label_of(*s_idx),
+            (*s_idx, index + 1),
+            &bits,
+            max_score,
+            html,
+            &mut *place,
+        )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-956
         if let Some(values) = values {
             write!(
@@ -4441,6 +4464,27 @@ impl DescriptionLabel {
         } else {
             write_spaces(writer, 68 - id - title)
         }
+    }
+}
+
+/// The label and bit-score columns of one description row (`write_description_table` and
+/// `psiblast_round::RoundSections::write_part`): plain (`DescriptionLabel::write_cut` and the
+/// score), or `-html` (`HtmlRows::write_start`).
+fn write_description_row_start<W: Write>(
+    writer: &mut W,
+    label: &DescriptionLabel,
+    rank: (u32, usize),
+    bits: &str,
+    max_score: usize,
+    html: Option<HtmlRows<'_>>,
+    place: super::query_warnings::ReportHook<'_, W>,
+) -> io::Result<()> {
+    match html {
+        None => {
+            label.write_cut(writer)?;
+            write!(writer, "  {bits:<max_score$}")
+        }
+        Some(html) => html.write_start(writer, label, rank, bits, max_score, place),
     }
 }
 

@@ -522,10 +522,6 @@ impl PreparedXml {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {
                 warnings.before_query(q_idx, &mut *writer)?;
-                // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
-                if q_idx < self.texts.len() {
-                    warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
-                }
             }
             // How NCBI shows the query's result (`query_batch::XmlShow`).
             let show = crate::blastinput::query_batch::xml_show_of(
@@ -632,7 +628,7 @@ impl PreparedXml {
                     // time (nothing for the other formats).
                     posts.hit(sink.position(), &hit, first as u32, |texts| {
                         if posting {
-                            taxdb_printer.at_names((q_idx, first), names, texts)
+                            taxdb_printer.at_names(names, texts)
                         } else {
                             Ok(())
                         }

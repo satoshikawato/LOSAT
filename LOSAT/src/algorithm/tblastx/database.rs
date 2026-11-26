@@ -163,11 +163,6 @@ impl TblastxDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
-    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
-    pub(crate) fn open_for_tabular_rows(&self) -> Result<()> {
-        self.taxdb.open_for_rows(&self.db, PROGRAM)
-    }
-
     /// Whether the database has parsed Seq-ids, whose subjects NCBI's prefetch can fail at
     /// (`batch_prefetch`).
     pub(crate) fn parsed_seqids(&self) -> bool {
@@ -329,49 +324,18 @@ impl TblastxDatabase {
     /// (`common::database::read_reported_taxonomy`: the taxid, `sciname`, and the taxonomy
     /// database's refusals before any byte). Only the ranks that the reports load are read
     /// (`ReportedSubjects::loads`: not the subject of a `Hit` that throws, nor those after it in a
-    /// query's report, which NCBI never loads, so that the taxonomy database's one-time texts go
-    /// with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
-    ///
-    /// `(ordered, queries, spans, format)`: the reported hits in report order (subjects by rank) of
-    /// `queries` queries, the queries of each batch and the run's first format, for NCBI's loads by batch
-    /// (`shared::XmlBatchLoads`, `batches_prefetch`; asked only where they decide the texts).
-    pub(crate) fn read_taxids(
-        &self,
-        reported: &ReportedSubjects,
-        (ordered, queries, spans, format): (
-            &[TblastxHsp],
-            usize,
-            &[std::ops::Range<usize>],
-            shared::PrefetchFormat,
-        ),
-    ) -> Result<XmlTaxa> {
+    /// query's report, which NCBI never loads; review 1 of DBID pfoff-1, H1). The texts of the
+    /// loads are the batches' prefetches' or reads', modelled before this call.
+    pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len())
             .filter(|rank| reported.loads.loaded(*rank))
             .collect();
-        // Each query's `Hit`s: its hits' subjects, each once, in order.
-        let batches = || {
-            shared::XmlBatchLoads::of(
-                queries,
-                spans,
-                &batches_prefetch(format, ordered, queries, spans),
-                &reported.loads,
-                |query| {
-                    let mut seen = std::collections::HashSet::new();
-                    query_hits(ordered, query..query + 1)
-                        .iter()
-                        .map(|hsp| hsp.hit.s_idx as usize)
-                        .filter(|&rank| seen.insert(rank))
-                        .collect()
-                },
-            )
-        };
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
             &reported.ordinals,
             &ranks,
             &reported.parsed,
-            &batches,
             PROGRAM,
         )?;
         Ok(XmlTaxa {
@@ -600,7 +564,7 @@ pub(crate) fn subject_read_texts(
     database: &TblastxDatabase,
     ordinals: Vec<u32>,
     titles: &DatabaseTitles,
-    rows_open: bool,
+    rows: shared::RowLookups,
 ) -> Result<crate::report::query_warnings::QueryReads> {
     let parsed = |ordinal: u32| match titles.get(&ordinal) {
         Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -609,46 +573,26 @@ pub(crate) fn subject_read_texts(
     let subjects = ordinals
         .into_iter()
         .map(|ordinal| (ordinal, ordinal, parsed(ordinal)));
-    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
+    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows, PROGRAM)
 }
 
-/// The XML2 and JSON formats, a batch whose prefetch is off, whose reported hits are `ordered` (in
-/// report order, by ordinal id, each HSP's `q_idx` counted from the batch's first query `start`):
-/// each query's report's `Hit` loads (`shared::scope_utf8_hit_reads`), into `reads` by query of the
-/// run.
-pub(crate) fn scope_utf8_hit_reads(
+/// The open of the taxonomy database by the rows `rows` of the hits `hits` (by ordinal id) after
+/// their batch's prefetch (`shared::RowLookups::open_after_prefetch`).
+pub(crate) fn open_for_rows<'h>(
     database: &TblastxDatabase,
-    ordered: &[TblastxHsp],
+    rows: shared::RowLookups,
+    hits: impl IntoIterator<Item = &'h TblastxHsp>,
     titles: &DatabaseTitles,
-    start: usize,
-    after: Option<crate::report::db_subject::RunThrow>,
-    reads: &mut Vec<crate::report::query_warnings::QueryReads>,
-) {
-    if !database.db.scope_utf8_seen() {
-        return;
-    }
-    let parsed = |ordinal: u32| match titles.get(&ordinal) {
-        Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
-        _ => None,
-    };
-    let mut from = 0;
-    while from < ordered.len() {
-        let query = ordered[from].hit.q_idx;
-        let to = from + ordered[from..].partition_point(|hsp| hsp.hit.q_idx == query);
-        let subjects = ordered[from..to]
-            .iter()
-            .map(|hsp| (hsp.hit.s_idx, hsp.hit.s_idx, parsed(hsp.hit.s_idx)));
-        let query_reads =
-            shared::scope_utf8_hit_reads(&database.db, &database.taxdb, after, subjects, PROGRAM);
-        if !query_reads.is_empty() {
-            let index = start + query as usize;
-            if reads.len() <= index {
-                reads.resize_with(index + 1, Vec::new);
-            }
-            reads[index] = query_reads;
-        }
-        from = to;
-    }
+) -> Result<()> {
+    let subjects = hits.into_iter().map(|hsp| {
+        let ordinal = hsp.hit.s_idx;
+        let parsed = match titles.get(&ordinal) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        (ordinal, parsed)
+    });
+    rows.open_after_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
 }
 
 /// The ordinal ids of the subjects that one query's report reads one by one, in the order of its
@@ -740,51 +684,6 @@ pub(crate) fn batch_prefetch(
         &database.db,
         &database.taxdb,
         loaded_subjects(before, titles),
-        prefetch_subjects(ordered, titles),
-        PROGRAM,
-        queries,
-    )
-}
-
-/// The stop of NCBI's prefetch of the query batch of `queries` whose reported hits are
-/// `ordered`, for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-/// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
-/// whose reported hits are `before` (by ordinal id; `before_queries` queries, those of each batch
-/// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
-/// alone, of `batches_prefetch`, the reports' own answer, with `after`, the first format
-/// `format`, and the hits' engine
-/// `identities`, `hit_identities`; review 2 of line DBID pfoff-1, N-M2), which TBLASTX writes
-/// after the stop (the XML formats are not streamed, `report_stream`). `Ok`: the warning of a
-/// UTF8String header that a load of a batch that does not stop posts
-/// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn batch_prefetch_stop(
-    database: &TblastxDatabase,
-    before: &[TblastxHsp],
-    before_queries: usize,
-    before_spans: &[std::ops::Range<usize>],
-    (after, format): (
-        crate::report::db_subject::FormatThrow,
-        shared::PrefetchFormat,
-    ),
-    identities: &dyn Fn(&TblastxHsp) -> usize,
-    ordered: &[TblastxHsp],
-    titles: &DatabaseTitles,
-    queries: &shared::PrefetchQueries<'_>,
-) -> Result<Vec<u8>> {
-    let prefetch = batches_prefetch(format, before, before_queries, before_spans);
-    let loads = hit_loads(
-        before,
-        &prefetch,
-        (after, None, database.taxdb.calls_before()),
-        titles,
-        identities,
-    );
-    shared::held_batch_prefetch_stop(
-        &database.db,
-        &database.taxdb,
-        prefetch_subjects(before, titles).filter(|subject| loads.loaded(subject.ordinal as usize)),
-        std::iter::empty(),
         prefetch_subjects(ordered, titles),
         PROGRAM,
         queries,
@@ -916,8 +815,8 @@ pub(crate) struct ReportedSubjects {
 
 /// What the XML2 and JSON reports of the reported hits `ordered` (in report order, subjects named
 /// by ordinal id) do at each subject's `Hit` (`HitLoads::of`, the one answer, by ordinal id):
-/// `prefetch` tells by the hits' query index whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `after` what the formats do after a subject whose lookup
+/// `prefetch` tells by the hits' query index whether its batch loads one by one
+/// (`BatchPrefetch::report_read`), `after` what the formats do after a subject whose lookup
 /// throws (`FormatThrow::of_outfmts`), `identities` the engine's identities of a hit
 /// (`hit_identities`), which tell whether a row of `nident` alone reads its subject; the `Hit`s
 /// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other),
@@ -997,8 +896,8 @@ pub(crate) fn hit_identities(
 
 /// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
 /// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads` and the
-/// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
-/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2),
+/// run's `RunLoads`): the reports (`reported_subjects`) ask it of the run's formats alike (review 2
+/// of line DBID pfoff-1, N-M2),
 /// with the call's refusal over the `-outfmt` values of its other searches, `others`
 /// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
 /// (`TblastxArgs::html_links`, which the writer's `PairwiseConfig::html` gets too).
@@ -1039,18 +938,23 @@ pub(crate) fn pairwise_reading(
 }
 
 /// What one query's report of the hits `ordered` (in report order) loads where its batch's
-/// prefetch is off (`RunLoads::loads` of that report alone, by ordinal id, after the reports
-/// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
-/// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
-/// one that no report reaches after it. `pairwise`: how a pairwise report reads them
-/// (`pairwise_keys`); `batch`: the first query in the call of the report's query batch, whose
-/// scope it reads in; the reports come after the loads of the calls before on `database`
-/// (`hit_loads`).
+/// reports load one by one (`RunLoads::loads` of that report alone, by ordinal id, after the
+/// reports before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its
+/// reads one by one (`run_impl`'s texts of a batch whose prefetch is off or fails,
+/// `prefetch_fails`: after the failed prefetch, which may have loaded the batch's other subjects,
+/// `ReportRead::prefetch_fails`), not one whose load throws, nor one that no report reaches after
+/// it. `pairwise`: how a pairwise report reads them (`pairwise_keys`); `batch`: the first query in
+/// the call of the report's query batch, whose scope it reads in; the reports come after the
+/// loads of the calls before on `database` (`hit_loads`).
 pub(crate) fn report_loads(
     (database, run): (&TblastxDatabase, &crate::report::db_subject::RunLoads),
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    (pairwise, batch): (Option<crate::report::pairwise::PairwiseReading>, usize),
+    (pairwise, batch, prefetch_fails): (
+        Option<crate::report::pairwise::PairwiseReading>,
+        usize,
+        bool,
+    ),
     identities: impl Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
     // A subject's HSPs follow each other: one `Hit`.
@@ -1068,6 +972,7 @@ pub(crate) fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: Some(batch),
+        prefetch_fails,
     };
     run.loads(
         database.taxdb.calls_before(),
@@ -1116,20 +1021,30 @@ pub(crate) fn prefetch_format(
 /// Whether the batch of each query of the reported hits `ordered` (in report order, by query of
 /// `queries` queries, numbered from 0) of a run of the first format `format` prefetches
 /// (`shared::BatchPrefetch::of`): `spans` are the
-/// queries of each batch, whose Seq-aligns `seq_aligns_of` counts. The one producer of the
-/// prefetch that the reports' loads read (`hit_loads`), for both of its readers: the stop of a
-/// later batch, of the batches before it (`batch_prefetch_stop`), and the reports
-/// (`reported_subjects`), so the two cannot disagree on what the batches before loaded (review 2
-/// of line DBID pfoff-1, N-M2).
-fn batches_prefetch(
+/// queries of each batch, whose Seq-aligns `seq_aligns_of` counts and whose prefetch fails where
+/// one of their subjects' lookup throws on the id (`titles`). The one producer of the prefetch
+/// that the reports' loads read (`hit_loads`; `reported_subjects`; `run_impl`'s reads of a batch,
+/// one batch with `spans` empty).
+pub(crate) fn batches_prefetch(
     format: shared::PrefetchFormat,
-    ordered: &[TblastxHsp],
+    (ordered, titles): (&[TblastxHsp], &DatabaseTitles),
     queries: usize,
     spans: &[std::ops::Range<usize>],
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(format, queries, 0, spans, |span| {
-        seq_aligns_of(query_hits(ordered, span))
-    })
+    shared::BatchPrefetch::of(
+        format,
+        queries,
+        0,
+        spans,
+        |span| seq_aligns_of(query_hits(ordered, span)),
+        |span| {
+            shared::BatchPrefetch::prefetch_fails_among(
+                query_hits(ordered, span)
+                    .iter()
+                    .map(|hsp| titled_parsed(titles, hsp.hit.s_idx as usize)),
+            )
+        },
+    )
 }
 
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
@@ -1165,7 +1080,7 @@ pub(crate) fn reported_subjects(
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    let prefetch = batches_prefetch(format, ordered, queries, spans);
+    let prefetch = batches_prefetch(format, (ordered, titles), queries, spans);
     // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them
     // one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes

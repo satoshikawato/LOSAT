@@ -1033,7 +1033,7 @@ pub(crate) fn psi_search_and_object_of(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:110-112
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
     // NCBI takes every value of the file into `kbp_psi` or `kbp_gap_psi` as it is (0 is
-    // `kInvalidStat`: the query's BLOSUM62 value), a negative one, `PLUS-INFINITY`,
+    // `kInvalidStat`: the query's value with the options' matrix), a negative one, `PLUS-INFINITY`,
     // `MINUS-INFINITY` and `NOT-A-NUMBER` (text or binary) too. A `kbp_psi` that is not valid
     // stops the search's setup with NCBI's error of a query without Karlin-Altschul parameters
     // (`blastp::blast_engine::psiblast_stop_at_invalid_query`, line PS DECISIONS 30). A
@@ -1439,8 +1439,9 @@ pub(crate) fn score_block(matrix: ScoringMatrix, gapped: KarlinBlk) -> Result<Ps
 }
 
 /// The score block of `CPssmEngine::x_InitializeScoreBlock` for the matrix named `matrix_name`
-/// (`GetMatrixName()`), the gap costs and the query (NCBIstdaa), psiblast's `-in_msa` and
-/// makeprofiledb's PSSMs of frequency ratios only: the inner `Err` is the message of NCBI's
+/// (`GetMatrixName()`), the gap costs and the query (NCBIstdaa), psiblast's `-in_msa`, and the
+/// PSSMs of frequency ratios only of `-in_pssm` (psiblast and tblastn, with 11/1:
+/// `scores_from_freq_ratios`) and of makeprofiledb: the inner `Err` is the message of NCBI's
 /// `CBlastException` for a matrix it does not know and for gap costs that the matrix's table does
 /// not hold; the block holds the gapped block
 /// `kbp_gap_psi` copies. `None` for IDENTITY, whose table has no frequency ratios (the engine

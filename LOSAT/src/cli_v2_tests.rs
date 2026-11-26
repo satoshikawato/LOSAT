@@ -252,8 +252,11 @@ fn makedb_takes_makeblastdb_s_option_names() {
     );
     assert_eq!(given.input, "x.faa");
     assert_eq!(given.dbtype, "prot");
-    assert_eq!(given.out.as_deref(), Some("db"));
-    assert_eq!(given.title.as_deref(), Some("a title"));
+    assert_eq!(given.out.as_deref(), Some(std::ffi::OsStr::new("db")));
+    assert_eq!(
+        given.title.as_deref(),
+        Some(std::ffi::OsStr::new("a title"))
+    );
     assert_eq!(given.max_file_sz, "1GB");
 
     // makeblastdb's defaults.
@@ -303,7 +306,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
         .unwrap(),
     );
     assert!(given.parse_seqids && given.hash_index);
-    assert_eq!(given.taxid_map.as_deref(), Some("map.txt"));
+    assert_eq!(
+        given.taxid_map.as_deref(),
+        Some(std::ffi::OsStr::new("map.txt"))
+    );
     let given = args(makedb(&["-dbtype", "prot", "-parse_seqids", "-taxid", "9606"]).unwrap());
     assert!(given.parse_seqids);
     assert_eq!(given.taxid, Some(9606));
@@ -379,9 +385,15 @@ fn makedb_takes_makeblastdb_s_option_names() {
         ])
         .unwrap(),
     );
-    assert_eq!(given.mask_data.as_deref(), Some("a.asnt,b.asnb"));
-    assert_eq!(given.mask_id.as_deref(), Some("x,y"));
-    assert_eq!(given.mask_desc.as_deref(), Some("d1,d2"));
+    assert_eq!(
+        given.mask_data.as_deref(),
+        Some(std::ffi::OsStr::new("a.asnt,b.asnb"))
+    );
+    assert_eq!(given.mask_id.as_deref(), Some(std::ffi::OsStr::new("x,y")));
+    assert_eq!(
+        given.mask_desc.as_deref(),
+        Some(std::ffi::OsStr::new("d1,d2"))
+    );
     for words in [
         &["-dbtype", "prot", "-mask_id", "x"][..],
         &["-dbtype", "prot", "-mask_data", "a", "-mask_desc", "d"],
@@ -414,7 +426,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
         .unwrap(),
     );
     assert!(given.gi_mask);
-    assert_eq!(given.gi_mask_name.as_deref(), Some("x,y"));
+    assert_eq!(
+        given.gi_mask_name.as_deref(),
+        Some(std::ffi::OsStr::new("x,y"))
+    );
     for words in [
         &["-dbtype", "nucl", "-gi_mask"][..],
         &[
@@ -1775,10 +1790,18 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     };
     for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         let found = masks(program, &["-db", "d", "-db_soft_mask", "+11"]).unwrap();
-        assert_eq!(found.db_soft_mask.as_deref(), Some("+11"), "{program}");
+        assert_eq!(
+            found.db_soft_mask.as_deref(),
+            Some(std::ffi::OsStr::new("+11")),
+            "{program}"
+        );
         assert_eq!(found.db_hard_mask, None, "{program}");
         let found = masks(program, &["-db", "d", "-db_hard_mask", "seg"]).unwrap();
-        assert_eq!(found.db_hard_mask.as_deref(), Some("seg"), "{program}");
+        assert_eq!(
+            found.db_hard_mask.as_deref(),
+            Some(std::ffi::OsStr::new("seg")),
+            "{program}"
+        );
         for words in [
             &["-db", "d", "-db_soft_mask", "11", "-db_hard_mask", "11"][..],
             &["-subject", "s.fa", "-db_soft_mask", "11"],
@@ -1840,15 +1863,21 @@ fn blastp_takes_a_database_and_its_size() {
         })
     };
     let args = blastp(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
     // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
     let resolved = args.resolve().unwrap();
-    assert_eq!(resolved.db.as_deref(), Some("dir/name"));
+    assert_eq!(resolved.db.as_deref(), Some(b"dir/name".as_slice()));
     assert_eq!(resolved.dbsize, 3_000_000_000);
     // An empty name is a name (NCBI's "Database name is required." comes from the open).
-    assert_eq!(blastp(&["-db", ""]).unwrap().db.as_deref(), Some(""));
+    assert_eq!(
+        blastp(&["-db", ""]).unwrap().db.as_deref(),
+        Some(std::ffi::OsStr::new(""))
+    );
     assert_eq!(
         blastp(&["-db", "  "])
             .unwrap()
@@ -1856,9 +1885,12 @@ fn blastp_takes_a_database_and_its_size() {
             .unwrap()
             .db
             .as_deref(),
-        Some("")
+        Some(b"".as_slice())
     );
-    assert_eq!(blastp(&["-db=a b"]).unwrap().db.as_deref(), Some("a b"));
+    assert_eq!(
+        blastp(&["-db=a b"]).unwrap().db.as_deref(),
+        Some(std::ffi::OsStr::new("a b"))
+    );
     // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
     for (word, value) in [
         ("0", 0),
@@ -1917,13 +1949,19 @@ fn blastn_takes_a_database_and_its_size() {
         })
     };
     let args = blastn(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
     // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     assert_eq!(args.db_length(), 3_000_000_000);
-    assert_eq!(blastn(&["-db", "  "]).unwrap().database_name(), Some(""));
+    assert_eq!(
+        blastn(&["-db", "  "]).unwrap().database_name(),
+        Some(Vec::new())
+    );
     // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
     for (word, value) in [
         ("0", 0),
@@ -1970,10 +2008,13 @@ fn tblastn_takes_a_database_and_its_size() {
         })
     };
     let args = tblastn(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = tblastn(&["-subject", "s.fa", "-dbsize", word]).unwrap();
         assert_eq!(args.dbsize, Some(value), "{word}");
@@ -2014,10 +2055,13 @@ fn tblastx_takes_a_database_and_its_size() {
         })
     };
     let args = tblastx(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = tblastx(&["-subject", "s.fa", "-dbsize", word]).unwrap();
         assert_eq!(args.dbsize, Some(value), "{word}");
@@ -2398,10 +2442,13 @@ fn blastx_takes_a_database_and_its_size() {
         })
     };
     let args = blastx(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     assert_eq!(args.resolve().unwrap().db_length, 3_000_000_000);
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = blastx(&["-subject", "s.fa", "-dbsize", word]).unwrap();
@@ -2466,8 +2513,11 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         unreachable!("makeblastdb")
     };
     assert_eq!(
-        (args.input.as_str(), args.out.as_deref()),
-        ("x.faa", Some("db"))
+        (args.input.as_os_str(), args.out.as_deref()),
+        (
+            std::ffi::OsStr::new("x.faa"),
+            Some(std::ffi::OsStr::new("db"))
+        )
     );
     // The checks that name the command apply: makeblastdb's dependencies.
     let error = makedb(&["-gi_mask"]).unwrap_err().to_string();

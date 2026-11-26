@@ -288,7 +288,7 @@ fn an_empty_sequence_checks_every_chunk_as_ncbi() {
 #[test]
 fn an_oid_is_located_in_its_volume() {
     let volume = |start_oid, n_oids| IndexedVolume {
-        path: String::new(),
+        path: Vec::new(),
         start_oid,
         n_oids,
         has_index: true,

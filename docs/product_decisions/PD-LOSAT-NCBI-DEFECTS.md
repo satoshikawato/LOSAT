@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.119
+- Version: 1.120
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -921,7 +921,21 @@
   (psiblast line item PS14); then 1.116 at the merge of dev 42678f399 that brought 1.114 (line DBID
   item pfoff-7); then 1.117 and exception 34 at the merge of dev 9758dbd59 that brought 1.115 and
   exception 32 (line RG item G1); then 1.118 at the merge of dev f71a5cb85 that brought 1.116 (line
-  RG item X-chunk); then 1.119 at the merge of dev 351661f13 that brought 1.117 (line WQA item D23))
+  RG item X-chunk); then 1.119 at the merge of dev 351661f13 that brought 1.117 (line WQA item D23));
+  1.120 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
+  outside `' '` to `'~'`, of 1.10, narrowed to the cases that read the definition line outside
+  a query batch's Seq-aligns: formats other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; `psiblast`, `rpsblast` and `rpstblastn` (except a query
+  batch that ends at a header NCBI cannot read); searches restricted
+  by a seqid, GI or taxid list, alias files with a list or an OID mask, or a volume with an OID
+  mask type; a query batch whose headers also give NCBI's warning of a UTF8String; and a stored
+  Seq-id with such a byte. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write NCBI's
+  output and `Error: (803.7)` messages, rule 2; and in any format of all eight search programs
+  (including `psiblast`, `rpsblast` and `rpstblastn`), a query batch that ends at a header NCBI
+  cannot read writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
+  error; line RG-KB item 9(b), Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.119 at the merge of dev bf0e63c3d; first 1.107,
+  then 1.113, then 1.114, then 1.115, then 1.116, then 1.117, then 1.118)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -5043,8 +5057,16 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
-- A stored title or Seq-id with a byte outside ' ' to '~': NCBI prints `#` and an error message
-  each time it reads the definition line.
+- A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
+  cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
+  and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; a search restricted by a seqid, GI or taxid list, an alias
+  file with a list or an OID mask, or a volume with an OID mask type; a query batch whose headers
+  also give NCBI's warning of a UTF8String; except a query batch that ends at a header NCBI cannot
+  read, which writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
+  error, in any format of all eight search programs): NCBI prints `#` and an error message each
+  time it reads the definition line. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write
+  NCBI's output and `Error: (803.7)` messages.
 - psiblast and tblastn `-in_pssm` with `-subject` (version 1.45, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI

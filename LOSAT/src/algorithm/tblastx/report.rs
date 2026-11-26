@@ -1137,14 +1137,16 @@ pub(crate) fn shift_to_records(
 pub(crate) fn write_outfmt7_query_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    database: &str,
+    database: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# TBLASTX {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {database}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(database)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -1168,7 +1170,7 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     comments: bool,
     query_titles: &[&[u8]],
-    database: &str,
+    database: &[u8],
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     loads: &crate::report::db_subject::HitLoads,
@@ -1377,6 +1379,30 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
+            Self::Unsupported => None,
+        }
+    }
+
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
     /// are made from the same records and refuse the same names.
     pub(crate) fn is_structured_xml(self) -> bool {
@@ -1461,7 +1487,7 @@ impl TblastxOutputFormat {
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
+pub(crate) fn output_format(outfmt: impl AsRef<[u8]>) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
     // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
     if let Ok(choice) = &choice {

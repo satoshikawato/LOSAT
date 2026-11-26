@@ -363,7 +363,7 @@ impl Volume {
         for (i, &amb) in amb_offsets.iter().enumerate() {
             let start = seq_offsets[i];
             let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
-            if whole_bytes < 0 || whole_bytes >= (1 << 29) {
+            if !(0..(1 << 29)).contains(&whole_bytes) {
                 let last_pos = i64::from(start) + i64::from(whole_bytes);
                 let file = self.open_non_empty_seq_file()?;
                 if last_pos < 0 {

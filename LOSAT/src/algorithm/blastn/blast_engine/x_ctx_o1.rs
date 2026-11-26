@@ -177,6 +177,9 @@ impl CtxO1 {
         if !any_empty {
             rank_context = Vec::new();
         }
+        // Checked once at construction so `XBlocks::get`'s unchecked `entries` read is sound for
+        // every `n < total_len`, and the shift masks fit in 32 bits.
+        assert!(shift < 31 && entries.len() >= total_len.div_ceil(1usize << shift));
         Some(CtxO1::Blocks {
             shift,
             entries,
@@ -191,53 +194,18 @@ impl CtxO1 {
     /// block.
     #[inline(always)]
     pub(super) fn get(&self, n: usize) -> Option<usize> {
-        match self {
-            CtxO1::Div {
-                magic,
-                room,
-                len,
-                total_len,
-            } => {
-                if n >= *total_len {
-                    return None;
-                }
-                let q = ((*magic as u128 * n as u128) >> 64) as u64;
-                let r = n as u64 - q * *room;
-                Some(if r == *len { 0 } else { q as usize })
-            }
-            CtxO1::Blocks {
-                shift,
-                entries,
-                rank_context,
-                total_len,
-                ..
-            } => {
-                if n >= *total_len {
-                    return None;
-                }
-                let entry = entries[n >> *shift];
-                let low = (n as u32) & ((1u32 << *shift) - 1);
-                let crowded_place = (2u32 << *shift) - 1;
-                let place = entry & crowded_place;
-                if place == crowded_place {
-                    return None;
-                }
-                let rank = (entry >> (*shift + 1)) + u32::from(low > place);
-                let context = if rank_context.is_empty() {
-                    rank
-                } else {
-                    rank_context[rank as usize]
-                };
-                Some(if low == place { 0 } else { context as usize })
-            }
+        match self.x_view() {
+            XView::Div(v) => v.get(n),
+            XView::Blocks(v) => v.get(n),
+            XView::BlocksRanks(v) => v.get(n),
         }
     }
 
-    /// No NCBI counterpart: EXPERIMENT (LOSAT_X_DCEMITHOIST) the form as a value whose `get` (the
-    /// same arithmetic as `get`'s, the same answer for every offset) has its constants made once,
-    /// for a loop that keeps them in registers and is compiled once per form
-    /// (`x_pair_seed_disc.rs` `DcPairs`) instead of choosing the form and reading its fields for
-    /// every offset.
+    /// No NCBI counterpart: EXPERIMENT (LOSAT_X_DCEMITHOIST) the form as a value whose `get` has
+    /// its constants made once, for both `CtxO1::get` and a loop that keeps them in registers and
+    /// is compiled once per form (`x_pair_seed_disc.rs` `DcPairs`) instead of choosing the form
+    /// and reading its fields for every offset.
+    #[inline(always)]
     pub(super) fn x_view(&self) -> XView<'_> {
         match self {
             CtxO1::Div {
@@ -318,7 +286,7 @@ pub(super) struct XDiv {
 
 impl XCtxGet for XDiv {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:225-227
-    /// `CtxO1::get` of `Div`, statement for statement.
+    /// `direct_map[n]` for a `Div` form (`CtxO1::get` and `DcPairs`).
     #[inline(always)]
     fn get(&self, n: usize) -> Option<usize> {
         if n >= self.total_len {
@@ -343,11 +311,11 @@ pub(super) struct XBlocks<'a, const RANKS: bool> {
 }
 
 impl<'a, const RANKS: bool> XBlocks<'a, RANKS> {
-    /// The value of a `Blocks` form. It checks what makes `get`'s unchecked read of `entries`
-    /// sound: every offset below `total_len` has its block's entry (`build_with` makes one entry
-    /// per block of `2^shift` offsets up to `total_len`), and the masks fit in 32 bits.
+    /// The value of a `Blocks` form built by `CtxO1::build_with`, which asserts once that
+    /// `shift < 31` and `entries` holds every block of `2^shift` offsets below `total_len`.
+    #[inline(always)]
     fn new(shift: u32, entries: &'a [u32], rank_context: &'a [u32], total_len: usize) -> Self {
-        assert!(shift < 31 && entries.len() >= total_len.div_ceil(1usize << shift));
+        debug_assert!(shift < 31 && entries.len() >= total_len.div_ceil(1usize << shift));
         debug_assert_eq!(RANKS, !rank_context.is_empty());
         XBlocks {
             entries,
@@ -362,15 +330,18 @@ impl<'a, const RANKS: bool> XBlocks<'a, RANKS> {
 
 impl<const RANKS: bool> XCtxGet for XBlocks<'_, RANKS> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:225-227
-    /// `CtxO1::get` of `Blocks`, statement for statement, with the entry read unchecked.
+    /// `direct_map[n]` for a `Blocks` form (`CtxO1::get` and `DcPairs`), with the entry read
+    /// unchecked.
     #[inline(always)]
     fn get(&self, n: usize) -> Option<usize> {
         if n >= self.total_len {
             return None;
         }
         debug_assert!(n >> self.shift < self.entries.len());
-        // SAFETY: `n < total_len`, and `new` checked that `entries` has the entry of every block of
-        // `2^shift` offsets below `total_len`, so `n >> shift < entries.len()`.
+        // SAFETY: `n < total_len`, and `CtxO1::build_with` (the sole constructor of
+        // `CtxO1::Blocks`, whose fields are private to this module) asserted that `shift < 31` and
+        // `entries` holds every block of `2^shift` offsets below `total_len`, so
+        // `n >> shift < entries.len()`.
         let entry = unsafe { *self.entries.get_unchecked(n >> self.shift) };
         let low = (n as u32) & self.low_mask;
         let place = entry & self.crowded_place;

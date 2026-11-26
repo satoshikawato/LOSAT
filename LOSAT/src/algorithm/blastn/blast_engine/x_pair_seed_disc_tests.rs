@@ -2201,13 +2201,13 @@ fn the_hoisted_csr_scan_gives_the_seeds_and_stops_of_the_csr_scan() {
                         );
                         let from = Resume::at(job.start);
                         let mut want: Vec<Seed> = Vec::new();
-                        let r = scan_strip_disc_csr::<_, false, false>(
-                            &x, disc, csr, job, from, &mut want,
+                        let r = scan_strip_disc_csr::<_, false>(
+                            &x, disc, csr, job, from, &mut want, false,
                         );
                         assert_eq!(r, None, "{at}");
                         let mut got: Vec<Seed> = Vec::new();
-                        let r = scan_strip_disc_csr::<_, false, true>(
-                            &x, disc, csr, job, from, &mut got,
+                        let r = scan_strip_disc_csr::<_, false>(
+                            &x, disc, csr, job, from, &mut got, true,
                         );
                         assert_eq!(r, None, "{at}");
                         assert_eq!(got, want, "{at}");
@@ -2218,10 +2218,10 @@ fn the_hoisted_csr_scan_gives_the_seeds_and_stops_of_the_csr_scan() {
                         }
                         for limit in [1usize, 2, 3, 7] {
                             let want = hoist_pieces(limit, job.start, |from, out| {
-                                scan_strip_disc_csr::<_, true, false>(&x, disc, csr, job, from, out)
+                                scan_strip_disc_csr::<_, true>(&x, disc, csr, job, from, out, false)
                             });
                             let got = hoist_pieces(limit, job.start, |from, out| {
-                                scan_strip_disc_csr::<_, true, true>(&x, disc, csr, job, from, out)
+                                scan_strip_disc_csr::<_, true>(&x, disc, csr, job, from, out, true)
                             });
                             assert_eq!(got, want, "{at} pieces of {limit}");
                             stops_in_runs += got

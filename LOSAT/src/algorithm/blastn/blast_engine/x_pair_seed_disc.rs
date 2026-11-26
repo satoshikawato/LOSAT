@@ -299,10 +299,7 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
         // EXPERIMENT (LOSAT_X_DCEMITHOIST): its runs through `DcPairs::run`.
-        if emit_hoist_on() {
-            return scan_strip_disc_csr::<O, PIECE, true>(x, disc, csr, job, from, out);
-        }
-        return scan_strip_disc_csr::<O, PIECE, false>(x, disc, csr, job, from, out);
+        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out, emit_hoist_on());
     }
     let two_stage = x.two_stage;
     // (the presence vector by value: `lookup::XPvView`)
@@ -406,24 +403,27 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
 /// its run), then the same presence test and the cell's run, which lists the chain's offsets in
 /// the chain's order; so the same pairs reach `seed_of_pair` in the same order.
 ///
-/// EXPERIMENT (LOSAT_X_DCEMITHOIST): with `HOIST` each word's run goes to `DcPairs::run` instead
-/// of `seed_of_pair` pair by pair: for each word the same seeds in the same order (`DcPairs`); the
-/// same cut of a piece (`Cut::fit`, and `Cut::run_cold` with `seed_of_pair` itself). A word in the
-/// ring has passed the presence test (the scan's closure lets no other word in, and the ring hands
-/// out only the words it took), so `emit` does not test it again.
+/// EXPERIMENT (LOSAT_X_DCEMITHOIST): with `hoist` each word's run goes to `DcPairs::run` instead
+/// of `seed_of_pair` pair by pair (`x_csr_run_ref`): for each word the same seeds in the
+/// same order (`DcPairs`); the same cut of a piece (`Cut::fit`, and `Cut::run_cold` with
+/// `seed_of_pair` itself). A word in the ring has passed the presence test (the scan's closure
+/// lets no other word in, and the ring hands out only the words it took), so the hoisted emit
+/// does not test it again. Passing `hoist` at run time shares one scan-loop monomorphization
+/// between `=1` and `=0`, avoiding duplicating `disc_word_scan_subject_until`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
 #[inline(never)]
-fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
+fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     csr: &Csr,
     job: &StripJob,
     from: Resume,
     out: &mut O,
+    hoist: bool,
 ) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
-    if HOIST {
+    if hoist {
         EMIT_HOIST_STRIPS.fetch_add(1, Ordering::Relaxed);
     }
     let two_stage = x.two_stage;
@@ -432,16 +432,12 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
     let s_range = job.s_range;
     // EXPERIMENT (LOSAT_X_DCEMITHOIST): the strip's values of `DcPairs` and the context index's
     // form, made once
-    let hoist = if HOIST {
-        Some((DcPairs::new(x, s_range), x.query_context_index.x_view()))
-    } else {
-        None
-    };
+    let hoist_ctx = hoist.then(|| (DcPairs::new(x, s_range), x.query_context_index.x_view()));
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
     let start = from.s;
     let mut emit = |(s_off, index): (i32, u32)| {
-        if !HOIST && !two_stage.has_hits(u64::from(index)) {
+        if hoist_ctx.is_none() && !two_stage.has_hits(u64::from(index)) {
             return;
         }
         debug_assert!(two_stage.has_hits(u64::from(index)));
@@ -458,12 +454,10 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
                 }
             }
         }
-        if let (true, Some((pairs, form))) = (HOIST, hoist) {
+        if let Some((pairs, form)) = hoist_ctx {
             pairs.run(form, run, kmer_start, out);
-            return;
-        }
-        for &q_off_1 in run {
-            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        } else {
+            x_csr_run_ref(x, run, kmer_start, s_range, out);
         }
     };
     let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);
@@ -495,6 +489,22 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
     cut.stop.get()
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+/// Reference CSR emit (`LOSAT_X_DCEMITHOIST=0`): one word's run through `seed_of_pair` pair by
+/// pair, out of line so the hoisted scan keeps a single copy of the scan loop.
+#[inline(never)]
+fn x_csr_run_ref<O: SeedOut>(
+    x: &Inputs<'_>,
+    run: &[u32],
+    kmer_start: usize,
+    s_range: usize,
+    out: &mut O,
+) {
+    for &q_off_1 in run {
+        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1106-1144
 /// EXPERIMENT (LOSAT_X_DCEMITHOIST): `seed_of_pair` for the pairs of a strip of a discontiguous
 /// table laid out as CSR, with what it reads for every pair read once per strip. For a pair
@@ -509,9 +519,8 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
 ///   (`kmer_start + word > s_len`) depends on the word alone and is made once per word, before any
 ///   pair of it (`run`).
 /// - the context is `context_for_offset`'s (`QueryContextIndex::x_context_with` with the form made
-///   once per strip: the same answer for every offset), and `contexts[context]` is read without the
-///   bounds check: `new` checks that the index was made of as many contexts as there are, at least
-///   one, and every answer of the index is below that number (`QueryContextIndex::x_contexts`).
+///   once per strip: the same answer for every offset), and `contexts[context]` is read with the
+///   same checked indexing as `seed_of_pair`.
 /// - `s_range as u32` is made once per strip.
 #[derive(Clone, Copy)]
 struct DcPairs<'a> {
@@ -527,15 +536,12 @@ impl<'a> DcPairs<'a> {
     fn new(x: &Inputs<'a>, s_range: usize) -> Self {
         let word = x.two_stage.lut_word_length();
         assert_eq!(word, x.two_stage.word_length(), "a discontiguous word");
-        let contexts = x.query_contexts;
-        let index = x.query_context_index;
-        assert!(!contexts.is_empty() && index.x_contexts() == contexts.len());
         DcPairs {
             word,
             s_len: x.s_len,
             s_range: s_range as u32,
-            contexts,
-            index,
+            contexts: x.query_contexts,
+            index: x.query_context_index,
         }
     }
 
@@ -572,10 +578,7 @@ impl<'a> DcPairs<'a> {
             let q_off0 = q_off_1 as usize - 1;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
             let context_idx = index.x_context_with(form, q_off0);
-            debug_assert!(context_idx < contexts.len());
-            // SAFETY: `context_idx` is an answer of the index, below the number of contexts it
-            // was made of, which `new` checked to be `contexts.len()` (struct comment).
-            let ctx = unsafe { contexts.get_unchecked(context_idx) };
+            let ctx = &contexts[context_idx];
             let q_context_start = ctx.query_offset as usize;
             let q_context_end = q_context_start + ctx.len;
             if q_off0 + word > q_context_end {

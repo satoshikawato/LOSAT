@@ -4078,14 +4078,6 @@ impl QueryContextIndex {
         }
     }
 
-    /// No NCBI counterpart: the number of contexts the index was made of. Every answer of
-    /// `context_for_offset` is below it when it is not 0: the constant-time form's (a rank at most
-    /// that of the last context with letters, or an index of `rank_context`), the runs' and the
-    /// table's (indices of the contexts), the binary search's (`b < size`).
-    fn x_contexts(&self) -> usize {
-        self.offsets.len()
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
     // The forms besides the constant-time one (LOSAT_X_CTXO1), out of line as `context_for_offset` was.
     #[inline(never)]

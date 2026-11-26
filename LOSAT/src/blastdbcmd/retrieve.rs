@@ -6,7 +6,7 @@
 //! `gnl|BL_ORD_ID|n` read without a file, and the answers of a database built without
 //! `-parse_seqids`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::io::{BufWriter, Write};
@@ -124,6 +124,41 @@ pub(super) struct Source<'a> {
     source_names: TaxCache,
     /// The buffers of `masks`, kept from one sequence to the next (`SeqDb::mask_ranges_in`).
     mask_block: RefCell<MaskBlock>,
+    /// The definition lines of the last read that `deflines` gave back (`HeaderSet`), whose
+    /// buffers the next read writes over (`SeqDb::header_set_in`).
+    kept_set: Cell<DeflineSet>,
+}
+
+/// The definition lines that [`Source::deflines`] read, given back to the source when dropped:
+/// the next read writes over their buffers, so a run allocates the lines, titles and Seq-id lists
+/// of its sequences once, not for each sequence.
+pub(super) struct HeaderSet<'s> {
+    set: DeflineSet,
+    home: &'s Cell<DeflineSet>,
+}
+
+impl<'s> HeaderSet<'s> {
+    /// The set that `home` kept (a new one where a read holds it).
+    fn take(home: &'s Cell<DeflineSet>) -> Self {
+        HeaderSet {
+            set: home.take(),
+            home,
+        }
+    }
+}
+
+impl std::ops::Deref for HeaderSet<'_> {
+    type Target = DeflineSet;
+
+    fn deref(&self) -> &DeflineSet {
+        &self.set
+    }
+}
+
+impl Drop for HeaderSet<'_> {
+    fn drop(&mut self) {
+        self.home.set(std::mem::take(&mut self.set));
+    }
 }
 
 impl<'a> Source<'a> {
@@ -135,6 +170,7 @@ impl<'a> Source<'a> {
             taxdb: TaxdbRun::sequential(),
             source_names: TaxCache::default(),
             mask_block: RefCell::default(),
+            kept_set: Cell::default(),
         }
     }
 
@@ -197,23 +233,25 @@ impl<'a> Source<'a> {
     /// stored header of no bytes ([`Source::null_set`]). The first read of a record with a
     /// UTF8String where a VisibleString is expected gives NCBI's warning first (`Stop::Utf8Post`),
     /// also where the read then fails.
-    pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
+    pub fn deflines(&self, oid: u32) -> Result<Option<HeaderSet<'_>>, Stop> {
         let at = self.at(oid)?;
-        let read = self.db.header_set_at(at);
-        let Some(set) = read.map_err(|error| self.failed_read(at, error))? else {
+        let mut set = HeaderSet::take(&self.kept_set);
+        let read = self.db.header_set_in(at, &mut set.set);
+        if !read.map_err(|error| self.failed_read(at, error))? {
             return self.null_set(at);
-        };
+        }
         self.check_read(oid, at, &set)?;
         Ok(Some(set))
     }
 
     /// `GetHdr` of `oid` and the header that `GetBioseq` keeps in the Bioseq's user object
-    /// (`SeqDb::defline_set_with_header_at`); `None` and NCBI's warning as for
+    /// (`SeqDb::defline_set_with_header_in`); `None` and NCBI's warning as for
     /// [`Source::deflines`].
-    pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
+    pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(HeaderSet<'_>, Vec<u8>)>, Stop> {
         let at = self.at(oid)?;
-        let read = self.db.defline_set_with_header_at(at);
-        let Some((set, header)) = read.map_err(|error| self.failed_read(at, error))? else {
+        let mut set = HeaderSet::take(&self.kept_set);
+        let read = self.db.defline_set_with_header_in(at, &mut set.set);
+        let Some(header) = read.map_err(|error| self.failed_read(at, error))? else {
             return self.null_set(at);
         };
         self.check_read(oid, at, &set)?;

@@ -31,7 +31,7 @@ export interface DatasetRevision {
 
 /**
  * Whether the reading of the revision ends with the reader's error (`DatasetRevision.readerError`): a run reads no record after
- * it, and a Combined input reads no source after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one test of
+ * it, and a Combined input reads no source after it (`DataService.assembleRunInput`, line WQA's D10, 2026-11-19). The one test of
  * that: the draft's `readSources`, `sourcesBefore` and `queryEndBefore` use it.
  */
 export function endsInput(revision: DatasetRevision | undefined): boolean {
@@ -57,6 +57,28 @@ export function recordName(id: string, role: 'query' | 'subject', index: number,
 
 export function recordKey(record: RecordKey): RecordKey {
   return { id: record.id, length: record.length };
+}
+
+/**
+ * Identifies one record of a source across FASTA reader kinds (nucleotide vs protein): its byte
+ * offset in the file and its ID (line WQA's D16, Owner Q2=B, 2026-11-20). The offset distinguishes
+ * duplicate IDs and untitled records within the same source while staying stable between readers.
+ */
+export function recordExclusionKey(record: Pick<DatasetRecord, 'header_offset' | 'id'>): string {
+  return `${record.header_offset}\0${record.id}`;
+}
+
+/**
+ * Ascending indices of the records in `records` whose exclusion key is in `excludedKeys`.
+ * Records not in `excludedKeys` (including records newly parsed by another reader) enter as
+ * included (line WQA's D16, Owner Q2=B).
+ */
+export function excludedIndicesFor(
+  records: ReadonlyArray<Pick<DatasetRecord, 'index' | 'header_offset' | 'id'>>,
+  excludedKeys: ReadonlySet<string>,
+): readonly number[] {
+  if (excludedKeys.size === 0) return [];
+  return records.filter((record) => excludedKeys.has(recordExclusionKey(record))).map((record) => record.index);
 }
 
 /** Sorts and deduplicates record indices; rejects an index that is not in the table. */

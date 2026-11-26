@@ -2820,13 +2820,55 @@ pre.range-text {
 .db-filter-rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px 12px;
+  gap: 12px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--border);
+}
+
+.db-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-filter-group + .db-filter-group {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.db-filter-group-title {
+  margin: 0;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .db-filter-rows .param-row {
   margin: 0;
+}
+
+.db-filter-rows .param-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.db-mask-control input[type='text'] {
+  width: 11em;
+  max-width: 100%;
+}
+
+.db-mask-missing,
+.db-conflict-note {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.db-conflict-note .link {
+  margin-left: 8px;
 }
 
 .parameter-form .param-row[data-kind='database'] {

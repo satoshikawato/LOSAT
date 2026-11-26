@@ -378,6 +378,24 @@ fn search_programs_refuse_self_referencing_logfile() {
     );
     assert!(ok_log.exists(), "normal -logfile should be created");
 
+    // `-version` does not read command-line input files (`-query`), so `-logfile nq.fa` is not
+    // refused by argv input collection (still succeeds with rc 0).
+    let version_q = dir.join("ver_q.fa");
+    fs::write(&version_q, NUCL_FASTA).unwrap();
+    let out_ver = run_in(
+        &dir,
+        &[
+            "blastn", "-version", "-query", "ver_q.fa", "-logfile", "ver_q.fa",
+        ],
+        &[("NCBI_DONT_USE_NCBIRC", "1")],
+    );
+    assert_eq!(
+        out_ver.status.code(),
+        Some(0),
+        "blastn -version -query ver_q.fa -logfile ver_q.fa failed: {}",
+        String::from_utf8_lossy(&out_ver.stderr)
+    );
+
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -505,6 +523,65 @@ fn tools_refuse_self_referencing_logfile() {
         &[],
     );
     assert_refused_and_unchanged(&out_db_comp, &[(&nhr, &nhr_snap)], "blastn -db component");
+
+    // Alias pointing to `mydb` via DBLIST: both target volume (`mydb.nhr`) and alias file itself
+    // (`myalias.nal`) must be refused, including when resolved through `BLASTDB`.
+    let alias_nal = dir.join("myalias.nal");
+    fs::write(&alias_nal, b"TITLE my alias\nDBLIST mydb\n").unwrap();
+    let alias_snap = snapshot(&alias_nal);
+
+    let out_alias_vol = run_in(
+        &dir,
+        &[
+            "blastn", "-query", "in.fa", "-db", "myalias", "-logfile", "mydb.nhr",
+        ],
+        &[],
+    );
+    assert_refused_and_unchanged(
+        &out_alias_vol,
+        &[(&nhr, &nhr_snap), (&alias_nal, &alias_snap)],
+        "blastn -db alias -> volume component",
+    );
+
+    let out_alias_self = run_in(
+        &dir,
+        &[
+            "blastn",
+            "-query",
+            "in.fa",
+            "-db",
+            "myalias",
+            "-logfile",
+            "myalias.nal",
+        ],
+        &[],
+    );
+    assert_refused_and_unchanged(
+        &out_alias_self,
+        &[(&alias_nal, &alias_snap)],
+        "blastn -db alias self",
+    );
+
+    let caller_dir = dir.join("caller");
+    fs::create_dir_all(&caller_dir).unwrap();
+    let out_blastdb_env = run_in(
+        &caller_dir,
+        &[
+            "blastn",
+            "-query",
+            &fa.to_string_lossy(),
+            "-db",
+            "myalias",
+            "-logfile",
+            &nhr.to_string_lossy(),
+        ],
+        &[("BLASTDB", &dir.to_string_lossy())],
+    );
+    assert_refused_and_unchanged(
+        &out_blastdb_env,
+        &[(&nhr, &nhr_snap)],
+        "blastn -db alias via BLASTDB",
+    );
 
     let out_bdc_batch = run_in(
         &dir,

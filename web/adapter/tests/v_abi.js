@@ -1400,13 +1400,13 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s1-folder-slash", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db/" },
     { id: "s1-inputfolder", program: "tblastx", query: ["in/q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "in" },
     // (2) existing files of the run's directory (and registered files outside `/work`): refused at validate and run
-    { id: "s2-query", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "q.fa", expect: "refusal" },
-    { id: "s2-abs-query", program: "tblastx", query: [absQuery, Q], subject: ["s.fa", S], work: {}, logfile: absQuery, expect: "refusal", cliAppends: absQuery },
-    { id: "s2-subject", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "s.fa", expect: "refusal" },
-    { id: "s2-other", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db/keep", expect: "refusal" },
-    { id: "s2-query-ncbirc", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { ".ncbirc": EF }, logfile: "q.fa", expect: "refusal" },
-    { id: "s2-ncbirc-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { ".ncbirc": EF }, logfile: ".ncbirc", expect: "refusal" },
-    { id: "s2-batches-query", program: "tblastx", query: ["q.fa", B], subject: ["s.fa", S], work: {}, logfile: "q.fa", expect: "refusal" },
+    { id: "s2-query", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "q.fa", expect: "refusal", cliRefuses: "q.fa" },
+    { id: "s2-abs-query", program: "tblastx", query: [absQuery, Q], subject: ["s.fa", S], work: {}, logfile: absQuery, expect: "refusal", cliRefuses: absQuery },
+    { id: "s2-subject", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "s.fa", expect: "refusal", cliRefuses: "s.fa" },
+    { id: "s2-other", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db/keep", expect: "refusal", cliAppends: "db/keep" },
+    { id: "s2-query-ncbirc", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { ".ncbirc": EF }, logfile: "q.fa", expect: "refusal", cliRefuses: "q.fa", cliHasUsageNotice: true },
+    { id: "s2-ncbirc-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { ".ncbirc": EF }, logfile: ".ncbirc", expect: "refusal", cliRefuses: ".ncbirc", cliHasUsageNotice: true },
+    { id: "s2-batches-query", program: "tblastx", query: ["q.fa", B], subject: ["s.fa", S], work: {}, logfile: "q.fa", expect: "refusal", cliRefuses: "q.fa" },
     // (3) /dev/stdout in a search: stream 8 file named /dev/stdout (with and without -out on CLI)
     { id: "s3-stdout", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "/dev/stdout", stdoutSearch: true },
     { id: "s3-stdout-out", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "/dev/stdout", stdoutSearchOut: true },
@@ -1420,10 +1420,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     // Registered `-conffile` and `-window_masker_db` folders and files
     { id: "s-conffile-folder", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { "sub/settings.ini": CONF }, extra: ["-conffile", "sub/settings.ini"], logfile: "sub/run.log" },
     { id: "s-conffile-dir", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { "sub/settings.ini": CONF }, extra: ["-conffile", "sub/settings.ini"], logfile: "sub" },
-    { id: "s-conffile-self", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { "sub/settings.ini": CONF }, extra: ["-conffile", "sub/settings.ini"], logfile: "sub/settings.ini", expect: "refusal" },
+    { id: "s-conffile-self", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { "sub/settings.ini": CONF }, extra: ["-conffile", "sub/settings.ini"], logfile: "sub/settings.ini", expect: "refusal", cliRefuses: "sub/settings.ini" },
     { id: "s-wmdb-folder", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/run.log" },
     { id: "s-wmdb-dir", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm" },
-    { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal" },
+    { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal", cliRefuses: "wm/c.obinary" },
   ];
   const { reactor, close, waitForWorkers } = await engine.open(workDir);
   try {
@@ -1461,17 +1461,35 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       const run = reactor.call("losat_web2_run", words.join("\0"), qHandle.status, sHandle.status);
       if (waitForWorkers) await waitForWorkers();
       if (c.expect === "refusal") {
-        const expectedError = `a -logfile file '${c.logfile}' that is a file of the run's directory (the command line appends its messages to it; LOSAT Web reads the run's files and writes none of them) is not supported by LOSAT's ${c.program.toUpperCase()}`;
+        const expectedError = `a -logfile file '${c.logfile}' that is a file of the run's directory (LOSAT Web reads the run's files and writes none of them) is not supported by LOSAT's ${c.program.toUpperCase()}`;
         assert.equal(validated.status, -1, `${label}: validate refuses`);
         assert.equal(validated.error, expectedError, `${label}: validate refusal`);
         assert.equal(run.status, -1, `${label}: run refuses`);
         assert.equal(run.error, expectedError, `${label}: run refusal`);
         assert.ok(!run.streams.has(8), `${label}: no stream 8`);
-        if (c.cliAppends) {
-          const beforeBytes = fs.readFileSync(c.cliAppends);
+        if (c.cliRefuses) {
+          const targetPath = path.resolve(cliDir, c.cliRefuses);
+          const beforeBytes = fs.readFileSync(targetPath);
+          const beforeMtime = fs.statSync(targetPath, { bigint: true }).mtimeNs;
+          const outPath = path.join(cliDir, "o.txt");
+          const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
+          const cliRefusalLine = `Error: a -logfile file '${c.logfile}' that is also an input file read by this run (appending diagnostics to an input file corrupts it and can cause an endless read loop) is not supported by LOSAT's ${c.program.toUpperCase()}\n`;
+          assert.equal(cli.status, 1, `${label}: native CLI refuses: ${cli.stderr}`);
+          const cliStderr = cli.stderr.toString();
+          if (c.cliHasUsageNotice) {
+            assert.ok(cliStderr.endsWith(cliRefusalLine), `${label}: native CLI stderr ends with D23 refusal: ${cliStderr}`);
+          } else {
+            assert.equal(cliStderr, cliRefusalLine, `${label}: native CLI stderr`);
+          }
+          assert.ok(fs.readFileSync(targetPath).equals(beforeBytes), `${label}: ${c.cliRefuses} bytes unchanged`);
+          assert.equal(fs.statSync(targetPath, { bigint: true }).mtimeNs, beforeMtime, `${label}: ${c.cliRefuses} mtime unchanged`);
+          assert.ok(!fs.existsSync(outPath), `${label}: o.txt not created`);
+        } else if (c.cliAppends) {
+          const targetPath = path.resolve(cliDir, c.cliAppends);
+          const beforeBytes = fs.readFileSync(targetPath);
           const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
           assert.equal(cli.status, 0, `${label}: native CLI append: ${cli.stderr}`);
-          const afterBytes = fs.readFileSync(c.cliAppends);
+          const afterBytes = fs.readFileSync(targetPath);
           assert.ok(
             afterBytes.length > beforeBytes.length && afterBytes.subarray(0, beforeBytes.length).equals(beforeBytes),
             `${label}: native CLI appends to ${c.cliAppends}`,

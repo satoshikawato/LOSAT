@@ -186,8 +186,8 @@ impl RunFiles {
 /// file the run opens for reading.
 fn existing_log_refusal(name: &OsStr) -> String {
     format!(
-        "a -logfile file '{}' that is a file of the run's directory (the command line appends \
-         its messages to it; LOSAT Web reads the run's files and writes none of them)",
+        "a -logfile file '{}' that is a file of the run's directory (LOSAT Web reads the run's \
+         files and writes none of them)",
         name.display()
     )
 }
@@ -311,7 +311,6 @@ impl OpenFiles {
     /// `Receiver`, is an opening of the run's file of that path that appends to it
     /// (`DiagTarget::Stream`), or `ToolLog::Stdout` for `/dev/stdout`. `Err` with LOSAT's refusal
     /// reason when the name is a file of the run's directory.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn log_target(&self, name: Option<&OsStr>) -> Result<ToolLog, String> {
         match &self.0 {
             None => Ok(ToolLog::Target(diag_target(name))),
@@ -961,8 +960,7 @@ enum LogName {
     /// No message: the null device written otherwise than NCBI's special `/dev/null`, or a file
     /// system that reports no free space.
     Nowhere,
-    /// A file of the run's working directory, which the command line appends to (refused by LOSAT
-    /// Web).
+    /// A file of the run's working directory (refused by LOSAT Web).
     Existing,
     /// A new file made at this host name (`host_file_name`) and file-table key (`file_key`).
     File { name: Vec<u8>, key: Vec<u8> },

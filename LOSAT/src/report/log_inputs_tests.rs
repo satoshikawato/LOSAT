@@ -159,8 +159,10 @@ fn blastn_start(words: &[OsString]) -> ApplicationStart {
 #[test]
 fn detects_database_component_files() {
     let dir = fresh_dir("db-comp");
+    let nin = dir.join("mydb.nin");
     let nhr = dir.join("mydb.nhr");
     let other = dir.join("mydb.log");
+    std::fs::write(&nin, b"index").unwrap();
     std::fs::write(&nhr, b"header").unwrap();
     std::fs::write(&other, b"log").unwrap();
     let db = dir.join("mydb");
@@ -168,6 +170,94 @@ fn detects_database_component_files() {
     let start = blastn_start(&words);
     assert!(check_disk_logfile("blastn", &words, &start, Some(nhr.as_os_str())).is_err());
     assert!(check_disk_logfile("blastn", &words, &start, Some(other.as_os_str())).is_ok());
+
+    // Alias pointing via DBLIST to a differently named volume: both the alias file itself and the
+    // target volume's component files must be refused.
+    let real_nin = dir.join("real_db.nin");
+    let real_nhr = dir.join("real_db.nhr");
+    let alias_nal = dir.join("myalias.nal");
+    std::fs::write(&real_nin, b"index").unwrap();
+    std::fs::write(&real_nhr, b"header").unwrap();
+    std::fs::write(&alias_nal, b"TITLE my alias\nDBLIST real_db\n").unwrap();
+    let alias_db = dir.join("myalias");
+    let alias_words: Vec<OsString> = vec!["-db".into(), alias_db.as_os_str().to_os_string()];
+    let alias_start = blastn_start(&alias_words);
+    assert!(check_disk_logfile(
+        "blastn",
+        &alias_words,
+        &alias_start,
+        Some(real_nhr.as_os_str())
+    )
+    .is_err());
+    assert!(check_disk_logfile(
+        "blastn",
+        &alias_words,
+        &alias_start,
+        Some(alias_nal.as_os_str())
+    )
+    .is_err());
+    assert!(check_disk_logfile(
+        "blastn",
+        &alias_words,
+        &alias_start,
+        Some(other.as_os_str())
+    )
+    .is_ok());
+
+    // Registry [BLAST] BLASTDB resolves bare database names and aliases.
+    let conf = dir.join("blastdb.ini");
+    std::fs::write(&conf, format!("[BLAST]\nBLASTDB={}\n", dir.display())).unwrap();
+    let reg_words: Vec<OsString> = vec![
+        "-conffile".into(),
+        conf.as_os_str().to_os_string(),
+        "-db".into(),
+        "myalias".into(),
+    ];
+    let reg_start = blastn_start(&reg_words);
+    assert!(
+        check_disk_logfile("blastn", &reg_words, &reg_start, Some(real_nhr.as_os_str())).is_err()
+    );
+    assert!(check_disk_logfile(
+        "blastn",
+        &reg_words,
+        &reg_start,
+        Some(alias_nal.as_os_str())
+    )
+    .is_err());
+
+    // Unresolvable (missing) database is not refused by log_inputs (the run stops opening the DB).
+    let missing_nhr = dir.join("no_such_db.nhr");
+    std::fs::write(&missing_nhr, b"stale").unwrap();
+    let missing_words: Vec<OsString> = vec![
+        "-db".into(),
+        dir.join("no_such_db").as_os_str().to_os_string(),
+    ];
+    let missing_start = blastn_start(&missing_words);
+    assert!(check_disk_logfile(
+        "blastn",
+        &missing_words,
+        &missing_start,
+        Some(missing_nhr.as_os_str())
+    )
+    .is_ok());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn version_request_does_not_collect_argv_inputs() {
+    let dir = fresh_dir("version-run");
+    let q = dir.join("q.fa");
+    std::fs::write(&q, b">q\nACGT\n").unwrap();
+    let words: Vec<OsString> = vec![
+        "-version".into(),
+        "-query".into(),
+        q.as_os_str().to_os_string(),
+        "-logfile".into(),
+        q.as_os_str().to_os_string(),
+    ];
+    let start = blastn_start(&words);
+    assert!(check_disk_logfile("blastn", &words, &start, Some(q.as_os_str())).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

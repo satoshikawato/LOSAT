@@ -13,18 +13,25 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use crate::blastinput::ncbi_environment::{
-    log_file_name, log_path, ncbi_cwd, special_log_target, ApplicationStart, PathRules,
+    log_file_name, log_path, ncbi_cwd, preparse, special_log_target, ApplicationStart, PathRules,
+    Preparsed,
 };
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
+use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
-/// BLAST database, alias, mask, and index file extensions checked when `-db` (or a database
-/// argument) is given together with `-logfile`.
-const DB_EXTENSIONS: &[&str] = &[
-    "nhr", "nin", "nsq", "nal", "ndb", "not", "nos", "ntf", "nto", "njs", "nhd", "nhi", "nnd",
-    "nni", "nog", "nsd", "nsi", "nma", "nmb", "nmc", "phr", "pin", "psq", "pal", "pdb", "pot",
-    "pos", "ptf", "pto", "pjs", "phd", "phi", "pnd", "pni", "pog", "psd", "psi", "pma", "pmb",
-    "pmc", "rps", "loo", "aux", "freq", "blocks", "idx", "msk",
+/// Nucleotide BLAST database volume, mask, and index file extensions checked for resolved volumes
+/// of `-db` (and other database arguments) when `-logfile` is given.
+const NUCL_VOLUME_EXTENSIONS: &[&str] = &[
+    "nhr", "nin", "nsq", "ndb", "not", "nos", "ntf", "nto", "njs", "nhd", "nhi", "nnd", "nni",
+    "nog", "nsd", "nsi", "nma", "nmb", "nmc", "shd", "idx", "msk",
+];
+
+/// Protein BLAST database volume, RPS, and mask file extensions checked for resolved volumes of
+/// `-db` (and other database arguments) when `-logfile` is given.
+const PROT_VOLUME_EXTENSIONS: &[&str] = &[
+    "phr", "pin", "psq", "pdb", "pot", "pos", "ptf", "pto", "pjs", "phd", "phi", "pnd", "pni",
+    "pog", "psd", "psi", "pma", "pmb", "pmc", "rps", "loo", "aux", "freq", "blocks", "msk",
 ];
 
 /// Data files that `rpsbproc` reads from its `-d` directory (default `data`).
@@ -43,9 +50,13 @@ pub(crate) struct RunInputs {
     /// Direct file paths read by the run (command-line input files, list files, WindowMasker
     /// counts, registry files, and `rpsbproc` data files).
     pub(crate) files: Vec<PathBuf>,
-    /// BLAST database or MegaBLAST index base names read by the run (`-db`, `-filtering_db`,
-    /// `-index_name`, `-dblist`, `-seqid_db`, or `-in`/`-input` with `blastdb` format).
+    /// BLAST database arguments read by the run (`-db`, `-filtering_db`, `-dblist`, `-seqid_db`,
+    /// or `-in`/`-input` with `blastdb` format), passed verbatim to `SeqDb::volume_and_alias_paths`.
     pub(crate) databases: Vec<OsString>,
+    /// Old-style MegaBLAST index names (`blastn -index_name`), resolved via `SearchPath`.
+    pub(crate) mb_indexes: Vec<OsString>,
+    /// Explicit `-dbtype` (`prot` or `nucl`) for tools whose database type is not fixed by program.
+    pub(crate) dbtype: Option<SeqType>,
 }
 
 /// Checks whether `-logfile` `log_name` on `Disk` would open or create an input file read by the
@@ -71,7 +82,7 @@ pub(crate) fn check_disk_logfile<S: AsRef<OsStr>>(
         return Ok(());
     }
     let inputs = collect_run_inputs(program, words, start);
-    if matches_any_input(&candidates, &inputs, start) {
+    if matches_any_input(program, &candidates, &inputs, start) {
         return Err(format!(
             "a -logfile file '{}' that is also an input file read by this run (appending \
              diagnostics to an input file corrupts it and can cause an endless read loop)",
@@ -119,7 +130,9 @@ fn disk_log_candidates(program: &str, raw_name: &OsStr) -> Vec<PathBuf> {
 }
 
 /// Collects all direct input file paths and BLAST database names that `program` with `words` and
-/// `start` reads.
+/// `start` reads. Version requests (`-version`, `-version-full`, `-version-full-xml`,
+/// `-version-full-json`) exit before reading command-line inputs, so only the registry inputs
+/// recorded by `start` apply.
 pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
@@ -128,6 +141,10 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     let mut inputs = RunInputs::default();
     for path in start.registry_inputs() {
         push_file(&mut inputs.files, path.clone());
+    }
+    let word_refs: Vec<&OsStr> = words.iter().map(AsRef::as_ref).collect();
+    if matches!(preparse(&word_refs), Preparsed::Version(_)) {
+        return inputs;
     }
     match program {
         "windowmasker" => collect_windowmasker_inputs(words, &mut inputs),
@@ -220,6 +237,7 @@ fn collect_makeblastdb_inputs<S: AsRef<OsStr>>(words: &[S], inputs: &mut RunInpu
         };
         match name {
             "input_type" => input_type_blastdb = value == "blastdb",
+            "dbtype" => inputs.set_dbtype(value),
             "in" => raw_in.push(value.to_os_string()),
             "taxid_map" => push_non_stdin_file(&mut inputs.files, value),
             "mask_data" => {
@@ -379,11 +397,17 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                     );
                 }
             }
+            "dbtype" => {
+                inputs.set_dbtype(value);
+            }
             "db" | "dblist" | "seqid_db" => {
                 inputs.add_db(value);
             }
-            "filtering_db" | "index_name" if is_blastn => {
+            "filtering_db" if is_blastn => {
                 inputs.add_db(value);
+            }
+            "index_name" if is_blastn => {
+                inputs.add_mb_index(value);
             }
             _ => {}
         }
@@ -401,7 +425,12 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
 
 /// Whether any path in `candidates` refers to the same file (or missing target) as any input in
 /// `inputs`.
-fn matches_any_input(candidates: &[PathBuf], inputs: &RunInputs, start: &ApplicationStart) -> bool {
+fn matches_any_input(
+    program: &str,
+    candidates: &[PathBuf],
+    inputs: &RunInputs,
+    start: &ApplicationStart,
+) -> bool {
     for candidate in candidates {
         if inputs
             .files
@@ -411,10 +440,17 @@ fn matches_any_input(candidates: &[PathBuf], inputs: &RunInputs, start: &Applica
             return true;
         }
     }
-    if !inputs.databases.is_empty() {
-        let search_dirs = db_search_dirs(start);
+    if !inputs.databases.is_empty() || !inputs.mb_indexes.is_empty() {
+        let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
+        let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
+        let seqtypes = db_seqtypes(program, inputs.dbtype);
         for db in &inputs.databases {
-            if matches_database(candidates, db, &search_dirs) {
+            if matches_database(candidates, db, seqtypes, &search_path) {
+                return true;
+            }
+        }
+        for index in &inputs.mb_indexes {
+            if matches_mb_index(candidates, index, &search_path) {
                 return true;
             }
         }
@@ -422,84 +458,113 @@ fn matches_any_input(candidates: &[PathBuf], inputs: &RunInputs, start: &Applica
     false
 }
 
-/// The directories searched for a BLAST database name without path separators: `.`, then
-/// `BLASTDB` from the environment and `[BLAST] BLASTDB` from the registry.
-fn db_search_dirs(start: &ApplicationStart) -> Vec<PathBuf> {
-    let mut dirs = vec![PathBuf::from(".")];
-    let delimiter = if cfg!(windows) { b';' } else { b':' };
-    let mut add_list = |bytes: &[u8]| {
-        for part in bytes.split(|&b| b == delimiter) {
-            if !part.is_empty() {
-                let path = crate::utils::os_bytes::path_from_bytes(part);
-                if !dirs.contains(&path) {
-                    dirs.push(path);
+/// The sequence types tried when resolving a BLAST database for `program` (`SeqDb::open_in` /
+/// `SeqDb::open_guessing` order).
+fn db_seqtypes(program: &str, dbtype: Option<SeqType>) -> &'static [SeqType] {
+    match program {
+        "blastn" | "tblastn" | "tblastx" | "dustmasker" | "windowmasker" | "makembindex" => {
+            &[SeqType::Nucleotide]
+        }
+        "blastp" | "blastx" | "psiblast" | "rpsblast" | "rpstblastn" | "segmasker" => {
+            &[SeqType::Protein]
+        }
+        _ => match dbtype {
+            Some(SeqType::Protein) => &[SeqType::Protein],
+            Some(SeqType::Nucleotide) => &[SeqType::Nucleotide],
+            None => &[SeqType::Protein, SeqType::Nucleotide],
+        },
+    }
+}
+
+/// Whether any candidate `-logfile` path matches an alias file or volume component file of BLAST
+/// database `db_name` resolved through `SeqDb::volume_and_alias_paths` (NCBI `FindVolumePaths`).
+/// Databases that cannot be resolved fail to open in the run itself and are not refused here.
+fn matches_database(
+    candidates: &[PathBuf],
+    db_name: &OsStr,
+    seqtypes: &[SeqType],
+    search_path: &SearchPath,
+) -> bool {
+    let db_bytes = crate::utils::os_bytes::os_str_bytes(db_name);
+    let resolved = seqtypes.iter().find_map(|&seqtype| {
+        SeqDb::volume_and_alias_paths(db_bytes.as_ref(), seqtype, search_path)
+            .ok()
+            .map(|paths| (seqtype, paths))
+    });
+    let Some((seqtype, (volumes, alias_files))) = resolved else {
+        return false;
+    };
+    let (extensions, alias_suffix) = match seqtype {
+        SeqType::Nucleotide => (NUCL_VOLUME_EXTENSIONS, b".nal".as_slice()),
+        SeqType::Protein => (PROT_VOLUME_EXTENSIONS, b".pal".as_slice()),
+    };
+    for alias in &alias_files {
+        let alias_path = crate::utils::os_bytes::path_of_bytes(alias);
+        if matches_candidate(candidates, &alias_path) {
+            return true;
+        }
+        if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
+            if matches_volume_components(candidates, stem, extensions) {
+                return true;
+            }
+        }
+    }
+    for volume in &volumes {
+        if matches_volume_components(candidates, volume, extensions) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether any candidate `-logfile` path matches an old-style MegaBLAST index volume
+/// (`<base>.NN.idx`, 00..=99) resolved through `search_path`.
+fn matches_mb_index(candidates: &[PathBuf], index_name: &OsStr, search_path: &SearchPath) -> bool {
+    let bytes = crate::utils::os_bytes::os_str_bytes(index_name);
+    for token in bytes.split(|&b| b == b' ').filter(|s| !s.is_empty()) {
+        let base = token.split(|&b| b == b',').next().unwrap_or(token);
+        if base.is_empty() {
+            continue;
+        }
+        for vol in 0..100u8 {
+            let file = [base, format!(".{vol:02}.idx").as_bytes()].concat();
+            if let Some(resolved) = search_path.resolve_file(&file) {
+                let path = crate::utils::os_bytes::path_of_bytes(&resolved);
+                if matches_candidate(candidates, &path) {
+                    return true;
                 }
             }
         }
-    };
-    if let Some(env_db) = std::env::var_os("BLASTDB") {
-        add_list(crate::utils::os_bytes::os_str_bytes(&env_db).as_ref());
     }
-    if let Ok(settings) = start.settings() {
-        if let Some(reg_db) = settings.blastdb.as_deref() {
-            add_list(reg_db);
-        }
-    }
-    dirs
+    false
 }
 
-/// Whether any candidate `-logfile` path matches an existing component file of BLAST database
-/// `db_name` (such as `<db>.nhr`, `<db>.00.nin`, `<db>.nal`, `<db>.phr`, `<db>.rps`, or a symlink
-/// pointing to one).
-fn matches_database(candidates: &[PathBuf], db_name: &OsStr, search_dirs: &[PathBuf]) -> bool {
-    let db_path = Path::new(db_name);
-    let has_sep = db_name
-        .as_encoded_bytes()
+fn matches_candidate(candidates: &[PathBuf], target: &Path) -> bool {
+    candidates
         .iter()
-        .any(|&b| b == b'/' || (cfg!(windows) && b == b'\\'));
-    let prefixes: Vec<PathBuf> = if db_path.is_absolute() || has_sep {
-        vec![db_path.to_path_buf()]
-    } else {
-        search_dirs.iter().map(|dir| dir.join(db_path)).collect()
-    };
-    for prefix in prefixes {
-        let Some(stem) = prefix.file_name() else {
-            continue;
-        };
-        let parent = match prefix.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p,
-            _ => Path::new("."),
-        };
-        let Ok(entries) = std::fs::read_dir(parent) else {
-            continue;
-        };
-        let stem_bytes = stem.as_encoded_bytes();
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_bytes = name.as_encoded_bytes();
-            let Some(rest) = name_bytes.strip_prefix(stem_bytes) else {
-                continue;
-            };
-            if !rest.starts_with(b".") {
-                continue;
-            }
-            let entry_path = entry.path();
-            let is_db_ext = entry_path
-                .extension()
-                .and_then(OsStr::to_str)
-                .is_some_and(|ext| DB_EXTENSIONS.iter().any(|k| ext.eq_ignore_ascii_case(k)));
-            if !is_db_ext {
-                continue;
-            }
-            if candidates
-                .iter()
-                .any(|candidate| same_file_target(candidate, &entry_path))
-            {
-                return true;
-            }
+        .any(|candidate| same_file_target(candidate, target))
+}
+
+fn matches_volume_components(candidates: &[PathBuf], base: &[u8], extensions: &[&str]) -> bool {
+    let mut buf = Vec::with_capacity(base.len() + 8);
+    buf.extend_from_slice(base);
+    buf.push(b'.');
+    let prefix_len = buf.len();
+    for ext in extensions {
+        buf.truncate(prefix_len);
+        buf.extend_from_slice(ext.as_bytes());
+        let path = crate::utils::os_bytes::path_of_bytes(&buf);
+        if matches_candidate(candidates, &path) {
+            return true;
         }
     }
     false
+}
+
+fn strip_ascii_suffix<'a>(bytes: &'a [u8], suffix: &[u8]) -> Option<&'a [u8]> {
+    let len = bytes.len().checked_sub(suffix.len())?;
+    let (head, tail) = bytes.split_at(len);
+    tail.eq_ignore_ascii_case(suffix).then_some(head)
 }
 
 impl RunInputs {
@@ -514,6 +579,18 @@ impl RunInputs {
     fn add_db(&mut self, value: &OsStr) {
         push_db_list(&mut self.databases, value);
     }
+
+    fn add_mb_index(&mut self, value: &OsStr) {
+        push_db_list(&mut self.mb_indexes, value);
+    }
+
+    fn set_dbtype(&mut self, value: &OsStr) {
+        self.dbtype = match value.to_str() {
+            Some("prot") => Some(SeqType::Protein),
+            Some("nucl") => Some(SeqType::Nucleotide),
+            _ => None,
+        };
+    }
 }
 
 fn parse_ncbi_bool(value: &OsStr) -> bool {
@@ -523,7 +600,7 @@ fn parse_ncbi_bool(value: &OsStr) -> bool {
         .unwrap_or(false)
 }
 
-fn push_file(out: &mut Vec<PathBuf>, path: PathBuf) {
+pub(crate) fn push_file(out: &mut Vec<PathBuf>, path: PathBuf) {
     if !path.as_os_str().is_empty() && !out.contains(&path) {
         out.push(path);
     }
@@ -542,9 +619,10 @@ fn push_non_stdin_file(out: &mut Vec<PathBuf>, value: &OsStr) {
 }
 
 fn push_db_list(out: &mut Vec<OsString>, value: &OsStr) {
-    for part in split_quoted_os(value) {
-        if !part.is_empty() && part != "-" && !out.contains(&part) {
-            out.push(part);
+    if !value.is_empty() && value != "-" {
+        let os = value.to_os_string();
+        if !out.contains(&os) {
+            out.push(os);
         }
     }
 }

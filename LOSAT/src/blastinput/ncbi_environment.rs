@@ -2653,31 +2653,6 @@ fn application_settings(
 /// (`IncludeNcbircIfAllowed`,
 /// cited at `settings_of`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
 /// any value.
-fn push_registry_input(out: &mut Vec<PathBuf>, path: PathBuf) {
-    if !path.as_os_str().is_empty() && !out.contains(&path) {
-        out.push(path);
-    }
-}
-
-/// Appends each candidate `<dir>/<file_name>` along `search_path` up to and including `found` (or
-/// every directory when `found` is `None`), so missing registry paths that `-logfile` would create
-/// are caught alongside existing hits.
-fn push_registry_search_candidates(
-    out: &mut Vec<PathBuf>,
-    search_path: &[PathBuf],
-    file_name: &OsStr,
-    found: Option<&Path>,
-) {
-    for dir in search_path {
-        let candidate = dir.join(file_name);
-        let hit = found == Some(candidate.as_path());
-        push_registry_input(out, candidate);
-        if hit {
-            break;
-        }
-    }
-}
-
 fn application_start(
     program: &str,
     conffile: Option<&OsStr>,
@@ -2715,7 +2690,10 @@ fn application_start(
         Err(reason) => {
             if !is_version {
                 if let Some(name) = conffile {
-                    push_registry_input(&mut start.registry_inputs, PathBuf::from(name));
+                    crate::report::log_inputs::push_file(
+                        &mut start.registry_inputs,
+                        PathBuf::from(name),
+                    );
                 }
             }
             start.settings = Err(environment_refusal.clone().unwrap_or(reason));
@@ -2754,7 +2732,10 @@ fn application_start(
         let ncbirc_found = ncbirc.as_ref().map(|(_, path)| path.as_path());
         if usage_report_reads {
             if let Some(ncbirc_path) = ncbirc_found {
-                push_registry_input(&mut start.registry_inputs, ncbirc_path.to_path_buf());
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    ncbirc_path.to_path_buf(),
+                );
             }
         }
         if !is_version {
@@ -2770,7 +2751,10 @@ fn application_start(
         match conffile {
             Some(name) => {
                 let path = Path::new(name);
-                push_registry_input(&mut start.registry_inputs, path.to_path_buf());
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    path.to_path_buf(),
+                );
                 let has_directory = path
                     .parent()
                     .is_some_and(|parent| !parent.as_os_str().is_empty());
@@ -2902,6 +2886,25 @@ fn application_start(
         None => settings_of(env, ini_entries, ncbirc_entries, ncbirc_window_masker),
     };
     start
+}
+
+/// Appends each candidate `<dir>/<file_name>` along `search_path` up to and including `found` (or
+/// every directory when `found` is `None`), so missing registry paths that `-logfile` would create
+/// are caught alongside existing hits.
+fn push_registry_search_candidates(
+    out: &mut Vec<PathBuf>,
+    search_path: &[PathBuf],
+    file_name: &OsStr,
+    found: Option<&Path>,
+) {
+    for dir in search_path {
+        let candidate = dir.join(file_name);
+        let hit = found == Some(candidate.as_path());
+        crate::report::log_inputs::push_file(out, candidate);
+        if hit {
+            break;
+        }
+    }
 }
 
 /// LOSAT's refusal of the usage report's `[BLAST] BLAST_USAGE_REPORT` when it is not a Boolean

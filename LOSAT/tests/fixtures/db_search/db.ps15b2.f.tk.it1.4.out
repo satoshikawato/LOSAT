@@ -1,0 +1,102 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          132     3e-39
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       23.1    2.2  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.3    3.6  
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       21.6    4.0  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       22.3    4.3  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.9    5.1  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.9    5.3  
+BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]       21.6    6.2  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       21.2    8.7  
+
+
+
+Query_1  10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+52       4     TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+58       1808                                               YGVKLLAIVEMMGHE  1822
+56       173        VALLTGAAAGGCGVYSDSAQQSSFNGSWTCLLFHNNKETK                 212
+
+Query_1  70    IEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNRLADKGKRIVIAALDGTSD  127
+52       64    IRDCVATSV---LSYVDTSNYDYIFID-EGQFFSDLGATCKDWAIKGKRVTVAALDGNYE  119
+58       1823  FASCLTSDMRMNMYNGVGSVVDILSIDNEEERYSII-ISINKFILKNIKDVL          1873
+
+Query_1  128   QQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAE  182
+52       120   QQLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTE  179
+2        374                                                         CPGLSD  379
+
+Query_1  183   MYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----AKLLLTNKNSPLY--GGEY  235
+52       180   TYCAVCIGC                                                     188
+2        380   VYGQEFKNLYEKYEK---EGKVRI---------SIE-----ARKLLHNLASAKLETGTPF  422
+68       273                                                    HSKFY--PGEW  281
+25       484                     KFKVNVLPDGDQCGNSGEYESMTAHLFLT               512
+
+Query_1  236   MCFPD----RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQL--LDDGIHV  289
+2        423   ICFKDTINYRSNH                                                 435
+68       282   IYFPP----SLSNLSKL                                             294
+74       82                                 NFGGYILLSGNSGEIISGLGEPRDIDDELHV  112
+31       291                                   AYMMFSRHRVQSGDCIKQF--L----YT  312
+
+Query_1  290   VMDRYYYSGIVFSLARGVDTVEWCSAS  316
+74       113   LSNR                         116
+30       100                  RGNNTDEWCSLS  111
+31       313   IFVRFIYSA                    321
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

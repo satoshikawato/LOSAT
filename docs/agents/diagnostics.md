@@ -450,6 +450,7 @@ export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_CSRQSKEEP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCFOLDREG=1
 export LOSAT_X_DCLATEST=1
 export LOSAT_X_DCQSAHEAD=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -4397,6 +4398,34 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCFOLDREG=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
+  `LOSAT_X_DCLATEST`'s maps fold runs; in the strict set from the pull request that added it, 2026-11-26:
+  `LOSAT_X_DCFOLDREG=0` turns it off) runs the map fold in `blast_engine/x_dc_fold_reg.rs`
+  (`fold_two_hit_reg`, `#[inline(never)]`) instead of `fold_two_hit_on` on `Latest`. `fold_two_hit_on` reloaded
+  the map's buckets and shift on every seed, kept `top` and `entries` in memory across every insert, built the
+  `is_seed_masked` closure and tested `two_hits` and `x_tow` per seed, and looked up the query context before the
+  miss/reject tests. Now `latest::Hot` holds the buckets `Vec`, `shift`, `top` and `entries` in locals (giving
+  them back before cold paths and on `Drop`), `TOW` (`LOSAT_X_FOLDLEAN` with `word_length == lut_word_length`) is a
+  const generic, a miss inserts directly through `Hot::put_new` with `LvSeeds::bound_in` (no range check, as
+  `latest_bound` checked the chunk's range once), and the query context is read only on the cold `extend` path (or
+  in `word_of` when `LOSAT_X_FOLDLEAN=0`). Every decision, insert and hit is identical in order. `[TIMING]
+  x_dc_latest:` adds `reg_calls=` counting calls of `fold_two_hit_reg`. The unit tests
+  `the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map` and
+  `the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges` compare every retrieve/insert event,
+  map state, hit and count with `=0` across all four `(PT, LEAN)` instances, and `LOSAT/tests/blastn_dc_latest.rs`
+  (`dc_fold_reg_subjects`, `dc_fold_reg_db_soft_mask_out_of_order`) checks whole reports and `reg_calls=` against
+  `=0`.
+  Evidence (2026-11-26, workstation node 1, 16 cores, memory bound to the node; dev 5341bbc90, its merge
+  and the merge with `=0` in one run, rotated, medians; reports byte-identical in every arm): dc-megablast of
+  31,168 D. melanogaster cDNAs against 3 Mb of its genome (`-subject`, outfmt 6, sha1 `f129806fc5bfa034`) at one
+  thread 9.685 s against 10.781 s (x0.898, range 9.642-9.688 vs 10.772-10.818 s, cycles x0.895, instructions
+  x0.885), at 16 threads 1.039 s against 1.130 s (x0.920, cycles x0.908, instructions x0.888), at 8 threads
+  1.732 s against 1.894 s (x0.915, cycles x0.898, instructions x0.888); 5,000 of the cDNAs at 16 threads 0.223 s
+  against 0.233 s (x0.957, cycles x0.911); MG1655 against AP027131 0.298 s against 0.313 s at one thread (x0.952,
+  cycles x0.946) and 0.138 s against 0.137 s at 16 threads (cycles x0.974, instructions x0.944). VmHWM sampled
+  every 2 ms: +0.53 % (121,538 against 120,896 KiB, 8 rounds) at 16 threads, +0.53 % for 5,000 cDNAs, -0.12 % for
+  MG1655 at 16 threads, and +0.85 % (94,248 against 93,452 KiB, 3 rounds) at one thread (all well below the
+  wall-time reductions). `=0` took x0.983 to x1.005 of dev's time (cycles x0.994 to x1.006).
 - `LOSAT_X_DCLATEST=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
   `LOSAT_X_PAIRPARDISC`'s stage of the diagonal hash runs: a query block over 8000 letters, a subject searched
   by its owner, masked or not, two threads or more or one with `LOSAT_X_BNDCONE`, with or without
@@ -4433,8 +4462,9 @@ Scheduling (each value computed by one thread with the original function; order 
   their take-overs, so such a chunk goes to the chains (`x_pair_seed_disc.rs` `latest_ranges_ascend`, one pass
   over the chunk's ranges at the decision point; `LOSAT_X_REACH` records the reference side), on every path
   that folds on the maps (the owner's map, the partitions', one thread or many). `[TIMING] x_dc_latest:
-  stages= back= grows= buckets=` counts the stages folded on the maps, the chunks sent to the chains because
-  their ranges step back, the maps' growths and their largest size. The unit tests of `x_dc_latest.rs`
+  stages= back= grows= buckets= reg_calls=` counts the stages folded on the maps, the chunks sent to the chains
+  because their ranges step back, the maps' growths, their largest size and the calls of the fold with the map
+  in registers (`LOSAT_X_DCFOLDREG`, above). The unit tests of `x_dc_latest.rs`
   check the map against a model of the latest inserts over stages, clears, crowded buckets and growths,
   and against the chains with NCBI's window (every window) and LOSAT's (outside the band);
   `the_fold_on_the_map_makes_the_decisions_of_the_chains` compares the folds' decisions and inserts seed
@@ -5286,7 +5316,7 @@ Scheduling (each value computed by one thread with the original function; order 
   prolog (before the search, as before), the outfmt 0 epilog (fixed inputs) and outfmt 7's last line, which
   counts the queries of every batch (NCBI's `m_QueriesFormatted`; `write_output_blastn_hitlists_to_writer`
   takes the count). NCBI's errors of a later batch (reader errors, an `eEOF` batch, a batch of queries
-  without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read) come after the reports of
+  without letters, `after_batch_reports`, a header file that cannot be read) come after the reports of
   the batches before in both paths. LOSAT's own refusals of a reported subject come before every report
   without the switch and, since 2026-11-03 (NCMEM1, drop-in DECISIONS 44), after the reports and query
   warnings of the batches before with it, with the same text and exit status: nothing is read before the
@@ -5314,11 +5344,11 @@ Scheduling (each value computed by one thread with the original function; order 
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
   `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16), `scoring`
-  (no Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
-  `ungapped_cutoff` (`-ungapped` with a query of 2^30 letters or more) and `search_space`
-  (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal of the
-  effective search space); the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity` and
-  `taxonomy` are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
+  (no Karlin-Altschul values, or greedy gap costs LOSAT refuses) and
+  `ungapped_cutoff` (`-ungapped` with a query of 2^30 letters or more);
+  the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`
+  and `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches before
+  in both paths since line RG item X-short-bat-2) are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
   streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`). Outfmt 20's line of the field names
   comes with the first batch's
   report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
@@ -5364,7 +5394,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and a subject set with a refused id that only they hit (the refusal after the rows of the batches before,
   which begin the rows of the same search not refused; the off bytes for queries that do not reach it);
   parsed Seq-id databases refused in the first or the third batch; custom tabular reports; and the
-  `search_space`, `scoring`, `chunk_size` and `debug` cases) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
+  `scoring` and `debug` cases, and a negative `CHUNK_SIZE`, which streams) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
   records and an observer, one and three formats: the formats, hits and observer ranges of one batch).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation, perf-mb `logs/rptstream_report.md`,
   alternating rounds): blastn of 31,168 cDNAs against 3 Mb max RSS 502 -> 157 MiB at one thread (x1.006 wall), 638 ->
@@ -7441,10 +7471,12 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXPAR`'s rule: a batch end in a pool of 2+ threads with 2 or more matches, not `-use_sw_tback` in e-value
   mode): the matches ahead are redone as a flow (`utils::xahead`, `runtime/kappa_batch.rs`) instead of in fork-join
   batches of 32 matches per worker. The loop's thread offers the next 32 x workers matches as it walks the stream
-  (the early-termination guess on the heaps as they are then), each worker (one per thread of the pool, as for the
-  batches, at most one per match: the loop's thread keeps one) takes the next match offered,
-  and the loop takes a match's result when it reaches it, redoing other offered matches while one is still being
-  redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
+  (those the early-termination test will let through even after each match already offered whose best E-value is at
+  or below its heap's cutoff has filled that heap; at a match that only those offered matches would end early the
+  offers stop until the loop has passed them, and the `=0` batches end there: `XPending`), each worker (one per
+  thread of the pool, as for the batches, at most one per match: the loop's thread keeps one) takes the next match
+  offered, and the loop takes a match's result when it reaches it, redoing other offered matches while one is still
+  being redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
   50 us at a time (`Ahead::x_new_napping`; a wasm thread keeps yielding). Why: each batch waited at its join for its longest redo; with
   one batch end live the threads stood idle there (BLASTX `-use_sw_tback`, 200 queries of q200k against the 40
   proteins of `ov_atha` at BATCH_SIZE 40000 and 4 threads: 2,103 matches in about 20 batches, 662 s of user time in
@@ -7472,6 +7504,14 @@ Scheduling (each value computed by one thread with the original function; order 
   the second thread now redoes matches). A thread that waits sleeps after spinning and yielding, which keeps the
   system time at 0.3-2.0 s a run where waits that only yield took 6-13 s (BATCH_SIZE 40000, 32 threads); with 16 threads
   on 8 cores the yielding form was 2 % faster (6 of 7 rounds) for 2-6 s more system time a run.
+  The guess counts the matches offered ahead since 2026-11-25 (branch `feature/np-bxredo-fill`, no switch: it changes
+  which matches are offered, not a result). Before, a short hit list let the whole window be offered while the heaps
+  were empty: 1 x 9,000 x 595 `-use_sw_tback -max_target_seqs 3` on 4 CPUs of the workstation (release f6efadb67, 2
+  runs) redid 119-131 matches ahead at 4 threads and 204 at 8 for the 32 the loop redoes, in 0.77-5.16 s of wall time
+  against 0.79 s at one thread (`=0` 4.4-5.8 s), and under `-C instrument-coverage` the test took hours (nightly
+  coverage cancelled at 240 min). With it every match redone ahead in the two short-hit-list rows of
+  `tests/blastx_unit_cap.rs` was one the loop took (12 runs at 2, 4 and 8 threads), that row took 0.48-0.53 s
+  (`=0` 0.52-0.60 s) and 8 x 4,000 x 595 `-max_target_seqs 1` the same 0.06-0.09 s, with the same bytes.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

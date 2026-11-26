@@ -42,13 +42,8 @@ fn write_isam(dir: &Path, rows: &[(i64, i32)], long_id: bool, page: usize) -> st
     base
 }
 
-fn temp_dir(stem: &str) -> std::path::PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat_isam_num_{stem}_{}",
-        crate::utils::test_dir::process_id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(stem: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("isam-num-{stem}"))
 }
 
 #[test]
@@ -68,7 +63,6 @@ fn every_row_is_found_in_both_key_widths() {
         }
         assert_eq!(isam.id_to_oid(-5).unwrap(), None);
         assert_eq!(isam.id_to_oid(i64::MAX).unwrap(), None);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 
@@ -102,7 +96,6 @@ fn missing_files_are_silent_and_a_bad_header_is_refused() {
         NumericIsam::open_volume(&base, SeqType::Protein),
         Err(SeqDbError::NcbiCrashes { .. })
     ));
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 fn list(keys: &[i64]) -> Vec<NumOid> {
@@ -139,7 +132,6 @@ fn a_list_is_translated_against_every_page_of_the_volume() {
                 None
             ]
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 
@@ -153,7 +145,6 @@ fn an_id_translated_by_an_earlier_volume_keeps_its_oid() {
     isam.ids_to_oids(10, &mut ids).unwrap();
     let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
     assert_eq!(oids, vec![Some(10), Some(3), Some(12)]);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// NCBI's constructor reads the first and last rows of the data file whatever `x_InitSearch`
@@ -208,7 +199,6 @@ fn the_bounds_are_read_in_the_mapping_of_the_data_file() {
     std::fs::write(with_extension(&base, SeqType::Protein, "nd"), []).unwrap();
     with_terms(1, 0);
     assert!(open().unwrap_err().ncbi_crashes());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -232,5 +222,52 @@ fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
         NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 2).unwrap(),
         Some(Opened::Uninitialized)
     ));
-    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_negative_scan_marks_excluded_oids_visible_and_unlisted_oids_included() {
+    let dir = temp_dir("negative_scan");
+    // OID 0 has GIs 10 and 20; OID 1 has GI 30; OID 2 has GI 40 (outside vol_end=2? no, vol_end=10).
+    let rows = [(10, 0), (20, 0), (30, 1), (40, 2), (50, 3)];
+    let base = write_isam(&dir, &rows, false, 2);
+    let isam = opened(&base);
+    let mut out = super::super::isam::NegativeOids::new();
+    // Exclude GI 10 (OID 0 still has unlisted GI 20 -> stays included!) and GI 30 (OID 1 only has GI 30 -> excluded!).
+    isam.negative_scan(10, 14, &[10, 30, 99], &mut out).unwrap();
+    assert!(out.get_oid_status(10));
+    assert!(!out.get_oid_status(11));
+    assert!(out.get_oid_status(12));
+    assert!(out.get_oid_status(13));
+}
+
+#[test]
+fn list_isam_pig_opens_ppi_and_ppd_when_both_exist() {
+    let dir = temp_dir("pig_open");
+    let base = write_isam(&dir, &[(1001, 0), (1002, 1)], false, 256);
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Pig, 2)
+            .unwrap()
+            .is_none()
+    );
+    std::fs::copy(
+        with_extension(&base, SeqType::Protein, "ni"),
+        with_extension(&base, SeqType::Protein, "pi"),
+    )
+    .unwrap();
+    std::fs::copy(
+        with_extension(&base, SeqType::Protein, "nd"),
+        with_extension(&base, SeqType::Protein, "pd"),
+    )
+    .unwrap();
+    let Some(Opened::Ready(isam)) =
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Pig, 2).unwrap()
+    else {
+        panic!("PIG ISAM not ready");
+    };
+    let mut ids = list(&[1001, 1002, 9999]);
+    isam.ids_to_oids(5, &mut ids).unwrap();
+    assert_eq!(
+        ids.iter().map(|id| id.oid).collect::<Vec<_>>(),
+        vec![Some(5), Some(6), None]
+    );
 }

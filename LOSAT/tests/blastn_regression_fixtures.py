@@ -616,12 +616,25 @@ _CASES += [
     ("rm_batches", f"{B} -task rmblastn -outfmt 6", ""),
     ("rm_batches_fmt0", f"{B} -task rmblastn -outfmt 0", ""),
     ("rm_batches_threads4", f"{B} -task rmblastn -outfmt 6", "-num_threads 4"),
+    # Line RG item G1: megablast greedy extension with gap costs above 32767 (up to i32::MAX),
+    # including scaled high-GCD real gapped alignments and widened Int4-overflow cases.
+    ("g1.t2_32768", f"{T2} -task megablast -gapopen 32768 -gapextend 32768 -outfmt 6", ""),
+    ("g1.t2_40000_fmt0", f"{T2} -task megablast -gapopen 40000 -gapextend 40000 -outfmt 0", ""),
+    ("g1.t2_40000_fmt7", f"{T2} -task megablast -gapopen 40000 -gapextend 40000 -outfmt 7", ""),
+    ("g1.t2_40000_threads4", f"{T2} -task megablast -gapopen 40000 -gapextend 40000 -outfmt 6", "-num_threads 4"),
+    ("g1.p_gapped_50k", f"{P} -task megablast -reward 25000 -penalty -25000 -gapopen 50000 -gapextend 50000 -outfmt 6", ""),
+    ("g1.p_gapped_60k_30k", f"{P} -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6", ""),
+    ("g1.p_gapped_60k_30k_fmt0", f"{P} -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -max_target_seqs 20 -outfmt 0", ""),
+    ("g1.t2_intmax", f"{T2} -task megablast -gapopen 2147483647 -gapextend 2147483647 -outfmt 6", ""),
+    ("g1.p_no_greedy_60k_30k", f"{P} -task megablast -no_greedy -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6", ""),
+    ("g1.p_no_greedy_intmax", f"{P} -task megablast -no_greedy -gapopen 2147483647 -gapextend 2147483647 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument (see above).
 ORACLE_ARGV = {
     "culling.near_int4_max_2147483646": f"{CT} -culling_limit 2147483644 -outfmt 6",
     "culling.near_int4_max_2147483647": f"{CT} -culling_limit 2147483644 -outfmt 6",
+    "g1.t2_intmax": f"{T2} -task megablast -gapopen 40000 -gapextend 40000 -outfmt 6",
 }
 
 

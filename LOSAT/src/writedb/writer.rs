@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use super::bioseq::{Bioseq, SeqData};
+use super::bioseq::Bioseq;
 use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
 use super::convert::{
     find_sequence_length, raw_sequence_hash, seq_data_to_binary, sequence_hash, BinarySequence,
@@ -14,7 +14,8 @@ use super::convert::{
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
 use super::header::{
-    bad_title_chars, defline_set, defline_set_bad_chars, encode_defline_set, BadChar, BadTitleChar,
+    bad_title_chars, defline_set, defline_set_bad_chars, encode_defline_set_checked, BadChar,
+    BadTitleChar, NullSeqIdWriteError,
 };
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
@@ -47,6 +48,9 @@ pub struct WriteDb {
     pending: Option<Pending>,
     /// What NCBI's serializer posts to the diagnostic stream, in order.
     diagnostics: Vec<u8>,
+    /// Application prefix for diagnostic posts (`SetDiagPostPrefix`: `Some("makeblastdb")` in
+    /// `makeblastdb`, `None` in `makeprofiledb`).
+    diag_prefix: Option<&'static str>,
     /// What NCBI's writer writes to the standard output (`cout`), in order: the lines of the
     /// conversion of NCBI4na data whose size is not the one its length needs
     /// (`convert::ncbi4na_to_binary`).
@@ -66,6 +70,9 @@ pub struct WriteDb {
     /// `m_Deflines` of the kept sequence (`SetDeflines`: makeblastdb's with `-parse_seqids`,
     /// makeprofiledb's with or without its `-index`).
     pending_deflines: Option<DeflineSet>,
+    /// Positions `(defline_index, slot_index)` of `NULL` `Seq-id` elements inside
+    /// `pending_deflines` (from binary definition lines `ASN1_BlastDefLine`).
+    pending_null_seqids: Vec<(usize, usize)>,
     /// The taxid of the kept sequence's definition line without `-parse_seqids`
     /// (`FixTaxId` of `CBuildDatabase::x_EditHeaders`, `set_taxid`).
     pending_taxid: i32,
@@ -154,12 +161,21 @@ impl std::fmt::Debug for WriteDb {
 // string of a parsed definition line, under the path of its member):
 // "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
 // in string at byte 21" and the title.
-fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitleChar]) {
+fn post_bad_title_chars(
+    diagnostics: &mut Vec<u8>,
+    diag_prefix: Option<&str>,
+    title: &[u8],
+    bad: &[BadTitleChar],
+) {
+    if bad.is_empty() {
+        return;
+    }
+    let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
     for bad_char in bad {
         diagnostics.extend_from_slice(
             format!(
-                "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title\nBad char [0x{:X}] in \
-                 string at byte {}\n",
+                "Error: (803.7) {tag}Blast-def-line-set.E.title\nBad char [0x{:X}] in string at \
+                 byte {}\n",
                 bad_char.byte, bad_char.stream_offset
             )
             .as_bytes(),
@@ -173,11 +189,15 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
 /// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
 /// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
 /// p23_nonascii; the member paths of the other alternatives from the S3a probes).
-fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
+fn post_bad_chars(diagnostics: &mut Vec<u8>, diag_prefix: Option<&str>, bad: &[BadChar]) {
+    if bad.is_empty() {
+        return;
+    }
+    let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
     for bad_char in bad {
         diagnostics.extend_from_slice(
             format!(
-                "Error: (803.7) [makeblastdb] {}\nBad char [0x{:X}] in string at byte {}\n",
+                "Error: (803.7) {tag}{}\nBad char [0x{:X}] in string at byte {}\n",
                 bad_char.path, bad_char.byte, bad_char.stream_offset
             )
             .as_bytes(),
@@ -185,6 +205,27 @@ fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
         diagnostics.extend_from_slice(&bad_char.string);
         diagnostics.push(b'\n');
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384,522-557
+/// Posts NCBI's `802.5` `CObjectOStream` error for a `NULL` `Seq-id` inside
+/// `Blast-def-line-set.E.seqid.E` at `byte` and returns the matching `CUnassignedMember::eWrite`
+/// exception.
+fn null_seqid_write_error(
+    diagnostics: &mut Vec<u8>,
+    diag_prefix: Option<&str>,
+    byte: usize,
+) -> WriteDbError {
+    let null = crate::report::serial::encoder::NullElement {
+        stream: crate::report::serial::encoder::Stream::AsnBinary,
+        element_frame: true,
+        trace: "Blast-def-line-set.E.seqid.E".to_string(),
+        position: crate::report::serial::encoder::StreamPosition::Byte(byte as u64),
+        frames: Vec::new(),
+    };
+    diagnostics.extend_from_slice(&null.post(diag_prefix));
+    WriteDbError::Exception(null.exception())
 }
 
 impl WriteDb {
@@ -218,6 +259,7 @@ impl WriteDb {
             closed: false,
             pending: None,
             diagnostics: Vec::new(),
+            diag_prefix: Some("makeblastdb"),
             stdout: Vec::new(),
             lmdb: None,
             taxdb: None,
@@ -226,6 +268,7 @@ impl WriteDb {
             indices,
             oid_masks: 0,
             pending_deflines: None,
+            pending_null_seqids: Vec::new(),
             pending_taxid: 0,
             pending_hash: 0,
             pending_pig: 0,
@@ -246,6 +289,12 @@ impl WriteDb {
     /// now on.
     pub fn set_max_file_size(&mut self, max_file_size: u64) {
         self.max_file_size = max_file_size;
+    }
+
+    /// Sets the application prefix of serializer diagnostics (`None` for `makeprofiledb`, which
+    /// calls no `SetDiagPostPrefix`).
+    pub(crate) fn set_diag_prefix(&mut self, prefix: Option<&'static str>) {
+        self.diag_prefix = prefix;
     }
 
     /// Takes the diagnostics posted since the last call (text for the
@@ -271,7 +320,7 @@ impl WriteDb {
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
         let mut bad = Vec::new();
         bad_title_chars(&bioseq.title, &mut bad);
-        post_bad_title_chars(&mut self.diagnostics, &bioseq.title, &bad);
+        post_bad_title_chars(&mut self.diagnostics, self.diag_prefix, &bioseq.title, &bad);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
@@ -282,7 +331,7 @@ impl WriteDb {
     pub fn post_extracted_deflines(&mut self, deflines: &DeflineSet) {
         let mut bad = Vec::new();
         defline_set_bad_chars(deflines, &mut bad);
-        post_bad_chars(&mut self.diagnostics, &bad);
+        post_bad_chars(&mut self.diagnostics, self.diag_prefix, &bad);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1242-1249
@@ -291,15 +340,20 @@ impl WriteDb {
     // of FASTA input do not have (a copied database's may).
     /// `SetDeflines`: the definition lines of the sequence added last.
     pub fn set_deflines(&mut self, mut deflines: DeflineSet) {
-        for defline in &mut deflines.deflines {
-            if defline.memberships.as_ref().is_some_and(Vec::is_empty) {
-                defline.memberships = None;
-            }
-            if defline.links.as_ref().is_some_and(Vec::is_empty) {
-                defline.links = None;
-            }
-        }
+        super::deflines::strip_empty_lists(&mut deflines);
         self.pending_deflines = Some(deflines);
+        self.pending_null_seqids.clear();
+    }
+
+    /// [`WriteDb::set_deflines`], keeping the `(defline_index, slot_index)` positions of any
+    /// `NULL` `Seq-id` elements from binary definition lines (`ASN1_BlastDefLine`).
+    pub(crate) fn set_deflines_with_null_seqids(
+        &mut self,
+        deflines: DeflineSet,
+        null_seqids: Vec<(usize, usize)>,
+    ) {
+        self.set_deflines(deflines);
+        self.pending_null_seqids = null_seqids;
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1558-1561
@@ -337,15 +391,18 @@ impl WriteDb {
         if self.indices.hash {
             if let Some(seq_data) = &bioseq.seq_data {
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
-                // The hash reads the Bioseq's sequence vector (`convert::sequence_hash`), which
-                // LOSAT has for the codings of its sources only; no program of LOSAT asks for the
-                // hash of iupacna data.
-                if let SeqData::Iupacna(_) = seq_data {
-                    return Err(WriteDbError::Unsupported(
-                        "the sequence hash (-hash_index) of iupacna data".to_string(),
-                    ));
-                }
-                self.pending_hash = sequence_hash(seq_data, bioseq.length).unwrap_or(0);
+                self.pending_hash = match sequence_hash(seq_data, bioseq.length) {
+                    Ok(hash) => hash.unwrap_or(0),
+                    Err(super::convert::SequenceHashError::OutOfRange(exception)) => {
+                        return Err(WriteDbError::Exception(exception));
+                    }
+                    Err(super::convert::SequenceHashError::PastEnd(coding)) => {
+                        return Err(WriteDbError::Unsupported(format!(
+                            "the sequence hash (-hash_index) of {coding} data shorter than its \
+                             length (NCBI makeblastdb reads past the end of the buffer)"
+                        )));
+                    }
+                };
             }
         }
         self.pending = Some(Pending::Bioseq(bioseq));
@@ -387,11 +444,27 @@ impl WriteDb {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:139-149
+    /// `AddSequence` of a raw protein whose signed 32-bit `GetRawSeqAndAmbig` length wrapped
+    /// negative (`>= 2^31` residues): publishes the previous sequence, resets the pending sequence
+    /// state, and returns the first error (`publish` failure if any, otherwise NCBI's
+    /// `std::length_error` `basic_string::_M_create`) without allocating, so `~CWriteDB_Impl`
+    /// closes the partial database containing prior sequences.
+    #[must_use]
+    pub fn add_raw_negative_length(&mut self) -> WriteDbError {
+        if let Err(error) = self.publish() {
+            return error;
+        }
+        self.reset_sequence_data();
+        WriteDbError::LengthError("basic_string::_M_create")
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:110-137
     /// `x_ResetSequenceData`: the next sequence starts without the data of the previous one
     /// (its definition lines, taxid, hash, PIG, ids and column blobs).
     fn reset_sequence_data(&mut self) {
         self.pending_deflines = None;
+        self.pending_null_seqids.clear();
         self.pending_taxid = 0;
         self.pending_hash = 0;
         self.pending_pig = 0;
@@ -415,18 +488,29 @@ impl WriteDb {
     // `GetTaxIds` is the definition line's taxid (set on every one by `FixTaxId`) and its
     // `links` (the leaf taxids of a copied database; FASTA input has none).
     /// `x_CookHeader` and `x_CookIds` with `-parse_seqids`.
-    fn cook_parsed_header(&mut self) -> Vec<u8> {
+    fn cook_parsed_header(&mut self) -> Result<Vec<u8>, WriteDbError> {
         let deflines = self.pending_deflines.take().unwrap_or_default();
+        let null_seqids = std::mem::take(&mut self.pending_null_seqids);
         let mut bad = Vec::new();
-        let binhdr = encode_defline_set(&deflines, &mut bad);
-        post_bad_chars(&mut self.diagnostics, &bad);
+        let encoded = encode_defline_set_checked(&deflines, &null_seqids, &mut bad);
+        post_bad_chars(&mut self.diagnostics, self.diag_prefix, &bad);
+        let binhdr = match encoded {
+            Ok(binhdr) => binhdr,
+            Err(NullSeqIdWriteError { byte }) => {
+                return Err(null_seqid_write_error(
+                    &mut self.diagnostics,
+                    self.diag_prefix,
+                    byte,
+                ));
+            }
+        };
         self.tax_ids = union_of_tax_ids(&deflines.deflines);
         self.ids = deflines
             .deflines
             .into_iter()
             .flat_map(|defline| defline.ids)
             .collect();
-        binhdr
+        Ok(binhdr)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:925-929
@@ -442,14 +526,14 @@ impl WriteDb {
     /// `x_CookHeader`: the header record with the number the sequence gets
     /// in the current volume; the first cooking of a sequence also sets `m_Ids` (with
     /// indices or OID masks) and `m_TaxIds`.
-    fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
+    fn cook_header(&mut self, title: &[u8]) -> Result<Vec<u8>, WriteDbError> {
         let oid = self.volumes.last().map_or(0, Volume::oid);
         if self.pending_deflines.is_some() {
             return self.cook_given_header(oid);
         }
         let mut bad = Vec::new();
         let binhdr = defline_set(title, oid, self.pending_taxid, &mut bad);
-        post_bad_title_chars(&mut self.diagnostics, title, &bad);
+        post_bad_title_chars(&mut self.diagnostics, self.diag_prefix, title, &bad);
         if self.tax_ids.is_empty() {
             self.tax_ids.push(self.pending_taxid);
         }
@@ -461,34 +545,52 @@ impl WriteDb {
                 tag: ObjectId::Id(oid as i32),
             }));
         }
-        binhdr
+        Ok(binhdr)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:779-781,866-893,925-952
     // Definition lines given by `SetDeflines` without `eFullIndex` (makeprofiledb `-index
     // false`): every cooking takes the given lines with the first id of the first line
     // replaced by `gnl|BL_ORD_ID|<oid>` and serializes them; `m_Ids` (every line's ids after
-    // the replacement) and `m_TaxIds` are set by the first cooking only. `set_deflines` keeps
-    // only sets whose first line has an id (`deflines_have_first_id`).
+    // the replacement) and `m_TaxIds` are set by the first cooking only. When the first slot
+    // of the first line was `NULL`, replacing it with `gnl|BL_ORD_ID|<oid>` removes that `NULL`
+    // element before serialization.
     /// `x_CookHeader` and `x_CookIds` of given definition lines without `-parse_seqids`.
-    fn cook_given_header(&mut self, oid: u32) -> Vec<u8> {
+    fn cook_given_header(&mut self, oid: u32) -> Result<Vec<u8>, WriteDbError> {
         let mut deflines = self
             .pending_deflines
             .clone()
             .expect("the caller checked the given definition lines");
-        if let Some(first) = deflines
+        let mut null_seqids = self.pending_null_seqids.clone();
+        let gnl = ParsedSeqId::General(Dbtag {
+            db: b"BL_ORD_ID".to_vec(),
+            tag: ObjectId::Id(oid as i32),
+        });
+        if let Some(pos) = null_seqids.iter().position(|&pair| pair == (0, 0)) {
+            null_seqids.remove(pos);
+            if let Some(defline) = deflines.deflines.first_mut() {
+                defline.ids.insert(0, gnl);
+            }
+        } else if let Some(first) = deflines
             .deflines
             .first_mut()
             .and_then(|defline| defline.ids.first_mut())
         {
-            *first = ParsedSeqId::General(Dbtag {
-                db: b"BL_ORD_ID".to_vec(),
-                tag: ObjectId::Id(oid as i32),
-            });
+            *first = gnl;
         }
         let mut bad = Vec::new();
-        let binhdr = encode_defline_set(&deflines, &mut bad);
-        post_bad_chars(&mut self.diagnostics, &bad);
+        let encoded = encode_defline_set_checked(&deflines, &null_seqids, &mut bad);
+        post_bad_chars(&mut self.diagnostics, self.diag_prefix, &bad);
+        let binhdr = match encoded {
+            Ok(binhdr) => binhdr,
+            Err(NullSeqIdWriteError { byte }) => {
+                return Err(null_seqid_write_error(
+                    &mut self.diagnostics,
+                    self.diag_prefix,
+                    byte,
+                ));
+            }
+        };
         if self.tax_ids.is_empty() {
             self.tax_ids = union_of_tax_ids(&deflines.deflines);
         }
@@ -499,7 +601,7 @@ impl WriteDb {
                 .flat_map(|defline| defline.ids)
                 .collect();
         }
-        binhdr
+        Ok(binhdr)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1127-1133
@@ -538,7 +640,9 @@ impl WriteDb {
             ));
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:865-874
+        let first_has_null = self.pending_null_seqids.iter().any(|&(d, _)| d == 0);
         if !self.indices.full
+            && !first_has_null
             && self
                 .pending_deflines
                 .as_ref()
@@ -552,9 +656,9 @@ impl WriteDb {
             Pending::Raw(_) => &[],
         };
         let mut binhdr = if self.indices.full {
-            self.cook_parsed_header()
+            self.cook_parsed_header()?
         } else {
-            self.cook_header(title)
+            self.cook_header(title)?
         };
         let cooked;
         let binary = match &pending {
@@ -612,7 +716,7 @@ impl WriteDb {
                 }
             }
             if !self.indices.full {
-                binhdr = self.cook_header(title);
+                binhdr = self.cook_header(title)?;
             }
             done = self.write_to_volume(binary, &binhdr)?;
             if !done {

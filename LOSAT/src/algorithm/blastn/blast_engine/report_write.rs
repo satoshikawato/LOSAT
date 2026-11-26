@@ -176,7 +176,7 @@ pub(super) fn write_sam(
         searched_lengths: query_lengths,
         placements: &report.ranges.queries.placements,
     };
-    match (
+    let added = match (
         report.database_ordinals,
         report.database,
         report.database_reader,
@@ -205,7 +205,7 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Database(&letters_of),
                 },
-            )?;
+            )
         }
         _ => {
             // The records as read with `-subject_loc` (never packed), else the
@@ -236,8 +236,15 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Records(whole_records),
                 },
-            )?;
+            )
         }
+    };
+    if let Err(error) = added {
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316
+        // `~CSAM_Formatter()` flushes all earlier queries' records accumulated before an
+        // exception unwinds the formatter.
+        target.document.finish(writer)?;
+        return Err(error);
     }
     if target.finish {
         target.document.finish(writer)?;
@@ -255,8 +262,6 @@ pub(super) struct XmlDocument<'a> {
     pub(super) only_xml2: bool,
     /// The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
     pub(super) side_sink: Option<&'a crate::report::blast_xml2::SideFileSink>,
-    /// The run's first format, whose prefetch each batch asks (`database::prefetch_format`).
-    pub(super) prefetch: crate::algorithm::common::database::PrefetchFormat,
 }
 
 /// Outfmt 5 (BLAST XML) and 13 to 16 (the XML2 and JSON documents): the structured report of the
@@ -283,7 +288,6 @@ pub(super) fn write_structured_xml(
         kind: xml2_kind,
         only_xml2: xml_only_xml2,
         side_sink,
-        prefetch,
     } = structured;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
     // The CBlastOutput document of the queries (`blast_xml`).
@@ -342,7 +346,6 @@ pub(super) fn write_structured_xml(
             report.database_parsed,
             hit_lists,
             report.database_loads,
-            (report.batch_spans, !report.ungapped, prefetch),
         )?,
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
@@ -427,8 +430,10 @@ pub(super) fn write_structured_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         letters: report.subjects,
+        ungapped: report.ungapped,
         epilog: report.epilog,
         only_xml2: xml_only_xml2,
+        query_scopes: report.query_scopes,
     };
     match xml2_kind {
         None => crate::algorithm::blastn::blast_xml::write_blastn_xml(
@@ -459,6 +464,7 @@ pub(super) fn write_structured_xml(
                 cbs: 0,
                 query_gencode: None,
                 db_gencode: None,
+                program_type: None,
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);

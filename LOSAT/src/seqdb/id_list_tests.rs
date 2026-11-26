@@ -161,11 +161,17 @@ fn the_lookups_throw_where_ncbis_throw() {
     for db in ["PIG", "BL_ORD_ID"] {
         let thrown = find_id(&[7001], &[], &[], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
-        assert!(!thrown.places_known());
-        let thrown = negative_find_id(&[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
+        // The place that NCBI's report names (`isam::OBJECT_ID_GET_ID`, line DBID pfoff-7).
+        assert!(thrown.places_known());
+        let thrown =
+            negative_find_id(&[], &[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
         assert_eq!(
-            negative_find_id(&[], &general(db, text("abc"))),
+            negative_find_id(&[], &[], &general(db, text("abc"))),
+            Ok((false, false))
+        );
+        assert_eq!(
+            negative_find_id(&[7001], &[], &general(db, text("abc"))),
             Ok((false, false))
         );
         assert_eq!(
@@ -174,9 +180,53 @@ fn the_lookups_throw_where_ncbis_throw() {
         );
     }
     assert_eq!(
-        negative_find_id(&[b"abc".to_vec()], &general("ti", text("abc"))),
+        negative_find_id(&[], &[b"abc".to_vec()], &general("ti", text("abc"))),
         Ok((false, false))
     );
+    assert_eq!(
+        negative_find_id(&[7001, 7002], &[], &ParsedSeqId::Gi(7001)),
+        Ok((true, true))
+    );
+    assert_eq!(
+        negative_find_id(&[7001, 7002], &[], &ParsedSeqId::Gi(7003)),
+        Ok((false, true))
+    );
+    assert_eq!(
+        negative_find_id(&[], &[b"abc".to_vec()], &ParsedSeqId::Gi(7001)),
+        Ok((false, false))
+    );
+}
+
+#[test]
+fn an_ipg_list_reads_text_and_binary_with_ncbis_messages() {
+    assert_eq!(read_pig_list(b"1001\n1002").unwrap(), vec![1001]);
+    assert_eq!(
+        read_pig_list(b"1001 0 \r\n2147483649\n").unwrap(),
+        vec![1001, 2_147_483_649]
+    );
+    assert_eq!(read_pig_list(b"4294967297\n").unwrap(), vec![1]);
+    assert_eq!(
+        read_pig_list(&binary(&[0xFFFF_FFFF, 2, 1001, 2_147_483_649])).unwrap(),
+        vec![1001, 2_147_483_649]
+    );
+    assert_eq!(read_pig_list(b"").unwrap_err(), "Specified file is empty.");
+    assert_eq!(
+        read_pig_list(b" 1001\n").unwrap_err(),
+        "Specified file is not a valid GI/TI list."
+    );
+    assert_eq!(
+        read_pig_list(b"1001a\n").unwrap_err(),
+        "Invalid byte in textIPG list [97]."
+    );
+    for bad in [
+        binary(&[0xFFFF_FFFF, 3, 1001, 1002]),
+        binary(&[0xFFFF_FFFE, 1, 1001]),
+    ] {
+        assert_eq!(
+            read_pig_list(&bad).unwrap_err(),
+            "Specified file is not a valid binary IPG file."
+        );
+    }
 }
 
 /// `SiToOid` halves the ids in their order: on ids that a second simplification left out of order
@@ -195,4 +245,36 @@ fn find_si_halves_the_ids_in_their_order() {
     assert!(!find_si(&unsorted, b"loc7"));
     assert!(find_si(&unsorted, b"p10102.1"));
     assert!(find_si(&unsorted, b"np_000103.1"));
+}
+
+#[test]
+fn a_taxid_list_is_a_set_of_int4_numbers() {
+    let set = read_tax_id_list(b"9606\n10090\n9606\n2147483648\n").unwrap();
+    assert_eq!(
+        set.into_iter().collect::<Vec<_>>(),
+        vec![
+            ListNumber::Value(9606),
+            ListNumber::Value(10090),
+            ListNumber::Past,
+        ]
+    );
+    assert_eq!(
+        read_tax_id_list(&binary(&[0xFFFF_FFFF, 1, 562]))
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![ListNumber::Value(562)]
+    );
+    assert_eq!(
+        read_tax_id_list(&binary(&[0xFFFF_FFFF, 2, 562])).unwrap_err(),
+        "Specified file is not a valid binary Tax Id List file."
+    );
+    assert_eq!(
+        read_tax_id_list(b"9606,\n").unwrap_err(),
+        "Invalid byte in textTAXID list [44]."
+    );
+    assert_eq!(
+        read_tax_id_list(b"9606").unwrap(),
+        std::collections::BTreeSet::new()
+    );
 }

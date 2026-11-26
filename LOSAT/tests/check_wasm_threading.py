@@ -77,12 +77,17 @@ def fixtures(directory):
 
 # The -db rows whose alias files declare a total of 2^32 letters or more (LOSAT/tests/db_search/dbcounts:
 # LENGTH 4294967296000000000 in l4295, 4294967295999999999 in l4294, 68719476736 and 98784247808 in
-# avg2p32), which the WASI commands run (`main`, "db-total").
+# avg2p32; LOSAT/tests/db_search/aliaskeys: 4611686018427387904 in n_nseq0_l62 and 4611686018427387907 in
+# n_nseq1_l62p3), which the WASI commands run (`main`, "db-total").
 DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "db.cnt.l4295.bp.5",
                  "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx",
                  "db.cnt.avg2p32.mb.split.6", "db.cnt.avg2p32.mb.split.0", "db.cnt.avg2p32.mb.split.7",
                  "db.cnt.avg2p32.mb.split.b1.7", "db.cnt.avg2p32.mb.split.nq", "db.cnt.avg2p32.mb.whole.6",
-                 "db.cnt.avg2p32.mo00.split.6", "db.cnt.avg2p32.mo52.split.6"]
+                 "db.cnt.avg2p32.mo00.split.6", "db.cnt.avg2p32.mo52.split.6",
+                 "db.cnt.avg2p32.g3.split.6", "db.cnt.avg2p32.g3.split.0", "db.cnt.avg2p32.g3.split.b1.7",
+                 "db.cnt.avg2p32.g3.split.mo00.6", "db.cnt.avg2p32.g3.split.mb40k.6",
+                 "db.ak.bn.nseq0.l62.alln.7", "db.ak.tbn.nseq0.l62.allx.7",
+                 "db.ak.tbn.nseq1.l62p3.allx.7", "db.ak.tbx.nseq1.l62p3.alln.7"]
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
@@ -273,7 +278,11 @@ def main():
     # id, which WASI does not have (LOSAT/src/utils/process_id.rs). The -db rows are compared byte for
     # byte, all of them: since the port of glibc's FMA exp/log/pow (LOSAT/src/utils/glibc_fma_libm.rs)
     # WASI writes the frozen bytes in the 14 rows that PD-LOSAT-PLATFORM-LIBM 1.1 named, where the
-    # ASN.1 PSSM's informationContent had differed in the last of its 15 digits by 1.
+    # ASN.1 PSSM's informationContent had differed in the last of its 15 digits by 1. The device rows
+    # (`device: MODE`, db_search_fixtures.py `run_on_device`) run here too, psiblast's and blastx's of the
+    # formats below: where NCBI aborts (exit -6), the module's abort ends the runner by SIGABRT
+    # (wasi_artifact.js `endOnAbortTrap`), as the native command's; before, the runners exited 1 after
+    # the trap's stack, and the rows db.device.ps.p1epi.7 and db.device.ps.p1both.0 differed.
     # NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     # blastx's BLAST XML (outfmt 5), XML2 and JSON (13 to 16) through each WASI command, at -num_threads 1: every
     # blastx row of these formats of the frozen NCBI -subject fixtures (outfmt0_manifest.tsv, 88 rows) and -db

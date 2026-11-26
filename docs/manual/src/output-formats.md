@@ -11,10 +11,10 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `-outfmt` | Format | Written by |
 | --- | --- | --- |
 | `0` | Pairwise | all eight search programs |
-| `1` | Query-anchored, showing identities | all but `psiblast` |
-| `2` | Query-anchored, no identities | all but `psiblast` |
-| `3` | Flat query-anchored, showing identities | all but `psiblast` |
-| `4` | Flat query-anchored, no identities | all but `psiblast` |
+| `1` | Query-anchored, showing identities | all eight |
+| `2` | Query-anchored, no identities | all eight |
+| `3` | Flat query-anchored, showing identities | all eight |
+| `4` | Flat query-anchored, no identities | all eight |
 | `5` | BLAST XML | all eight |
 | `6` | Tabular | all eight |
 | `7` | Tabular with comment lines | all eight |
@@ -22,21 +22,21 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `9` | Seqalign, ASN.1 binary | all eight |
 | `10` | Comma-separated values | all eight |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
-| `12` | Seqalign, JSON | all but `psiblast` |
+| `12` | Seqalign, JSON | all eight |
 | `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
 | `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
 | `15` | Single-file BLAST JSON | all but `psiblast` |
 | `16` | Single-file BLAST XML2 | all but `psiblast` |
 | `17` | SAM | `blastn` only |
-| `18` | Organism report | all but `psiblast` |
+| `18` | Organism report | all eight |
 | `20` | Comma-separated values with header lines | all eight |
 
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
 
-- `psiblast` writes `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and it writes one Seq-annot or archive per round.
-- `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
+- `psiblast` writes `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round; it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round. Formats `13` to `16` are not yet supported.
+- `tblastn` with `-in_pssm` writes every format but `11`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` and `blastdb_aliastool` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 
@@ -44,7 +44,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 `-num_descriptions`, `-num_alignments`, `-line_length`, `-sorthits` and `-sorthsps` shape these formats. For formats above `4` they are ignored with a warning, as in NCBI.
 
-With `-html`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` write formats `0` to `4` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Format `18` is written as NCBI's HTML too (see below); the other formats are the same as without `-html`.
+With `-html`, `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast` and `rpstblastn` write formats `0` to `4` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Format `18` is written as NCBI's HTML too (see below); the other formats are the same as without `-html`.
 
 ## Tabular and custom fields (6, 7, 10, 20)
 

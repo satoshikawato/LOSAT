@@ -14,12 +14,13 @@
 use std::io::{self, Write};
 
 use crate::blastinput::app::{FormatChoice, ReportFormat};
+use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     write_outfmt7_query_line,
 };
-use crate::report::pairwise::end_gap_span;
+use crate::report::serial::seqalign::{row_end_gaps, AlignRow};
 
 /// NCBI's `ETabularField`: the fields of a tabular report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -903,6 +904,16 @@ impl TabularSpec {
         ])
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
+    /// The warning that the formatter NCBI makes for each query's report of this field list
+    /// writes when it is made (`x_CheckTaxDB`: `checks_taxdb` and no `taxdb.bti` found,
+    /// `taxdb_found`), as `program` (lower case) posts it: the one owner of that rule for the
+    /// report writers and for what a refused report writes before its refusal
+    /// (`FailedLookupRefusal::formatter_warning`).
+    pub fn formatter_warning(&self, taxdb_found: bool, program: &str) -> Option<String> {
+        (self.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line(program))
+    }
+
     /// Whether the report writes rows of fields: every tabular report but the organism report
     /// (outfmt 18), whose table shows the labels and titles of the subjects' definition lines
     /// (`report::tax_report`, taxFormat.cpp:935-976) and never a row's subject ids (`sseqid`,
@@ -951,11 +962,17 @@ impl TabularSpec {
 
     /// Whether a row of this report can stop where NCBI has no result (`failed_lookup_stop`):
     /// the report asks `sacc` or `saccver`, or `staxid` (a failed first row: `staxid` loads the
-    /// subject, whose load may throw, `FailedStage::Bioseq`). A report that cannot stop needs no
-    /// check of its rows before it is written.
+    /// subject, whose load may throw, `FailedStage::Bioseq`), or `sallacc` (a subject with a
+    /// definition line without a Seq-id, `LookupFailure::lineless`). A report that cannot stop
+    /// needs no check of its rows before it is written.
     pub fn may_stop_at_failed_lookup(&self) -> bool {
         self.writes_rows()
-            && self.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+            && self.has_any(&[
+                SubjectAccession,
+                SubjectAccessionVersion,
+                SubjectTaxId,
+                SubjectAllAccessions,
+            ])
     }
 
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
@@ -990,6 +1007,11 @@ impl TabularSpec {
 /// 2.17.0 stops with `CCoreException::eNullPtr`, exit 255, after the row's earlier fields), and
 /// `staxid` of a first row prints `m_SubjectTaxId` before any row set it (an uninitialised `int`:
 /// a different number in each run). `None`: the report has a result (`TabularWriter::row`).
+///
+/// A subject with a definition line without a Seq-id (`failure.lineless`) and no other failure
+/// has rows whose `sallacc` takes the label of that line's best id, null: NCBI's
+/// `x_PrintSubjectAllAccessions` has no `catch` and stops (exit 255) after the row's earlier fields,
+/// at any row (`LINELESS_ACCESSION_NULL_POINTER`).
 pub fn failed_lookup_stop(
     spec: Option<&TabularSpec>,
     failure: LookupFailure,
@@ -999,6 +1021,15 @@ pub fn failed_lookup_stop(
         return (failure.subject_id || (failure.bioseq && first))
             .then_some(FAILED_LOOKUP_NULL_POINTER);
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185
+    if failure.lineless
+        && !failure.bioseq
+        && spec.writes_rows()
+        && spec.has(SubjectAllAccessions)
+        && spec.failure_stage(failure).is_none()
+    {
+        return Some(LINELESS_ACCESSION_NULL_POINTER);
+    }
     let stage = spec.failure_stage(failure)?;
     // A load that throws leaves `m_SubjectId` as the last row that found its subject set it: empty
     // only before such a row (the result set's first row; every row before a later one that
@@ -1017,7 +1048,11 @@ pub fn failed_lookup_stop(
     }
 }
 
-const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver)";
+const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row, which reads the accession of the subject's Bioseq that its load did not give (the default fields of outfmt 6, 7, 10 and 20 print saccver), and reports the addresses of its own binary";
+
+/// The reason of `failed_lookup_stop` for the `sallacc` of a subject with a definition line
+/// without a Seq-id (`LookupFailure::lineless`).
+pub const LINELESS_ACCESSION_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sallacc of each row of such a sequence";
 
 /// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
 /// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
@@ -1034,17 +1069,36 @@ pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
+/// Whether a tabular report of `spec` (`None`: the default fields) can stop at a row whose
+/// subject lookup throws (`sacc`, `saccver`, default fields, or `staxid`), apart from a
+/// lineless-only definition line (`stops_at_lineless_accession`).
+pub fn stops_at_lookup_failure(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(|spec| {
+        spec.writes_rows()
+            && spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+    })
+}
+
+/// Whether a tabular report of `spec` (`None`: the default fields) stops at a subject that has a
+/// definition line without a Seq-id (`LookupFailure::lineless`, `failed_lookup_stop`: `sallacc`).
+pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
+    spec.is_some_and(|spec| spec.writes_rows() && spec.has(SubjectAllAccessions))
+}
+
 /// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
 /// `result_sets` (each the indices of its subjects in row order, a subject's run of rows once,
 /// one set per query or psiblast round), that NCBI has a result for each row whose subject
 /// lookups fail (`failure`, `None` where they do not): `failed_lookup_stop`'s cases are LOSAT's
-/// refusals, which name the subject (`describe`: what its title is) and the program.
+/// refusals, which name the subject (`describe` of its index and failure: what its title or
+/// definition line is) and the program (upper case; its formatter's warning, `taxdb_found` as
+/// `TabularSpec::formatter_warning` reads it, names it in lower case).
 pub fn check_failed_lookups<S>(
     spec: Option<&TabularSpec>,
     result_sets: impl IntoIterator<Item = S>,
     failure: impl Fn(usize) -> Option<LookupFailure>,
-    describe: impl Fn(usize) -> String,
+    describe: impl Fn(usize, LookupFailure) -> String,
     program: &str,
+    taxdb_found: bool,
 ) -> anyhow::Result<()>
 where
     S: IntoIterator<Item = usize>,
@@ -1052,16 +1106,26 @@ where
     if !may_stop_at_failed_lookup(spec) {
         return Ok(());
     }
-    for set in result_sets {
+    let mut rows = Vec::new();
+    for (index, set) in result_sets.into_iter().enumerate() {
+        rows.clear();
         for (row, s_idx) in set.into_iter().enumerate() {
+            rows.push(s_idx);
             let Some(failure) = failure(s_idx) else {
                 continue;
             };
             if let Some(reason) = failed_lookup_stop(spec, failure, row == 0) {
-                return Err(FailedLookupRefusal(format!(
-                    "{}; {reason}, which is not supported by LOSAT's {program}",
-                    describe(s_idx)
-                ))
+                return Err(FailedLookupRefusal {
+                    message: format!(
+                        "{}; {reason}, which is not supported by LOSAT's {program}",
+                        describe(s_idx, failure)
+                    ),
+                    set: index,
+                    rows,
+                    formatter_warning: spec.and_then(|spec| {
+                        spec.formatter_warning(taxdb_found, &program.to_ascii_lowercase())
+                    }),
+                }
                 .into());
             }
         }
@@ -1071,13 +1135,73 @@ where
 
 /// LOSAT's refusal of `check_failed_lookups` (exit status 1 with its message in every program; a
 /// type of its own, so that a program that reports its engine's errors otherwise, BLASTX's
-/// `native::report_error`, passes it on as a refusal).
+/// `native::report_error`, passes it on as a refusal), with the result set at which NCBI stops
+/// (`set`, 0-based in the order given): a program that checks the result sets of several query
+/// batches at once fails the batch of that set, after the reports of the batches before, as
+/// NCBI's run does, and after what NCBI writes to the standard error of that batch's reports up
+/// to the row (`report::query_warnings::posts_before_stop`: the subjects of the set's rows up to
+/// it, `rows`, and its formatter's warning, `formatter_warning`).
 #[derive(Debug)]
-pub struct FailedLookupRefusal(String);
+pub struct FailedLookupRefusal {
+    message: String,
+    set: usize,
+    /// The subjects of the set's rows up to that row, in order (the row's last), as the result
+    /// sets name them: the rows that NCBI's report of the set makes before it stops, whose reads
+    /// of their subjects come before the stop.
+    rows: Vec<usize>,
+    formatter_warning: Option<String>,
+}
+
+impl FailedLookupRefusal {
+    /// The result set (0-based) whose row NCBI has no result for.
+    pub fn set(&self) -> usize {
+        self.set
+    }
+
+    /// The warning of the formatter that NCBI makes for each query's report of the refused
+    /// field list (`TabularSpec::formatter_warning`), written after each query's posts.
+    pub fn formatter_warning(&self) -> Option<&str> {
+        self.formatter_warning.as_deref()
+    }
+
+    /// What NCBI writes to the standard error of the refused batch's reports before it stops at
+    /// the row (`report::query_warnings::posts_before_stop`), of `posts` and `reads`, the posts
+    /// and subject reads of the batch's queries from its first up to the row's, whose reads name a
+    /// subject as `read_subject` names a subject of the result sets (`rows`).
+    pub fn posts_before_stop(
+        &self,
+        posts: &[crate::report::diag_log::Posts],
+        reads: &[crate::report::query_warnings::QueryReads],
+        read_subject: impl Fn(usize) -> u32,
+    ) -> crate::report::diag_log::Posts {
+        let rows: Vec<u32> = self.rows.iter().map(|&s_idx| read_subject(s_idx)).collect();
+        crate::report::query_warnings::posts_before_stop(
+            posts,
+            reads,
+            &rows,
+            self.formatter_warning(),
+        )
+    }
+
+    /// The first query of the batch whose report `error` stops (a `FailedLookupRefusal` whose
+    /// result sets are the queries, in order; `starts`: the first query of each batch, in order):
+    /// the reports of the queries before it are written before the refusal (TBLASTN, TBLASTX,
+    /// which check every batch's rows at once). 0 for the first batch, one batch, or another
+    /// error.
+    pub fn batch_start(error: &anyhow::Error, starts: impl IntoIterator<Item = usize>) -> usize {
+        error.downcast_ref::<Self>().map_or(0, |refusal| {
+            starts
+                .into_iter()
+                .take_while(|&start| start <= refusal.set)
+                .last()
+                .unwrap_or(0)
+        })
+    }
+}
 
 impl std::fmt::Display for FailedLookupRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -1094,17 +1218,23 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
     )
 }
 
-/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails: where its
-/// load throws `thrown` (a batch whose prefetch is off, `SubjectLookup::Throws`), that load;
-/// otherwise its title (`failed_database_title`).
+/// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails as `failure`
+/// says: where its load throws `thrown` (a batch whose prefetch is off, or fails at a lookup that
+/// throws on the id: `SubjectLookup::Throws`), that load; where no lookup fails and a definition
+/// line has no Seq-id (`LookupFailure::lineless`), that line; otherwise its title
+/// (`failed_database_title`).
 pub fn failed_database_subject(
     oid: impl std::fmt::Display,
     thrown: Option<&crate::ncbi_exception::NcbiException>,
+    failure: LookupFailure,
 ) -> String {
     match thrown {
         Some(exception) => format!(
-            "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
+            "database sequence {oid} has a Seq-align id whose lookup throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
             String::from_utf8_lossy(exception.get_msg())
+        ),
+        None if failure.lineless && !failure.subject_id && !failure.all_ids => format!(
+            "database sequence {oid} has a definition line without a Seq-id (a hand-edited database)"
         ),
         None => failed_database_title(oid),
     }
@@ -1473,6 +1603,7 @@ impl FailedLookup<'_> {
             subject_id: self.subject_id,
             all_ids: self.all_ids.is_some(),
             bioseq: false,
+            lineless: false,
         }
     }
 }
@@ -1503,6 +1634,10 @@ pub struct LookupFailure {
     /// Whether the load of the subject's Bioseq by its Seq-align id throws, before both
     /// (`SubjectLookup::Throws`: a lookup that fails on a file where the batch's prefetch is off).
     pub bioseq: bool,
+    /// Whether a definition line of the subject has no Seq-id
+    /// (`db_subject::ParsedSubject::has_lineless_line`): no lookup fails, but `sallacc` prints the
+    /// label of that line's best id, which is null (`failed_lookup_stop`).
+    pub lineless: bool,
 }
 
 impl LookupFailure {
@@ -1513,7 +1648,7 @@ impl LookupFailure {
         Self {
             subject_id: true,
             all_ids: database,
-            bioseq: false,
+            ..Self::default()
         }
     }
 
@@ -1672,24 +1807,48 @@ pub struct TabularHsp<'a> {
     /// The query and subject rows of the alignment (`-` for a gap; translated rows in
     /// residues), when `TabularNeeds::rows`.
     pub rows: Option<(&'a [u8], &'a [u8])>,
-    /// Whether a `-` that begins or ends a row of `rows` is an end gap (`end_gap_span`), which NCBI
-    /// shows as its end character, a space (`push_alignment_row`), as in the Smith-Waterman
-    /// alignments of rpsblast's `-use_sw_tback`. NCBI decides by where the `-` comes from
-    /// (alnvec.cpp:279-297): a gap segment outside the row's aligned segments is the end
-    /// character, a fill of a segment that has a start is the gap character. `true` for the
-    /// alignments of the engines other than BLASTN; `false` for every row of BLASTN (whose X-drop
-    /// and greedy alignments start and end with a substitution, so a `-` at a row's end fills a
-    /// segment past the query's end: `algorithm::blastn::tabular`, remaining-gaps X1b-p) and for
-    /// `-subject`'s mapped row of BLASTX (`blastx::empty_rows::MappedAlignment`), whose `-` past
-    /// the query's end fills its segment.
-    pub end_gaps: bool,
-    /// The columns (0-based, sorted) of `rows` whose `-` is a residue, the query's and the
-    /// subject's: a PSSM query's gap residue, a database's stored gap character
-    /// (`pairwise::PairwiseHit::query_stored_gaps`, `subject_stored_gaps`), which is no end gap
-    /// (`end_gap_span`).
-    pub stored_gaps: [&'a [u32]; 2],
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+    /// The HSP's edit script (`gap_info`; the rows of `rows` are its columns), whose rows' aligned
+    /// ranges NCBI's table reads (`serial::seqalign::row_end_gaps`): `length`, `gapopen` and
+    /// `gaps` count the columns inside the query row's (`TabularHsp::within_query_range`, which
+    /// the writer applies), and `qseq`, `sseq` and `btop` show a row's end gaps as NCBI's end
+    /// character, a space (`push_alignment_row`), as in the Smith-Waterman alignments of
+    /// `-use_sw_tback`. NCBI decides by where a `-` comes from: a gap segment outside the row's
+    /// aligned segments is the end character; a `-` that is a residue (a PSSM query's gap residue,
+    /// a database's stored gap character) or fills a segment that has a start is the row's
+    /// letter. Empty for an ungapped HSP and for the rows whose `-` at an end fills a segment past
+    /// the query's end: BLASTN's (whose X-drop and greedy alignments start and end with a
+    /// substitution: `algorithm::blastn::tabular`, remaining-gaps X1b-p) and `-subject`'s mapped
+    /// row of BLASTX (`blastx::empty_rows::MappedAlignment`).
+    pub ops: &'a [GapEditOp],
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,
+}
+
+impl TabularHsp<'_> {
+    /// The row with `length`, `gaps` and `gap_opens` as NCBI's tables count them
+    /// (`serial::seqalign::AlignLengths::within_query_range` of `ops`, from the whole alignment's;
+    /// `pident` and `ppos` then divide by the shorter length, `mismatch` stays). The writer reads
+    /// every row so (`TabularWriter::row`).
+    pub(crate) fn within_query_range(self) -> Self {
+        let crate::report::serial::seqalign::AlignLengths {
+            length,
+            gaps,
+            gap_opens,
+        } = crate::report::serial::seqalign::AlignLengths {
+            length: self.length,
+            gaps: self.gaps,
+            gap_opens: self.gap_opens,
+        }
+        .within_query_range(self.ops);
+        Self {
+            length,
+            gaps,
+            gap_opens,
+            ..self
+        }
+    }
 }
 
 /// `NStr::Quote` with its default quote (`"`) and escape (`\`) characters.
@@ -1730,10 +1889,18 @@ pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiExcep
 }
 
 /// The end of a report at a row that reads the letters of a query whose molecule is `other`
-/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
-/// flushed, and the exception is the run's error.
-pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`), the
+/// exception's unwinding flushes the stream (NCBI's flush, as at `run_end`), and the exception is
+/// the run's error.
+pub fn query_sequence_end(
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    buffered: &[u8],
+    coding: i32,
+) -> anyhow::Error {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
@@ -1741,18 +1908,26 @@ pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) 
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163 (cited at
+// `blastn::tabular::write_blastn_tabular`)
 /// The end of the run at a row whose subject's load throws outside the subject block
-/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`,
-/// ends the reads (`end_reads`: `QueryWarnings::end_run`, `ReadCursor::end_run`; NCBI loads
-/// nothing after it) and gives NCBI's exception as the run's error
-/// (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit status 2).
+/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`, and
+/// the exception's unwinding runs `~CBlastTabularInfo`, which flushes the stream (NCBI's flush,
+/// the one of the query's end: a device that fails there ends the run as any tabular failure,
+/// not at the exception), ends the reads (`end_reads`: `QueryWarnings::end_run`,
+/// `ReadCursor::end_run`; NCBI loads nothing after it) and gives NCBI's exception as the run's
+/// error (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit
+/// status 2).
 pub fn run_end(
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     buffered: &[u8],
     exception: &crate::ncbi_exception::NcbiException,
     end_reads: impl FnOnce(),
 ) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     end_reads();
@@ -1919,6 +2094,8 @@ impl<'a> TabularWriter<'a> {
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
     ) {
+        // The counts inside the query row's aligned range (`TabularHsp::ops`).
+        let hsp = &hsp.within_query_range();
         if let Some(stage) = self.spec.failed_stage(subject.lookup) {
             self.failed_row(out, rows, query, subject, kept, hsp, stage);
             return;
@@ -2173,14 +2350,14 @@ impl<'a> TabularWriter<'a> {
                 QuerySeq => push_alignment_row(
                     out,
                     hsp.rows.map_or(&[][..], |rows| rows.0),
-                    hsp.end_gaps,
-                    hsp.stored_gaps[0],
+                    hsp.ops,
+                    AlignRow::Query,
                 ),
                 SubjectSeq => push_alignment_row(
                     out,
                     hsp.rows.map_or(&[][..], |rows| rows.1),
-                    hsp.end_gaps,
-                    hsp.stored_gaps[1],
+                    hsp.ops,
+                    AlignRow::Subject,
                 ),
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
                 BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
@@ -2208,7 +2385,7 @@ impl<'a> TabularWriter<'a> {
                 SubjectFrame => push_num(out, frames(hsp).1),
                 Btop => {
                     if let Some((qrow, srow)) = hsp.rows {
-                        write_btop(out, qrow, srow, hsp.end_gaps, hsp.stored_gaps);
+                        write_btop(out, qrow, srow, hsp.ops);
                     }
                 }
                 SubjectTaxId | SubjectTaxIds | SubjectSciName | SubjectCommonName
@@ -2442,27 +2619,16 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
     }
 }
 
-/// The BTOP string of two rows.
+/// The BTOP string of two rows, the columns of the edit script `ops` (`TabularHsp::ops`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1001-1027
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
 /// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
-/// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
-/// they are; `end_gap_span` stops at each row's first letter from each end, or at its first `-`
-/// that is a residue (`stored`, the query's and the subject's: `TabularHsp::stored_gaps`).
-pub fn write_btop(
-    out: &mut Vec<u8>,
-    qrow: &[u8],
-    srow: &[u8],
-    end_gaps: bool,
-    stored: [&[u32]; 2],
-) {
+/// the rows of an empty script) take the columns as they are.
+pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8], ops: &[GapEditOp]) {
     let columns = qrow.iter().copied().zip(srow.iter().copied());
-    if !end_gaps {
-        write_btop_columns(out, columns);
-        return;
-    }
-    let (q_span, s_span) = (end_gap_span(qrow, stored[0]), end_gap_span(srow, stored[1]));
+    let q_span = row_end_gaps(ops, AlignRow::Query).span(qrow.len());
+    let s_span = row_end_gaps(ops, AlignRow::Subject).span(srow.len());
     if q_span == (0, qrow.len()) && s_span == (0, srow.len()) {
         write_btop_columns(out, columns);
     } else {
@@ -2497,7 +2663,7 @@ fn write_btop_columns(out: &mut Vec<u8>, columns: impl Iterator<Item = (u8, u8)>
 }
 
 /// The letter of column `column` of a row whose columns between its end gaps are `span`
-/// (`end_gap_span`): NCBI's end character, a space, outside them.
+/// (`serial::seqalign::RowEndGaps::span`): NCBI's end character, a space, outside them.
 fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
     if column < span.0 || column >= span.1 {
         b' '
@@ -2507,15 +2673,11 @@ fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
-/// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
-/// the tabular writer does not set) for its end gaps (`end_gap_span`, whose `-` is no residue of
-/// `stored`: `TabularHsp::stored_gaps`), where it has some (`end_gaps`, `TabularHsp::end_gaps`).
-fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool, stored: &[u32]) {
-    let span = if end_gaps {
-        end_gap_span(row, stored)
-    } else {
-        (0, row.len())
-    };
+/// `qseq` or `sseq`: the row `row` (`which`) of the edit script `ops` with `-` for its inner gaps
+/// and a space (NCBI's end character, which the tabular writer does not set) for its end gaps
+/// (`serial::seqalign::row_end_gaps`, `TabularHsp::ops`), where it has some.
+fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], ops: &[GapEditOp], which: AlignRow) {
+    let span = row_end_gaps(ops, which).span(row.len());
     if span == (0, row.len()) {
         out.extend_from_slice(row);
         return;

@@ -5,6 +5,7 @@
 // "WindowMasker options" showing every stage option from `-xmlhelp` plus "Files of the run" and
 // "Additional options".
 import { computed, ref, watch } from 'vue';
+import type { CountsLoader } from '../application/counts';
 import type { Coordinator } from '../application/coordinator';
 import type { ToolDraft } from '../application/tool-draft';
 import { changedToolOptionsCount, toolValidationSummary } from '../domain/tool-argv';
@@ -28,12 +29,14 @@ import { useStore } from './useStore';
 const props = defineProps<{
   draft: ToolDraft;
   coordinator: Coordinator;
+  counts: CountsLoader;
 }>();
 
 const emit = defineEmits<{ submitted: [runId: string] }>();
 
 const state = useStore(props.draft.state);
 const appState = useStore(props.coordinator.state);
+const countsState = useStore(props.counts.state);
 const formModel = computed(() => windowMaskerFormModel(props.draft, state.value));
 const runFilesInput = ref<HTMLInputElement | null>(null);
 const runFolderInput = ref<HTMLInputElement | null>(null);
@@ -137,7 +140,13 @@ function onRunFiles(event: Event): void {
     </fieldset>
     <p class="program-summary" data-testid="wm-stage-summary">{{ stageSummary }}</p>
 
-    <ToolInputs :draft="draft" :state="state" :session-counts="sessionCounts" :model="formModel" />
+    <ToolInputs
+      :draft="draft"
+      :state="state"
+      :session-counts="sessionCounts"
+      :saved-counts="countsState.list"
+      :model="formModel"
+    />
 
     <fieldset class="search-block" data-testid="wm-output-block">
       <legend>Output</legend>

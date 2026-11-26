@@ -51,6 +51,10 @@ pub struct HspRecord<'a> {
     /// translated query), in the searched letters.
     pub q_offset: i32,
     pub q_end: i32,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP (the records of
+    /// BLASTX and TBLASTN come mapped, `serial::seqalign::mapped_script`: an end `Ins`), which its
+    /// `hsp_percent_coverage` still counts (`MappedScript::query_left_out`); 0 for every other HSP.
+    pub q_left_out: i32,
     /// `subject.offset` and `subject.end` (exclusive), likewise for the subject.
     pub s_offset: i32,
     pub s_end: i32,
@@ -160,6 +164,16 @@ impl ProgramType {
             ProgramType::RpsBlast => "rpsblast",
             ProgramType::RpsTblastn => "rpstblastn",
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:861-871
+    /// Whether a search of the program is an iterative one (`IsIterativeSearch`, the formatter's
+    /// `m_IsIterative`): psiblast and PSI-TBLASTN (tblastn `-in_pssm`); NCBI's third, DELTA-BLAST,
+    /// is not a LOSAT program. The one owner of this fact for every report: the XML2 and JSON
+    /// documents of such a search are held (`blast_xml2::reports_held`) and list a database
+    /// search's results as its rounds.
+    pub fn is_iterative(self) -> bool {
+        matches!(self, ProgramType::PsiBlast | ProgramType::PsiTblastn)
     }
 }
 

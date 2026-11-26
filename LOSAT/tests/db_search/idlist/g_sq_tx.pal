@@ -1,0 +1,4 @@
+TITLE sq and tx v5
+DBLIST g
+SEQIDLIST sq_a.txt
+TAXIDLIST tx_a.txt

@@ -1,0 +1,7 @@
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Warning: [psiblast] Query_1 qp1 query: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 

@@ -20,8 +20,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases
   after which every reading frame keeps a letter after its part, for exception 21 with the freed letters stored as `X`
   or `N`; for exception 3 the same volume with zero bytes after its last memory page; for exception 19 the hit list
-  size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`), where
-  NCBI's own run of the row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19 and 27); `freeze` copies ROW_ID's columns and runs nothing.
+  size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`; for
+  exception 31 a PSSM file's gapped Lambda of 8e-9, in outfmt 7, which prints no Lambda), where NCBI's own run of the
+  row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19, 27 and 31); `freeze` copies
+  ROW_ID's columns and runs nothing.
 - `kind ncbi` with a part ` | ncbi-valgrind` of covers: the frozen bytes are NCBI's run under valgrind memcheck, where
   NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3) and may crash or vary; `freeze` runs
   such a row only with `--valgrind CMD` (for example `--valgrind "valgrind -q --log-file=/dev/null"`) and otherwise
@@ -29,6 +31,31 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
 - `kind ncbi` with `ncbi-stack: unlimited` in covers: `freeze` runs NCBI with no stack limit, where its default 8 MiB
   stack overflows on a PSSM's values nested thousands of levels deep (PD-LOSAT-NCBI-DEFECTS exception 15); `check`
   runs LOSAT as for any row.
+- `kind ncbi` with `device: MODE` in covers (Linux only; line RG item T6a fix 1; the rows `db.device.*` of
+  `<program>.device.tsv`): the report goes to a device that fails, and the expectation is NCBI's exit status and
+  stderr and the bytes that reached the device (`<row_id>.out`). MODE `stdout-full`: standard output is /dev/full;
+  `out-full`: `-out /dev/full`; `fsize=N`: `-out` a temporary file under `RLIMIT_FSIZE` N, SIGXFSZ ignored (the
+  write past N bytes fails with EFBIG); `check` gives LOSAT's file N plus the bytes that LOSAT's words add to NCBI's
+  frozen bytes (`device_growth`: LOSAT's version statement moves the same point of the report that far). Inputs: each program's base search (blastn nslice, blastp prot_v5, tblastn
+  tslice, blastx bslice, tblastx xslice; formats 0, 5-12, 15-18 where LOSAT dev and NCBI agree without a device; SAM
+  only for blastn) with stdout-full, out-full and `fsize` of half the report (at most 100000) and of its size minus 1
+  (where the report is at most 100001 bytes), and for outfmt 0 inside the last query footer, and just inside and 20
+  bytes after the epilog's flushed line feeds; `dev_nw.fna` (a warning for an all-N query between two queries, also
+  with BATCH_SIZE=1; outfmt 6, 7, 10); `dev_pblk.faa` (1000 copies of p3.faa's first record, 61,000 letters) against
+  `-subject dev_psubj.faa` (prot_v5 as FASTA; outfmt 0, 5, 8, 9, 12 with `fsize` 100000); and outfmt 16 with
+  `-subject` (`dev_nsubj.fna`, `dev_psubj.faa`; out-full and half). Frozen files stay at or below 100 KB.
+  Fix 3 (2026-11-22) adds the modes `stdout-fsize=N` (standard output a file limited to N bytes, no `-out`),
+  `stdout-stderr-fsize=N` (standard output and standard error one such file, `> file 2>&1`), `stderr-full`
+  (standard error /dev/full), and `stdout-closed` / `stderr-closed` (a pipe whose reader closed: LOSAT only, NCBI is
+  ended by SIGPIPE; the expectation is the `ncbi-near` row of the full device, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+  exception 5), and rows (`<program>.device.tsv`, psiblast, rpsblast and rpstblastn files new): psiblast
+  `Search has CONVERGED!` limits (`paja`, `tk.faa` 2 rounds and `tk_o.faa` 3 rounds; outfmt 0, 6, 7) and its warnings
+  on a failed standard error; rpsblast and rpstblastn on each device; tblastx and rpstblastn outfmt 6 at 4,096,
+  8,191 and 8,192 bytes on a file and on standard output; the review's outfmt 0 exit transitions on standard output
+  (`dev_nm.fna` against `of18/ns_ids` with `-task blastn`, `dev_pm.faa` against `of18/ps_ids`), each boundary on
+  both sides; `dev_nw.fna`'s warning on a failed standard error and in one limited file with the report; a strategy
+  file that LOSAT refuses on a device that fails at NCBI's prolog, in every program; and closed pipes for formats 0, 5, 6, 11 (and
+  blastn's 17).
 - `kind ncbi` with `ncbi-copies: PATH [NAME=VALUE ...]` in covers (a copy row; up to a ` | ` or the end): the
   expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place of the row's query
   file. With unified P-values (`blastp -comp_based_stats 1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values
@@ -109,8 +136,9 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   the `[LOCAL_ID] TOOL_URL` link (`db_name`), and an absolute path would put the checkout's path into the frozen bytes.
   Not taken: absolute paths (bytes of one machine), paths relative to DIR in the cells (every reader counts on paths
   relative to LOSAT/), a temporary directory with copies of the files (absolute paths again), a new column (a new
-  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, an `rps-gz:` db cell, a
-  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused. `freeze`
+  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, a
+  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused; an `rps-gz:`
+  db cell is taken (its names are databases of the inflated directory, not paths). `freeze`
   and `check` refuse to start when `LOSAT/.ncbirc` exists (it would change every row).
 
 ## Who runs which rows
@@ -125,8 +153,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
   them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
   the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
-- `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
-  outfmt 0 to 4 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
+- `check_wasm_threading.py`: a few rows by id, every psiblast row (`psiblast.html.tsv` included) and blastx's rows of outfmt 5 and 13 to 16; no row of
+  outfmt 0 to 4 or 18 (the `-html` rows) of the other blast programs (rpsblast and rpstblastn have none there).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
   `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
   `check_manifest_sizes.py` checks the size of every file.

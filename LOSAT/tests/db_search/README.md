@@ -1195,6 +1195,52 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's mapper packs gi ids, so its prefetch loads the batch's subjects in the order of their gi numbers, where the taxids
   alternate from gi 1 to gi 10: the offset error comes six times (the order of the OIDs would give it once). Rows
   `db.tm.bp.cachegi.*`.
+- `tm_hd.pal` (`DBLIST tm_hd_a tm_hd_b`) and `tm_hdr.pal` (`DBLIST tm_hdr_a tm_hdr_b`), line NP item O4b2-7: two
+  volumes of the protein of `tm_cache.faa` each. `tm_hd_a` holds one sequence with two definition lines,
+  `gb|AAA00001.1|` (taxid 99990) and `gb|XYZ00002.1|` (150), `tm_hd_b` one with `gb|XYZ00002.1|` (562); `tm_hdr_a` holds
+  `gb|XYZ00005.1|` (99990) and `gb|AAA00002.1|` (150), `tm_hdr_b` `gb|AAA00002.1|` (562) (the `.faa` and `.map` of each
+  volume), built in this directory with
+
+      for v in tm_hd_a tm_hd_b tm_hdr_a tm_hdr_b; do
+          makeblastdb -in $v.faa -dbtype prot -out $v -title "${v//_/ }" -parse_seqids -taxid_map $v.map
+      done
+
+  NCBI's data loader gives the first volume's sequence for the second volume's Seq-align id, which it holds in its second
+  line, and names a blob by the sequence with the id's Seq-id handle: the prefetch loads that sequence twice, by its own
+  id and by the other, and `tm_hd`'s handles in that order look 99990 up again after 150 (the offset error twice), while
+  `tm_hdr`'s other order gives it once. `tm_hd_q2.faa` holds the query of `tm_cache_q.faa` twice: a second batch
+  (`BATCH_SIZE=1`) loads nothing again. Rows `db.tm.hd.*`.
+- `tm_hdg.pal` (`DBLIST tm_hdg_a tm_hdg_b`), line NP item O4b2-7 (review 1, M2): as `tm_hd`, but the second volume's
+  `gb|XYZ00002.1|` (562) is on the first line of `tm_hdg_a`'s sequence, `gi|5|gb|XYZ00002.1|` (99990), whose second line
+  is `gb|CCC00003.1|` (150); built as above (`for v in tm_hdg_a tm_hdg_b`). Each Seq-align id gives that sequence's
+  first line, so the Bioseq of either load holds the other's id; the prefetch still loads both blobs (it asks its scope
+  only for ids resolved before it): the offset error twice. Rows `db.tm.hd.g.*`.
+- `tm_hdg2.pal` (`DBLIST tm_hdg_a tm_hdg_c`), `tm_hdg2_q.faa`, line NP item O4b2-8: reuses `tm_hdg_a` (protein P1) and
+  adds `tm_hdg_c` (`gb|XYZ00002.1|`, taxid 562, unrelated 130-aa protein P2), built with `makeblastdb -in tm_hdg_c.faa
+  -dbtype prot -out tm_hdg_c -title "tm hdg c" -parse_seqids -taxid_map tm_hdg_c.map`. `tm_hdg2_q.faa` holds P1 then P2:
+  with `BATCH_SIZE=1`, batch 1 prefetches `gi|5` and resets NCBI's scope, so batch 2's prefetch of `gb|XYZ00002.1|` loads
+  fresh (the offset error twice; row `db.tm.hd.g2.bp.qe.q2b1.6`).
+- `tm_cache_ngi`, `tm_cache_ngi_q1.fna`, and `tm_cache_ngi_q2.fna`, line NP item O4b2-8: nucleotide counterpart of
+  `tm_cache_gi` (12 copies of the 390-bp coding sequence of P1 with the same gi numbers and taxids 99990/150, built with
+  `makeblastdb -in tm_cache_ngi.fna -dbtype nucl -out tm_cache_ngi -title "tm cache ngi" -parse_seqids -taxid_map
+  tm_cache_ngi.map`) and one/two query copies, for two-batch outfmt 5 (scope kept) vs outfmt 6 (scope reset) rows across
+  `blastn`, `tblastn`, `tblastx`, and `blastx` (`db.tm.*.cachengi.*`, `db.tm.bx.cachegi.*`, `db.tm.bp.cachegi.q2b1.*`,
+  `db.tm.psi.cachegi.*`).
+- `tm_cache_gi12a` (12 proteins: 6 copies of P1 `gi|1..6` and 6 copies of P2 `gi|7..12`, alternating taxids 99990 and 150)
+  and `tm_gi21` (21 copies of P1 `gi|1..21`, alternating 99990 and 150), built with `makeblastdb -dbtype prot -parse_seqids
+  -taxid_map`, plus `nz_qcut.faa` and `nz_qcut.fna` (a non-hitting ASCII `>q0 none` query followed by `nz_q1` with a
+  non-ASCII UTF-8 query title `>q1 a\xc3\xa9b z`), line NP item O4b2-8 (L6): 11-20 sequence two-batch rows
+  (`db.tm.bp.cachegi12a.q2b1.lim0.6`, `db.tm.bp.cachegi.q2b1.lim0.*`), >20 sequence rows (`db.tm.bp.gi21.*`: outfmt 5 pins
+  all 21 prefetched blobs while outfmt 6 and prefetch-off report reads are refused), and end-to-end BLAST XML stream-cut
+  refusals (`db.nz.bp.c150.lim0.xmlcut.5.reject` anchored by `db.nz.bp.xmlcut.good.5`, and
+  `db.nz.bx.c150.lim0.xmlcut.5.reject`).
+- `tm_stop_gi`, `tm_stop_u`, `tm_stop_tie`, and `tm_stop_q2.faa`, line NP item O4b2-8 (b): `tm_stop_gi` holds 11 copies of
+  P1 (`gi|5,1,3` taxid 99990, `gi|6,2,4` taxid 150, `ref|NP_000008.1|` taxid 99990, `gi|9..12` alternating 99990/150;
+  `-parse_seqids`), `tm_stop_u` holds one unparsed v5 sequence of P2 (`-taxid 9606`, no `-parse_seqids`, so no accession
+  table), `tm_stop_tie` adds `gi|8` (taxid 99990, same packed key 8 as `ref|NP_000008.1|`), and `tm_stop_q2.faa` holds P2
+  then P1. Mixed with `tm_stop_u`, `gi|1..6` surely load before `ref|NP_000008.1|` stops with exit 2 and 3 offset errors
+  (`db.tm.bp.stopgi.{6,0,16,q2b1.6}`), while `tm_stop_tie`'s tied key varies across heap layouts and is refused
+  (`db.tm.bp.stopgi.tie.6.reject`).
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
@@ -1433,6 +1479,10 @@ the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid li
 `rps_mini3v.msk`, `OID_MASK_TYPE 1`): NCBI searches the three volumes bare, so the profile reaches the reports
 (`db.om.rps.rej.x3v`, `db.om.rtbn.rej.x3v`) unless it is past the cut (`oidmask/qrps8.faa`, eight queries of
 `tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
+`rps/tx3v{00,01,02}.{phr,pin,pot,ptf}.gz` are the files of the volumes `rps_mini3v.00` to `.02` made as `rps/build.sh` makes
+them, with `makeprofiledb -taxid` 9606, 10090 and 562 (the other files are `rps_mini3v`'s; probe
+`PS/scripts/impl15b2_rps18_probe.sh` of line PS): row `db.ps15b2.rps.tax3v.18`, the organism report of the merged
+volumes at `-max_target_seqs 1` with the taxonomy database `tests/seqdb/taxdb/good`.
 `omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
 build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
 OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`; `ompartn.nal`
@@ -1441,7 +1491,7 @@ OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of mak
 `db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
 databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
 
-## Alias files with GILIST, TILIST and SEQIDLIST (line RG, series D, D1c-1)
+## Alias files with GILIST, TILIST, SEQIDLIST and TAXIDLIST (line RG, series D, D1c-1 and D1c-2)
 
 `idlist/` (`make_idlist.py`, whose docstring lists the sources and databases): `g` (version 5, 14 proteins, some with two
 or three definition lines), `g4` (version 4), `gm` (two volumes), `gu` (no parsed Seq-ids, no ISAM), `gt` (`g4` with a TI
@@ -1449,11 +1499,22 @@ ISAM written by the script; makeblastdb writes none), `n` and `n4` (nucleotides)
 files and alias files over them: the list alone, under `NSEQ` and `LENGTH` (read at the search's first use instead of
 the constructor's scan), ANDed with a range or an `OIDLIST`, nested, two alias files over one volume, beside the bare
 volume (sequences left with no line), over one or both volumes of `gm`, and the list files' forms and errors (binary,
-no last separator, a GI past 2^32, `#`, empty, a bad count, missing at the absolute path
-`/losat-idlist-fixture-missing/none.txt`, two files in one value). The rows are `db.il.*` (every search program;
-`rps/ilmiss.pal` and `ilmissw.pal` over `rps_mini` with a missing GILIST) and blastdbcmd's cases A272-A366
-(`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt` and `u_np103.txt` are the searches' own
-`-seqidlist` files beside the alias files' lists.
+no last separator, a GI past 2^32, a taxid past 2^31-1, `#`, empty, a bad count, missing at the absolute path
+`/losat-idlist-fixture-missing/none.txt`, two files in one value), and databases whose headers were rewritten with
+definition lines without a Seq-id (`ln`, `lnn`, `lm`, `x1`, `xw`, `pn`). D1c-2 adds version 5 `SEQIDLIST` (text and binary
+`.bsl`, versioned and unversioned ids, unparseable FASTA fallback, empty and 0-count lists, missing eager and lazy
+lists, combined with `GILIST`, `TAXIDLIST`, and user `-seqidlist`/`-negative_seqidlist`/`-taxids`/`-negative_taxids`)
+and version 5 `TAXIDLIST` (text, past `i32::MAX`, unknown, empty, non-numeric, missing eager and lazy, combined with
+ranges, `OIDLIST`, nested/sibling/bare aliases, multi-volume `gm`, `ln`, `lx`, and user search lists). The rows are
+`db.il.*` (every search program; `rps/ilmiss.pal`, `ilmissw.pal`, `ilv5sqm.pal`, `ilv5sqmw.pal`, `ilv5txm.pal`,
+`ilv5txmw.pal`, `ilv5sq.pal`, `ilv5sqw2.pal`, `ilv5txw.pal` over `rps_mini` and `rpstax`) and blastdbcmd's cases
+A272-A366 and A447 on (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt`, `u_np103.txt`, `u_np103v.txt`,
+`u_np103_1.txt`, `u_np103_2.txt`, `u_np103_amb.txt` and `u_1abc.txt` are the searches' own `-seqidlist` files beside the
+alias files' lists (`g_sqamb0`/`g_sqamb1`/`g_sqamb2` hold `NP_000103`, `NP_000103.1` and `NP_000103.2` in three orders
+for the rule-3 strict-weak-ordering refusal rows; `g_squns` holds `NP_000118.1` and `NP_000103.1` unsorted without an
+equivalent pair). `pw` and `nw` (version 4, line DBID pfoff-7) hold general ids whose lookups throw on the id itself
+(`gnl|PIG|abc`, `gnl|ti|xyz`, `gnl|BL_ORD_ID|zz`), for the rows `db.pfo.<program>.thr.*` with the queries `pwq.faa` and
+`pwq.fna`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -1958,6 +2019,19 @@ it, so the first chunks have no valid context. The rejection row has `NSEQ 0`, w
 Rows `db.gr.bn.*` (the same item): `db.gr.bn.rej.mo00.b1` refuses matrix-only scoring with the greedy extension in the third
 batch of `alln_q.fna` (`BATCH_SIZE=1`) after the reports of the two batches before, the 142 bytes NCBI writes before it
 divides by zero there (SIGFPE); `db.gr.bn.alln_q.b1.7` is the near run NCBI finishes (`ncbi-near`).
+Rows `db.ak.*.l62*` (D1a-6 review A F2): `aliaskeys/n_nseq0_l62` (`NSEQ 0`, `LENGTH 4611686018427387904`) and
+`aliaskeys/n_nseq1_l62p3` (`NSEQ 1`, `LENGTH 4611686018427387907`) over `../taxfilter/tfn` with `BATCH_SIZE=1` and
+`allx_q649.faa` (TBLASTN, with and without `OLD_FSC=1`) or `alln_q.fna` (BLASTN split `CHUNK_SIZE=200`, TBLASTX):
+LOSAT writes the reports of the two unsearchable batches before batch 3 refuses the 64-bit effective search space overflow
+(`ncbi-near` against the matching `allx.faa` / `alln.fna` runs).
+Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
+`../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
+with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`
+unmasked (valid batch context) while `restrict_masks` covers `aC` in chunk 0 so every chunk has no valid context. Chunk 0
+still reads OID 0 of an empty database (`aliaskeys/en`: `Database memory map file error`, exit 3), a database without its
+sequence file (`arch_tbn_snucl_nonsq`) is reported with exit 0, and otherwise the batch's traceback set-up checks the
+subjects (`dbcounts/avg2p32`: `Traceback failed`, exit 3, before greedy refusals; `aliaskeys/n_nseq0`: count 0 refusal) and
+then the greedy set-up (`db.gr.bn.rej.mo00.g3.split.b1`).
 Frozen with NCBI BLAST+ 2.17.0 on the developer machine and again on the workstation (`env_blast`), the same bytes.
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
@@ -2602,8 +2676,9 @@ alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS excep
 `tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
 (`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
 letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);
-the other rows are NCBI's own, which equal its run of the near input there. Masks out of
-order (`unsorted`, `overlap`) are refused, as for the other programs.
+the other rows are NCBI's own, which equal its run of the near input there. Masks that overlap in
+start order (`overlap`, `th1.15`) are searched with NCBI's rows (M4b-3c part 2); masks stored out of
+the order of their start (`unsorted`, `th2.11`) stay refused.
 
 The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read
 inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
@@ -2707,8 +2782,17 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 2.17.0, run from `LOSAT/`) of `tests/fasta/outfmt0/x1bp_d3m_s.fna`, `x1bo_R_short_s.fna` and `x1bo_d3_s.fna`: subjects
 on which `-ungapped -xdrop_ungap 1e10` (and megablast for `rs`) keeps an HSP outside its query context. Fix 2 (review 1
 M1 and S1): `qpa` and `r3` the same of `x1bp_qpA_s.fna` and `x1bo_r3_s.fna`; `d3t` of `x1bo_d3_s.fna` with
-`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6.rej`, whose
+`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6`, whose
 `BLASTDB=tests/seqdb/taxdb/bad_magic` makes NCBI's prefetch write a message.
+
+`x1bq/`: rows `db.x1bq.*` (line RG, item X1b-q): `-db` alignments whose Seq-align query start lies below 0 in record
+coordinates. `mixed` is `makeblastdb -dbtype nucl` (NCBI BLAST+ 2.17.0, run from `LOSAT/`) of `x1bq/mixed_s.fna`
+(`s_infirst`: `x1bo_d3_s.fna`'s `s_plus3` + 80 random bases + `qB[0:250]`, giving normal, class N, and normal HSPs in one
+subject; `s_only_classN`: `s_plus3`; `s_norm_lo`: 40 random bases + `qB[150:270]` + 40 random bases; seed `20261125`).
+`rneg` is `makeblastdb -dbtype nucl` of `x1bq/rneg_s.fna` (`s_R_neg`: `x1bo_R_short_s.fna`'s first 4,200 bases; `s_norm`:
+`C`x40 + `x1bo_R_q.fna`'s `qB` + `G`x40), searched with `x1bq/rneg_q.fna` (`q0`, `qA`, `rc(qB)`, `qB`, `rc(qC[:4200])`
+from `x1bo_R_q.fna`) under `-task megablast -strand minus -xdrop_ungap 1e10`, which produces a gapped `Dense-seg` whose
+query start is `-1020`.
 
 ## Where some inputs come from (provenance)
 
@@ -2768,3 +2852,15 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
   `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
   survey T2's `bom` file).
+
+Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_search_manifest/rpsblast.html.tsv`,
+`rpstblastn.html.tsv`): `-html` in rpsblast and rpstblastn, with the `rc/` directories above,
+`../seqdb/taxdb/good`, `../fasta/rps` and the profile databases of `rps/`.
+`rps/hx.{phr,pin,pdb,pos}.gz` are the files of `rps_mini` built with profile 101 under `ref|XP_000101.1|` and a title that holds `<`, `>`, `&` and double
+quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
+files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
+database reach the links of NCBI's HTML formatter through a reader of their own.
+
+Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
+formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,
+and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directories and databases above.

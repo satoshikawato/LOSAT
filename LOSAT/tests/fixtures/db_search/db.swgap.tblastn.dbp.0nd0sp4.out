@@ -1,0 +1,210 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nest_p.fna
+           1 sequences; 1,140 total letters
+
+
+
+Query= f101
+
+Length=190
+
+
+>nest_p
+Length=1140
+
+ Score = 353 bits (906),  Expect = 5e-128, Method: Compositional matrix adjust.
+ Identities = 190/285 (67%), Positives = 190/285 (67%), Gaps = 0/285 (0%)
+ Frame = +1
+
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+
+Query  1                                       MQLILSHHLTMAGRVELVTGPMFAG  25
+                                               MQLILSHHLTMAGRVELVTGPMFAG
+Sbjct  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIMQLILSHHLTMAGRVELVTGPMFAG  360
+
+Query  26   KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+            KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV
+Sbjct  361  KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  540
+
+Query  86   LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+            LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV
+Sbjct  541  LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  720
+
+Query  146  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+            KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  721  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  855
+
+
+ Score = 15.4 bits (28),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 6/18 (33%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = -3
+
+Query  132  SPIHKLLPYTNSIVKLAS  149
+            SPI    P+ N   +L +
+Sbjct  55   SPIQPYRPWLNDGSRLTA  2
+
+
+ Score = 13.9 bits (24),  Expect = 5.2, Method: Compositional matrix adjust.
+ Identities = 3/9 (33%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  65   HAGEVIEGC  73
+            H   + +GC
+Sbjct  172  HTHTLFQGC  146
+
+
+ Score = 394 bits (1012),  Expect = 4e-144, Method: Compositional matrix adjust.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  286  MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  465
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  466  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  645
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  646  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  825
+
+Query  181  AEMYAAACRD  190
+            AEMYAAACRD
+Sbjct  826  AEMYAAACRD  855
+
+
+ Score = 15.4 bits (28),  Expect = 1.5, Method: Compositional matrix adjust.
+ Identities = 8/19 (42%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
+ Frame = -3
+
+Query  68   EVIEGCTTVSSIKELISVL  86
+             V + C   S I  L SVL
+Sbjct  481  HVSQWCPYHSRIGSLESVL  425
+
+
+ Score = 14.2 bits (25),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 4/9 (44%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  60   GTIVTHAGE  68
+            G++ T AG+
+Sbjct  688  GSVRTSAGQ  662
+
+
+ Score = 15.4 bits (28),  Expect = 1.3, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  140  YTNSIVKLASKC  151
+            Y + I+KL  +C
+Sbjct  748  YKSCILKLVLRC  713
+
+
+ Score = 13.1 bits (22),  Expect = 7.8, Method: Compositional matrix adjust.
+ Identities = 5/17 (29%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+ Frame = -3
+
+Query  6    SHHLTMAGRVELVTGPM  22
+            SH+     R     GP+
+Sbjct  811  SHYYRYRSRTAP*KGPL  761
+
+
+ Score = 16.9 bits (32),  Expect = 0.53, Method: Compositional matrix adjust.
+ Identities = 8/16 (50%), Positives = 9/16 (56%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  57   CGTGTIVTHAGEVIEG  72
+            CG+GTI      V EG
+Sbjct  779  CGSGTITIIM*SVWEG  826
+
+
+ Score = 13.5 bits (23),  Expect = 6.0, Method: Compositional matrix adjust.
+ Identities = 4/11 (36%), Positives = 5/11 (45%), Gaps = 0/11 (0%)
+ Frame = -3
+
+Query  19   TGPMFAGKSTY  29
+            TGP   G   +
+Sbjct  868  TGPRHPGTQPH  836
+
+
+ Score = 200 bits (508),  Expect = 7e-68, Method: Compositional matrix adjust.
+ Identities = 94/94 (100%), Positives = 94/94 (100%), Gaps = 0/94 (0%)
+ Frame = +1
+
+Query  97    EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  156
+             EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI
+Sbjct  859   EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  1038
+
+Query  157   DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+             DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  1039  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  1140
+
+
+ Score = 14.2 bits (25),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = -3
+
+Query  92   VILIDEGQFFTDL  104
+            VI+   G  F DL
+Sbjct  985  VIVYGSG*TFVDL  947
+
+
+ Score = 15.0 bits (27),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 7/24 (29%), Positives = 11/24 (46%), Gaps = 7/24 (29%)
+ Frame = -3
+
+Query  137   LLPYTNSIV-------KLASKCMI  153
+             +LP+  S +        L S CM+
+Sbjct  1054  VLPWYQSYISCTLKPTSLWSSCMV  983
+
+
+ Score = 13.5 bits (23),  Expect = 5.8, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = -3
+
+Query  54    RYGCGT  59
+             RY C T
+Sbjct  1084  RYHCQT  1067
+
+
+ Score = 14.2 bits (25),  Expect = 3.9, Method: Compositional matrix adjust.
+ Identities = 3/10 (30%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = -3
+
+Query  127   DQQMFSPIHK  136
+              Q+ F P+ +
+Sbjct  1129  PQRTFPPLRR  1100
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: nest_p.fna
+    Posted date:  Nov 24, 2026  5:03 PM
+  Number of letters in database: 1,140
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

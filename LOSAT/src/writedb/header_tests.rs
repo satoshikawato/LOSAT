@@ -450,9 +450,9 @@ mod parsed {
     }
 
     /// The member path of the deepest members (every alternative with strings, a date of both
-    /// kinds) fits the capacity that the writer starts with.
+    /// kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the root.
     #[test]
-    fn the_member_path_never_grows() {
+    fn the_member_path_fits_the_fixed_depth() {
         let set = DeflineSet {
             deflines: vec![BlastDefline {
                 title: text("t"),
@@ -466,10 +466,9 @@ mod parsed {
         for write_strings in [true, false] {
             let mut bad = Vec::new();
             let mut w = SetWriter::new(&set, write_strings, &mut bad);
-            let capacity = w.path.capacity();
-            w.set(&set);
-            assert_eq!(w.path.capacity(), capacity);
-            assert_eq!(w.path, ["Blast-def-line-set"]);
+            w.set(&set, &[]).unwrap();
+            assert_eq!(w.path_len, 1);
+            assert_eq!(&w.path[..w.path_len], ["Blast-def-line-set"]);
         }
     }
 
@@ -511,6 +510,107 @@ mod parsed {
             assert!(written.iter().all(|bad| record[bad.stream_offset] == b'#'));
         }
     }
+
+    // Verified against NCBI BLAST+ 2.17.0 makeprofiledb -blastdb_version 4: exact BER stream
+    // byte position where CObjectOStreamAsnBinary::WriteContainer stops on a NULL Seq-id.
+    #[test]
+    fn encode_defline_set_checked_reports_exact_null_seqid_byte_positions() {
+        let local = |s: &[u8]| ParsedSeqId::Local(ObjectId::Str(s.to_vec()));
+        let gnl_ord = |oid: i32| {
+            ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(oid),
+            })
+        };
+        let mut bad = Vec::new();
+
+        // No title, first defline first seqid is NULL (byte 8).
+        let notitle = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: None,
+                ids: Vec::new(),
+                taxid: Some(0),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        assert_eq!(
+            encode_defline_set_checked(&notitle, &[(0, 0)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 8 })
+        );
+
+        // Title "t", first defline first seqid is NULL (byte 15).
+        let d1_s1 = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids: Vec::new(),
+                taxid: Some(0),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        assert_eq!(
+            encode_defline_set_checked(&d1_s1, &[(0, 0)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 15 })
+        );
+
+        // Title "t", second seqid is NULL (byte 28; with BL_ORD_ID 0, byte 49).
+        let d1_s2 = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids: vec![local(b"id1")],
+                taxid: Some(0),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        assert_eq!(
+            encode_defline_set_checked(&d1_s2, &[(0, 1)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 28 })
+        );
+        let d1_s2_ord = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids: vec![gnl_ord(0)],
+                taxid: Some(0),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        assert_eq!(
+            encode_defline_set_checked(&d1_s2_ord, &[(0, 1)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 49 })
+        );
+
+        // Second defline: first seqid is NULL (byte 56), second seqid is NULL (byte 69).
+        let d2_s1 = DeflineSet {
+            deflines: vec![
+                BlastDefline {
+                    title: Some(b"d1".to_vec()),
+                    ids: vec![local(b"id1")],
+                    taxid: Some(0),
+                    ..BlastDefline::default()
+                },
+                BlastDefline {
+                    title: Some(b"d2".to_vec()),
+                    ids: Vec::new(),
+                    taxid: Some(0),
+                    ..BlastDefline::default()
+                },
+            ],
+            utf8: false,
+        };
+        assert_eq!(
+            encode_defline_set_checked(&d2_s1, &[(1, 0)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 56 })
+        );
+        let mut d2_s2 = d2_s1;
+        d2_s2.deflines[1].ids.push(local(b"id2"));
+        assert_eq!(
+            encode_defline_set_checked(&d2_s2, &[(1, 1)], &mut bad),
+            Err(NullSeqIdWriteError { byte: 69 })
+        );
+    }
 }
 
 /// The title's diagnostics without the record are those of the record, for titles of every byte
@@ -525,8 +625,15 @@ fn bad_title_chars_are_those_of_the_record() {
         text[len - 1] = 0xff;
         texts.push(text);
     }
+    for len in [1, 12, 30, 60, 100] {
+        texts.push(vec![0xc3; len]);
+    }
     for text in texts {
-        let (mut alone, mut written) = (vec![], vec![]);
+        let earlier = BadTitleChar {
+            byte: 0x01,
+            stream_offset: 3,
+        };
+        let (mut alone, mut written) = (vec![earlier], vec![earlier]);
         bad_title_chars(&text, &mut alone);
         defline_set(&text, 7, 9606, &mut written);
         assert_eq!(alone, written, "{} bytes", text.len());

@@ -67,9 +67,7 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 // substitute '#': every byte outside ' '..'~' is written as '#' and reported
 // with the stream position of the replacement. The runs of visible bytes between them are
 // found a block at a time (`find_first`) and copied whole.
-fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
-    out.push(TAG_VISIBLE_STRING);
-    write_length(out, text.len());
+fn write_visible_string_bytes(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
     let mut rest = text;
     while let Some(at) = find_first(rest, is_bad_visible) {
         out.extend_from_slice(&rest[..at]);
@@ -83,7 +81,16 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
     out.extend_from_slice(rest);
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
+fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
+    out.push(TAG_VISIBLE_STRING);
+    write_length(out, text.len());
+    write_visible_string_bytes(out, text, bad);
+}
+
 /// Whether `write_visible_string` writes `byte` as `#` (a byte outside ' '..'~').
+///
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
 fn is_bad_visible(byte: u8) -> bool {
     !(b' '..=b'~').contains(&byte)
 }
@@ -91,6 +98,8 @@ fn is_bad_visible(byte: u8) -> bool {
 /// The bytes of `text` that `write_visible_string` writes as `#` and the stream offsets that it
 /// reports, without writing them: `start` is the stream offset of the string's first byte, after
 /// its tag and length.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
 fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
     let mut at = 0;
     while let Some(found) = find_first(&text[at..], is_bad_visible) {
@@ -106,11 +115,15 @@ fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
 /// lengths and their eleven ends, the title's tag and a length of up to 9 bytes, `BL_ORD_ID` with
 /// its tag and length, and two integers of up to 6 bytes), so that the record is written into its
 /// buffer without growing it (LOSAT's speed).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
 const DEFLINE_SET_OVERHEAD: usize = 80;
 
 /// The prefix of `defline_set`'s record before its title's bytes: the tags of
 /// `Blast-def-line-set`, `Blast-def-line` and the `title` member, and the VisibleString's tag and
 /// length.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
 fn title_prefix(out: &mut Vec<u8>, title: &[u8]) {
     open(out, TAG_SEQUENCE);
     open(out, TAG_SEQUENCE);
@@ -124,10 +137,20 @@ fn title_prefix(out: &mut Vec<u8>, title: &[u8]) {
 /// depend on the oid or the taxid. `ExtractBioseqDeflines` serializes the definition line only for
 /// these diagnostics (cited at `WriteDb::extract_bioseq_deflines`); computing them alone gives the
 /// same diagnostics (LOSAT's speed).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
 pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
+    let Some(first) = find_first(title, is_bad_visible) else {
+        return;
+    };
     let mut prefix = Vec::with_capacity(16);
     title_prefix(&mut prefix, title);
-    bad_visible_chars(title, prefix.len(), bad);
+    let start = prefix.len();
+    bad.push(BadTitleChar {
+        byte: title[first],
+        stream_offset: start + first,
+    });
+    bad_visible_chars(&title[first + 1..], start + first + 1, bad);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
@@ -141,13 +164,9 @@ pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
 /// appended to `bad`.
 pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
     let mut out = Vec::with_capacity(DEFLINE_SET_OVERHEAD + title.len());
-    // Outer `Blast-def-line-set` sequence of `Blast-def-line` entries.
-    open(&mut out, TAG_SEQUENCE);
-    // Single `Blast-def-line` sequence.
-    open(&mut out, TAG_SEQUENCE);
-    // Optional `title` field (VisibleString).
-    open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TITLE);
-    write_visible_string(&mut out, title, bad);
+    // Outer `Blast-def-line-set`, single `Blast-def-line`, and optional `title` (VisibleString).
+    title_prefix(&mut out, title);
+    write_visible_string_bytes(&mut out, title, bad);
     close(&mut out);
     // `seqid` list of `Seq-id` entries.
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
@@ -201,15 +220,33 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
 }
 
 /// The capacity that `encode_defline_set` gives the record of `set`: 64 bytes, and for each
-/// definition line its title and 64 bytes an id, so that a record of the usual size is written
-/// without growing its buffer (LOSAT's speed); a larger one grows as before.
-fn encoded_capacity(set: &DeflineSet) -> usize {
+/// definition line its title (when writing string bytes) and 64 bytes an id, so that a record of
+/// the usual size is written without growing its buffer (LOSAT's speed); a larger one grows as
+/// before.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
+fn encoded_capacity(set: &DeflineSet, write_strings: bool) -> usize {
     64 + set
         .deflines
         .iter()
-        .map(|defline| defline.title.as_ref().map_or(0, Vec::len) + 64 * defline.ids.len())
+        .map(|defline| {
+            let title_len = if write_strings {
+                defline.title.as_ref().map_or(0, Vec::len)
+            } else {
+                0
+            };
+            title_len + 64 * defline.ids.len()
+        })
         .sum::<usize>()
 }
+
+/// The names of the deepest member path of a record, kept inline on the stack so that the path is
+/// never heap-allocated (LOSAT's speed): `Blast-def-line-set.E.seqid.E` and four below it, as
+/// `pdb.rel.std.season` or `patent.cit.id.number`.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-45
+const MEMBER_PATH_DEPTH: usize = 8;
 
 /// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through
 /// `MSerial_AsnBinary`), with the member path of each string for the serializer's diagnostics.
@@ -220,7 +257,8 @@ struct SetWriter<'a> {
     /// way, so the stream offsets of the reports are the same.
     write_strings: bool,
     skipped: usize,
-    path: Vec<&'static str>,
+    path: [&'static str; MEMBER_PATH_DEPTH],
+    path_len: usize,
     bad: &'a mut Vec<BadChar>,
 }
 
@@ -233,13 +271,22 @@ impl SetWriter<'_> {
         close(&mut self.out);
     }
 
+    fn push_path(&mut self, name: &'static str) {
+        self.path[self.path_len] = name;
+        self.path_len += 1;
+    }
+
+    fn pop_path(&mut self) {
+        self.path_len -= 1;
+    }
+
     /// A member or an alternative `[number]` around `body`, named `name` in the path.
     fn context(&mut self, number: u8, name: &'static str, body: impl FnOnce(&mut Self)) {
-        self.path.push(name);
+        self.push_path(name);
         self.open(TAG_CONTEXT_CONSTRUCTED | number);
         body(self);
         self.close();
-        self.path.pop();
+        self.pop_path();
     }
 
     fn string(&mut self, text: &[u8]) {
@@ -252,9 +299,13 @@ impl SetWriter<'_> {
             bad_visible_chars(text, self.skipped + self.out.len(), &mut bad);
             self.skipped += text.len();
         }
+        if bad.is_empty() {
+            return;
+        }
+        let path = self.path[..self.path_len].join(".");
         for bad_char in bad {
             self.bad.push(BadChar {
-                path: self.path.join("."),
+                path: path.clone(),
                 byte: bad_char.byte,
                 stream_offset: bad_char.stream_offset,
                 string: text.to_vec(),
@@ -400,6 +451,15 @@ impl SetWriter<'_> {
     }
 }
 
+/// A `NULL` `Seq-id` element met while BER-encoding a `Blast-def-line-set`
+/// ([`encode_defline_set_checked`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NullSeqIdWriteError {
+    /// Byte position in the BER output stream where the `NULL` element would have been written
+    /// (`CObjectOStream::GetStreamPos`).
+    pub(crate) byte: usize,
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
 // The writing of blastdb.asn:32-47 (cited in `seqid::ber`): SEQUENCE OF Blast-def-line,
 // each a SEQUENCE of the members that are set, in order; `title` is a VisibleString,
@@ -409,9 +469,24 @@ impl SetWriter<'_> {
 /// (`-parse_seqids`): `set` as makeblastdb serializes it. Bytes of the strings that a
 /// VisibleString cannot hold are written as `#` and appended to `bad`.
 pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
+    encode_defline_set_checked(set, &[], bad).expect("no NULL Seq-id")
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384,522-557
+// When a `Blast-def-line.seqid` list holds a `NULL` element (`null_seqids`: sorted
+// `(defline_index, slot_index)` pairs), `CObjectOStreamAsnBinary::WriteContainer` stops at the
+// exact byte offset before that element with `fUnassigned` (`CUnassignedMember::eWrite`).
+/// [`encode_defline_set`], stopping at the first `NULL` `Seq-id` in `null_seqids` and returning
+/// its byte position in the BER stream.
+pub(crate) fn encode_defline_set_checked(
+    set: &DeflineSet,
+    null_seqids: &[(usize, usize)],
+    bad: &mut Vec<BadChar>,
+) -> Result<Vec<u8>, NullSeqIdWriteError> {
     let mut w = SetWriter::new(set, true, bad);
-    w.set(set);
-    w.out
+    w.set(set, null_seqids)?;
+    Ok(w.out)
 }
 
 /// The diagnostics of `encode_defline_set(set, bad)` without its record: the strings' bytes
@@ -419,47 +494,80 @@ pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
 /// definition lines it built only for these diagnostics and throws the bytes away (cited at
 /// `WriteDb::post_extracted_deflines`); computing them alone gives the same diagnostics (LOSAT's
 /// speed: the record is written once, for the header).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
 pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
-    SetWriter::new(set, false, bad).set(set);
+    SetWriter::new(set, false, bad)
+        .set(set, &[])
+        .expect("no NULL Seq-id");
 }
-
-/// The names of the deepest member path of a record, so that the path is allocated once and never
-/// grows (LOSAT's speed): `Blast-def-line-set.E.seqid.E` and four below it, as
-/// `pdb.rel.std.season` or `patent.cit.id.number`.
-const MEMBER_PATH_DEPTH: usize = 8;
 
 impl<'a> SetWriter<'a> {
     /// The writer of the record of `set`, with or without the bytes of its strings.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
     fn new(set: &DeflineSet, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {
-        let mut path = Vec::with_capacity(MEMBER_PATH_DEPTH);
-        path.push("Blast-def-line-set");
+        let mut path = [""; MEMBER_PATH_DEPTH];
+        path[0] = "Blast-def-line-set";
         SetWriter {
-            out: Vec::with_capacity(encoded_capacity(set)),
+            out: Vec::with_capacity(encoded_capacity(set, write_strings)),
             write_strings,
             skipped: 0,
             path,
+            path_len: 1,
             bad,
         }
     }
 
-    /// The record of `set`: SEQUENCE OF Blast-def-line.
-    fn set(&mut self, set: &DeflineSet) {
+    /// The record of `set`: SEQUENCE OF Blast-def-line, stopping at any `NULL` `Seq-id` listed in
+    /// `null_seqids`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256
+    fn set(
+        &mut self,
+        set: &DeflineSet,
+        null_seqids: &[(usize, usize)],
+    ) -> Result<(), NullSeqIdWriteError> {
         self.open(TAG_SEQUENCE);
-        for defline in &set.deflines {
-            self.path.push("E");
+        for (defline_idx, defline) in set.deflines.iter().enumerate() {
+            self.push_path("E");
             self.open(TAG_SEQUENCE);
             if let Some(title) = &defline.title {
                 self.string_member(DEFLINE_TITLE, "title", title);
             }
-            self.context(DEFLINE_SEQID, "seqid", |w| {
-                w.open(TAG_SEQUENCE);
+            self.push_path("seqid");
+            self.open(TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
+            self.open(TAG_SEQUENCE);
+            if null_seqids.is_empty() {
                 for id in &defline.ids {
-                    w.path.push("E");
-                    w.seq_id(id);
-                    w.path.pop();
+                    self.push_path("E");
+                    self.seq_id(id);
+                    self.pop_path();
                 }
-                w.close();
-            });
+            } else {
+                let line_nulls = null_seqids
+                    .iter()
+                    .filter(|&&(d, _)| d == defline_idx)
+                    .count();
+                let total_slots = defline.ids.len() + line_nulls;
+                let mut ids = defline.ids.iter();
+                for slot in 0..total_slots {
+                    if null_seqids.contains(&(defline_idx, slot)) {
+                        return Err(NullSeqIdWriteError {
+                            byte: self.skipped + self.out.len(),
+                        });
+                    }
+                    if let Some(id) = ids.next() {
+                        self.push_path("E");
+                        self.seq_id(id);
+                        self.pop_path();
+                    }
+                }
+            }
+            self.close();
+            self.close();
+            self.pop_path();
             if let Some(taxid) = defline.taxid {
                 self.int_member(DEFLINE_TAXID, "taxid", taxid);
             }
@@ -473,9 +581,10 @@ impl<'a> SetWriter<'a> {
                 self.int_list(5, "other-info", values);
             }
             self.close();
-            self.path.pop();
+            self.pop_path();
         }
         self.close();
+        Ok(())
     }
 }
 

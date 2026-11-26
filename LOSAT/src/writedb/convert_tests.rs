@@ -152,7 +152,10 @@ fn sequence_hashes_are_makeblastdb_s() {
         (b"M", 12_357),
     ] {
         let data = SeqData::Ncbieaa(letters.to_vec());
-        assert_eq!(sequence_hash(&data, letters.len() as u64), Some(expected));
+        assert_eq!(
+            sequence_hash(&data, letters.len() as u64),
+            Ok(Some(expected))
+        );
         // The hash runs over the ncbistdaa codes of the sequence file.
         let stdaa = seq_data_to_binary(&data, letters.len() as u32, &mut Vec::new())
             .unwrap()
@@ -171,14 +174,36 @@ fn sequence_hashes_are_makeblastdb_s() {
         (b"ACGTNNNNNNNNNNACGT", 3_309_723_638),
     ] {
         let na4 = SeqData::Ncbi4na(iupacna_to_ncbi4na(letters));
-        assert_eq!(sequence_hash(&na4, letters.len() as u64), Some(expected));
+        assert_eq!(
+            sequence_hash(&na4, letters.len() as u64),
+            Ok(Some(expected))
+        );
+        // Uppercase IUPACna (no U) matches NCBI4na under CSeqVector's CSeqportUtil table.
+        let iupac = SeqData::Iupacna(letters.to_vec());
+        assert_eq!(
+            sequence_hash(&iupac, letters.len() as u64),
+            Ok(Some(expected))
+        );
     }
+    // Lowercase, U, and non-IUPACna bytes map to 0xff in CSeqVector's CSeqportUtil table.
+    assert_eq!(
+        sequence_hash(&SeqData::Iupacna(b"acgt".to_vec()), 4),
+        Ok(Some(941_884_064))
+    );
+    assert_eq!(
+        sequence_hash(&SeqData::Iupacna(b"AU".to_vec()), 2),
+        Ok(Some(362_964_458))
+    );
+    assert_eq!(
+        sequence_hash(&SeqData::Iupacaa(b"Aa".to_vec()), 2),
+        Ok(Some(362_964_458))
+    );
     let gaps = SeqData::Ncbi4na(vec![0x12, 0x48, 0xff, 0x12, 0x48, 0xf1]);
-    assert_eq!(sequence_hash(&gaps, 12), Some(2_633_391_912));
+    assert_eq!(sequence_hash(&gaps, 12), Ok(Some(2_633_391_912)));
     // ncbi2na: ACGTACGTAC as 00 01 10 11 ...
     let na2 = SeqData::Ncbi2na(vec![0x1b, 0x1b, 0x10]);
-    assert_eq!(sequence_hash(&na2, 10), Some(4_241_009_515));
-    assert_eq!(sequence_hash(&SeqData::Other, 3), None);
+    assert_eq!(sequence_hash(&na2, 10), Ok(Some(4_241_009_515)));
+    assert_eq!(sequence_hash(&SeqData::Other, 3), Ok(None));
 }
 
 /// `x_ComputeHash` of a sequence in the form of the sequence file: a nucleotide of no base hashes
@@ -198,7 +223,7 @@ fn a_raw_nucleotide_of_no_base_hashes_before_its_ambiguities() {
     let na2 = SeqData::Ncbi2na(vec![0x1b, 0x10]);
     assert_eq!(
         raw_sequence_hash(false, &[0x1b, 0x12], &[]).ok(),
-        sequence_hash(&na2, 6)
+        sequence_hash(&na2, 6).unwrap()
     );
 }
 
@@ -456,4 +481,61 @@ fn short_nucleotide_data_is_found_at_each_boundary() {
     // The protein codings and the others are not converted so.
     assert_eq!(short(SeqData::Ncbieaa(Vec::new()), 22), None);
     assert_eq!(short(SeqData::Other, 22), None);
+}
+
+// NCBI `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:328-337`): the pair loop indexes
+// `sm_IupacnaTo4na` with a signed `char` (undefined for byte >= 0x80), while the odd overhang
+// casts to `Uint1` (defined). Bytes < 0x80 and other codings are defined.
+#[test]
+fn iupacna_high_byte_finds_only_pair_positions() {
+    assert_eq!(iupacna_high_byte(&SeqData::Iupacna(Vec::new())), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Iupacna(vec![0x80])), None);
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"GATT\x80".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"AT\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"\x01TGG\x7fG".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"\x80TGGCG".to_vec())),
+        Some((0, 0x80))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"A\xc3GGCG".to_vec())),
+        Some((1, 0xC3))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"ATGGC\xff".to_vec())),
+        Some((5, 0xFF))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"GAT\x80A".to_vec())),
+        Some((3, 0x80))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"A\x80".to_vec())),
+        Some((1, 0x80))
+    );
+    // Other codings never hit `x_ConvertIupacnaTo4na`.
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Ncbieaa(b"\x80\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacaa(b"\x80\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Ncbistdaa(vec![0x80, 0xff])),
+        None
+    );
+    assert_eq!(iupacna_high_byte(&SeqData::Ncbi2na(vec![0x80, 0xff])), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Ncbi4na(vec![0x80, 0xff])), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Other), None);
 }

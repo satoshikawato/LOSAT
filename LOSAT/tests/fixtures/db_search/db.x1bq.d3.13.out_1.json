@@ -1,0 +1,98 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/x1bp/d3"
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "filter": "L;m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qA",
+          "query_len": 1000,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "s_minus3"
+                }
+              ],
+              "len": 642,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 367.005,
+                  "score": 400,
+                  "evalue": 6.41801e-105,
+                  "identity": 200,
+                  "query_from": 1,
+                  "query_to": 200,
+                  "query_strand": "Plus",
+                  "hit_from": 200,
+                  "hit_to": 1,
+                  "hit_strand": "Minus",
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC",
+                  "hseq": "CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCGGACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGACTCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGAACAAGGTGGCTGAGAATATC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "s_plus3"
+                }
+              ],
+              "len": 1342,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 367.005,
+                  "score": 400,
+                  "evalue": 6.41801e-105,
+                  "identity": 200,
+                  "query_from": 801,
+                  "query_to": 1000,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 200,
+                  "hit_strand": "Plus",
+                  "align_len": 200,
+                  "gaps": 0,
+                  "qseq": "CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAATTGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCATTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCACAGATATAGGGCGGGCCCTC",
+                  "hseq": "CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAATTGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCATTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCACAGATATAGGGCGGGCCCTC",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 1984,
+            "hsp_len": 12,
+            "eff_space": 1936480,
+            "kappa": 0.408145662544724,
+            "lambda": 0.633731443099174,
+            "entropy": 0.91243839227971
+          }
+        }
+      }
+    }
+  }
+}

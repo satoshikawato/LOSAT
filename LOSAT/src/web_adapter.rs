@@ -67,6 +67,25 @@ pub fn argv_message(error: &ArgvError) -> String {
     error.to_string()
 }
 
+/// Scans `words` (the command line after the program's name) using `program`'s NCBI argument
+/// definitions (`ncbi_app::args::scan_argv`), calling `visit(canonical_name, value)` for each
+/// recognized option before `--` (`None` for a flag, `Some(value)` for an option taking a value).
+pub fn scan_program_argv(
+    program: &str,
+    words: &[&str],
+    mut visit: impl FnMut(&'static str, Option<&str>),
+) {
+    crate::ncbi_app::args::scan_argv(program, words, |name, value| {
+        visit(name, value.and_then(std::ffi::OsStr::to_str));
+    });
+}
+
+/// The input file names that a `windowmasker` run with `words` opens for reading
+/// (`windowmasker::read_files`): `(for_logfile, for_out)`.
+pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::windowmasker::read_files(words)
+}
+
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
@@ -206,10 +225,14 @@ pub fn open_strategy_file(
     if files.filter.is_some() || files.repeats.is_some() {
         if let Some(filter) = files.filter {
             for (option, list) in [
+                ("gilist", &filter.gilist),
+                ("negative_gilist", &filter.negative_gilist),
                 ("seqidlist", &filter.seqidlist),
                 ("negative_seqidlist", &filter.negative_seqidlist),
                 ("taxidlist", &filter.taxidlist),
                 ("negative_taxidlist", &filter.negative_taxidlist),
+                ("ipglist", &filter.ipglist),
+                ("negative_ipglist", &filter.negative_ipglist),
             ] {
                 others.extend(list.as_deref().map(|name| RunFileName {
                     option,
@@ -236,7 +259,6 @@ pub fn open_strategy_file(
     crate::report::archive::strategy::open_strategy_file_in(
         run_files,
         files.strategy,
-        None,
         files.label,
         &others,
     )
@@ -322,27 +344,47 @@ pub fn run_windowmasker(
 /// end.
 pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
-    /// The file of `-logfile`, kept for the message.
-    #[derive(Default)]
-    struct Log(Mutex<Vec<u8>>);
+    /// The file of `-logfile`, kept for the message, carrying the tool's read input names so
+    /// `-logfile` and `-out` naming a missing input that the CLI reads back are refused.
+    struct Log {
+        bytes: Mutex<Vec<u8>>,
+        read: Vec<Vec<u8>>,
+        out_read: Vec<Vec<u8>>,
+    }
     impl FileReceiver for Log {
         fn receive(&self, _name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
-            self.0
+            self.bytes
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend_from_slice(bytes);
             Ok(())
         }
+
+        fn read_files(&self) -> &[Vec<u8>] {
+            &self.read
+        }
+
+        fn output_read_files(&self) -> &[Vec<u8>] {
+            &self.out_read
+        }
     }
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-    let log = Arc::new(Log::default());
+    let (read, out_read) = crate::windowmasker::read_files(&words);
+    let log = Arc::new(Log {
+        bytes: Mutex::new(Vec::new()),
+        read,
+        out_read,
+    });
+    let mut out = Vec::new();
     let mut err = Vec::new();
-    let status = crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut err);
+    let status =
+        crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
     if status == 0 {
         return Ok(());
     }
+    err.extend_from_slice(&out);
     err.extend_from_slice(
-        &log.0
+        &log.bytes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
     );

@@ -2860,6 +2860,10 @@ quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with 
 files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
 database reach the links of NCBI's HTML formatter through a reader of their own.
 
+Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
+formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,
+and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directories and databases above.
+
 ## Titles with bytes outside the visible ASCII range (line RG-KB item 9(b))
 
 `tchar/` (rows `db.tchar.*`): `tchar/make_tchar.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb,

@@ -1165,13 +1165,12 @@ pub(super) fn sw_matrix_check(
 #[cold]
 #[inline(never)]
 fn sw_matrix_failed(batch_start: usize) -> anyhow::Error {
-    super::database::HeaderReadError {
-        query: batch_start,
-        error: crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
+    crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+        batch_start,
+        crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
             "blastp", false,
         ),
-        utf8: None,
-    }
+    )
     .into()
 }
 

@@ -348,7 +348,7 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
     overlap: i32,
     hsp_num_max: usize,
     allow_gap: bool,
-    compare_score: impl Fn(&H, &H) -> std::cmp::Ordering,
+    compare: impl Fn(&H, &H) -> std::cmp::Ordering,
     sort_by_score: impl Fn(&mut [H]),
 ) -> Result<(), ChunkMergeUndefined> {
     if incoming.is_empty() {
@@ -427,7 +427,7 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
     let mut selected = Vec::with_capacity(retained);
     while selected.len() < retained {
         let take_left = match (left.peek(), right.peek()) {
-            (Some(a), Some(b)) => compare_score(a, b).is_le(),
+            (Some(a), Some(b)) => compare(a, b).is_le(),
             (Some(_), None) => true,
             (None, Some(_)) => false,
             (None, None) => break,

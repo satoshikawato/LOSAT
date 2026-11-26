@@ -207,6 +207,22 @@ impl Drop for RunDir {
     }
 }
 
+fn make_prot_db(faa: &Path, asnt: &Path, db: &str, label: &str) {
+    let made = losat()
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(faa)
+        .args(["-dbtype", "prot", "-out", db, "-mask_data"])
+        .arg(asnt)
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(
+        made.status.success(),
+        "makeblastdb {label}: {}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+}
+
 #[test]
 fn protein_hard_masked_long_ranges_and_out_of_order_chunks_match_ncbi() {
     let run_dir = match std::env::var_os("DBMASK_PROT_HARD_LONG_DIR") {
@@ -224,18 +240,11 @@ fn protein_hard_masked_long_ranges_and_out_of_order_chunks_match_ncbi() {
     std::fs::create_dir_all(dir).unwrap();
     write_inputs(dir);
     let db = dir.join("phl").to_str().unwrap().to_string();
-    let made = losat()
-        .arg("makeblastdb")
-        .arg("-in")
-        .arg(dir.join("phl.faa"))
-        .args(["-dbtype", "prot", "-out", &db, "-mask_data"])
-        .arg(dir.join("phl_masks.asnt"))
-        .output()
-        .expect("run losat makeblastdb");
-    assert!(
-        made.status.success(),
-        "makeblastdb: {}",
-        String::from_utf8_lossy(&made.stderr)
+    make_prot_db(
+        &dir.join("phl.faa"),
+        &dir.join("phl_masks.asnt"),
+        &db,
+        "phl",
     );
 
     let modes: &[(&str, &[&str])] = &[
@@ -319,21 +328,27 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
         let db = dir.join(name).to_str().unwrap().to_string();
         write_fasta(&faa, &[(name, seq)]);
         std::fs::write(&asnt, make_asnt(ranges)).unwrap();
-        let made = losat()
-            .arg("makeblastdb")
-            .arg("-in")
-            .arg(&faa)
-            .args(["-dbtype", "prot", "-out", &db, "-mask_data"])
-            .arg(&asnt)
-            .output()
-            .expect("run losat makeblastdb");
-        assert!(
-            made.status.success(),
-            "makeblastdb {name}: {}",
-            String::from_utf8_lossy(&made.stderr)
-        );
+        make_prot_db(&faa, &asnt, &db, name);
         db
     };
+    let assert_refused =
+        |label: &str, prog: &str, qpath: &Path, db: &str, extra: &[&str], needle: &str| {
+            let out = losat()
+                .arg(prog)
+                .arg("-query")
+                .arg(qpath)
+                .args(["-db", db, "-db_hard_mask", "21", "-outfmt", "6"])
+                .args(extra)
+                .output()
+                .expect(label);
+            assert_eq!(out.status.code(), Some(1), "{label} {prog} {extra:?}");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                stderr.contains(needle),
+                "{label} {prog} {extra:?}: {stderr}"
+            );
+        };
+    let mode_extras: &[&[&str]] = &[&[], &["-ungapped", "-comp_based_stats", "0"]];
 
     // 1. po_last: static pre-search refusal (`HardMaskShape::LastRangeOverlap`).
     let m_po = make_motif(101, 200);
@@ -346,20 +361,14 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
     let q_po_dna = prot_to_dna(&m_po[30..180]).into_bytes();
     write_fasta(&q_po_fna, &[("q_po", &q_po_dna)]);
     for (prog, qpath) in [("blastp", &q_po_faa), ("blastx", &q_po_fna)] {
-        for extra in [&[][..], &["-ungapped", "-comp_based_stats", "0"][..]] {
-            let out = losat()
-                .arg(prog)
-                .arg("-query")
-                .arg(qpath)
-                .args(["-db", &po_last_db, "-db_hard_mask", "21", "-outfmt", "6"])
-                .args(extra)
-                .output()
-                .expect("run po_last");
-            assert_eq!(out.status.code(), Some(1), "po_last {prog} {extra:?}");
-            let err = String::from_utf8_lossy(&out.stderr);
-            assert!(
-                err.contains("merges alignments across an overlap read past its list of ranges"),
-                "po_last {prog} {extra:?}: {err}"
+        for &extra in mode_extras {
+            assert_refused(
+                "po_last",
+                prog,
+                qpath,
+                &po_last_db,
+                extra,
+                "merges alignments across an overlap read past its list of ranges",
             );
         }
     }
@@ -380,30 +389,14 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
     let q_ow_dna = prot_to_dna(&m_ow).into_bytes();
     write_fasta(&q_ow_fna, &[("q_ow", &q_ow_dna)]);
     for (prog, qpath) in [("blastp", &q_ow_faa), ("blastx", &q_ow_fna)] {
-        let out = losat()
-            .arg(prog)
-            .arg("-query")
-            .arg(qpath)
-            .args([
-                "-db",
-                &po_ow_last_db,
-                "-db_hard_mask",
-                "21",
-                "-evalue",
-                "1000",
-                "-outfmt",
-                "6",
-            ])
-            .output()
-            .expect("run po_ow_last");
-        assert_eq!(out.status.code(), Some(1), "po_ow_last {prog}");
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            err.contains(
-                "has alignments from an earlier range that meet the final part across an overlap \
-                 NCBI BLAST+ 2.17.0 reads past its list of ranges"
-            ),
-            "po_ow_last {prog}: {err}"
+        assert_refused(
+            "po_ow_last",
+            prog,
+            qpath,
+            &po_ow_last_db,
+            &["-evalue", "1000"],
+            "has alignments from an earlier range that meet the final part across an overlap \
+             NCBI BLAST+ 2.17.0 reads past its list of ranges",
         );
     }
 
@@ -418,24 +411,27 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
     let q_br_dna = prot_to_dna(&m_bridge).into_bytes();
     write_fasta(&q_br_fna, &[("q_bridge", &q_br_dna)]);
     for (prog, qpath) in [("blastp", &q_br_faa), ("blastx", &q_br_fna)] {
-        for extra in [&[][..], &["-ungapped", "-comp_based_stats", "0"][..]] {
-            let out1 = losat()
-                .arg(prog)
-                .arg("-query")
-                .arg(qpath)
-                .args([
-                    "-db",
-                    &lr_last_db,
-                    "-db_hard_mask",
-                    "21",
-                    "-outfmt",
-                    "6",
-                    "-num_threads",
-                    "1",
-                ])
-                .args(extra)
-                .output()
-                .expect("run lr_last t1");
+        for &extra in mode_extras {
+            let run_lr = |threads: &str| {
+                losat()
+                    .arg(prog)
+                    .arg("-query")
+                    .arg(qpath)
+                    .args([
+                        "-db",
+                        &lr_last_db,
+                        "-db_hard_mask",
+                        "21",
+                        "-outfmt",
+                        "6",
+                        "-num_threads",
+                        threads,
+                    ])
+                    .args(extra)
+                    .output()
+                    .expect("run lr_last")
+            };
+            let out1 = run_lr("1");
             assert!(
                 out1.status.success() && out1.stderr.is_empty(),
                 "lr_last {prog} {extra:?}: status={:?} err={}",
@@ -447,23 +443,7 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
                 stdout.contains("4999841\t5000060"),
                 "lr_last {prog} {extra:?} did not merge across 5M boundary:\n{stdout}"
             );
-            let out4 = losat()
-                .arg(prog)
-                .arg("-query")
-                .arg(qpath)
-                .args([
-                    "-db",
-                    &lr_last_db,
-                    "-db_hard_mask",
-                    "21",
-                    "-outfmt",
-                    "6",
-                    "-num_threads",
-                    "4",
-                ])
-                .args(extra)
-                .output()
-                .expect("run lr_last t4");
+            let out4 = run_lr("4");
             assert_eq!(
                 out1.stdout, out4.stdout,
                 "lr_last t1 vs t4 {prog} {extra:?}"

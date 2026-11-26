@@ -1647,6 +1647,14 @@ pub(super) fn reported_batch(
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
+            let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
+            let ends_on_throw = asks.throw.run().is_some_and(|run| {
+                matches!(
+                    run.after,
+                    crate::report::db_subject::AfterThrow::EndsReport
+                        | crate::report::db_subject::AfterThrow::EndsRun
+                )
+            });
             reported.fetch_by_query(
                 database,
                 results,
@@ -1655,6 +1663,7 @@ pub(super) fn reported_batch(
                 places,
                 row_lookups,
                 pairwise,
+                (options.shown_lists(), joins_copies, ends_on_throw),
             )?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;

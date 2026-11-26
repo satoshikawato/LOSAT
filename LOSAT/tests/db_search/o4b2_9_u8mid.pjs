@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "o4b2_9_u8mid",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "/home/kawato/.cache/losat-work/tmp-agy-o4b2-9/u8mid.faa",
+  "number-of-letters": 360,
+  "number-of-sequences": 6,
+  "last-updated": "2026-11-26T21:29:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 50321,
+  "bytes-to-cache": 559,
+  "files": [
+    "o4b2_9_u8mid.pdb",
+    "o4b2_9_u8mid.phr",
+    "o4b2_9_u8mid.pin",
+    "o4b2_9_u8mid.pnd",
+    "o4b2_9_u8mid.pni",
+    "o4b2_9_u8mid.pog",
+    "o4b2_9_u8mid.pos",
+    "o4b2_9_u8mid.pot",
+    "o4b2_9_u8mid.psq",
+    "o4b2_9_u8mid.ptf",
+    "o4b2_9_u8mid.pto"
+  ]
+}

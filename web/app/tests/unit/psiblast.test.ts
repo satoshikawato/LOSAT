@@ -7,7 +7,7 @@ import { ResultsBrowser } from '../../src/application/results';
 import { buildArgv } from '../../src/domain/argv';
 import { assembleSearchDirectory } from '../../src/domain/blast-db';
 import { hspTable } from '../../src/domain/hsp-table';
-import { programById, querySourcesOf } from '../../src/domain/programs';
+import { MODE_TABS, modeTabOf, programById, querySourcesOf } from '../../src/domain/programs';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -70,7 +70,10 @@ async function submitFileQuery(draft: SearchDraft, seenRequests: EngineRunReques
 }
 
 describe('psiblast & tblastn -in_pssm domain, draft, coordinator, and results', () => {
-  it('exposes expected query sources per program and builds -in_pssm / -in_msa argv cleanly', () => {
+  it('exposes expected query sources per program, keeps 5 mode tabs with psiblast under blastp, and builds -in_pssm / -in_msa argv cleanly', () => {
+    expect(MODE_TABS.map((p) => p.id)).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
+    expect(modeTabOf('psiblast')).toBe('blastp');
+    expect(modeTabOf('blastp')).toBe('blastp');
     expect(querySourcesOf('psiblast')).toEqual(['fasta', 'msa', 'pssm']);
     expect(querySourcesOf('tblastn')).toEqual(['fasta', 'pssm']);
     expect(querySourcesOf('blastp')).toEqual(['fasta']);
@@ -162,6 +165,16 @@ describe('psiblast & tblastn -in_pssm domain, draft, coordinator, and results', 
     expect(results.state.get().queries).toHaveLength(1);
     expect(results.state.get().queries[0]!.length).toBe(120);
     expect(results.state.get().subjects.length).toBeGreaterThan(0);
+  });
+
+  it('switches between blastp tasks and psiblast via selectProteinAlgorithm', () => {
+    const { draft } = makeHarness();
+    draft.setProgram('blastp');
+    draft.selectProteinAlgorithm('psiblast');
+    expect(draft.state.get().program).toBe('psiblast');
+    draft.selectProteinAlgorithm('blastp-fast');
+    expect(draft.state.get().program).toBe('blastp');
+    expect(draft.state.get().values.blastp['-task']).toBe('blastp-fast');
   });
 
   it('resets incompatible querySource when switching programs and supports tblastn -in_pssm', async () => {

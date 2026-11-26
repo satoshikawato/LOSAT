@@ -356,7 +356,7 @@ prints them.
 |---|---|---|
 | `index` | integer | 0-based position of the HSP in the final, sorted hit list of the formats 6 and 7 (`HspIndex` in `LOSAT/src/api/local_blast.rs`); the same HSP has the same index in every output format of the same search |
 | `q_idx`, `s_idx` | integer | 0-based record index of the query and the subject in the registered inputs (the `index` of the *register* response: records without residues count; with `-query_loc`, a query record that NCBI skips because its interval starts past its end keeps its place, so `q_idx` is not the position among the searched queries). In a run of `-db`, `s_idx` is the subject's OID in the database (its 0-based place in the database's volumes), and its IDs are the database's: no registered record, and no entry of the *inputs* response, stands for it |
-| `rank` | integer | 0-based position of the HSP among the HSPs of its query (derived from `index`) |
+| `rank` | integer | 0-based position of the HSP among the HSPs of its query (within its round when `round` is present, matching `losat::api`'s per-part `rank`; derived from `index`) |
 | `raw_score`, `bit_score`, `e_value` | number | engine values, not rounded |
 | `q_start`, `q_end`, `s_start`, `s_end` | integer | 1-based coordinates as printed in outfmt 6 (start > end means minus strand; a BLASTN HSP of one letter has start = end on either strand, and only its `Strand=` line in the stream 0 section shows the strand, S07+ AUTHORITY §P) |
 | `query_frame`, `subject_frame` | integer or null | translation frames where applicable |
@@ -366,7 +366,7 @@ prints them.
 | `out6` | [integer, integer] or null | byte range [start, end) of this HSP's row in the stream 6 text; null if outfmt 6 does not show it |
 | `out0` | [integer, integer] or null | byte range [start, end) of this HSP's section in the stream 0 text: its score lines and alignment. The subject heading that precedes the first HSP of each subject is not part of any section; null if outfmt 0 does not show the HSP (for example BLASTX shows alignments for the first 250 subjects by default). In a run of two searches (§7) outfmt 0 has its own hit list: the range is set only where outfmt 0 shows exactly the HSPs that the records hold for that query and subject (the same count and every field of each HSP equal, in order; the subject has a heading in stream 0), else null (for example when outfmt 0 shows only some of the pair's HSPs, or other HSPs besides), and stream 0 may hold sections and headings that no record points to |
 | `out0_subject` | [integer, integer] or null | byte range [start, end) of the heading of this HSP's subject in the stream 0 text: the defline and the `Length=` line that NCBI's `x_ShowAlnvecInfo` writes before the first HSP of each subject (`showalign.cpp:3613-3632`). Every HSP of the subject in that query has the same range |
-| `round` | integer (optional) | 1-based PSI-BLAST iteration round number, present for multi-round `psiblast` searches (since version 15) |
+| `round` | integer (optional) | 1-based PSI-BLAST iteration round number, present for `psiblast` searches (since version 15) |
 
 The ranges come from formatter observer events: a formatter reports when it starts and
 ends the row or section of an HSP, identified by its `index`, and the heading of a

@@ -11,7 +11,7 @@ import { REPOSITORY } from './support/harness-server';
 import { openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
 import { test } from './support/test';
 
-const WIDTHS = [320, 330, 340, 350, 359, 360, 390, 480, 768, 1280] as const;
+const WIDTHS = [320, 330, 340, 350, 359, 360, 390, 768, 1280] as const;
 
 for (const width of WIDTHS) {
   test(`at ${width} px the search page is no wider than the window, and each mode's name fits its tab`, async ({ page }) => {
@@ -44,9 +44,9 @@ for (const width of WIDTHS) {
       expect(tab.left, `${tab.name} at ${width} px`).toBeGreaterThanOrEqual(0.5);
       expect(tab.right, `${tab.name} at ${width} px`).toBeGreaterThanOrEqual(0.5);
     }
-    // From 480 px the six tabs keep the type of the narrow layout (0.9em of the panel's 14 px;
-    // Firefox keeps sizes in 1/64 px) or the wide one.
-    if (width >= 480) for (const tab of layout.tabs) expect(tab.size).toBeCloseTo(width > 800 ? 14 : 12.6, 1);
+    // From 360 px the tabs keep the type of the narrow layout (0.9em of the panel's 14 px; Firefox keeps
+    // sizes in 1/64 px) or the wide one.
+    if (width >= 360) for (const tab of layout.tabs) expect(tab.size).toBeCloseTo(width > 800 ? 14 : 12.6, 1);
   });
 }
 

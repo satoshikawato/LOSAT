@@ -431,7 +431,7 @@ function onDrop(event: DragEvent): void {
     <template v-if="isQueryFile">
       <div class="subject-db-block" data-testid="query-file-block">
         <div class="entry-label">
-          <span>{{ state.querySource === 'msa' ? 'Multiple sequence alignment (FASTA)' : 'PSSM checkpoint (ASN.1)' }}</span>
+          <span>{{ state.querySource === 'msa' ? 'Multiple sequence alignment' : 'PSSM checkpoint (ASN.1)' }}</span>
           <span class="kind">{{ queryFileFlag }}</span>
           <HelpTip
             v-if="dbOptionHelp(queryFileFlag)"

@@ -580,6 +580,16 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
+  /** Selects an algorithm in BLASTP's Algorithm radiogroup (`psiblast`, or a `blastp` `-task` choice). */
+  selectProteinAlgorithm(choice: string): void {
+    if (choice === 'psiblast') {
+      this.setProgram('psiblast');
+      return;
+    }
+    if (this.state.get().program !== 'blastp') this.setProgram('blastp');
+    this.setField('-task', choice);
+  }
+
   // --- file-based query (`-in_pssm` and `-in_msa`) ----------------------------------------
 
   /** Switches Query between FASTA (`-query`), MSA (`-in_msa`), and PSSM (`-in_pssm`). */

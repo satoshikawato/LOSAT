@@ -639,7 +639,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
   {
     id: 'psiblast',
     label: 'PSIBLAST',
-    summary: 'PSIBLAST mode iteratively searches protein subjects using a protein query, MSA, or PSSM.',
+    summary: 'PSI-BLAST iteratively searches protein subjects using a protein query, MSA, or PSSM.',
     searches: 'protein subjects',
     ...PROGRAM_INPUTS.psiblast,
     sections: [
@@ -699,6 +699,20 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     ],
   },
 ] satisfies ProgramDescriptor[]);
+
+/** Top-level mode tabs matching NCBI's five program tabs; PSI-BLAST lives under BLASTP's Algorithm radios. */
+export const MODE_TABS: readonly ProgramDescriptor[] = Object.freeze(PROGRAMS.filter((p) => p.id !== 'psiblast'));
+
+/** The top-level mode tab that owns `program` (`psiblast` lives under `blastp`, as on NCBI BLAST). */
+export function modeTabOf(program: ProgramId): ProgramId {
+  return program === 'psiblast' ? 'blastp' : program;
+}
+
+/** Label of the PSI-BLAST choice inside BLASTP's Algorithm radiogroup (NCBI's wording). */
+export const PSIBLAST_ALGORITHM_LABEL = 'PSI-BLAST (Position-Specific Iterated BLAST)';
+
+/** BLASTP's task choices shown alongside PSI-BLAST when PSI-BLAST is active. */
+export const BLASTP_TASK_CHOICES: readonly string[] = Object.freeze(['blastp', 'blastp-fast', 'blastp-short']);
 
 export type QuerySource = 'fasta' | 'pssm' | 'msa';
 

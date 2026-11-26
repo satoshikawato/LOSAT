@@ -1100,6 +1100,18 @@ impl RangeRecorder {
             .expect("recorder has at least one part")
     }
 
+    /// Checks that the collected hit lists match the recorded parts (one per call / round), as
+    /// `losat::api::parts::Parts::finish` does; a mismatch records a fault so the run fails rather
+    /// than silently truncating or shifting rounds.
+    fn check_hit_lists(&mut self, hits_len: usize) {
+        if hits_len > 0 && hits_len != self.parts.len() {
+            self.fault.get_or_insert(format!(
+                "{hits_len} hit lists for {} parts of the search",
+                self.parts.len()
+            ));
+        }
+    }
+
     /// Forgets the events of the format `format`, which failed alone (`search`): its stream is
     /// dropped, so no HSP record points into it (stream 6: `out6`; stream 0: `out0` and
     /// `out0_subject`), and an HSP that its report had begun when it stopped is not a fault.
@@ -1278,6 +1290,25 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
         .hitlist_size
 }
 
+/// The searches of a run: the output formats grouped by hit list size (and, for `psiblast`, by
+/// `losat::web_adapter::psiblast_list_cut` so formats with different preliminary list cuts stay
+/// separate), the group of the tabular formats first. One group is one `run_local` call, and every
+/// format of it is written from that search, as the CLI writes it alone: the CLI's search depends
+/// on the hit list size, which `-num_descriptions` and `-num_alignments` (without
+/// `-max_target_seqs`) can make differ between the pairwise format 0 and the tabular formats.
+/// Without those options (and with the same `ListCut` for `psiblast`) the keys are equal and the
+/// run is one search of every format. The output of the argv's `-outfmt` has the hit list size of
+/// its number's formats (that of the tabular formats above 4, that of format 0 for 1 to 4), so it
+/// joins their group: it adds no search.
+///
+/// In each group the argv's own format (`Output::requested`) comes first, then the tabular
+/// formats: the first format of a search writes the warnings that its formats share (the
+/// formatting handler's, the queries'), and the argv's are the ones that the CLI writes for the
+/// argv (the handler warns of `-num_descriptions`, `-line_length` and `-sorthits` for formats
+/// above 4 only and of `-sorthsps` for formats other than 0, blast_args.cpp:2947-2989), whatever
+/// the outcome of the run (line WQA's sweep, D3 review r2 M1, 2026-11-19: with the tabular
+/// formats first, a failed run whose argv asks for format 0 to 4 gave their lines). `search_all`
+/// adds the lines that the other formats' handler writes where the run completes.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
     type GroupKey = (usize, Option<losat::web_adapter::ListCut>);
     let [_, descriptions, alignments] = count_options(command);
@@ -1688,6 +1719,7 @@ fn search(
             .fault
             .get_or_insert(format!("HSP {hsp} started but did not end"));
     }
+    recorder.check_hit_lists(collected.len());
     if let Some(fault) = recorder.fault.take() {
         let message = format!("internal error in the output ranges: {fault}");
         return Err(Failed {
@@ -2013,8 +2045,8 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
         {
             Some(files) => {
-                // Multi-round or multi-query psiblast without `-save_each_pssm` overwrites the
-                // same PSSM file path; replace in place so stream 8 holds the final CLI bytes.
+                // Match filesystem semantics: writing the same file name again replaces its bytes
+                // in place so stream 8 holds the final bytes written for each name.
                 if let Some(existing) = files.iter_mut().find(|(n, _)| n.as_slice() == name) {
                     existing.1 = bytes.to_vec();
                 } else {
@@ -2036,6 +2068,13 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
     fn read_files(&self) -> &[Vec<u8>] {
         &self.run_names.read
     }
+}
+
+/// Host-provided files and application settings shared across the searches of a run (`search_all`).
+#[derive(Clone, Copy)]
+struct RunContext<'a> {
+    run_files: &'a RunFiles,
+    settings: &'a ApplicationSettings,
 }
 
 /// The inputs of a run (`run`): the query records, how the reading of the query ended after them,
@@ -2091,7 +2130,10 @@ fn run_started(
             strategy,
             words,
             inputs,
-            (run_files, &settings),
+            RunContext {
+                run_files,
+                settings: &settings,
+            },
             &mut sink,
             &mut posted,
         )
@@ -2133,16 +2175,33 @@ struct Done {
     records: Option<HitRecords>,
 }
 
+/// The searches of a run of the parsed argv `parsed` (`run`), whose file of
+/// `-export_search_strategy` is `strategy` (`started_command`): the argv's own search writes it as
+/// the command line's run of the argv does (`losat::web_adapter::give_strategy`), and each other
+/// search writes one of the same name whose bytes no one keeps, so that it reads its records and
+/// refuses the file as the argv's search does. For `psiblast`, PSSM outputs (`-out_pssm`,
+/// `-out_ascii_pssm`) follow the same rule: the argv's own search receives `context.run_files`
+/// (`losat::web_adapter::give_pssm_run_files`), while any other search writes to `NoFiles`. The
+/// messages that the command line writes to its standard error for the argv go to `diagnostics`,
+/// and what the other formats' standard error adds to them goes to stream 3 after them
+/// (`CallerSink::add`); for an error that ends the run, `posted` gets the NCBI message that the
+/// command line writes for it (`Failed::native`). Each output stream that fails while the run goes
+/// on (a format that failed alone, the formats of the other search when it failed) is signalled to
+/// the host with the place where the sink wrote its error (`CallerSink::error`, `emit::discard`).
 fn search_all(
     parsed: (Program, Commands, Requested),
     mut strategy: Option<StrategyFile>,
     words: &[&str],
     inputs: RunInputs,
-    (run_files, settings): (&RunFiles, &ApplicationSettings),
+    context: RunContext<'_>,
     diagnostics: &mut CallerSink<'_>,
     posted: &mut Option<Vec<u8>>,
 ) -> Result<Done, String> {
     use std::io::Write as _;
+    let RunContext {
+        run_files,
+        settings,
+    } = context;
     let (program, command, requested) = parsed;
     let groups = search_groups(&outputs(program, &requested), &command);
     let own = own_search(&groups);
@@ -2459,8 +2518,10 @@ fn emit_hit_records(
     recorder: &RangeRecorder,
     ordinals: Option<&[usize]>,
 ) {
+    debug_assert!(parts_hits.is_empty() || parts_hits.len() == recorder.parts.len());
     let mut lines = String::new();
-    let mut ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut ranks: std::collections::HashMap<(usize, Option<u32>), usize> =
+        std::collections::HashMap::new();
     let mut global_index: usize = 0;
     for (part, hits) in recorder.parts.iter().zip(parts_hits) {
         for (local_index, record) in hits.iter().enumerate() {
@@ -2469,7 +2530,7 @@ fn emit_hit_records(
             let q_idx = ordinals
                 .and_then(|ordinals| ordinals.get(searched_q).copied())
                 .unwrap_or(searched_q);
-            let rank = ranks.entry(q_idx).or_default();
+            let rank = ranks.entry((q_idx, part.round)).or_default();
             let s_idx = part.subject_index(hit.s_idx);
             let _ = write!(
                 lines,

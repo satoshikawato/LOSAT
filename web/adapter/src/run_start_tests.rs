@@ -1675,3 +1675,33 @@ fn a_version_comes_before_the_configuration_and_the_help_after_it() {
         Some(vec![("v.log".to_string(), String::new())])
     );
 }
+
+#[test]
+fn range_recorder_faults_when_hit_list_count_mismatches_parts() {
+    let mut recorder = RangeRecorder::new(vec![6], vec![Arc::new(AtomicU64::new(0))]);
+    recorder.round_begin(0, 1);
+    recorder.round_begin(0, 2);
+    assert_eq!(recorder.parts.len(), 2);
+
+    // Zero hit lists (e.g. search that handed over no hit list) or exact match is valid.
+    recorder.check_hit_lists(0);
+    assert!(recorder.fault.is_none());
+    recorder.check_hit_lists(2);
+    assert!(recorder.fault.is_none());
+
+    // Fewer hit lists than parts faults instead of silently truncating later rounds.
+    recorder.check_hit_lists(1);
+    assert_eq!(
+        recorder.fault.as_deref(),
+        Some("1 hit lists for 2 parts of the search")
+    );
+
+    // More hit lists than parts also faults.
+    let mut extra = RangeRecorder::new(vec![6], vec![Arc::new(AtomicU64::new(0))]);
+    extra.round_begin(0, 1);
+    extra.check_hit_lists(3);
+    assert_eq!(
+        extra.fault.as_deref(),
+        Some("3 hit lists for 1 parts of the search")
+    );
+}

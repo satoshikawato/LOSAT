@@ -2385,12 +2385,15 @@ pre.range-text {
     font-size: 0.9em;
   }
 
-  /* Below 480 px the six mode names would pass their tabs' borders: the type shrinks with the row
-     so that each name fits its tab. A tab is (100cqi - 10px) / 6 wide (six tabs, five 2 px gaps);
-     a name takes 6 px of border/padding and the widest ("PSIBLAST" in Inter 600) is up to ~5.4 em. */
-  @media (max-width: 479px) {
+  /* Below 360 px the names would pass their tabs' borders: the type shrinks with the row so that
+     each name fits its tab. A tab is (100cqi - 8px) / 5 wide (five tabs, four 2 px gaps); a name
+     wider than its tab's content starts 3 px in (1 px border, 2 px padding); the widest,
+     "TBLASTN" in Inter 600, is up to 4.76 em wide (Chromium at 12 px; Firefox and WebKit 4.67).
+     With 1 px to spare and 4.8 em: 3px + 4.8em <= (100cqi - 8px) / 5 - 1px, so the size is at
+     most (100cqi - 28px) / 24 (10.8 px in a 320 px window, 12.5 px at 359 px). */
+  @media (max-width: 359px) {
     .program-tab {
-      font-size: min(0.9em, calc((100cqi - 46px) / 33));
+      font-size: min(0.9em, calc((100cqi - 28px) / 24));
     }
   }
 

@@ -642,9 +642,10 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
   const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
-    const rank = ranks.get(record.q_idx) || 0;
+    const rankKey = `${record.q_idx}:${record.round ?? 0}`;
+    const rank = ranks.get(rankKey) || 0;
     assert.equal(record.rank, rank, `${label}: rank`);
-    ranks.set(record.q_idx, rank + 1);
+    ranks.set(rankKey, rank + 1);
     const row = out6.subarray(record.out6[0], record.out6[1]).toString();
     assert.equal(row.trimEnd(), rows[index], `${label}: out6 of HSP ${index}`);
     const fields = row.trimEnd().split("\t");
@@ -1748,6 +1749,14 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       extra: ["-num_iterations", "2", "-out_ascii_pssm", "inpssm.ascii", "-save_pssm_after_last_round"],
     },
     {
+      id: "psiblast.subject.in_pssm.parse_deflines",
+      program: "psiblast",
+      queryFileFlag: "-in_pssm",
+      queryFile: pssmAsn,
+      subject: subjIds,
+      extra: ["-parse_deflines"],
+    },
+    {
       id: "tblastn.subject.in_pssm",
       program: "tblastn",
       queryFileFlag: "-in_pssm",
@@ -1796,25 +1805,58 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       const start = JSON.parse(started.streams.get(2).toString());
       assert.equal(start.database, Boolean(c.db), `${c.id}: start.database`);
       assert.equal(start.query_file, c.queryFile ?? null, `${c.id}: start.query_file`);
-      let qHandle = 0, qIds;
-      if (!c.queryFile) {
-        const regQ = reactor.call("losat_web2_register", c.program, 0, 1, fs.readFileSync(path.join(losatDir, c.query)));
-        assert.ok(regQ.status > 0, `${c.id}: register query: ${regQ.error}`);
-        qHandle = regQ.status;
-        qIds = JSON.parse(regQ.streams.get(2).toString()).records.map((r) => r.id);
-      }
-      let sHandle = 0;
-      if (!c.db) {
-        const regS = reactor.call("losat_web2_register", c.program, 1, 1, fs.readFileSync(path.join(losatDir, c.subject)));
-        assert.ok(regS.status > 0, `${c.id}: register subject: ${regS.error}`);
-        sHandle = regS.status;
+      let qHandle = 0, qIds, sHandle = 0, shownIds;
+      if (start.register_inputs) {
+        const reg = reactor.call(
+          "losat_web2_register_inputs",
+          [...baseArgv, "-num_threads", "1"].join("\0"),
+          c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query)),
+          c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject)),
+        );
+        assert.equal(reg.status, 0, `${c.id}: register_inputs: ${reg.error}`);
+        const parsed = JSON.parse(reg.streams.get(2).toString());
+        qHandle = parsed.query ? parsed.query.handle : 0;
+        qIds = parsed.query ? parsed.query.records.map((r) => r.id) : undefined;
+        sHandle = parsed.subject ? parsed.subject.handle : 0;
+        if (parsed.subject) {
+          shownIds = {
+            query: parsed.query ? parsed.query.records.map((r) => r.shown_id) : [],
+            subject: parsed.subject.records.map((r) => r.shown_id),
+          };
+        }
+      } else {
+        if (!c.queryFile) {
+          const regQ = reactor.call("losat_web2_register", c.program, 0, 1, fs.readFileSync(path.join(losatDir, c.query)));
+          assert.ok(regQ.status > 0, `${c.id}: register query: ${regQ.error}`);
+          qHandle = regQ.status;
+          qIds = JSON.parse(regQ.streams.get(2).toString()).records.map((r) => r.id);
+        }
+        if (!c.db) {
+          const regS = reactor.call("losat_web2_register", c.program, 1, 1, fs.readFileSync(path.join(losatDir, c.subject)));
+          assert.ok(regS.status > 0, `${c.id}: register subject: ${regS.error}`);
+          sHandle = regS.status;
+        }
       }
       for (const threads of engine.threads) {
         const label = `${engine.name} n${threads} ${c.id}`;
         const argv = [...baseArgv, "-num_threads", String(threads)].join("\0");
+        let runQHandle = qHandle, runSHandle = sHandle, releasePerThread = false;
+        if (start.register_inputs && threads !== 1) {
+          const reg = reactor.call(
+            "losat_web2_register_inputs",
+            argv,
+            c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query)),
+            c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject)),
+          );
+          assert.equal(reg.status, 0, `${label}: register_inputs: ${reg.error}`);
+          const parsed = JSON.parse(reg.streams.get(2).toString());
+          runQHandle = parsed.query ? parsed.query.handle : 0;
+          runSHandle = parsed.subject ? parsed.subject.handle : 0;
+          releasePerThread = true;
+        }
         const val = reactor.call("losat_web2_validate", argv);
         assert.equal(val.status, 0, `${label}: validate: ${val.error}`);
-        const run = reactor.call("losat_web2_run", argv, qHandle, sHandle);
+        const run = reactor.call("losat_web2_run", argv, runQHandle, runSHandle);
         if (waitForWorkers) await waitForWorkers();
         assert.equal(run.status, 0, `${label}: run: ${run.error}`);
         for (const fmt of formats) {
@@ -1826,7 +1868,11 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         for (let i = 0; i < sentFiles.length; i++) {
           assert.equal(sha256(sentFiles[i][1]), sha256(cliPssmFiles[i][1]), `${label}: PSSM file ${sentFiles[i][0]}`);
         }
-        checkHits(run.streams, c.program, label, qIds, undefined, Boolean(c.db), false);
+        checkHits(run.streams, c.program, label, qIds, shownIds, Boolean(c.db), false);
+        if (releasePerThread) {
+          if (runQHandle > 0) assert.equal(reactor.call("losat_web2_release", runQHandle).status, 0);
+          if (runSHandle > 0) assert.equal(reactor.call("losat_web2_release", runSHandle).status, 0);
+        }
         runs++;
       }
       if (qHandle > 0) assert.equal(reactor.call("losat_web2_release", qHandle).status, 0);

@@ -17,7 +17,7 @@
 // gathered and drawn once per animation frame. A TBLASTN or BLASTX plot counts 3 nt per aa for its
 // proportions (S13b decision 26).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
-import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
+import { sameHsp, type HspEntry, type HspId, type ResultsBrowser, type ResultsState } from '../application/results';
 import { runInputRecords } from '../domain/run';
 import {
   clipToBox,
@@ -157,7 +157,7 @@ const segments = computed<Segments>(() => {
 });
 const selectedIndex = computed(() => {
   const id = props.state.hsp;
-  return id === undefined ? -1 : segments.value.list.findIndex((hsp) => hsp.id.qIdx === id.qIdx && hsp.id.rank === id.rank);
+  return id === undefined ? -1 : segments.value.list.findIndex((hsp) => sameHsp(hsp.id, id));
 });
 const selected = computed(() => (selectedIndex.value < 0 ? undefined : segments.value.list[selectedIndex.value]));
 /** The line under the plot that names the selected HSP. */

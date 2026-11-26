@@ -32,6 +32,7 @@ import {
   type ToolValidation,
   type ValidationResult,
 } from 'losat/ports';
+import { optionValue } from '../../domain/argv';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
@@ -382,6 +383,10 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     let out6 = `# ${FAKE_MARKER}\n`;
     let out7 = `# ${FAKE_MARKER}\n`;
     let hits = '';
+    const iterations =
+      program === 'psiblast'
+        ? Math.max(1, Math.min(5, Number.parseInt(optionValue(request.argv, '-num_iterations') ?? '1', 10) || 1))
+        : 1;
     let index = 0;
     const length = (text: string) => encoder.encode(text).length;
     queries.forEach((query, qIdx) => {
@@ -390,55 +395,59 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         out0 += '\n***** No hits found ***** (FAKE)\n';
         return;
       }
-      let rank = 0;
-      subjects.forEach((subject, sIdx) => {
-        const shown = sIdx < 2;
-        const heading = `> ${subject.id}\nLength=${subject.length}\n\n`;
-        const headingStart = length(out0);
-        if (shown) out0 += heading;
-        const count = 1 + ((qIdx + sIdx) % 2);
-        for (let j = 0; j < count; j++) {
-          const single = program === 'blastn' && qIdx === 2 && sIdx === 0 && j === 0;
-          const span = (total: number) => (single ? 1 : Math.max(1, Math.floor(total / 2)));
-          const qStart = 1 + j;
-          const qEnd = Math.min(query.length, qStart + span(query.length) - 1);
-          const reverse = nucleotide.subject && j === 1;
-          const sFrom = 1 + j;
-          const sTo = Math.min(subject.length, sFrom + span(subject.length) - 1);
-          const [sStart, sEnd] = reverse ? [sTo, sFrom] : [sFrom, sTo];
-          const row = [query.id, subject.id, 'FAKE', String(qEnd - qStart + 1), '0', '0', qStart, qEnd, sStart, sEnd, 'FAKE', 'FAKE'].join('\t') + '\n';
-          const out6Start = length(out6);
-          out6 += row;
-          out7 += row;
-          const sectionStart = length(out0);
-          if (shown) out0 += ` Score = FAKE, Expect = FAKE (${FAKE_MARKER})\n Strand=Plus/${reverse ? 'Minus' : 'Plus'}\n\n`;
-          const hit: HspRecord = {
-            index,
-            q_idx: qIdx,
-            s_idx: sIdx,
-            rank,
-            raw_score: 100 - index,
-            bit_score: 50 - index / 2,
-            e_value: index * 1e-5,
-            q_start: qStart,
-            q_end: qEnd,
-            s_start: sStart,
-            s_end: sEnd,
-            query_frame: translated.query ? 1 : null,
-            subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
-            query_length: query.length,
-            subject_length: subject.length,
-            query_aligned: null,
-            subject_aligned: null,
-            out6: [out6Start, length(out6)],
-            out0: shown ? [sectionStart, length(out0)] : null,
-            out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
-          };
-          hits += `${JSON.stringify(hit)}\n`;
-          index++;
-          rank++;
-        }
-      });
+      for (let round = 1; round <= iterations; round++) {
+        if (program === 'psiblast' && iterations > 1) out0 += `\nResults from round ${round}\n`;
+        let rank = 0;
+        subjects.forEach((subject, sIdx) => {
+          const shown = sIdx < 2;
+          const heading = `> ${subject.id}\nLength=${subject.length}\n\n`;
+          const headingStart = length(out0);
+          if (shown) out0 += heading;
+          const count = 1 + ((qIdx + sIdx) % 2);
+          for (let j = 0; j < count; j++) {
+            const single = program === 'blastn' && qIdx === 2 && sIdx === 0 && j === 0;
+            const span = (total: number) => (single ? 1 : Math.max(1, Math.floor(total / 2)));
+            const qStart = 1 + j;
+            const qEnd = Math.min(query.length, qStart + span(query.length) - 1);
+            const reverse = nucleotide.subject && j === 1;
+            const sFrom = 1 + j;
+            const sTo = Math.min(subject.length, sFrom + span(subject.length) - 1);
+            const [sStart, sEnd] = reverse ? [sTo, sFrom] : [sFrom, sTo];
+            const row = [query.id, subject.id, 'FAKE', String(qEnd - qStart + 1), '0', '0', qStart, qEnd, sStart, sEnd, 'FAKE', 'FAKE'].join('\t') + '\n';
+            const out6Start = length(out6);
+            out6 += row;
+            out7 += row;
+            const sectionStart = length(out0);
+            if (shown) out0 += ` Score = FAKE, Expect = FAKE (${FAKE_MARKER})\n Strand=Plus/${reverse ? 'Minus' : 'Plus'}\n\n`;
+            const hit: HspRecord = {
+              index,
+              q_idx: qIdx,
+              s_idx: sIdx,
+              rank,
+              raw_score: 100 - index,
+              bit_score: 50 - index / 2,
+              e_value: index * 1e-5,
+              q_start: qStart,
+              q_end: qEnd,
+              s_start: sStart,
+              s_end: sEnd,
+              query_frame: translated.query ? 1 : null,
+              subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
+              query_length: query.length,
+              subject_length: subject.length,
+              query_aligned: null,
+              subject_aligned: null,
+              out6: [out6Start, length(out6)],
+              out0: shown ? [sectionStart, length(out0)] : null,
+              out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
+              ...(program === 'psiblast' ? { round } : {}),
+            };
+            hits += `${JSON.stringify(hit)}\n`;
+            index++;
+            rank++;
+          }
+        });
+      }
     });
     writer.write(0, encoder.encode(out0));
     writer.write(6, encoder.encode(out6));

@@ -385,6 +385,23 @@ async function toAlignments(id: HspId): Promise<void> {
                   {{ inputLabel(selectedSearch.snapshot.subject) }}, {{ plural(subjectRecords.length, 'record') }}
                 </dd>
               </template>
+              <template v-if="state.phase === 'ready' && state.rounds.length > 1">
+                <dt>Round</dt>
+                <dd class="results-round">
+                  <label class="results-round-select">
+                    <span class="visually-hidden">Round</span>
+                    <select
+                      :value="state.round"
+                      data-testid="results-round"
+                      @change="results.selectRound(Number(($event.target as HTMLSelectElement).value))"
+                    >
+                      <option v-for="r in state.rounds" :key="r" :value="r" :data-testid="`results-round-${r}`">
+                        Round {{ r }}
+                      </option>
+                    </select>
+                  </label>
+                </dd>
+              </template>
             </template>
           </template>
         </dl>

@@ -324,6 +324,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
                 false,
                 crate::algorithm::common::database::RowLookups::None,
                 None,
+                (usize::MAX, false, false),
             )
             .unwrap();
         [

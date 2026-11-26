@@ -2573,8 +2573,21 @@ fn search(
                 } else {
                     crate::algorithm::common::database::RowLookups::None
                 };
-                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    database.open_for_rows(reported, hitlists, row_lookups)
+                let ends_on_throw = super::database::after_throw(
+                    &outputs.formats,
+                    (outputs.other_outfmts, resolved.html.is_some()),
+                )
+                .run()
+                .is_some_and(|run| {
+                    matches!(
+                        run.after,
+                        crate::report::db_subject::AfterThrow::EndsReport
+                            | crate::report::db_subject::AfterThrow::EndsRun
+                    )
+                });
+                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList],
+                                 stop_on_throw| {
+                    database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)
                 };
                 for span in &batch_spans {
                     // No batch after the run's end is prefetched, nor read one by one.
@@ -2647,7 +2660,7 @@ fn search(
                         // The rows of a batch whose reports load one by one open it with each
                         // query's reads (below).
                         if !one_by_one {
-                            rows_open(hitlists)?;
+                            rows_open(hitlists, false)?;
                         }
                         // After the reader's messages of the batch, in its first query
                         // (`query_warnings::query_posts`).
@@ -2675,6 +2688,9 @@ fn search(
                                 // The first format writes the texts where it reads each subject
                                 // (`places_subject_reads`), else before the report.
                                 if places_reads {
+                                    let joins_copies = first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                    );
                                     subject_reads.set(
                                         query,
                                         database.subject_read_texts(
@@ -2683,6 +2699,7 @@ fn search(
                                             rows,
                                             row_lookups,
                                             pairwise,
+                                            (joins_copies, ends_on_throw),
                                         )?,
                                     );
                                 } else {
@@ -2691,7 +2708,7 @@ fn search(
                                     query_warning_lines[query].extend(messages);
                                 }
                             }
-                            rows_open(shown)?;
+                            rows_open(shown, ends_on_throw)?;
                         }
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275

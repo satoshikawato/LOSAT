@@ -1202,13 +1202,15 @@ impl ReportedSubjects {
         places: bool,
         row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        (cut, joins_copies, ends_on_throw): (usize, bool, bool),
     ) -> Result<()> {
         if rows == SubjectFetch::Never && shared::prefetch_always_off(format) {
             return Ok(());
         }
         for batch in batches {
-            for (index, lists) in batch.queries.iter().enumerate() {
-                let ranks: Vec<u32> = match pairwise {
+            for index in 0..batch.queries.len() {
+                let lists = batch.cut_lists(index, cut);
+                let ranks: Vec<usize> = match pairwise {
                     Some(reading) => pairwise_read_order(
                         lists,
                         batch.prepared.original_lengths[index],
@@ -1224,26 +1226,22 @@ impl ReportedSubjects {
                     )?
                     .subjects()
                     .into_iter()
-                    .map(|rank| rank as u32)
+                    .filter(|&rank| self.loads.reached(rank))
                     .collect(),
-                    None => lists
-                        .iter()
-                        .filter(|list| super::report::reads_list(list, gapped, rows))
-                        .map(|list| list.oid as u32)
-                        .collect(),
+                    None => shared::one_by_one_query_reads(
+                        lists
+                            .iter()
+                            .filter(|list| super::report::reads_list(list, gapped, rows))
+                            .map(|list| list.oid),
+                        |rank| self.parsed_subject(rank),
+                        &self.loads,
+                        joins_copies,
+                        ends_on_throw,
+                    ),
                 };
-                // Not a subject that no report reaches after one whose load throws
-                // (`HitLoads::reached`).
                 let subjects = ranks
                     .into_iter()
-                    .filter(|&rank| self.loads.reached(rank as usize))
-                    .map(|rank| {
-                        (
-                            rank,
-                            self.ordinals[rank as usize],
-                            self.parsed_subject(rank as usize),
-                        )
-                    });
+                    .map(|rank| (rank as u32, self.ordinals[rank], self.parsed_subject(rank)));
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,

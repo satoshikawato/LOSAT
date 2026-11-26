@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "o4b2_9_prestop1",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "o4b2_9_prestop1",
+  "number-of-letters": 427,
+  "number-of-sequences": 7,
+  "last-updated": "2026-11-26T19:49:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 50422,
+  "bytes-to-cache": 595,
+  "files": [
+    "o4b2_9_prestop1.pdb",
+    "o4b2_9_prestop1.phr",
+    "o4b2_9_prestop1.pin",
+    "o4b2_9_prestop1.pnd",
+    "o4b2_9_prestop1.pni",
+    "o4b2_9_prestop1.pog",
+    "o4b2_9_prestop1.pos",
+    "o4b2_9_prestop1.pot",
+    "o4b2_9_prestop1.psq",
+    "o4b2_9_prestop1.ptf",
+    "o4b2_9_prestop1.pto"
+  ]
+}

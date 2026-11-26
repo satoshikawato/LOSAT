@@ -1,0 +1,10 @@
+Seq-entry ::= seq {
+  id { local str "ignored_id2" },
+  descr {
+    user {
+      type str "ASN1_BlastDefLine",
+      data { { label str "ASN1_BlastDefLine", data oss { '303A3038A00D1A0B656D707479206C69737473A1153013A411300FA1081A06553132333436A303020101A20402022586A3023000A4023000A5023000'H } } }
+    }
+  },
+  inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+}

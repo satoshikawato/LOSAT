@@ -2,7 +2,6 @@ use super::{
     prepare_queries, split_queries, x_chunk_record, x_chunk_record_from_copy, FastaRecord,
     DEFAULT_SIZES,
 };
-use crate::algorithm::blastx::input::InputWarning;
 use crate::blastinput::fasta_reader::RecordSource;
 
 /// A query of 30,000 letters of no repeat in its frames, with masks at the chunks' borders.
@@ -14,12 +13,6 @@ fn whole() -> FastaRecord {
             .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
             .collect(),
         lowercase_masks: vec![(0, 9), (100, 299), (9_990, 10_010), (29_990, 29_999)],
-        warnings: vec![InputWarning {
-            line: 3,
-            kind: "defline_id",
-            positions: vec![7],
-            text: b"a warning".to_vec(),
-        }],
         source: Some(Box::new(RecordSource {
             defline: b">long query".to_vec(),
             ..RecordSource::default()

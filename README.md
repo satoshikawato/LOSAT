@@ -128,7 +128,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`–`12`, `18`, `20` | [psiblast](docs/manual/src/programs/psiblast.md) |
 | `rpsblast` | Protein against a PSSM database such as CDD | `0`–`16`, `18`, `20` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
 | `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`16`, `18`, `20` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
-| `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
+| `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, ASN.1 (`asn1_txt`, `asn1_bin`) or BLAST databases, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
 | `windowmasker` | Makes the unit counts file of a genome (`-mk_counts`), converts it (`-convert`), masks repeats of nucleotide sequences with it (`-ustat`) | counts files, intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
@@ -138,6 +138,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files | | [makeprofiledb](docs/manual/src/programs/makeprofiledb.md) |
 | `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists | alias files, binary lists | [blastdb_aliastool](docs/manual/src/programs/blastdb_aliastool.md) |
 | `blastdbcheck` | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids | report | [blastdbcheck](docs/manual/src/programs/blastdbcheck.md) |
+| `cleanup-blastdb-volumes.py` | Removes orphaned BLAST database volume files not listed in a database's `.pal` or `.nal` alias file | | [cleanup-blastdb-volumes.py](docs/manual/src/programs/cleanup-blastdb-volumes.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).

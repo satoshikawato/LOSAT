@@ -1688,24 +1688,60 @@ impl<S: AsnSource> Reader<S> {
         let start_line = line;
         let mut i = 0usize;
         loop {
+            let run_start = pos;
             // Whether the run holds a byte that a VisibleString reads as `#`.
             let mut clean = true;
-            let (end, c) = self.src.scan(pos + i, |c| {
-                if (b' '..=b'~').contains(&c) {
-                    return c != b'"';
+            let (end, c) = loop {
+                let rest = self.src.rest(pos + i);
+                if let Some(found) = rest.iter().position(|&c| {
+                    if (b' '..=b'~').contains(&c) {
+                        return c == b'"';
+                    }
+                    if matches!(c, b'\r' | b'\n') {
+                        return true;
+                    }
+                    clean &= !visible;
+                    false
+                }) {
+                    break (pos + i + found, Some(rest[found]));
                 }
-                if matches!(c, b'\r' | b'\n') {
-                    return false;
+                let scanned = pos + i + rest.len();
+                // Keep a long single-line run bounded in `StreamSource`: flush complete 128-byte
+                // pieces before filling the next block so the stream buffer does not grow with the
+                // run alongside `out`, while keeping piece borders at multiples of 128 from the
+                // run's start (`AppendStringData`).
+                if scanned - pos >= STREAM_BLOCK {
+                    let whole = (scanned - pos) / 128 * 128;
+                    if !clean {
+                        self.append_run(
+                            pos..pos + whole,
+                            pos + whole,
+                            line,
+                            out,
+                            clean,
+                            skip,
+                            bad_char,
+                        );
+                    } else if !skip {
+                        out.extend_from_slice(self.src.bytes(pos..pos + whole));
+                    }
+                    pos += whole;
+                    self.src.release_before(pos);
+                    i = 0;
+                    clean = true;
+                    continue;
                 }
-                clean &= !visible;
-                true
-            });
+                i = scanned - pos;
+                if !self.src.fill(scanned) {
+                    break (scanned, None);
+                }
+            };
             let Some(c) = c else {
                 // The pieces of 128 bytes before the end of the text were appended; the rest was
                 // not (`PeekChar` throws first).
                 let whole = (end - pos) / 128 * 128;
                 self.append_run(pos..end, pos + whole, line, out, clean, skip, bad_char);
-                self.pos = pos;
+                self.pos = run_start;
                 self.line = line;
                 return Err(self.unended_string(start_line));
             };
@@ -1729,9 +1765,11 @@ impl<S: AsnSource> Reader<S> {
                 } else {
                     i = 1;
                 }
+                self.src.release_before(pos);
             } else {
                 line += 1;
                 pos = self.end_of_line_at(pos, c);
+                self.src.release_before(pos);
             }
         }
     }
@@ -1801,6 +1839,7 @@ impl<S: AsnSource> Reader<S> {
                 b'\'' => break,
                 b'\r' | b'\n' => {
                     self.skip_end_of_line(c);
+                    self.src.release_before(self.pos);
                     continue;
                 }
                 _ => {
@@ -1811,6 +1850,9 @@ impl<S: AsnSource> Reader<S> {
                     ));
                 }
             };
+            if self.pos & 0x3ff == 0 {
+                self.src.release_before(self.pos);
+            }
             match high.take() {
                 Some(h) => out.push((h << 4) | digit),
                 None => high = Some(digit),

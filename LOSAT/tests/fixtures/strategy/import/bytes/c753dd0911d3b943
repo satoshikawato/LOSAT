@@ -1,0 +1,86 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: mask probe v5
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           5 sequences; 7,360 total letters
+
+
+
+Query= lcl|Query_1 ovr_p1 override protein
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s3 test subject s3                                                    15.4    6.1  
+s5 test subject s5                                                    15.0    7.9  
+s2 test subject s2                                                    14.6    9.8  
+
+
+>s3 test subject s3
+Length=1360
+
+ Score = 15.4 bits (28),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 7/36 (19%), Positives = 15/36 (42%), Gaps = 4/36 (11%)
+ Frame = +1
+
+Query  33   KGWENYCWPANMSWKVL----MKYEFSSDIHPCNLW  64
+            KG    C P ++   +     +    +  +HP ++W
+Sbjct  871  KGPRRRCVPCSLCNAIRCPW*LPNSSAKTLHPGSIW  978
+
+
+>s5 test subject s5
+Length=1200
+
+ Score = 15.0 bits (27),  Expect = 7.9, Method: Compositional matrix adjust.
+ Identities = 3/8 (38%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = +2
+
+Query  93   HKYPKCMC  100
+            H++  C+C
+Sbjct  833  HRFIHCLC  856
+
+
+>s2 test subject s2
+Length=1500
+
+ Score = 14.6 bits (26),  Expect = 9.8, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  30    AVMKGWENYCWP  41
+               ++ W N  WP
+Sbjct  1276  GTIRTWWNSTWP  1311
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.511    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 199056
+
+
+  Database: mask probe v5
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 14, 2026  5:20 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

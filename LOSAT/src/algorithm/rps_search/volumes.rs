@@ -488,29 +488,27 @@ pub(crate) fn search_sets(
     db_length: Option<i64>,
     costs: Option<(String, i32, i32)>,
 ) -> Vec<crate::report::archive::options::Param> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let mut sets = Vec::new();
     if let Some(db_length) = db_length {
         // `SetDbLength` of `D` as an `Int8`, whatever its sign (0 too; probes p6_3v_l0#3,
         // p6_3v_l2p63p1#3 of line RG D1a-4).
-        sets.push(Param {
-            name: "DbLength",
-            value: ParamValue::BigInteger(db_length),
-        });
+        sets.push(Param::new(
+            fields::DB_LENGTH,
+            ParamValue::BigInteger(db_length),
+        ));
     }
     if let Some((matrix, gap_open, gap_extend)) = costs {
-        sets.push(Param {
-            name: "MatrixName",
-            value: ParamValue::Str(matrix),
-        });
-        sets.push(Param {
-            name: "GapOpeningCost",
-            value: ParamValue::Integer(gap_open),
-        });
-        sets.push(Param {
-            name: "GapExtensionCost",
-            value: ParamValue::Integer(gap_extend),
-        });
+        sets.push(Param::new(fields::MATRIX_NAME, ParamValue::Str(matrix)));
+        sets.push(Param::new(
+            fields::GAP_OPENING_COST,
+            ParamValue::Integer(gap_open),
+        ));
+        sets.push(Param::new(
+            fields::GAP_EXTENSION_COST,
+            ParamValue::Integer(gap_extend),
+        ));
     }
     sets
 }

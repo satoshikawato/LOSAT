@@ -1,0 +1,260 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 576 total letters
+
+
+
+Query= lcl|Query_1 qx1 plus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  108     2e-29  1
+sx2 minus strand gene                                                 67.8    4e-17  1
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 108 bits (215),  Expect = 2e-29
+ Identities = 35/39 (90%), Positives = 35/39 (90%), Gaps = 0/39 (0%)
+ Frame = +1/+1
+
+Query  4    LMGVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPTNMCW  120
+            L  VFAVRRKVMDDPKIRDGPMAVMKGWENYCWP NM W
+Sbjct  40   LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  156
+
+
+ Score = 84.1 bits (165),  Expect = 5e-22
+ Identities = 31/39 (79%), Positives = 33/39 (85%), Gaps = 0/39 (0%)
+ Frame = -2/-1
+
+Query  119  QHMFVGQQ*FSQPFITAMGPSRIFGSSITFRLTANTPIK  3
+            Q +F GQQ*FSQPFITAMGPS IFGSS+T RLTANT  K
+Sbjct  155  QDIFAGQQ*FSQPFITAMGPSLIFGSSMTLRLTANTAFK  39
+
+
+ Score = 75.7 bits (148),  Expect = 2e-19
+ Identities = 21/36 (58%), Positives = 27/36 (75%), Gaps = 0/36 (0%)
+ Frame = -1/-3
+
+Query  120  PTHVCWPAVIFPTFHNSHGAITDLWVVHYLPSDCEY  13
+            P H+CWPA+IFP FHN HG ++D WV+H L  D E+
+Sbjct  156  PRHICWPAIIFPAFHNRHGPVSDFWVIHDLTPDGEH  49
+
+
+ Score = 54.5 bits (105),  Expect = 5e-13
+ Identities = 21/35 (60%), Positives = 23/35 (66%), Gaps = 0/35 (0%)
+ Frame = +2/+2
+
+Query  17   SQSDGR*WTTQRSVMAPWLL*KVGKITAGQQTCVG  121
+            S S  R W TQ+S   PW L*K GKI AGQQ C+G
+Sbjct  53   SPSGVRSWMTQKSETGPWRL*KAGKIIAGQQICLG  157
+
+
+ Score = 53.5 bits (103),  Expect = 9e-13
+ Identities = 23/37 (62%), Positives = 26/37 (70%), Gaps = 0/37 (0%)
+ Frame = +3/+3
+
+Query  9    GRIRSQTEGNGRPKDP*WPHGCYERLGKLLLANKHVL  119
+            GR+R Q  G G PK+    HG YERLGKLLLA K+VL
+Sbjct  45   GRVRRQA*GHG*PKNQRRAHGGYERLGKLLLASKYVL  155
+
+
+ Score = 50.5 bits (97),  Expect = 7e-12
+ Identities = 22/40 (55%), Positives = 24/40 (60%), Gaps = 0/40 (0%)
+ Frame = -3/-2
+
+Query  121  ANTCLLASSNFPNLS*QPWGHHGSLGRPLPSV*LRIRPLR  2
+            + T LLAS NFP LS* PW     LG P P  * R RPL+
+Sbjct  157  SKTYLLASNNFPSLS*PPWARL*FLGHP*PYA*RRTRPLK  38
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 67.8 bits (132),  Expect = 4e-17
+ Identities = 22/24 (92%), Positives = 22/24 (92%), Gaps = 0/24 (0%)
+ Frame = +1/-1
+
+Query  28   RKVMDDPKIRDGPMAVMKGWENYC  99
+            RKVMDDPKIRDGPMAVMK WE YC
+Sbjct  190  RKVMDDPKIRDGPMAVMKVWESYC  119
+
+
+ Score = 49.0 bits (94),  Expect = 2e-11
+ Identities = 19/30 (63%), Positives = 23/30 (77%), Gaps = 0/30 (0%)
+ Frame = -2/+3
+
+Query  101  QQ*FSQPFITAMGPSRIFGSSITFRLTANT  12
+            +Q* S+ FITA+GPS I GSSITFR +  T
+Sbjct  117  KQ*LSHTFITAIGPSLILGSSITFRRSIHT  206
+
+
+ Score = 29.7 bits (55),  Expect = 1e-05
+ Identities = 12/23 (52%), Positives = 15/23 (65%), Gaps = 0/23 (0%)
+ Frame = +3/-3
+
+Query  30   EGNGRPKDP*WPHGCYERLGKLL  98
+            +G GRP D     GCYE +G+LL
+Sbjct  188  KGYGRP*DKRRSNGCYESVGELL  120
+
+
+ Score = 29.7 bits (55),  Expect = 1e-05
+ Identities = 12/22 (55%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+ Frame = -1/+2
+
+Query  96   VIFPTFHNSHGAITDLWVVHYL  31
+            V  P FHNSH  ++ L VVH L
+Sbjct  122  VTLPHFHNSHWTVSYLRVVHNL  187
+
+
+ Score = 29.2 bits (54),  Expect = 2e-05
+ Identities = 12/25 (48%), Positives = 14/25 (56%), Gaps = 0/25 (0%)
+ Frame = +2/-2
+
+Query  38   WTTQRSVMAPWLL*KVGKITAGQQT  112
+            WTT R     WLL*K G++T    T
+Sbjct  180  WTTLR*ETVQWLL*KCGRVTVSYST  106
+
+
+ Score = 27.2 bits (50),  Expect = 7e-05
+ Identities = 13/22 (59%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+ Frame = -3/+1
+
+Query  97   SNFPNLS*QPWGHHGSLGRPLP  32
+            SN P LS*QP     S GRP P
+Sbjct  121  SNSPTLS*QPLDRLLS*GRP*P  186
+
+
+
+Lambda      K        H
+   0.343    0.177    0.657 
+
+
+Effective search space used: 5880
+
+
+Query= lcl|Query_2 qx2 minus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx2 minus strand gene                                                 107     6e-29  1
+sx1 plus strand gene                                                  54.5    1e-15  2
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 107 bits (212),  Expect = 6e-29
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = -1/-1
+
+Query  120  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  13
+            DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY
+Sbjct  175  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  68
+
+
+ Score = 54.9 bits (106),  Expect = 3e-13
+ Identities = 24/37 (65%), Positives = 27/37 (73%), Gaps = 0/37 (0%)
+ Frame = +2/+3
+
+Query  14   YFIRTCALMLAMLCRMKQYDSHTFITAIGPSRIFGST  124
+            YFI+T A M A+   MKQ  SHTFITAIGPS I GS+
+Sbjct  69   YFIKT*ADMFAIEWSMKQ*LSHTFITAIGPSLILGSS  179
+
+
+ Score = 19.8 bits (35),  Expect = 0.013
+ Identities = 5/13 (38%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +1/+2
+
+Query  61   EAI*FPYLHYCHW  99
+            E +  P+ H  HW
+Sbjct  116  ETVTLPHFHNSHW  154
+
+
+ Score = 10.4 bits (16),  Expect = 8.6
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +2/+1
+
+Query  53  CRM  61
+           CR+
+Sbjct  52  CRI  60
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 54.5 bits (105),  Expect(2) = 1e-15
+ Identities = 17/19 (89%), Positives = 17/19 (89%), Gaps = 0/19 (0%)
+ Frame = -1/+1
+
+Query  120  DPKIRDGPMAVMKVWESYC  64
+            DPKIRDGPMAVMK WE YC
+Sbjct  79   DPKIRDGPMAVMKGWENYC  135
+
+
+ Score = 24.3 bits (44),  Expect(2) = 1e-15
+ Identities = 9/11 (82%), Positives = 9/11 (82%), Gaps = 0/11 (0%)
+ Frame = -1/+1
+
+Query  45   ANMSAHVLMKY  13
+            ANMS  VLMKY
+Sbjct  142  ANMSWKVLMKY  174
+
+
+ Score = 34.7 bits (65),  Expect = 4e-07
+ Identities = 12/17 (71%), Positives = 15/17 (88%), Gaps = 0/17 (0%)
+ Frame = +2/-1
+
+Query  74   SHTFITAIGPSRIFGST  124
+            S+ FITA+GPS IFGS+
+Sbjct  125  SQPFITAMGPSLIFGSS  75
+
+
+
+Lambda      K        H
+   0.343    0.177    0.657 
+
+
+Effective search space used: 5880
+
+
+Query= lcl|Query_3 qx3 no hits
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.343    0.177    0.657 
+
+
+Effective search space used: 3696
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  7:50 PM
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM80
+Neighboring words threshold: 13
+Window for multiple hits: 40

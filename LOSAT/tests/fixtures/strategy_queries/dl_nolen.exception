@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/serial/serialobject.cpp", line 306: Error: (CUnassignedMember::eGet) CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length

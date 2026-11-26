@@ -361,7 +361,8 @@ fn run_main_entry() -> Result<()> {
     // `CATCH_ALL` posts it (`cli::post_native_error`).
     crate::cli::post_errors_in_run();
 
-    match cli.command {
+    let command = import_strategy(cli.command, &start)?;
+    match command {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
         // Native serial search passes actual final results to the BLASTX formatter.
         Commands::Blastx(args) => {
@@ -404,7 +405,10 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227,252-255
-        Commands::Tblastx(args) => {
+        Commands::Tblastx(mut args) => {
+            // The `@PG` line of SAM (outfmt 17), which a TBLASTX strategy run by BLASTN's
+            // application writes, shows the command line.
+            args.command_line = Some(crate::cli::command_line_bytes());
             // NCBI's application layer reads its environment and registry files before
             // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
             // the output.
@@ -551,6 +555,37 @@ fn run_main_entry() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     crate::utils::xtiming::print();
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// `RecoverSearchStrategy` at the start of a search program's run, after the application's
+/// settings: the arguments of an `-import_search_strategy` become the import's
+/// (`import::apply`, the one import of the command line, the library API and LOSAT Web), which
+/// are another program's where the running program runs another's strategy. Its warnings go to
+/// the standard error; an error ends the run as the running program's errors end it. Other
+/// arguments are returned as they are.
+fn import_strategy(
+    command: Commands,
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> Result<Commands> {
+    let blastx = matches!(command, Commands::Blastx(_));
+    let end = |error: anyhow::Error| {
+        if blastx {
+            blastx::native::exit_on_native_error(&error);
+        } else {
+            crate::cli::exit_on_native_error(&error);
+        }
+        error
+    };
+    if !crate::report::archive::read::import::imports(&command) {
+        return Ok(command);
+    }
+    // The application's settings come first, as for any run of the program.
+    let settings = start.settings().map_err(anyhow::Error::msg);
+    if let Err(error) = settings {
+        return Err(if blastx { end(error) } else { error });
+    }
+    crate::report::archive::read::import::apply(command, None, &mut std::io::stderr()).map_err(end)
 }
 
 /// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s

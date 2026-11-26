@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "q", genbank { accession "AB000003", version 1 } }, descr { user { type str "OriginalID", data { { label str "LocalId", data str "gb" } } }, title "o6" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

@@ -187,6 +187,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     );
     let xml_run = XmlRun {
         program: "tblastx",
+        app: args.app().ncbi_name(),
         version: concat!("TBLASTX ", crate::wording::report_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name,
@@ -478,7 +479,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
         // query leaves its partial bytes in `buf`, which the error return drops.
         if let Some(post) =
-            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.program)?
+            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.app)?
         {
             posts.caught(post);
         }

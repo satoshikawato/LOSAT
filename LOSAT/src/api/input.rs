@@ -533,6 +533,9 @@ pub struct Inputs<'a> {
     /// The file whose sequence is the one query (`-in_pssm`, `-in_msa`), in place of query
     /// records.
     pub(crate) query_file: Option<QueryFile<'a>>,
+    /// The search strategy whose queries and subject (or database) these are
+    /// (`Inputs::strategy`).
+    pub(crate) strategy: Option<&'a super::strategy::Strategy>,
     /// How the reading of the query records ended (`Inputs::query_end`); `None`: at the end of
     /// the input.
     pub(crate) query_end: Option<&'a QueryEnd>,
@@ -548,6 +551,7 @@ impl<'a> Inputs<'a> {
             subject_name: "subject",
             database: false,
             query_file: None,
+            strategy: None,
             query_end: None,
         }
     }
@@ -564,6 +568,7 @@ impl<'a> Inputs<'a> {
             subject_name: name,
             database: true,
             query_file: None,
+            strategy: None,
             query_end: None,
         }
     }
@@ -612,6 +617,26 @@ impl<'a> Inputs<'a> {
         Self {
             query_file: Some(QueryFile::Alignment(path)),
             ..Self::database(&[], name)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-599
+    /// The queries and the subjects (or the database) that the search strategy `strategy` carries
+    /// (`Search::read_strategy`): the command line's `-import_search_strategy FILE` without
+    /// `-query`, `-subject` or `-db`. The search is the one that read the strategy; its argv
+    /// supplies the options that the import takes from the command line, and the strategy the
+    /// others. The reports name the subject set as the command line names an imported one
+    /// (`User specified sequence set.`).
+    pub fn strategy(strategy: &'a super::strategy::Strategy) -> Self {
+        Self {
+            query: strategy.queries(),
+            subject: strategy.subjects(),
+            query_name: "query",
+            subject_name: strategy.database().unwrap_or("subject"),
+            database: strategy.database().is_some(),
+            query_file: None,
+            strategy: Some(strategy),
+            query_end: Some(strategy.query_end()),
         }
     }
 

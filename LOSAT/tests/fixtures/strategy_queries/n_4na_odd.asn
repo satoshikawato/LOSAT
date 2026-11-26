@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "odd" }, inst { repr raw, mol na, length 5, seq-data ncbi4na '1248F0'H } }
+      }
+    }

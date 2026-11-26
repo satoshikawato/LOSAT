@@ -472,6 +472,7 @@ impl PreparedXml {
         let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program,
+            app: "tblastn",
             version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
@@ -761,7 +762,7 @@ impl PreparedXml {
             // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
             // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, "tblastn")?
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.app)?
             {
                 posts.caught(post);
             }

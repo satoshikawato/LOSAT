@@ -2949,26 +2949,32 @@ fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     };
     // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
     crate::report::ostream::ncbi_endl(writer)?;
-    writeln!(writer, "Lambda      K        H        a         alpha")?;
-    write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.k)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a_un)?;
-    write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+    // A block that the query's results do not keep (`stats::tables::ancillary_kept`) has no
+    // part in the footer.
+    if crate::stats::tables::ancillary_kept(ungapped_karlin.lambda) {
+        writeln!(writer, "Lambda      K        H        a         alpha")?;
+        write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.k)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a_un)?;
+        write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer, "Gapped")?;
-    writeln!(
-        writer,
-        "Lambda      K        H        a         alpha    sigma"
-    )?;
-    write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, gapped_karlin.k)?;
-    write_ncbi_ka_field(writer, gapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a)?;
-    write_ncbi_ka_field(writer, gumbel.alpha)?;
-    write_ncbi_ka_field(writer, gumbel.sigma)?;
-    writeln!(writer)?;
+    if crate::stats::tables::ancillary_kept(gapped_karlin.lambda) {
+        writeln!(writer, "Gapped")?;
+        writeln!(
+            writer,
+            "Lambda      K        H        a         alpha    sigma"
+        )?;
+        write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, gapped_karlin.k)?;
+        write_ncbi_ka_field(writer, gapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a)?;
+        write_ncbi_ka_field(writer, gumbel.alpha)?;
+        write_ncbi_ka_field(writer, gumbel.sigma)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
     writeln!(
         writer,
@@ -3995,6 +4001,31 @@ pub struct BlastnPairwiseReport {
     pub subject_oids: Option<Arc<[u32]>>,
 }
 
+/// The HSP of a subject's HSPs `hits` whose values the description table shows
+/// (`GetSeqAlignSetCalcParams`): NCBI keeps the highest bit score from 0 and takes the bit score,
+/// E-value, identities and length of each HSP that raises it, so the HSP is the first of the
+/// highest bit score above 0, and a subject whose HSPs all have a bit score of 0 or less or NaN (a
+/// PSSM whose gapped Karlin-Altschul block is not valid gives -1 or NaN) has none. The one
+/// predicate of the table's scores (`table_scores`) and of `-sorthits`' identity
+/// (`SortColumnValues::of`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4261-4309
+pub(super) fn shown_hsp<'a>(hits: &[&'a PairwiseHit]) -> Option<&'a PairwiseHit> {
+    let mut shown: Option<&PairwiseHit> = None;
+    for &hit in hits {
+        if hit.hit.bit_score > shown.map_or(0.0, |shown| shown.hit.bit_score) {
+            shown = Some(hit);
+        }
+    }
+    shown
+}
+
+/// The bit score and E-value that the description table shows for a subject whose shown HSP is
+/// `shown` (`shown_hsp`): 0.0 and 0.0 without one.
+pub(super) fn table_scores(shown: Option<&PairwiseHit>) -> (f64, f64) {
+    shown.map_or((0.0, 0.0), |hit| (hit.hit.bit_score, hit.hit.e_value))
+}
+
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
 // (`write_blastn_description_table`), BLASTX's
 // (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
@@ -4068,17 +4099,18 @@ fn write_description_table<W: Write>(
     if described.is_empty() {
         return writeln!(writer);
     }
-    let rows: Vec<(u32, &PairwiseHit, f64, i32, Option<SortColumnValues>)> = described
+    let rows: Vec<(
+        u32,
+        Option<&PairwiseHit>,
+        f64,
+        i32,
+        Option<SortColumnValues>,
+    )> = described
         .iter()
         .filter_map(|s_idx| {
             let hits = subject_hits.get(s_idx)?;
             let first = *hits.first()?;
-            let mut best = first;
-            for hit in hits {
-                if hit.hit.bit_score > best.hit.bit_score {
-                    best = hit;
-                }
-            }
+            let best = shown_hsp(hits);
             let sum_n = first.sum_n.filter(|&num| num > 1).unwrap_or(1);
             Some((
                 *s_idx,
@@ -4096,8 +4128,8 @@ fn write_description_table<W: Write>(
     let mut max_total = "Total".len();
     let mut max_sum_n = 1;
     for (index, (_, best, total, sum_n, _)) in rows.iter().enumerate() {
-        max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
-        max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
+        max_score = max_score.max(format_bitscore_ncbi(table_scores(*best).0).len());
+        max_evalue = max_evalue.max(format_evalue_ncbi(table_scores(*best).1).len());
         max_sum_n = max_sum_n.max(sum_n.to_string().len());
         let total_len = format_total_bitscore_ncbi(*total).len();
         if index + 1 == rows.len() && last_row_counted {
@@ -4159,7 +4191,7 @@ fn write_description_table<W: Write>(
         // the lines before it are written (`QueryWarnings::subject_read`).
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
         super::x_pairwise_par::end_here(end, index)?;
-        let bits = format_bitscore_ncbi(best.hit.bit_score);
+        let bits = format_bitscore_ncbi(table_scores(*best).0);
         match html {
             None => {
                 label_of(*s_idx).write_cut(writer)?;
@@ -4190,7 +4222,7 @@ fn write_description_table<W: Write>(
         write!(
             writer,
             "  {:<max_evalue$}",
-            format_evalue_ncbi(best.hit.e_value)
+            format_evalue_ncbi(table_scores(*best).1)
         )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
         if show_sum_n {
@@ -4255,12 +4287,12 @@ struct SortColumnValues {
 impl SortColumnValues {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4271-4306
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1525-1530
-    /// The columns of the subject whose HSPs are `hits` and whose best HSP (the first of the
-    /// highest bit score, `write_description_table`) is `best`: `GetSeqAlignSetCalcParams` with
-    /// `m_TranslatedNucAlignment` false (TBLASTX's identities over its nucleotide lengths). The
+    /// The columns of the subject whose HSPs are `hits` and whose shown HSP is `best`
+    /// (`shown_hsp`; without one NCBI's identities 0 over a length of 1): `GetSeqAlignSetCalcParams`
+    /// with `m_TranslatedNucAlignment` false (TBLASTX's identities over its nucleotide lengths). The
     /// cover is computed without NCBI's `int` product `100*master_covered_length`, which
     /// overflows above about 21 million covered letters.
-    fn of(hits: &[&PairwiseHit], best: &PairwiseHit, columns: SortColumns) -> Self {
+    fn of(hits: &[&PairwiseHit], best: Option<&PairwiseHit>, columns: SortColumns) -> Self {
         use super::hit_sort::{percent_identity, query_coverage, HspScores};
         let scores: Vec<HspScores> = hits.iter().map(|hit| HspScores::of(hit)).collect();
         let covered = query_coverage(&scores);
@@ -4269,11 +4301,14 @@ impl SortColumnValues {
         if percent_coverage > 100 {
             percent_coverage = percent_coverage.min(99);
         }
-        let best = HspScores::of(best);
-        let identity = percent_identity(
-            best.num_ident,
-            best.alignment_length(columns.tblastx, false),
-        );
+        let (num_ident, length) = best.map_or((0, 1), |best| {
+            let best = HspScores::of(best);
+            (
+                best.num_ident,
+                best.alignment_length(columns.tblastx, false),
+            )
+        });
+        let identity = percent_identity(num_ident, length);
         let mut percent_identity = (0.5 + identity) as i64;
         if percent_identity > 100 {
             percent_identity = percent_identity.min(99);
@@ -4611,7 +4646,10 @@ fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>
 ) -> io::Result<()> {
     // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
     crate::report::ostream::ncbi_endl(writer)?;
-    if let Some((ungapped, _)) = karlin {
+    // (A block that the results do not keep is not written, `stats::tables::ancillary_kept`.)
+    if let Some((ungapped, _)) =
+        karlin.filter(|(ungapped, _)| crate::stats::tables::ancillary_kept(ungapped.lambda))
+    {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, ungapped.lambda)?;
         write_ncbi_ka_field(writer, ungapped.k)?;
@@ -4621,7 +4659,10 @@ fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>
     writeln!(writer)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1130-1159
     // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
-    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
+    if let Some((_, gapped_block)) = karlin
+        .filter(|_| gapped)
+        .filter(|(_, gapped_block)| crate::stats::tables::ancillary_kept(gapped_block.lambda))
+    {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, gapped_block.lambda)?;

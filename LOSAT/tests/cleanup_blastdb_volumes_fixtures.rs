@@ -701,6 +701,7 @@ fn unlink_failure_flushes_stdout_before_stderr_and_matches_closed_pipe_exit_stat
             .env("HOME", &dir)
             .env_remove("BLASTDB")
             .env_remove("NCBI")
+            .stdin(Stdio::null())
             .stdout(writer)
             .stderr(err_file)
             .status()

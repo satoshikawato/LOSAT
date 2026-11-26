@@ -37,6 +37,8 @@
 # xp3v01.phr, .pin, .pdb and .pos (series D, item D1b-2): rps_mini3v.01 made from profile 102 under ref|XP_000102.1|
 #   (below; the other files of that build are the same as rps_mini3v.01's), the second of three volumes searched bare
 #   (`rps-gz:rps_mini3v!01.phr=xp3v01.phr.gz...@om3vrps`).
+# tx3v00..02.{phr,pin,pot,ptf} (line PS, PS15b-2): rps_mini3v.00 to .02 made as below with makeprofiledb -taxid 9606,
+#   10090 and 562 (`rps-gz:rps_mini3v!00.phr=tx3v00.phr.gz...`, row db.ps15b2.rps.tax3v.18).
 #
 # rps_wide and the .loo rps_wide_ug.loo (series PR, item PS12m): one profile of 133,000 columns (f101 tiled 700 times by
 #   build_wide.py, version 5, gnl|CDD|901) with makeprofiledb -threshold 20 -force, so that its table holds the nine words that

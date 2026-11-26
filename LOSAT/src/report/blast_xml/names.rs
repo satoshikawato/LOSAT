@@ -63,7 +63,7 @@ fn believed_query_title(
     protein: bool,
     believed: &crate::blastinput::fasta_reader::believed::BelievedIds,
 ) -> Result<Option<Vec<u8>>, Refusal> {
-    let ids = crate::report::db_subject::bioseq_facts(&believed.ids);
+    let ids = crate::report::defline::bioseq_facts(&believed.ids);
     let Ok(defline) = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
     else {
         return Ok(None);
@@ -187,8 +187,7 @@ pub fn query_text(
         None => xml_query_title(title, protein),
     }
     .map_err(|refusal| refusal.error(program, "a query title"))?;
-    let message_id = crate::report::query_warnings::warning_query_id(warning_id, title);
-    let message = xml_message(&message_id, warnings, has_hits);
+    let message = own_message(warning_id, title, warnings, has_hits);
     Ok(match generated {
         Some(title) => QueryText {
             title,
@@ -201,6 +200,37 @@ pub fn query_text(
             id: Some(fasta_id(local_id, believed)),
         },
     })
+}
+
+/// The message of a query's result (`xml_message`), which names the query's own record.
+fn own_message(
+    warning_id: &[u8],
+    title: &[u8],
+    warnings: &[String],
+    has_hits: bool,
+) -> Option<Vec<u8>> {
+    let message_id = crate::report::query_warnings::warning_query_id(warning_id, title);
+    xml_message(&message_id, warnings, has_hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-719
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
+/// The `QueryText` of a query whose result NCBI's XML family formats show with the id, title and
+/// length of an earlier query (`query_batch::XmlShow::label`; the document reads that query's
+/// `QueryText` for them) and whose own no written result shows (`query_batch::names_unshown_in`):
+/// its message alone (`query_text`'s, from its record's `warning_id` and FASTA `title`). NCBI's
+/// formatter generates no title of the record, so none is refused (`Refusal`).
+pub fn labelled_query_text(
+    warning_id: &[u8],
+    title: &[u8],
+    warnings: &[String],
+    has_hits: bool,
+) -> QueryText {
+    QueryText {
+        title: Vec::new(),
+        message: own_message(warning_id, title, warnings, has_hits),
+        id: None,
+    }
 }
 
 /// Whether NCBI's XML stream throws in the outfmt 5 `Iteration` of a query before its first `Hit`
@@ -233,18 +263,28 @@ pub fn iteration_cut_before_hits(
 }
 
 /// The `QueryText` of every query of `records` (`program` names the program in a refusal):
-/// `warnings[q]` are the query's warning messages and `has_hits(q)` whether it has Seq-aligns.
+/// `warnings[q]` are the query's warning messages, `has_hits(q)` whether it has Seq-aligns and
+/// `labelled(q)` whether no result shows its names (`labelled_query_text`).
 pub fn query_texts(
     program: &str,
     records: &[crate::blastinput::fasta_reader::FastaRecord],
     protein: bool,
     warnings: &[Vec<String>],
     has_hits: impl Fn(usize) -> bool,
+    labelled: impl Fn(usize) -> bool,
 ) -> anyhow::Result<Vec<QueryText>> {
     records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
+            if labelled(q_idx) {
+                return Ok(labelled_query_text(
+                    record.warning_id(),
+                    &record.title,
+                    &warnings[q_idx],
+                    has_hits(q_idx),
+                ));
+            }
             query_text(
                 program,
                 record.local_id.as_bytes(),

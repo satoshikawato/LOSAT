@@ -138,10 +138,13 @@ fn write_scientific_ncbi<W: Write + ?Sized>(
     writer.write_all(formatted.as_bytes())
 }
 
-/// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
+/// Format E-value exactly as NCBI BLAST does (base GetScoreString logic). The value is the
+/// one that NCBI's readers of the Seq-align take: -1 for the E-value that it lacks, a NaN
+/// (`seqalign_evalue_read`), which prints as 0.0.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 pub fn format_evalue_ncbi(e_value: f64) -> String {
+    let e_value = crate::report::serial::seqalign::seqalign_evalue_read(e_value);
     if e_value == 0.0 || e_value < 1.0e-180 {
         // Formats as "0.0" matching NCBI's threshold below 1e-180.
         "0.0".to_string()
@@ -166,10 +169,12 @@ pub fn format_evalue_ncbi(e_value: f64) -> String {
     }
 }
 
-/// Format E-value exactly as NCBI BLAST does for tabular output.
+/// Format E-value exactly as NCBI BLAST does for tabular output (the readers' value, as
+/// `format_evalue_ncbi`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
 pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
+    let e_value = crate::report::serial::seqalign::seqalign_evalue_read(e_value);
     if e_value == 0.0 || e_value < 1.0e-180 {
         "0.0".to_string()
     } else if e_value < 0.0009 {
@@ -183,7 +188,11 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-994
 pub fn format_bitscore_ncbi(bit_score: f64) -> String {
-    if bit_score > 99999.0 {
+    if bit_score == f64::INFINITY {
+        // `%5.3le` of an infinite bit score (a PSSM whose gapped Lambda is `PLUS-INFINITY`):
+        // C's printf writes `inf` in the field of 5 (NCBI BLAST+ 2.17.0 prints `  inf`).
+        "  inf".to_string()
+    } else if bit_score > 99999.0 {
         // NCBI: "%5.3le" -> scientific notation
         format_scientific_ncbi(bit_score, 3)
     } else if bit_score > 99.9 {
@@ -231,10 +240,12 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
     }
 }
 
-/// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
+/// Write E-value exactly as NCBI BLAST does (base GetScoreString logic), the readers' value
+/// (`format_evalue_ncbi`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
+    let e_value = crate::report::serial::seqalign::seqalign_evalue_read(e_value);
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -256,6 +267,7 @@ fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
 fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
+    let e_value = crate::report::serial::seqalign::seqalign_evalue_read(e_value);
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -269,7 +281,9 @@ fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) ->
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
 fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io::Result<()> {
-    if bit_score > 99999.0 {
+    if bit_score == f64::INFINITY {
+        writer.write_all(b"  inf")
+    } else if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
         write!(writer, "{:3}", bit_score as i64)

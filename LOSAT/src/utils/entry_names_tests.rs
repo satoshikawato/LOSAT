@@ -31,6 +31,7 @@ fn the_name_of_a_program_is_its_subcommand() {
         "blastn.1",
         "my-blastn",
         "blastn2",
+        "cleanup-blastdb-volumes.py.1",
     ] {
         assert_eq!(words(&[argv0, "blastn", "-h"]), [argv0, "blastn", "-h"]);
     }

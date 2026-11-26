@@ -23,14 +23,13 @@ use crate::seqdb::DbSequence;
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
-use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
 use super::blast_xml::HitTaxonomy;
 use super::defline::{
-    bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline, SourceTaxname,
-    UnknownEncoding,
+    bioseq_facts, bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline,
+    SourceTaxname, UnknownEncoding,
 };
 use super::html_ids::{self, HtmlHeading};
 
@@ -2307,88 +2306,6 @@ fn check_pairwise_record(
         );
     }
     Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt:241-266 (the rows of the RefSeq
-// kinds that `x_SetFlags` tests; `3+6` is a prefix of three characters and six digits)
-/// The RefSeq kind that `CSeq_id::IdentifyAccession` gives `accession` where `x_SetFlags` tests
-/// it: a chromosome or ncRNA (`BioseqFacts::refseq_chromosome_or_ncrna`) or an mRNA
-/// (`BioseqFacts::refseq_mrna`).
-fn refseq_accession_kind(accession: &[u8]) -> Option<RefseqKind> {
-    if accession.len() < 3 || accession[2] != b'_' {
-        return None;
-    }
-    let digits = &accession[3..];
-    if !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let prefix = [
-        accession[0].to_ascii_uppercase(),
-        accession[1].to_ascii_uppercase(),
-    ];
-    match &prefix {
-        b"AC" | b"NC" | b"NR" if digits.len() == 6 => Some(RefseqKind::ChromosomeOrNcrna),
-        b"NM" | b"XM" if digits.len() == 6 || digits.len() == 9 => Some(RefseqKind::Mrna),
-        _ => None,
-    }
-}
-
-/// A RefSeq kind whose empty title `GenerateDefline` makes with its own function
-/// (`refseq_accession_kind`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RefseqKind {
-    /// `m_IsNC` or `m_IsNR`.
-    ChromosomeOrNcrna,
-    /// `m_IsNM`.
-    Mrna,
-}
-
-impl BioseqFacts {
-    /// Sets the flag of the RefSeq kind of `accession` (`refseq_accession_kind`), if any.
-    fn add_refseq_accession(&mut self, accession: Option<&[u8]>) {
-        match accession.and_then(refseq_accession_kind) {
-            Some(RefseqKind::ChromosomeOrNcrna) => self.refseq_chromosome_or_ncrna = true,
-            Some(RefseqKind::Mrna) => self.refseq_mrna = true,
-            None => {}
-        }
-    }
-}
-
-/// `BioseqFacts` of the Seq-ids `ids` of a Bioseq.
-pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
-    let mut flags = BioseqFacts::default();
-    for id in ids {
-        match id {
-            ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
-                flags.third_party = true;
-                flags.add_refseq_accession(text.accession.as_deref());
-            }
-            ParsedSeqId::Other(text)
-            | ParsedSeqId::Genbank(text)
-            | ParsedSeqId::Embl(text)
-            | ParsedSeqId::Ddbj(text) => {
-                flags.add_refseq_accession(text.accession.as_deref());
-            }
-            ParsedSeqId::Pdb(pdb) => {
-                let (chain_id, chain) = flags.pdb.get_or_insert_with(|| (Vec::new(), 0));
-                if let Some(id) = &pdb.chain_id {
-                    *chain_id = id.clone();
-                } else if let Some(value) = pdb.chain {
-                    *chain = value;
-                }
-            }
-            ParsedSeqId::Patent(patent) => {
-                let number = match &patent.cit.id {
-                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => {
-                        number.clone()
-                    }
-                };
-                flags.patent = Some((patent.seqid, patent.cit.country.clone(), number));
-            }
-            _ => {}
-        }
-    }
-    flags
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:336-359

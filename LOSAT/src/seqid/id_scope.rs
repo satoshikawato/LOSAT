@@ -219,11 +219,52 @@ pub(crate) fn kind_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 pub(crate) fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
     let text = id.textseq()?;
     let accession = text.accession.as_ref()?.to_ascii_uppercase();
-    let key = |versioned: bool| {
-        let mut hasher = DefaultHasher::new();
-        (b"version kind", versioned, &accession).hash(&mut hasher);
-        hasher.finish()
-    };
     let versioned = text.version.is_some();
-    Some((key(versioned), key(!versioned)))
+    Some((
+        version_kind_key(&accession, versioned),
+        version_kind_key(&accession, !versioned),
+    ))
 }
+
+/// One key of `version_keys` of a text Seq-id with an accession: of its own kind of version
+/// (`own`), or of the other kind.
+pub(crate) fn version_key(id: &ParsedSeqId, own: bool) -> Option<u64> {
+    let text = id.textseq()?;
+    let accession = text.accession.as_ref()?.to_ascii_uppercase();
+    Some(version_kind_key(&accession, text.version.is_some() == own))
+}
+
+/// The key of the accession `accession` (in upper case) of a text Seq-id with or without a version
+/// (`version_keys`).
+fn version_kind_key(accession: &[u8], versioned: bool) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (b"version kind", versioned, accession).hash(&mut hasher);
+    hasher.finish()
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:141-156
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
+/// The bit of the form of a Seq-id among the Seq-ids that `CSeq_id::Match` takes for one though
+/// `defline_set::scope_keys` tells them apart (0 for any other Seq-id): for a text Seq-id with an
+/// accession, its accession with or without a version (`MATCH_FORMS_ACCESSION`); for a PDB Seq-id,
+/// its molecule with or without a `chain` and a `chain_id` (`MATCH_FORMS_PDB`). Two Seq-ids that
+/// `defline_set::compare` finds the same (`Sic::Yes`) with different `scope_keys` share the
+/// accession (`version_keys`) or the molecule and differ in the form: ids of one form match only
+/// where they are equal there (one accession with one version, one molecule with the same chains).
+pub(crate) fn match_form(id: &ParsedSeqId) -> u8 {
+    match id {
+        ParsedSeqId::Pdb(pdb) => {
+            1 << (2 + u8::from(pdb.chain.is_some()) + 2 * u8::from(pdb.chain_id.is_some()))
+        }
+        _ => id
+            .textseq()
+            .filter(|text| text.accession.is_some())
+            .map_or(0, |text| 1 << u8::from(text.version.is_some())),
+    }
+}
+
+/// The forms of `match_form` of a text Seq-id's accession.
+pub(crate) const MATCH_FORMS_ACCESSION: u8 = 0b11;
+
+/// The forms of `match_form` of a PDB Seq-id.
+pub(crate) const MATCH_FORMS_PDB: u8 = 0b11_1100;

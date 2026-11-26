@@ -1,0 +1,71 @@
+# name	env	cwd	args
+H01	-	.	-h
+H02	-	.	--help
+H03	-	.	-help
+H04	-	.	--hel
+H05	-	.	-h -bogus
+H06	-	.	-bogus -h
+H07	-	.	-hh=x
+H08	-	.	-hh=
+H09	-	.	-hh-x
+P01	-	.	-db in/p5 -dbtype prot -dry-run
+P02	-	.	-db in/p5 -dbtype prot -dry-run -verbose
+P03	-	.	-db in/p5 -dbtype prot
+P04	-	.	-db in/p5 -dbtype prot -verbose
+P05	-	.	-db in/p4 -dbtype prot
+P06	-	.	-db in/p4 -dbtype prot -dry-run -verbose
+N01	-	.	-db in/n4 -dbtype nucl -dry-run
+N02	-	.	-db in/n4 -dbtype nucl -dry-run -verbose
+N03	-	.	-db in/n4 -dbtype nucl
+N04	-	.	-db in/n5 -dbtype nucl -dry-run -verbose
+N05	-	.	-db in/n5 -dbtype nucl
+S01	-	.	-db in/sv -dbtype prot
+S02	-	.	-db in/p5 -dbtype nucl
+S03	-	.	-db missing_db -dbtype prot
+S04	-	.	-db missing_db -dbtype nucl
+D01	-	.	-db in/quoted -dbtype prot -dry-run -verbose
+D02	-	.	-db in/quoted -dbtype prot
+D03	-	.	-db in/multi_dl -dbtype prot -dry-run -verbose
+D04	-	.	-db in/multi_dl -dbtype prot
+D05	-	.	-db in/no_dl -dbtype prot
+D06	-	.	-db in/sub/sdb -dbtype prot -dry-run -verbose
+D07	-	.	-db ./in/sub/sdb -dbtype prot -dry-run
+D08	-	.	-db in/dots -dbtype prot -dry-run -verbose
+D09	-	.	-db in/globmeta/a[0] -dbtype prot -dry-run -verbose
+E01	BLASTDB=in/envdb	.	-db edb -dbtype prot -dry-run -verbose
+E02	BLASTDB=in/envdb	.	-db edb -dbtype prot
+E03	BLASTDB=in/envdb/	.	-db edb -dbtype prot -dry-run -verbose
+E04	BLASTDB=in/envdb:in/sub	.	-db edb -dbtype prot -dry-run
+E05	-	in/cfg_cwd	-db edb -dbtype prot -dry-run -verbose
+E06	-	in/cfg_ini	-db edb -dbtype prot -dry-run -verbose
+E07	HOME=<RUN>/in/cfg_home	.	-db edb -dbtype prot -dry-run -verbose
+E08	NCBI=<RUN>/in/cfg_ncbi	.	-db edb -dbtype prot -dry-run -verbose
+E09	-	in/cfg_lower	-db edb -dbtype prot -dry-run
+E10	-	in/cfg_def	-db edb -dbtype prot -dry-run -verbose
+A01	-	.	
+A02	-	.	-db x
+A03	-	.	-dbtype prot
+A04	-	.	-db x -dbtype bad
+A05	-	.	-db
+A06	-	.	-db -foo -dbtype prot
+A07	-	.	-db=-foo -dbtype=prot
+A08	-	.	-db -1 -dbtype prot
+A09	-	.	-db - -dbtype prot
+A10	-	.	-db x -dbtype prot -bogus
+A11	-	.	-db x -dbtype prot extra
+A12	-	.	-db x -dbtype prot --
+A13	-	.	-v
+A14	-	.	-d
+A15	-	.	-dry-run=1 -db x -dbtype prot
+A16	-	.	--help=1
+A17	-	.	-h=1
+A18	-	.	-dbt prot -db in/quoted -dr -verb
+A19	-	.	-db in/p5 -dbtype nucl -dbtype prot -dry-run
+A20	-	.	-=x
+A21	-	.	-=
+W01	COLUMNS=40	.	-h
+W02	COLUMNS=60	.	-h
+W03	COLUMNS=120	.	-h
+W04	COLUMNS=200	.	-h
+W05	COLUMNS=40	.	-db x
+W06	COLUMNS=200	.	-db x

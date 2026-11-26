@@ -1,0 +1,5 @@
+TITLE t
+DBLIST rps_mini
+SEQIDLIST /losat-idlist-fixture-missing/none.txt
+NSEQ 3
+LENGTH 560

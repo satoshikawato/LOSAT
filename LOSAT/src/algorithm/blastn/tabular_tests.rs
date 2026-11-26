@@ -110,15 +110,15 @@ fn query_positions_follow_the_columns() {
             GapEditOp::Sub(6),
         ]),
     );
-    assert_eq!(query_position(&gapped, 100), 10);
-    assert_eq!(query_position(&gapped, 103), 13);
-    assert_eq!(query_position(&gapped, 104), -1);
-    assert_eq!(query_position(&gapped, 105), 14);
-    assert_eq!(query_position(&gapped, 110), 19);
+    assert_eq!(query_position(&gapped, 100, 0, false), 10);
+    assert_eq!(query_position(&gapped, 103, 0, false), 13);
+    assert_eq!(query_position(&gapped, 104, 0, false), -1);
+    assert_eq!(query_position(&gapped, 105, 0, false), 14);
+    assert_eq!(query_position(&gapped, 110, 0, false), 19);
     // A minus-strand HSP: the query descends along the subject.
     let minus = hsp((11, 20), (110, 101), true, None);
-    assert_eq!(query_position(&minus, 100), 19);
-    assert_eq!(query_position(&minus, 109), 10);
+    assert_eq!(query_position(&minus, 100, 0, true), 19);
+    assert_eq!(query_position(&minus, 109, 0, true), 10);
 }
 
 #[test]
@@ -126,12 +126,15 @@ fn uniq_coverage_skips_subject_letters_covered_before() {
     // Two HSPs on disjoint subject ranges: both query ranges count.
     let a = hsp((1, 100), (1, 100), false, None);
     let b = hsp((201, 300), (201, 300), false, None);
-    assert_eq!(uniq_seq_coverage(&[a.clone(), b]), 200);
+    assert_eq!(uniq_seq_coverage(&[a.clone(), b], 0, true).unwrap(), 200);
     // A repeat of the query on the same subject letters counts once.
     let repeat = hsp((401, 500), (1, 100), false, None);
-    assert_eq!(uniq_seq_coverage(&[a.clone(), repeat]), 100);
+    assert_eq!(
+        uniq_seq_coverage(&[a.clone(), repeat], 0, true).unwrap(),
+        100
+    );
     // A partly covered HSP: only its uncovered subject part maps to query letters.
     let partial = hsp((501, 600), (51, 150), false, None);
-    assert_eq!(uniq_seq_coverage(&[a, partial]), 100 + 50);
-    assert_eq!(uniq_subject_coverage(&[], 100), -1);
+    assert_eq!(uniq_seq_coverage(&[a, partial], 0, true).unwrap(), 100 + 50);
+    assert_eq!(uniq_subject_coverage(&[], 100, 0, true), -1);
 }

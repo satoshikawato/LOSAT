@@ -12,8 +12,12 @@ export function parseHeadersFile(text: string): Map<string, Record<string, strin
   for (const line of text.split(/\r?\n/)) {
     if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
     if (!/^\s/.test(line)) {
+      const pattern = line.trim();
+      if (rules.has(pattern)) {
+        throw new Error(`duplicate _headers path rule: ${pattern}`);
+      }
       current = {};
-      rules.set(line.trim(), current);
+      rules.set(pattern, current);
       continue;
     }
     const separator = line.indexOf(':');

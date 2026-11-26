@@ -555,6 +555,23 @@ describe('WasmEngine', () => {
     expect(worker.terminated).toBe(false);
   });
 
+  it('forwards assembled on WorkerInput and readRecords on RuntimeInfo (D17)', async () => {
+    const { engine, workers } = setup();
+    const base = request('r1');
+    const run = engine.run(
+      { ...base, query: { ...base.query, assembled: true } },
+      output(),
+      () => undefined,
+    );
+    const worker = await posted(() => workers[0], 1);
+    const postedRun = worker.posted.find((m) => m.type === 'run')!;
+    expect(postedRun.type === 'run' && postedRun.query.assembled).toBe(true);
+    expect(postedRun.type === 'run' && postedRun.subject?.assembled).toBeUndefined();
+    const readRecords = { query: [{ id: 'q1', length: 120 }] };
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...RESULT, readRecords } });
+    expect((await run).readRecords).toEqual(readRecords);
+  });
+
   it('ends the runtime after an error that stopped the instance', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);

@@ -203,6 +203,12 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(crate) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// NCBI's warning of a failed prefetch, which names the running application `app`
     /// (`shared::prefetch_warning`).
     pub(crate) fn prefetch_warning(&self, app: &str) -> Vec<u8> {
@@ -457,6 +463,11 @@ pub(crate) struct ReportedSubjects {
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
     /// holds the title of their first definition line.
     parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// Whether the batch's reports resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`shared::ParsedShown::resolves_subject`: a report reads their Bioseqs, or the batch's
+    /// prefetch loads them), where a query of the batch that holds such an id takes the
+    /// subject's place (`refuse_ids_of_queries`).
+    resolves_subjects: bool,
     /// The sources from which NCBI makes the empty stored titles of the others, by rank
     /// (`shared::StoredTitle::source`; empty when none has one).
     sources: Vec<crate::report::defline::SourceTaxname>,
@@ -478,6 +489,18 @@ pub(crate) struct ReportedSubjects {
     /// `-db_soft_mask` and `-db_hard_mask` with a pairwise report: the stored masks of the
     /// search's algorithm of each rank (`read_db_masks`); `None` otherwise.
     db_masks: Option<Vec<Vec<(u32, u32)>>>,
+    /// The query Bioseqs that NCBI's scope finds for the reported sequences
+    /// (`report::query_bioseq`, filled by `refuse_ids_of_queries`), by the run's searched query
+    /// and the ordinal id.
+    seen: crate::report::query_bioseq::QueryBioseqs,
+    /// The run's searched query of the reader batch's first query (`refuse_ids_of_queries`).
+    seen_first: usize,
+    /// Whether `check_handle_loads` checks `ParsedSubject::handle_load_refusal` after
+    /// `refuse_ids_of_queries` (`reports && (reads || prefetched)` in `for_batch`).
+    checks_handle_loads: bool,
+    /// Whether the batch's reports read only through the prefetch (`reports && !reads && prefetched`),
+    /// for `check_handle_loads`'s refusal suffix (`PREFETCH_READS_IT`).
+    handle_loads_prefetch_only: bool,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -857,7 +880,15 @@ impl ReportedSubjects {
             },
         );
         let taxdb_found = database.db.taxdb_found();
-        let mut reported = ReportedSubjects::default();
+        // The formats that read the subject's Bioseq; the Seq-annots and the archive write its
+        // Seq-align id alone.
+        let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
+        let mut reported = ReportedSubjects {
+            resolves_subjects: reads || prefetched,
+            checks_handle_loads: reports && (reads || prefetched),
+            handle_loads_prefetch_only: reports && !reads && prefetched,
+            ..ReportedSubjects::default()
+        };
         for (&oid, title) in &listed {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
@@ -871,15 +902,14 @@ impl ReportedSubjects {
                 )?;
             }
             if let Some(subject) = parsed.get(&oid) {
-                // The formats that read the subject's Bioseq; the Seq-annots and the archive
-                // write its Seq-align id alone.
-                let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
+                    // `handle_load_refusal` is checked in `check_handle_loads` after
+                    // `refuse_ids_of_queries` has populated `seen`.
                     let sought = shared::weak_sought(&database.db, subject, ordinal, one_by_one);
                     sought
                         .as_ref()
                         .unwrap_or(subject)
-                        .fetched(taxonomy, one_by_one, loads.load(oid))
+                        .fetched_with_scope(taxonomy, one_by_one, loads.load(oid), true)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -892,6 +922,7 @@ impl ReportedSubjects {
                         &database.db,
                         subject,
                         ordinal,
+                        subject.load_throws(),
                         database.program,
                     )?;
                 }
@@ -1491,34 +1522,131 @@ impl ReportedSubjects {
     /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
     /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
     /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
-    /// from the reader batch, and the query's index).
+    /// from the reader batch, and the query's index), where the reports resolve the subjects'
+    /// Seq-align ids (`resolves_subjects`). Where the scope finds a query for the sequence and the
+    /// reports show NCBI's bytes for it (`run`), that query is noted in `seen` instead
+    /// (`report::query_bioseq::note_or_refuse`).
     pub(crate) fn refuse_ids_of_queries(
-        &self,
+        &mut self,
         batches: &[BatchResults],
         gapped: bool,
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+        run: &crate::report::query_bioseq::SeenRun<'_, '_>,
     ) -> Result<()> {
-        if self.parsed.is_empty() {
+        if self.parsed.is_empty() || !self.resolves_subjects {
             return Ok(());
         }
+        self.seen_first = scopes.first();
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
                     if !super::report::reported(list, gapped) {
                         continue;
                     }
-                    if let Some(subject) = self.parsed_subject(list.oid) {
-                        shared::refuse_id_of_a_query(
-                            subject,
-                            || self.oids[list.oid],
-                            scopes.of_query(batch.query_ordinal + qidx),
-                            PROGRAM,
-                        )?;
-                    }
+                    let Some(subject) = self.parsed.get(list.oid).and_then(Option::as_deref) else {
+                        continue;
+                    };
+                    let oid = self.oids[list.oid];
+                    crate::report::query_bioseq::note_or_refuse(
+                        &mut self.seen,
+                        subject,
+                        || oid,
+                        scopes.first() + batch.query_ordinal + qidx,
+                        self.ordinals[list.oid],
+                        scopes.run(),
+                        run,
+                        PROGRAM,
+                    )?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Checks `ParsedSubject::handle_load_refusal` after `refuse_ids_of_queries` has populated
+    /// `self.seen`: a subject resolved to a noted query Bioseq by every reporting query in
+    /// `batches` never reaches the BLAST database data loader (`scope_impl.cpp:3288-3297`).
+    pub(crate) fn check_handle_loads(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) -> Result<()> {
+        if !self.checks_handle_loads || self.parsed.is_empty() {
+            return Ok(());
+        }
+        for (rank, subject) in self.parsed.iter().enumerate() {
+            let Some(subject) = subject.as_deref() else {
+                continue;
+            };
+            if !subject.load_throws() {
+                continue;
+            }
+            if !self.handle_loads_prefetch_only
+                && matches!(
+                    self.loads.load(rank),
+                    crate::report::db_subject::HitLoad::Unread
+                        | crate::report::db_subject::HitLoad::Throws
+                )
+            {
+                continue;
+            }
+            let ordinal = self.ordinals[rank];
+            let seen_by_scope = !self.seen.is_empty()
+                && self.seen.hides_ordinal(
+                    batches.iter().flat_map(|batch| {
+                        batch
+                            .queries
+                            .iter()
+                            .enumerate()
+                            .filter_map(move |(qidx, lists)| {
+                                lists
+                                    .iter()
+                                    .any(|list| {
+                                        list.oid == rank && super::report::reported(list, gapped)
+                                    })
+                                    .then_some(self.seen_first + batch.query_ordinal + qidx)
+                            })
+                    }),
+                    ordinal,
+                );
+            if seen_by_scope {
+                continue;
+            }
+            if let Some(reason) = subject.handle_load_refusal() {
+                if self.handle_loads_prefetch_only {
+                    shared::check_prefetched_parsed(
+                        &database.db,
+                        subject,
+                        ordinal,
+                        false,
+                        database.program,
+                    )?;
+                } else {
+                    return Err(shared::parsed_refusal(
+                        self.oids[rank],
+                        &reason,
+                        database.program,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The query Bioseq that NCBI's scope finds for the sequence of rank `rank` in the report of
+    /// the reader batch's query `ordinal` (`report::query_bioseq::SeenFrom::of`).
+    pub(crate) fn seen_of(
+        &self,
+        ordinal: usize,
+        rank: usize,
+    ) -> Option<&crate::report::query_bioseq::QueryBioseq> {
+        if self.seen.is_empty() {
+            return None;
+        }
+        self.seen
+            .numbered_from(self.seen_first)
+            .of(ordinal, *self.ordinals.get(rank)?)
     }
 
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).

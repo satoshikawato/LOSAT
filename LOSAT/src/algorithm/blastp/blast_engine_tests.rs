@@ -3123,7 +3123,10 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
             Some(&spec),
             [vec![0], vec![0], vec![1]],
             |s_idx| (s_idx == 1).then_some(lineless),
-            |s_idx, failure| crate::report::tabular::failed_database_subject(s_idx, None, failure),
+            |s_idx, failure| {
+                crate::report::tabular::failed_database_subject(s_idx, None, None, failure)
+            },
+            crate::blastinput::app::Program::Blastp,
             "BLASTP",
             true,
         )

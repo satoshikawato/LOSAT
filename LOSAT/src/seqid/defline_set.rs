@@ -548,7 +548,9 @@ pub fn match_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1502
 // The handle of a text Seq-id is its accession and version in any alternative, in any case (probe
 // of the DI-7 review: `NM_1.1` and `NM_1.2`, `NM_1` and `NM_1.1`, `pdb|1ABC|A` and `|B` are two
-// sequences to NCBI's scope; `gb|X.1|` and `emb|X.1|`, `abc` and `ABC` are one).
+// sequences to NCBI's scope; `gb|X.1|` and `emb|X.1|`, `abc` and `ABC` are one). A PDB id is its
+// handle (`mask_handle_key`: the normalized id, in which `chain` 321 is `chain` 65 and `chain-id`
+// "A"; RG-KB item 12).
 /// Adds to `keys` the keys of `id` as NCBI's scope finds a sequence by it: two ids that the scope
 /// finds as one share a key. Other than `match_keys`, a version and a PDB chain tell ids apart.
 pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
@@ -558,13 +560,10 @@ pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
         parts.hash(&mut hasher);
         keys.push(hasher.finish());
     };
-    if let ParsedSeqId::Pdb(pdb) = id {
-        key(&[
-            b"pdb",
-            &pdb.mol.to_ascii_uppercase(),
-            &pdb.chain.unwrap_or(32).to_le_bytes(),
-            pdb.chain_id.as_deref().unwrap_or_default(),
-        ]);
+    if let ParsedSeqId::Pdb(_) = id {
+        if let Ok(Some(handle)) = crate::seqid::mask_handle::mask_handle_key(id) {
+            key(&[b"pdb", &handle]);
+        }
     } else if let Some(text) = id.textseq() {
         let version = text
             .version

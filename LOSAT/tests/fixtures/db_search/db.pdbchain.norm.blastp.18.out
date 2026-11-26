@@ -1,0 +1,16 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Mus musculus (house mouse) [rodents]                                
+ 1AB9_A    Chain A                                                                     462   9e-173  
+ 1ABB_A    Chain A                                                                     462   1e-172  
+
+                                   Homo sapiens (human) [primates]                                   
+ 1ABA_A    Chain A                                                                     462   1e-172  

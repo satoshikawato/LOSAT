@@ -190,6 +190,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -692,6 +693,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         taxonomy: crate::report::blast_xml::records::UNNAMED,
         descriptions: &[],
         defline_thrown: false,
+        unloaded: false,
         lookup_throws: Some(&exception),
     };
     let query = XmlQuery {

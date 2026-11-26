@@ -1,0 +1,341 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "pdbn",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1190
+        },
+        {
+          id str "blast_score",
+          value int 1190
+        },
+        {
+          id str "e_value",
+          value real { 361685475406478, 10, -187 }
+        },
+        {
+          id str "bit_score",
+          value real { 462995727621694, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 219
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 219
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            },
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 219,
+              strand unknown,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            },
+            int {
+              from 0,
+              to 659,
+              strand plus,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 32
+        },
+        {
+          id str "blast_score",
+          value int 32
+        },
+        {
+          id str "e_value",
+          value real { 583100684697446, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 169346187093993, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 7
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 10
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 686363636363636, 10, -14 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            },
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            }
+          },
+          loc {
+            int {
+              from 4,
+              to 17,
+              strand unknown,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            },
+            int {
+              from 12,
+              to 53,
+              strand minus,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1190
+        },
+        {
+          id str "blast_score",
+          value int 1190
+        },
+        {
+          id str "e_value",
+          value real { 431107963069843, 10, -187 }
+        },
+        {
+          id str "bit_score",
+          value real { 462995727621694, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 219
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 219
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            },
+            pdb {
+              mol "1AB2",
+              chain 65,
+              chain-id "A"
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 219,
+              strand unknown,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            },
+            int {
+              from 0,
+              to 659,
+              strand plus,
+              id pdb {
+                mol "1AB2",
+                chain 65,
+                chain-id "A"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 34
+        },
+        {
+          id str "blast_score",
+          value int 34
+        },
+        {
+          id str "e_value",
+          value real { 33496141609472, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 17705017861234, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 7
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 686363636363636, 10, -14 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            pdb {
+              mol "1AB1",
+              chain 65,
+              chain-id "A"
+            },
+            pdb {
+              mol "1AB2",
+              chain 65,
+              chain-id "A"
+            }
+          },
+          loc {
+            int {
+              from 4,
+              to 17,
+              strand unknown,
+              id pdb {
+                mol "1AB1",
+                chain 65,
+                chain-id "A"
+              }
+            },
+            int {
+              from 12,
+              to 53,
+              strand minus,
+              id pdb {
+                mol "1AB2",
+                chain 65,
+                chain-id "A"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

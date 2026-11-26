@@ -2707,6 +2707,7 @@ fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::E
             .utf8
             .filter(|read| batch.contains(&read.query))
             .cloned(),
+        title_reads: Vec::new(),
     }
     .into()
 }

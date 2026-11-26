@@ -2241,7 +2241,10 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges() {
         for w in [1 + case_no % 6, wl - 1, wl + 1, 40, 64] {
             let at = format!("edge case {case_no} wl {wl} w {w}");
             let x0 = inputs(&c, &lookup, 0, w);
-            let offsets = stage_offsets(37 + rng.below(1000) as i32, w, c.s_len, 3);
+            // the hash offset starts at the window and returns to it at the clear (`latest_bound`),
+            // so a stage's offset is never below it (below it, at w 64, the chunk has no bounds)
+            let first = (37 + rng.below(1000) as i32).max(w as i32);
+            let offsets = stage_offsets(first, w, c.s_len, 3);
             cover = cover.sum(reg_agrees_in_every_instance(
                 &x0, &seeds, &offsets, &mut rng, &at,
             ));

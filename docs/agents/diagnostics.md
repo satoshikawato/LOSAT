@@ -4462,8 +4462,9 @@ Scheduling (each value computed by one thread with the original function; order 
   their take-overs, so such a chunk goes to the chains (`x_pair_seed_disc.rs` `latest_ranges_ascend`, one pass
   over the chunk's ranges at the decision point; `LOSAT_X_REACH` records the reference side), on every path
   that folds on the maps (the owner's map, the partitions', one thread or many). `[TIMING] x_dc_latest:
-  stages= back= grows= buckets=` counts the stages folded on the maps, the chunks sent to the chains because
-  their ranges step back, the maps' growths and their largest size. The unit tests of `x_dc_latest.rs`
+  stages= back= grows= buckets= reg_calls=` counts the stages folded on the maps, the chunks sent to the chains
+  because their ranges step back, the maps' growths, their largest size and the calls of the fold with the map
+  in registers (`LOSAT_X_DCFOLDREG`, above). The unit tests of `x_dc_latest.rs`
   check the map against a model of the latest inserts over stages, clears, crowded buckets and growths,
   and against the chains with NCBI's window (every window) and LOSAT's (outside the band);
   `the_fold_on_the_map_makes_the_decisions_of_the_chains` compares the folds' decisions and inserts seed

@@ -187,10 +187,28 @@ fn run_main_entry() -> Result<()> {
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
     // makes F, with the usage report's messages.
+    // Line WQA D23 (`Q-D23=A`): refuse a `-logfile` pointing to any input file read by this run
+    // before opening or creating it, preventing input corruption and endless read loops.
+    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     let mut target = match &start {
-        Some(_) => {
-            use crate::blastinput::ncbi_environment::{diag_target, log_file};
-            diag_target(log_file(&argv[2..]))
+        Some(start) => {
+            let refusal_name = crate::cli::reader::tool(start.program())
+                .map_or(start.program(), |tool| tool.refusal_name);
+            match crate::report::run_files::RunFiles::Disk.log_target_for(
+                &argv[2..],
+                start,
+                crate::blastinput::ncbi_environment::log_file(&argv[2..]),
+            ) {
+                Ok((target, _)) => target,
+                Err(reason) => {
+                    let message = crate::seqmasks_io::run::unsupported(&reason, refusal_name);
+                    if argv_is_rpsbproc {
+                        exit_rpsbproc(crate::rpsbproc::Outcome::Refused(message.into_bytes()));
+                        return Ok(());
+                    }
+                    return Err(anyhow::Error::msg(message));
+                }
+            }
         }
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
@@ -200,7 +218,6 @@ fn run_main_entry() -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,
     // `cli::ncbi_version_request`).
-    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);

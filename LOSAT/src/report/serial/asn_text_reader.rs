@@ -1966,7 +1966,12 @@ impl<S: AsnSource> Reader<S> {
 /// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
-fn real_of_parts(mut mantissa: f64, is_negative: bool, base: u32, exp: i32) -> Option<f64> {
+pub(crate) fn real_of_parts(
+    mut mantissa: f64,
+    is_negative: bool,
+    base: u32,
+    exp: i32,
+) -> Option<f64> {
     if base != 2 && base != 10 {
         return None;
     }

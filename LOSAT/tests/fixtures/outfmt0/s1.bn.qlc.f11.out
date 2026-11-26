@@ -1,0 +1,337 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "plain",
+      queries seq-loc-list {
+        int {
+          from 0,
+          to 299,
+          strand both,
+          id swissprot {
+            name "NAME_Q",
+            accession "P99981",
+            release "reviewed",
+            version 1
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "bnq"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">bnq query"
+                }
+              }
+            },
+            title "query"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 300,
+            seq-data ncbi2na 'ECCF687E97351109ACF8AE81BC9BFAC7B691B1976E293104
+FFDB35989303BF726FD4BFE1AC4FFFFFFFFFFFFE68E392477D216825B465076185728FCCF912FA
+AD119EAEC2233D66ED5E05DD'H
+          }
+        },
+        {
+          id {
+            local str "bnq2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">bnq2 second query"
+                }
+              }
+            },
+            title "second query"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 160,
+            seq-data ncbi2na 'DB35989303BF726FD4BFE1EC4DC1858D3AA69268E192477D
+216825B465076185528FCCF912FAAD11'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 126582
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 40,
+                  to 49,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                },
+                {
+                  from 40,
+                  to 49,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                },
+                {
+                  from 51,
+                  to 89,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                },
+                {
+                  from 51,
+                  to 89,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                },
+                {
+                  from 150,
+                  to 167,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                },
+                {
+                  from 150,
+                  to 167,
+                  id swissprot {
+                    name "NAME_Q",
+                    accession "P99981",
+                    release "reviewed",
+                    version 1
+                  }
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 554
+          },
+          {
+            id str "blast_score",
+            value int 554
+          },
+          {
+            id str "e_value",
+            value real { 219124758761573, 10, -160 }
+          },
+          {
+            id str "bit_score",
+            value real { 50081946209296, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 289
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            swissprot {
+              name "NAME_Q",
+              accession "P99981",
+              release "reviewed",
+              version 1
+            },
+            local str "bnq"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            300
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 190
+          },
+          {
+            id str "blast_score",
+            value int 190
+          },
+          {
+            id str "e_value",
+            value real { 138894831092834, 10, -61 }
+          },
+          {
+            id str "bit_score",
+            value real { 172606340290721, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 133
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 538333333333333, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            swissprot {
+              name "NAME_Q",
+              accession "P99981",
+              release "reviewed",
+              version 1
+            },
+            local str "bnq2"
+          },
+          starts {
+            100,
+            0
+          },
+          lens {
+            160
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 40,
+              to 49,
+              id swissprot {
+                name "NAME_Q",
+                accession "P99981",
+                release "reviewed",
+                version 1
+              }
+            },
+            {
+              from 51,
+              to 89,
+              id swissprot {
+                name "NAME_Q",
+                accession "P99981",
+                release "reviewed",
+                version 1
+              }
+            },
+            {
+              from 150,
+              to 167,
+              id swissprot {
+                name "NAME_Q",
+                accession "P99981",
+                release "reviewed",
+                version 1
+              }
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 633731443099174, 10, -15 },
+        k { 408145662544724, 10, -15 },
+        h { 91243839227971, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 625, 10, -3 },
+        k { 41, 10, -2 },
+        h { 78, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 126582",
+      "Effective search space used: 126582",
+      "Length adjustment: 11"
+    }
+  }
+}

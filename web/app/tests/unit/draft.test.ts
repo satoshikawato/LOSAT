@@ -52,7 +52,7 @@ function setup(
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
-      return (await options.validate?.(argv, registry)) ?? { ok: true, dataLoaders: true };
+      return (await options.validate?.(argv, registry)) ?? { ok: true, dataLoaders: true, parseDeflines: false };
     },
     prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
@@ -508,7 +508,7 @@ describe('SearchDraft inputs', () => {
   it("reads and checks the sources with the data loaders of the argv's registry, as the CLI reads them", async () => {
     const { draft, data } = setup({
       start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
-      validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+      validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined), parseDeflines: false }),
     });
     const readers: string[] = [];
     const indexSource = data.indexSource.bind(data);
@@ -556,7 +556,7 @@ describe('SearchDraft inputs', () => {
       start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (argv, registry) => {
         const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
-        return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
+        return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders, parseDeflines: false } : { ok: true, dataLoaders, parseDeflines: false };
       },
     });
     const readers: string[] = [];
@@ -589,7 +589,7 @@ describe('SearchDraft inputs', () => {
     it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
       const { draft, data } = setup({
         start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
-        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined), parseDeflines: false }),
       });
       const readers: string[] = [];
       let release!: () => void;
@@ -639,7 +639,7 @@ describe('SearchDraft inputs', () => {
     it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
       const { draft, data } = setup({
         start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
-        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
+        validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined), parseDeflines: false }),
       });
       draft.setExtra('-conffile nol.ini');
       draft.setConffile(file('nol.ini', '[BLAST]\nDATA_LOADERS=none\n'));
@@ -663,6 +663,165 @@ describe('SearchDraft inputs', () => {
       await draft.idle();
       expect(readers).toEqual(['blastn|false', 'blastn|true']);
       expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: seqId('blastn') });
+    });
+
+    it('-parse_deflines clears cached tables and rescans every ready source, and restarts an in-flight scan', async () => {
+      const { draft, data } = setup({
+        validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
+      });
+      const scans: string[] = [];
+      const indexSource = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        scans.push(`${reader.program}|${reader.role}|${reader.parseDeflines}`);
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('query', '>q1\nACGT\n');
+      draft.setPaste('subject', '>sp|P99995.1|NAME_W\nACGT\n');
+      await draft.idle();
+      expect(draft.state.get().parseDeflines).toBe(false);
+      expect(scans).toEqual(['blastn|query|false', 'blastn|subject|false']);
+      // Turning -parse_deflines on must bypass cached tables even though the parser kind stays the same.
+      draft.setExtra('-parse_deflines');
+      await draft.idle();
+      expect(draft.state.get().parseDeflines).toBe(true);
+      expect(scans).toEqual(['blastn|query|false', 'blastn|subject|false', 'blastn|query|true', 'blastn|subject|true']);
+      // Turning it off rescans back to parseDeflines=false rather than reusing stale cached tables.
+      draft.setExtra('');
+      await draft.idle();
+      expect(draft.state.get().parseDeflines).toBe(false);
+      expect(scans).toEqual([
+        'blastn|query|false',
+        'blastn|subject|false',
+        'blastn|query|true',
+        'blastn|subject|true',
+        'blastn|query|false',
+        'blastn|subject|false',
+      ]);
+      // In-flight scan started with parseDeflines=false must re-run when -parse_deflines turns on mid-scan.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const inflight: string[] = [];
+      data.indexSource = async (sourceId, reader) => {
+        inflight.push(`${reader.role}|${reader.parseDeflines}`);
+        if (reader.role === 'subject' && !reader.parseDeflines) await gate;
+        return indexSource(sourceId, reader);
+      };
+      draft.setPaste('subject', '>sp|P99995.1|NAME_W\nACGTACGT\n');
+      await until(() => inflight.length === 1);
+      draft.setExtra('-parse_deflines');
+      await until(() => draft.state.get().parseDeflines === true);
+      release();
+      await draft.idle();
+      expect(inflight).toEqual(['subject|false', 'query|true', 'subject|true']);
+    });
+
+    it('keeps parseDeflines and triggers no rescan when a mid-edit argv fails to parse (Finding 3)', async () => {
+      const { draft, data } = setup({
+        validate: (argv) => {
+          if (argv.includes('-evalue') && argv[argv.indexOf('-evalue') + 1] === undefined) {
+            return { ok: false, message: 'Argument "-evalue". Value is missing', dataLoaders: true };
+          }
+          return { ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') };
+        },
+      });
+      const scans: string[] = [];
+      const origIndex = data.indexSource.bind(data);
+      data.indexSource = async (id, reader) => {
+        scans.push(`${reader.role}|${reader.parseDeflines}`);
+        return origIndex(id, reader);
+      };
+      draft.setPaste('query', '>q1\nACGT\n>q2\nACGT\n>q3\nACGT\n');
+      draft.setExtra('-parse_deflines');
+      await draft.idle();
+      draft.setIncluded('query', sourceOf(draft, 'query').key, [0, 2], false);
+      expect([draft.state.get().parseDeflines, sourceOf(draft, 'query').excluded]).toEqual([true, [0, 2]]);
+      const scansBefore = scans.length;
+      // Typing an incomplete option makes validation omit parseDeflines: no rescan, exclusions stay.
+      draft.setExtra('-parse_deflines -evalue');
+      await draft.idle();
+      expect([draft.state.get().validation.state, draft.state.get().parseDeflines, scans.length, sourceOf(draft, 'query').excluded]).toEqual([
+        'invalid',
+        true,
+        scansBefore,
+        [0, 2],
+      ]);
+    });
+
+    it('keeps exclusions in excludedKeys across -parse_deflines changes (Finding 4)', async () => {
+      const { draft, data } = setup({
+        validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
+      });
+      const baseIndex = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        const rev = await baseIndex(sourceId, reader);
+        if (reader.role === 'subject' && reader.parseDeflines) {
+          // Simulate a subject where record 0 (`>sp|P99995.1|X`) changes length under -parse_deflines
+          // and record 3 disappears past a reader stop, while records 1 and 2 keep their offsets/lengths.
+          return {
+            ...rev,
+            records: rev.records.slice(0, 3).map((rec, i) => (i === 0 ? { ...rec, length: rec.length + 10 } : rec)),
+          };
+        }
+        return rev;
+      };
+      // Source without other-molecule records: 2 exclusions survive adding and removing -parse_deflines.
+      draft.setPaste('query', '>q1\nACGT\n>q2\nCCCC\n>q3\nGGGG\n');
+      // Source with an other-molecule record whose length changes and a trailing record that disappears
+      // under -parse_deflines (s3 leaves the table and comes back excluded, per line WQA D16).
+      draft.setPaste('subject', '>sp|P99995.1|X\nACGT\n>s1\nCCCC\n>s2\nGGGG\n>s3\nTTTT\n');
+      await draft.idle();
+      draft.setIncluded('query', sourceOf(draft, 'query').key, [0, 1], false);
+      draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1, 3], false);
+      expect([sourceOf(draft, 'query').excluded, sourceOf(draft, 'subject').excluded]).toEqual([
+        [0, 1],
+        [1, 3],
+      ]);
+
+      for (const [extra, wantPd, wantSubj] of [
+        ['-parse_deflines', true, [1]],
+        ['', false, [1, 3]],
+      ] as const) {
+        draft.setExtra(extra);
+        await draft.idle();
+        expect([draft.state.get().parseDeflines, sourceOf(draft, 'query').excluded, sourceOf(draft, 'subject').excluded]).toEqual([
+          wantPd,
+          [0, 1],
+          wantSubj,
+        ]);
+      }
+    });
+
+    it('keeps the key of a record absent from the current table across a -parse_deflines change (D16 + X7-5)', async () => {
+      const { draft } = setup({
+        validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
+      });
+      const ids = () => sourceOf(draft, 'query').base!.records.map((r) => r.id);
+      const excluded = () => sourceOf(draft, 'query').excluded;
+      draft.setPaste('query', '>r0\nACGT\n>r1\nEFFILP\n@@@@@@\n>r2\nACGT\n');
+      await draft.idle();
+      draft.setProgram('blastp');
+      await draft.idle();
+      expect(ids()).toEqual(['r0', 'r1', 'r2']);
+      draft.setIncluded('query', 'paste', [2], false);
+      await draft.idle();
+      draft.setProgram('blastn');
+      await draft.idle();
+      expect(ids()).toEqual(['r0']);
+      draft.setIncluded('query', 'paste', [0], false);
+      await draft.idle();
+      expect(excluded()).toEqual([0]);
+      // Control without the toggle: back to blastp keeps r0 and r2.
+      draft.setProgram('blastp');
+      await draft.idle();
+      const control = [...excluded()];
+      draft.setProgram('blastn');
+      await draft.idle();
+      draft.setExtra('-parse_deflines');
+      await draft.idle();
+      expect([draft.state.get().parseDeflines, excluded()]).toEqual([true, [0]]);
+      draft.setProgram('blastp');
+      await draft.idle();
+      expect({ control, afterToggle: excluded() }).toEqual({ control: [0, 2], afterToggle: [0, 2] });
     });
   });
 
@@ -1773,7 +1932,7 @@ describe('SearchDraft submit', () => {
 
   it("validates the draft's argv with the engine and shows its message", async () => {
     const { draft, validated } = setup({
-      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'LOSAT query/options error: bad' } : { ok: true, dataLoaders: true }),
+      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'LOSAT query/options error: bad' } : { ok: true, dataLoaders: true, parseDeflines: false }),
     });
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
@@ -1790,7 +1949,7 @@ describe('SearchDraft submit', () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
       start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
-      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true }),
+      validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true, parseDeflines: false }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
@@ -1891,7 +2050,7 @@ describe('SearchDraft submit', () => {
         most = Math.max(most, running);
         await new Promise<void>((resolve) => gates.push(resolve));
         running--;
-        return { ok: true, dataLoaders: true };
+        return { ok: true, dataLoaders: true, parseDeflines: false };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1921,7 +2080,7 @@ describe('SearchDraft submit', () => {
     const { draft } = setup({
       start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
       validate: (_argv, registry) => {
-        if (registry === undefined) return { ok: true, dataLoaders: true };
+        if (registry === undefined) return { ok: true, dataLoaders: true, parseDeflines: false };
         // As the Data worker's error arrives: its name and message (rpc.ts).
         const error = new Error('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.');
         error.name = 'FileReadError';

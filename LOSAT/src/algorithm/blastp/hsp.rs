@@ -72,6 +72,53 @@ impl PhiOccurrenceIndex {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// `BlastpHsp` stores 1-based inclusive starts and ends (`q_start - 1`, `q_end` are NCBI's 0-based
+// half-open `offset` and `end`), and keeps `length` equal to the merged query span.
+impl crate::core::blast_hits::ChunkMergeHsp for BlastpHsp {
+    fn merge_context(&self) -> i32 {
+        self.query_context
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.subject_frame
+    }
+    fn merge_q_start(&self) -> i32 {
+        (self.q_start - 1) as i32
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end as i32
+    }
+    fn merge_s_start(&self) -> i32 {
+        (self.s_start - 1) as i32
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end as i32
+    }
+    fn merge_score(&self) -> i32 {
+        self.raw_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.gapped_q_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.gapped_s_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = (q_start + 1) as usize;
+        self.q_end = q_end as usize;
+        self.s_start = (s_start + 1) as usize;
+        self.s_end = s_end as usize;
+        self.length = (q_end - q_start) as usize;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.gapped_q_start = q_gapped_start;
+        self.gapped_s_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.raw_score = score;
+    }
+}
+
 impl BlastpHsp {
     /// Attaches the HSP's PHI-BLAST pattern occurrence index (`pat_info->index`) between
     /// `phi_traceback` and `PhiCall::split_occurrences`.

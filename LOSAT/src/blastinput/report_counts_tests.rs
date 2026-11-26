@@ -199,3 +199,26 @@ fn a_hit_list_above_500_in_the_options_is_kept_by_the_pairwise_formats() {
         }
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908: the hit list
+// size that the options held before the handler (an archive's in blast_formatter) is the start
+// of the counts at or below 500.
+#[test]
+fn the_hit_list_size_of_the_options_is_the_start() {
+    let from = |start, outfmt, mts, nd, na| {
+        let c = report_counts_from(start, outfmt, mts, nd, na);
+        (c.hitlist_size, c.num_descriptions, c.num_alignments)
+    };
+    assert_eq!(from(100, 0, None, None, None), (100, 500, 250));
+    assert_eq!(from(100, 6, None, None, None), (100, 100, 100));
+    assert_eq!(from(3, 6, None, None, None), (3, 3, 3));
+    assert_eq!(from(100, 0, Some(7), None, None), (7, 7, 7));
+    assert_eq!(from(100, 6, None, None, Some(2)), (2, 2, 2));
+    assert_eq!(from(100, 0, None, Some(3), None), (250, 3, 250));
+    // blast_formatter's posts have no prefix.
+    let c = report_counts_from(3, 6, None, None, None);
+    assert_eq!(
+        String::from_utf8(c.posted_warnings(None, 6, false, &FormattingArgs::default())).unwrap(),
+        "Warning: Examining 5 or more matches is recommended\n"
+    );
+}

@@ -143,5 +143,6 @@ fn _pylosat(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(search::windowmasker, module)?)?;
     module.add_function(wrap_pyfunction!(search::convert2blastmask, module)?)?;
     module.add_function(wrap_pyfunction!(search::makembindex, module)?)?;
+    module.add_function(wrap_pyfunction!(search::blast_formatter, module)?)?;
     Ok(())
 }

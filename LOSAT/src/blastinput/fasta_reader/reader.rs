@@ -1043,7 +1043,6 @@ impl<R: Read> FastaReader<R> {
 /// Outcome of scanning one FASTA data line (`scan_data_line`).
 pub(crate) struct DataLineOutcome {
     pub hyphen_seen: bool,
-    pub residues_added: usize,
 }
 
 /// The alphabet molecule `CFastaReader::ParseDataLine` checks a line against: the Seq-id's
@@ -1073,9 +1072,6 @@ impl DataLineAlphabet {
 /// `seq_data`, recording 0-based invalid positions in `bad_positions`, and calling
 /// `on_run(masked, start, count)` for each contiguous masked or unmasked residue run.
 ///
-/// Both `FastaReader::parse_data_line` and BLASTX's `blastx::input::parse_fasta_lines` scan data
-/// lines through this function so one owner decides which letters a record keeps.
-///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-1016
 #[inline]
 pub(crate) fn scan_data_line(
@@ -1096,7 +1092,6 @@ pub(crate) fn scan_data_line(
             &NUCLEOTIDE_MASKED,
         )
     };
-    let before = seq_data.len();
     let mut hyphen_seen = false;
     bad_positions.clear();
     let mut pos = 0;
@@ -1142,10 +1137,7 @@ pub(crate) fn scan_data_line(
         }
         pos += 1;
     }
-    DataLineOutcome {
-        hyphen_seen,
-        residues_added: seq_data.len() - before,
-    }
+    DataLineOutcome { hyphen_seen }
 }
 
 /// How `CSeqportUtil::Pack` maps upper-case residues read under a protein Seq-id into a

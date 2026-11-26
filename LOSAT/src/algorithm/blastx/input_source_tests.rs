@@ -595,7 +595,9 @@ fn blastx_other_molecule_accession_follows_ncbis_reading() {
         let mut records = Vec::new();
         while !source.end() {
             match source.next_sequence_upper(true, &mut |warning| {
-                crate::algorithm::blastx::native::reader_warning(warning, &mut warnings)
+                warnings.extend_from_slice(warning);
+                warnings.push(b'\n');
+                Ok(())
             }) {
                 Ok((record, masks)) => records.push(from_upper(record, masks)),
                 Err(ReadError::Parse {

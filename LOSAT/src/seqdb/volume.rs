@@ -302,6 +302,32 @@ impl Volume {
         self.index.sequence_range(oid)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1799
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// Relative index of the first protein in `first..end` whose NCBI `x_GetSequence` length is
+    /// negative (`start == 0` or signed 32-bit `end - 1 - start < 0`), or `None`.
+    pub(super) fn x_first_negative_protein_in(
+        &self,
+        first: u32,
+        end: u32,
+    ) -> Result<Option<u32>, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein lengths of a nucleotide volume"
+        );
+        self.check_range(first, end)?;
+        let offsets = self.index.sequence_offsets(first, end)?;
+        for (i, pair) in offsets.windows(2).enumerate() {
+            let len_i32 = (pair[1] as i32)
+                .wrapping_sub(1)
+                .wrapping_sub(pair[0] as i32);
+            if pair[0] == 0 || len_i32 < 0 {
+                return Ok(Some(i as u32));
+            }
+        }
+        Ok(None)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
     /// The signed 32-bit length of protein `oid` (volume-relative) as NCBI's `GetSeqLengthProt`
     /// returns it: `end_offset - 1 - start_offset` in 32-bit signed arithmetic (negative for
@@ -572,7 +598,36 @@ impl Volume {
         first_ordinal: u32,
         first_oid: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_protein_search_block_in(first, end, first_ordinal, first_oid, BlockBuffer::New)
+        self.read_protein_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::New,
+            false,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// [`Self::read_protein_search_block`] with `stop_at_negative` for multithreaded DB-split
+    /// scans where NCBI's `x_FillSeqBuffer` stops at the first OID whose `GetSequence` length is
+    /// negative.
+    pub(super) fn read_protein_search_block_mt(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_protein_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::New,
+            stop_at_negative,
+        )
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer of
@@ -624,6 +679,26 @@ impl Volume {
             first_ordinal,
             first_oid,
             BlockBuffer::Given(kept),
+            false,
+        )
+    }
+
+    pub(super) fn x_read_protein_search_block_into_mt(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        kept: &mut Vec<u8>,
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_protein_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::Given(kept),
+            stop_at_negative,
         )
     }
 
@@ -634,6 +709,7 @@ impl Volume {
         first_ordinal: u32,
         first_oid: u32,
         buffer: BlockBuffer<'_>,
+        stop_at_negative: bool,
     ) -> std::result::Result<SequenceBlock, SeqDbError> {
         assert!(
             self.index.seqtype == SeqType::Protein,
@@ -660,22 +736,26 @@ impl Volume {
         }
         // Cold path: at least one sequence has NCBI 32-bit length < 0 (>= 2^31 residues or
         // non-monotonic offsets) or start == 0. Validate and read each sequence as NCBI's
-        // `x_GetSequence` / `s_SeqDbGetSequence` does: non-positive lengths are skipped.
+        // `x_GetSequence` / `s_SeqDbGetSequence` does: non-positive lengths are skipped in
+        // single-thread mode, and negative lengths end iteration in multithreaded DB-split mode
+        // (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
         let file = self.seq_file()?;
         let count = seq_offsets.len() - 1;
         let mut data = vec![0u8];
         let mut packed_offsets = Vec::with_capacity(seq_offsets.len());
         packed_offsets.push(1u32);
         let mut prev_skipped = false;
+        let mut stopped_at_negative = false;
         for i in 0..count {
             let start = seq_offsets[i];
             let next = seq_offsets[i + 1];
             let len_i32 = (next as i32).wrapping_sub(1).wrapping_sub(start as i32);
-            if len_i32 <= 0 {
+            let is_negative = start == 0 || len_i32 < 0;
+            if is_negative || len_i32 == 0 {
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1804
                 // When start is 0, GetFileDataPtr returns null and x_GetSequence returns -1, which
                 // s_SeqDbGetSequence skips (e.g. a truncated .pin zero-filled in its last 4 KiB
-                // page).
+                // page) and x_FillSeqBuffer stops on.
                 if start >= 1 {
                     let check_end = if next > start {
                         u64::from(next)
@@ -684,14 +764,16 @@ impl Volume {
                     };
                     file.x_check_range(u64::from(start) - 1, check_end)?;
                 }
+                if stop_at_negative && is_negative {
+                    stopped_at_negative = true;
+                    break;
+                }
                 data.push(0);
                 packed_offsets.push(data.len() as u32);
                 prev_skipped = true;
             } else {
-                let Some(lead_start) = u64::from(start).checked_sub(1) else {
-                    return Err(self.index.sequence_changed(first, seq_offsets.len()));
-                };
-                let raw = file.read_range(lead_start, u64::from(start) + len_i32 as u64 + 1)?;
+                let raw =
+                    file.read_range(u64::from(start) - 1, u64::from(start) + len_i32 as u64 + 1)?;
                 if i == 0 || prev_skipped {
                     let last = data.len() - 1;
                     data[last] = raw[0];
@@ -710,6 +792,191 @@ impl Volume {
             data_start: 0,
             seq_offsets: packed_offsets,
             amb_offsets: Vec::new(),
+            stopped_at_negative,
+            amb_error: None,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Reads the nucleotide sequences `first..end` (volume-relative, non-empty) for a search or
+    /// retrieval: normal ascending blocks take the contiguous fast path; irregular ambiguity
+    /// offsets (`amb <= start` with `amb >= 1`, or `amb > next`) follow NCBI's `x_GetSequence`
+    /// and defer `x_GetAmbChar`'s `File error: could not get ambiguity data.` until ambiguity
+    /// data are requested. Offsets that read before the mapping (`amb == 0`) are refused.
+    pub(super) fn read_nucleotide_search_block_mt(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_nucleotide_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::New,
+            stop_at_negative,
+        )
+    }
+
+    pub(super) fn x_read_nucleotide_search_block_into_mt(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        kept: &mut Vec<u8>,
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_nucleotide_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::Given(kept),
+            stop_at_negative,
+        )
+    }
+
+    pub(super) fn x_read_nucleotide_search_block_mapped(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_nucleotide_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::Mapped,
+            false,
+        )
+    }
+
+    fn read_nucleotide_search_block_in(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        buffer: BlockBuffer<'_>,
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Nucleotide,
+            "nucleotide search block of a protein volume"
+        );
+        self.check_range(first, end)?;
+        let seq_offsets = self.index.sequence_offsets(first, end)?;
+        let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        let all_regular = seq_offsets.windows(2).all(|pair| pair[0] <= pair[1])
+            && amb_offsets
+                .iter()
+                .enumerate()
+                .all(|(i, &amb)| seq_offsets[i] < amb && amb <= seq_offsets[i + 1]);
+        if all_regular {
+            return self.read_block_with_offsets(
+                first,
+                first_ordinal,
+                first_oid,
+                seq_offsets,
+                amb_offsets,
+                buffer,
+            );
+        }
+        self.read_nucleotide_irregular_block(
+            first_ordinal,
+            first_oid,
+            &seq_offsets,
+            &amb_offsets,
+            stop_at_negative,
+        )
+    }
+
+    fn read_nucleotide_irregular_block(
+        &self,
+        first_ordinal: u32,
+        first_oid: u32,
+        seq_offsets: &[u32],
+        amb_offsets: &[u32],
+        stop_at_negative: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let file = self.seq_file()?;
+        if file.is_empty() {
+            return Err(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
+                    .to_string(),
+            });
+        }
+        let count = seq_offsets.len() - 1;
+        let mut data = Vec::new();
+        let mut packed_seq = Vec::with_capacity(seq_offsets.len());
+        let mut packed_amb = Vec::with_capacity(count);
+        let mut amb_invalid = Vec::with_capacity(count);
+        let mut any_amb_invalid = false;
+        let mut stopped_at_negative = false;
+        packed_seq.push(0u32);
+        for i in 0..count {
+            let (start, amb, next) = (seq_offsets[i], amb_offsets[i], seq_offsets[i + 1]);
+            let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
+            let last_pos = i64::from(start) + i64::from(whole_bytes);
+            if last_pos < 0 {
+                return Err(SeqDbError::NcbiCrashes {
+                    path: file.path().to_path_buf(),
+                    message: format!(
+                        "sequence {}: ambiguity offset {amb} causes NCBI to read before the start \
+                         of the sequence file mapping",
+                        u64::from(first_oid) + i as u64
+                    ),
+                });
+            }
+            file.x_check_range(u64::from(start), u64::from(start) + 1)?;
+            file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
+            if whole_bytes < 0 {
+                if stop_at_negative {
+                    stopped_at_negative = true;
+                    break;
+                }
+                data.push(0);
+                let end_off = data.len() as u32;
+                packed_amb.push(end_off);
+                packed_seq.push(end_off);
+                amb_invalid.push(false);
+            } else {
+                let packed_end = u64::from(start) + whole_bytes as u64 + 1;
+                let packed = file.read_range(u64::from(start), packed_end)?;
+                data.extend_from_slice(&packed);
+                packed_amb.push(data.len() as u32);
+                if amb <= next {
+                    if amb < next {
+                        let amb_bytes = file.read_range(u64::from(amb), u64::from(next))?;
+                        data.extend_from_slice(&amb_bytes);
+                    }
+                    amb_invalid.push(false);
+                } else {
+                    any_amb_invalid = true;
+                    amb_invalid.push(true);
+                }
+                packed_seq.push(data.len() as u32);
+            }
+        }
+        Ok(SequenceBlock {
+            seqtype: SeqType::Nucleotide,
+            first_ordinal,
+            first_oid,
+            path: file.path().to_path_buf(),
+            data,
+            data_start: 0,
+            seq_offsets: packed_seq,
+            amb_offsets: packed_amb,
+            stopped_at_negative,
+            amb_error: any_amb_invalid.then(|| amb_invalid.into_boxed_slice()),
         })
     }
 
@@ -780,6 +1047,8 @@ impl Volume {
             data_start,
             seq_offsets,
             amb_offsets,
+            stopped_at_negative: false,
+            amb_error: None,
         };
         Ok(block)
     }
@@ -827,6 +1096,8 @@ impl Volume {
             // empty, and nothing but `ambiguity_runs` reads it.
             seq_offsets: vec![amb_start, next],
             amb_offsets: vec![amb_start],
+            stopped_at_negative: false,
+            amb_error: None,
         };
         if length > i32::MAX as u64 {
             return Err(ambiguity.format(0, "the sequence is longer than a signed 32-bit length"));
@@ -1441,22 +1712,6 @@ impl Volume {
         })
     }
 
-    /// The offsets in the sequence file of nucleotide `oid` (volume-relative): `(start of its
-    /// packed bases, start of its ambiguity data, start of the next sequence)`.
-    fn part_offsets(&self, oid: u32, named: u32) -> Result<(u32, u32, u32), SeqDbError> {
-        self.check_range(oid, oid.saturating_add(1))?;
-        let seq = self.index.sequence_offsets(oid, oid + 1)?;
-        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
-        let (start, amb_start, next) = (seq[0], amb[0], seq[1]);
-        if !(start < amb_start && amb_start <= next) {
-            return Err(SeqDbError::Format {
-                path: self.seq_file()?.path().to_path_buf(),
-                message: format!("sequence {named}: the ambiguity offset lies outside its data"),
-            });
-        }
-        Ok((start, amb_start, next))
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323
     /// The lengths that the index alone gives for the nucleotides `first..end` (volume-relative),
     /// one read of each offset array for the range: `GetSeqLengthExact`'s whole bytes times four
@@ -1490,6 +1745,58 @@ impl Volume {
                     .then(|| (packed_length(start, amb_start, 0) as usize, high as usize))
             })
             .collect())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    /// Signed 32-bit exact length of nucleotide `oid` (volume-relative; `named` its OID in the
+    /// database) as NCBI's `GetSeqLengthExact` and `x_GetSequence` compute it:
+    /// `whole_bytes * 4 + (file[start + whole_bytes] & 3)` where `whole_bytes = int(amb - start - 1)`.
+    /// Refuses offsets whose `start + whole_bytes < 0` (e.g. `amb == 0`), where NCBI reads before
+    /// the sequence file mapping and crashes.
+    pub fn nucleotide_length_i32(&self, oid: u32, named: u32) -> Result<i32, SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
+        let (start, amb_start) = (seq[0], amb[0]);
+        let file = self.seq_file()?;
+        if file.is_empty() {
+            return Err(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
+                    .to_string(),
+            });
+        }
+        let whole_bytes = (amb_start as i32)
+            .wrapping_sub(start as i32)
+            .wrapping_sub(1);
+        let last_pos = i64::from(start) + i64::from(whole_bytes);
+        if last_pos < 0 {
+            return Err(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message: format!(
+                    "sequence {named}: ambiguity offset {amb_start} causes NCBI to read before \
+                     the start of the sequence file mapping"
+                ),
+            });
+        }
+        file.x_check_range(u64::from(start), u64::from(start) + 1)?;
+        let last = file.with_range(last_pos as u64, last_pos as u64 + 1, |b| b[0])?;
+        if whole_bytes >= 0 {
+            let length = (whole_bytes as u64) * 4 + u64::from(last & 3);
+            if length > i32::MAX as u64 {
+                return Err(SeqDbError::Format {
+                    path: file.path().to_path_buf(),
+                    message: format!(
+                        "sequence {named}: the sequence is longer than a signed 32-bit length"
+                    ),
+                });
+            }
+            return Ok(length as i32);
+        }
+        Ok(whole_bytes
+            .wrapping_mul(4)
+            .wrapping_add(i32::from(last & 3)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (quoted
@@ -1543,6 +1850,8 @@ impl Volume {
         self.nucleotide_iupac_range_with(oid, named, 0, ambiguity.length, &ambiguity)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1647,2350-2386
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:652-662
     /// The length of nucleotide `oid` (volume-relative; `named` its OID in the database) and
     /// its decoded ambiguity runs, read once for any number of
     /// [`Volume::nucleotide_iupac_range_with`] calls on the same sequence.
@@ -1551,11 +1860,26 @@ impl Volume {
         oid: u32,
         named: u32,
     ) -> Result<NucleotideAmbiguity, SeqDbError> {
-        let length = self.nucleotide_length(oid, named)?;
-        let (packed_start, amb_start, next) = self.part_offsets(oid, named)?;
+        let length_i32 = self.nucleotide_length_i32(oid, named)?;
+        let file = self.seq_file()?;
+        if length_i32 < 1 {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: "Error: could not get sequence or range.".to_string(),
+            });
+        }
+        let length = length_i32 as usize;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
+        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
+        let (packed_start, amb_start, next) = (seq[0], amb[0], seq[1]);
+        if amb_start > next {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: super::AMBIGUITY_DATA_ERROR.to_string(),
+            });
+        }
         let mut runs = Vec::new();
         if u64::from(amb_start) < u64::from(next) {
-            let file = self.seq_file()?;
             let words: Vec<u32> =
                 file.with_range(u64::from(amb_start), u64::from(next), |data| {
                     data.chunks_exact(4)
@@ -1889,6 +2213,13 @@ pub struct SequenceBlock {
     seq_offsets: Vec<u32>,
     /// Ambiguity start offsets of the block's sequences (nucleotide).
     amb_offsets: Vec<u32>,
+    /// Whether a multithreaded DB-split scan stopped early at a negative-length sequence
+    /// (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
+    stopped_at_negative: bool,
+    /// Per-sequence flag for nucleotide sequences with `amb > next` whose ambiguity read throws
+    /// NCBI's `File error: could not get ambiguity data.` (`seqdbvol.cpp:2358-2363`); `None` on
+    /// every normal block.
+    amb_error: Option<Box<[bool]>>,
 }
 
 /// A run of one ambiguity code in a nucleotide sequence.
@@ -2330,6 +2661,30 @@ impl SequenceBlock {
         self.seq_offsets.len() - 1
     }
 
+    /// Whether a multithreaded DB-split scan stopped at a negative-length sequence before the
+    /// end of the requested range (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
+    pub fn stopped_at_negative(&self) -> bool {
+        self.stopped_at_negative
+    }
+
+    /// Checks whether nucleotide `i` had `amb > next` (`GetAmbStartEnd` false) and returns NCBI's
+    /// `File error: could not get ambiguity data.` (`seqdbvol.cpp:2358-2363`).
+    fn check_amb_valid(&self, i: usize) -> Result<(), SeqDbError> {
+        if self
+            .amb_error
+            .as_deref()
+            .and_then(|flags| flags.get(i))
+            .copied()
+            .unwrap_or(false)
+        {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: super::AMBIGUITY_DATA_ERROR.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn slice(&self, start: u64, end: u64) -> &[u8] {
         let lo = (start - self.data_start) as usize;
         let hi = (end - self.data_start) as usize;
@@ -2456,6 +2811,7 @@ impl SequenceBlock {
     // ambiguity data, where NCBI reads past its vector, is a format error.
     /// The ambiguity runs of nucleotide `i`, in stored order.
     pub fn ambiguity_runs(&self, i: usize) -> Result<Vec<AmbiguityRun>, SeqDbError> {
+        self.check_amb_valid(i)?;
         decode_ambiguity_runs(&self.ambiguity_words(i)).map_err(|message| self.format(i, message))
     }
 
@@ -2505,6 +2861,7 @@ impl SequenceBlock {
     /// (`s_SeqDBRebuildDNA_NA4`, the runs as [`Self::nucleotide_iupac`] places them).
     pub fn nucleotide_seq_data(&self, i: usize) -> Result<(bool, Vec<u8>), SeqDbError> {
         let (packed, length) = self.nucleotide_packed_len(i)?;
+        self.check_amb_valid(i)?;
         let whole = length / 4;
         let remainder = length % 4;
         if self.ambiguity_bytes(i).len() < 4 {

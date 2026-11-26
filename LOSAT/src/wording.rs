@@ -868,7 +868,13 @@ fn tag(text: &[u8]) -> Option<usize> {
         .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'~'))
         .count();
     if function > 0 {
-        if let Some(end) = literal(&text[i + function..], b"() - ") {
+        let sep = literal(&text[i + function..], b"() - ").or_else(|| {
+            text[i..i + function]
+                .ends_with(b"::")
+                .then(|| literal(&text[i + function..], b" - "))
+                .flatten()
+        });
+        if let Some(end) = sep {
             i += function + end;
         }
     }

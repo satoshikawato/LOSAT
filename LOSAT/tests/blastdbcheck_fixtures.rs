@@ -843,10 +843,10 @@ fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>,
     )
 }
 
-/// PR #1660 R2 cross-program parity for non-ascending index offsets (`d_p4_nonasc_seq`,
-/// `d_p4_nonasc_hdr`, `n4_amb_eq_start`, `n4_amb_gt_next`) across `blastdbcmd`, `blastp`
-/// (`-num_threads 1` and `4` in `[profile.test]` with overflow checks), `blastn`, and
-/// `blastdbcheck` against frozen NCBI BLAST+ 2.17.0 outputs in `nonasc_xprog/`.
+/// Cross-program parity for non-ascending index offsets (`d_p4_nonasc_seq`, `d_p4_nonasc_hdr`,
+/// `n4_amb_eq_start`, `n4_amb_gt_next`, `n4_amb0_eq_0`) across `blastdbcmd`, `blastp`, `blastx`,
+/// `psiblast`, `blastn`, and `blastdbcheck` (under `[profile.test]` with overflow checks enabled)
+/// against frozen NCBI BLAST+ 2.17.0 outputs in `nonasc_xprog/`.
 #[test]
 fn nonasc_cross_program_parity() {
     let root = scratch("nonasc-xprog");
@@ -880,6 +880,14 @@ fn nonasc_cross_program_parity() {
 
     let q3 = root.join("q3.faa");
     fs::write(&q3, b">q3\nCSNFRHATLYNGCRFTMHYLCSNFRHATLYNGCRFTMHYL\n").unwrap();
+    let q3_dna = root.join("q3_dna.fna");
+    fs::write(
+        &q3_dna,
+        b">q3_dna\n\
+          TGCTCCAACTTCCGCCACGCAACGCTGTACAATGGCTGCCGCTTCACGATGCACTACCTG\
+          TGCTCCAACTTCCGCCACGCAACGCTGTACAATGGCTGCCGCTTCACGATGCACTACCTG\n",
+    )
+    .unwrap();
     let q2 = root.join("q2.faa");
     fs::write(&q2, b">q2\nRKFVIYQLDPFWRIVLEYPDRKFVIYQLDPFWRIVLEYPD\n").unwrap();
     let q4 = root.join("q4.faa");
@@ -890,14 +898,17 @@ fn nonasc_cross_program_parity() {
         b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
     )
     .unwrap();
-    let (q3s, q2s, q4s, qns) = (
+    let (q3s, q3ds, q2s, q4s, qns) = (
         q3.to_str().unwrap(),
+        q3_dna.to_str().unwrap(),
         q2.to_str().unwrap(),
         q4.to_str().unwrap(),
         qn.to_str().unwrap(),
     );
 
     // 1. d_p4_nonasc_seq (p4.pin@106 = 01f4 -> seq=[1, 62, 500, 179, ...]).
+    // At 2+ threads in DB-split mode, NCBI's CSeqDBImpl::x_FillSeqBuffer stops at OID 2 (len=-322);
+    // at 1 thread or `-mt_mode 1` (split by queries), NCBI scans all OIDs.
     let d_seq = root.join("d_p4_nonasc_seq");
     cp_db(&d_seq, "p4", true);
     poke(d_seq.join("p4.pin"), 106, "01f4");
@@ -922,29 +933,127 @@ fn nonasc_cross_program_parity() {
                 "1",
             ],
         ),
+        (
+            "nonasc_seq_blastp_t2",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "2",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_mt1_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_t1",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_mt1_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_t1",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_t4",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
     ] {
         let got = run_losat_sub(&root, &d_seq, sub, &args);
         let want = load_nonasc_expected(name);
         assert_eq!(got, want, "{name}");
     }
-    // Cross-thread invariance + debug-build overflow-check coverage: -num_threads 4 matches -num_threads 1
-    // (NCBI -num_threads 4 drops OIDs 3..8 due to CSeqDBImpl::x_FillSeqBuffer returning empty chunk on len<0).
-    let got_t4 = run_losat_sub(
-        &root,
-        &d_seq,
-        "blastp",
-        &[
-            "-query",
-            q3s,
-            "-db",
-            "p4",
-            "-outfmt",
-            "6",
-            "-num_threads",
-            "4",
-        ],
-    );
-    assert_eq!(got_t4, load_nonasc_expected("nonasc_seq_blastp_t1"));
 
     // 2. d_p4_nonasc_hdr (p4.pin@68 = 00000000 -> hdr=[0, 79, 167, 0, 334, ...]).
     let d_hdr = root.join("d_p4_nonasc_hdr");
@@ -1038,54 +1147,209 @@ fn nonasc_cross_program_parity() {
         assert_refused(&format!("nonasc_hdr_blastp_q3_t{t}"), got);
     }
 
-    // 3. Nucleotide ambiguity offset out of order: amb == start (OOB buffer[-1]) and amb > next
-    // (reads past OID into OID 2; SIGABRT in NCBI blastn -num_threads 4). Uniform Rule-3 refusal.
-    for (label, hex) in [
-        ("n4_amb_eq_start", "00000020"),
-        ("n4_amb_gt_next", "0000003b"),
+    // 3. n4_amb_eq_start (n4.nin@100 = 00000020 -> amb[1] = seq[1] = 32; length = -4 inside mapping).
+    // Deterministic across all programs; blastn -t 4 stops at OID 1 via x_FillSeqBuffer.
+    let d_ambeq = root.join("n4_amb_eq_start");
+    cp_db(&d_ambeq, "n4", true);
+    poke(d_ambeq.join("n4.nin"), 100, "00000020");
+    for (name, sub, args) in [
+        (
+            "n4_ambeq_dbcmd",
+            "blastdbcmd",
+            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
+        ),
+        (
+            "n4_ambeq_dbcmd_fmt",
+            "blastdbcmd",
+            vec![
+                "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_mt1_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambeq_check",
+            "blastdbcheck",
+            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
+        ),
+        (
+            "n4_ambeq_check_v3",
+            "blastdbcheck",
+            vec!["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"],
+        ),
     ] {
-        let d = root.join(label);
-        cp_db(&d, "n4", true);
-        poke(d.join("n4.nin"), 100, hex);
-        for (sub, args) in [
-            (
-                "blastdbcmd",
-                vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
-            ),
-            (
-                "blastn",
-                vec![
-                    "-query",
-                    qns,
-                    "-db",
-                    "n4",
-                    "-outfmt",
-                    "6",
-                    "-num_threads",
-                    "1",
-                ],
-            ),
-            (
-                "blastn",
-                vec![
-                    "-query",
-                    qns,
-                    "-db",
-                    "n4",
-                    "-outfmt",
-                    "6",
-                    "-num_threads",
-                    "4",
-                ],
-            ),
-            (
-                "blastdbcheck",
-                vec!["-db", "n4", "-dbtype", "nucl", "-full"],
-            ),
-        ] {
-            let got = run_losat_sub(&root, &d, sub, &args);
-            assert_refused(&format!("{label}_{sub}"), got);
-        }
+        let got = run_losat_sub(&root, &d_ambeq, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+
+    // 4. n4_amb_gt_next (n4.nin@100 = 0000003b -> amb[1] = 59 > next = 55; length = 107).
+    // Deterministic in blastdbcmd, blastn -t 1, and blastdbcheck; blastn at 2+ threads aborts in
+    // NCBI (SIGABRT) and is refused.
+    let d_ambgt = root.join("n4_amb_gt_next");
+    cp_db(&d_ambgt, "n4", true);
+    poke(d_ambgt.join("n4.nin"), 100, "0000003b");
+    for (name, sub, args) in [
+        (
+            "n4_ambgt_dbcmd",
+            "blastdbcmd",
+            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
+        ),
+        (
+            "n4_ambgt_dbcmd_fmt",
+            "blastdbcmd",
+            vec![
+                "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
+            ],
+        ),
+        (
+            "n4_ambgt_blastn_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambgt_check",
+            "blastdbcheck",
+            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
+        ),
+        (
+            "n4_ambgt_check_v3",
+            "blastdbcheck",
+            vec!["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_ambgt, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    for (label, args) in [
+        (
+            "n4_ambgt_blastn_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambgt_blastn_mt1_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_ambgt, "blastn", &args);
+        assert_refused(label, got);
+    }
+
+    // 5. n4_amb0_eq_0 (n4.nin@96 = 00000000 -> amb[0] = 0; NCBI reads file[-1] before its mapping
+    // and crashes with SIGSEGV). Refused across all programs.
+    let d_amb0 = root.join("n4_amb0_eq_0");
+    cp_db(&d_amb0, "n4", true);
+    poke(d_amb0.join("n4.nin"), 96, "00000000");
+    for (sub, args) in [
+        (
+            "blastdbcmd",
+            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
+        ),
+        (
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "blastdbcheck",
+            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_amb0, sub, &args);
+        assert_refused(&format!("n4_amb0_eq_0_{sub}"), got);
     }
 
     let _ = fs::remove_dir_all(&root);

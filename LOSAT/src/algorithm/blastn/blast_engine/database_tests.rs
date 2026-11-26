@@ -1230,6 +1230,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         taxdb: shared::TaxdbRun::default(),
         loaded_before_batch: Default::default(),
         parsed_seqids,
+        mt_threads: 1,
     }
 }
 

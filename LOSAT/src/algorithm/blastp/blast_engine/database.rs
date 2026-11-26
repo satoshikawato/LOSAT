@@ -143,6 +143,13 @@ impl BlastpDatabase {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Sets whether multithreaded DB-split scans stop at the first negative-length OID.
+    pub(super) fn with_mt_stop_at_negative(mut self, stop: bool) -> Self {
+        self.db.set_mt_stop_at_negative(stop);
+        self
+    }
+
     /// The database of a call of the run after other calls whose loads its record does not hold
     /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
     /// run's first, `first_query_ordinal` above 0).
@@ -665,15 +672,16 @@ where
             if round.is_empty() {
                 break;
             }
-            let found: Vec<Result<Vec<BlastpSubjectResult>>> = pool.install(|| {
+            let found: Vec<Result<(Vec<BlastpSubjectResult>, bool)>> = pool.install(|| {
                 round
                     .par_iter()
                     .map_init(
                         new_scratch,
                         |scratch,
                          &(range, first_diag_offset)|
-                         -> Result<Vec<BlastpSubjectResult>> {
+                         -> Result<(Vec<BlastpSubjectResult>, bool)> {
                             let block = read_search_block(db, range, database.program)?;
+                            let stopped = block.stopped_at_negative();
                             scratch.prepare_independent_subject(first_diag_offset);
                             let mut with_hits = Vec::new();
                             let mut subject_result = BlastpSubjectResult::new(0);
@@ -692,7 +700,7 @@ where
                                     ));
                                 }
                             }
-                            Ok(with_hits)
+                            Ok((with_hits, stopped))
                         },
                     )
                     .collect()
@@ -700,8 +708,12 @@ where
             // The subjects without HSP lists change no hit list, so the order of the
             // updates is the one-thread order.
             for block_results in found {
-                for mut subject_result in block_results? {
+                let (results, stopped) = block_results?;
+                for mut subject_result in results {
                     sink.add(&mut subject_result);
+                }
+                if stopped {
+                    return Ok(());
                 }
             }
         }
@@ -718,6 +730,7 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = read_search_block(db, range, database.program)?;
+        let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             process_subject(
                 &mut scratch,
@@ -726,6 +739,9 @@ where
                 &mut subject_result,
             );
             sink.add(&mut subject_result);
+        }
+        if stopped {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }

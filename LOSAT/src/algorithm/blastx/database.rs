@@ -78,6 +78,13 @@ impl BlastxDatabase {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Sets whether multithreaded DB-split scans stop at the first negative-length OID.
+    pub(crate) fn with_mt_stop_at_negative(mut self, stop: bool) -> Self {
+        self.db.set_mt_stop_at_negative(stop);
+        self
+    }
+
     /// The database of a call of the run after other calls whose loads its record does not hold
     /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
     /// run's first, `first_query_ordinal` above 0).
@@ -298,7 +305,15 @@ impl BlastxDatabase {
         if self.db.first_oid_read_fails() {
             return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
-        let count = self.db.num_seqs();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        let count = if self.db.mt_stop_at_negative() {
+            match self.db.x_protein_mt_scan_count() {
+                Ok(scan) => scan,
+                Err(_) => return self.x_check_stores(),
+            }
+        } else {
+            self.db.num_seqs()
+        };
         let mut longest = 0;
         let mut first = 0;
         while first < count {

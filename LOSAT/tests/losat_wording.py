@@ -109,6 +109,8 @@ def _tag(text: bytes, i: int) -> int | None:
         f += 1
     if f > k:
         end = _literal(text, f, b"() - ")
+        if end is None and text[k:f].endswith(b"::"):
+            end = _literal(text, f, b" - ")
         if end is not None:
             k = end
     return k

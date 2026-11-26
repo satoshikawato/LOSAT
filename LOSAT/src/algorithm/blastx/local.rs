@@ -1188,6 +1188,17 @@ fn search_database(
     .showing_gis(args.show_gis)
     .after_calls(args.first_query_ordinal > 0)
     .keeping_scope(keeps_scope, separate_xml2);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    let mt_stop = crate::algorithm::common::database::ncbi_mt_splits_db(
+        args.num_threads.max(1) as usize,
+        args.mt_mode,
+        database.x_seqdb().total_length(),
+        Some(args.query.as_path()),
+        900_000_000,
+        1_250_000,
+    );
+    let database = database.with_mt_stop_at_negative(mt_stop);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),

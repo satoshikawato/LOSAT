@@ -455,6 +455,12 @@ impl SeqDbError {
         matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
     }
 
+    /// Whether this is NCBI's `x_GetAmbChar` error (`AMBIGUITY_DATA_ERROR`) for out-of-order
+    /// nucleotide ambiguity offsets (`amb > next`).
+    pub(crate) fn is_ambiguity_data_error(&self) -> bool {
+        matches!(self, SeqDbError::Format { message, .. } if message == AMBIGUITY_DATA_ERROR)
+    }
+
     /// Whether this is LOSAT's refusal of a file that NCBI BLAST+ crashes on where it reads it
     /// ([`SeqDbError::NcbiCrashes`]; review 5 of line DBID loadord, L4: the variant, not the text,
     /// says it).
@@ -509,10 +515,14 @@ impl std::error::Error for SeqDbError {
     }
 }
 
+/// seqdbvol.cpp:2361: NCBI's `x_GetAmbChar` message when a nucleotide sequence's ambiguity
+/// offset exceeds the next sequence's offset (`amb > next`).
+pub(crate) const AMBIGUITY_DATA_ERROR: &str = "File error: could not get ambiguity data.";
+
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 15] = [
+const NCBI_FORMAT_MESSAGES: [&str; 17] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -540,6 +550,10 @@ const NCBI_FORMAT_MESSAGES: [&str; 15] = [
     "Failed to open oid-to-taxids lookup file",
     // seqdbgimask.cpp:213-217
     "Gi-mask file uses unknown format_version.",
+    // seqdbvol.cpp:2361: `x_GetAmbChar` when `amb > next`.
+    AMBIGUITY_DATA_ERROR,
+    // seqdbvol.cpp:1630: `GetSequenceAsString` when `x_GetSequence` length <= 0.
+    "Error: could not get sequence or range.",
 ];
 
 /// seqdblmdbset.cpp:224, 231: NCBI's text of a list of volumes of both versions
@@ -823,8 +837,18 @@ impl SeqDbError {
 // (`SetMemBit` throws in the inline header without a function name in NCBI's report; blastdbcheck
 // 2.17.0 at verbosity 3/4 reports `include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp`, line
 // 881, with no function prefix.)
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2358-2363
+// (`x_GetAmbChar` throws `CSeqDBException::eFileErr` with `AMBIGUITY_DATA_ERROR` at line 2361.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 12] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 13] = [
+    (
+        AMBIGUITY_DATA_ERROR,
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbvol.cpp",
+            2361,
+            "BLASTDB::ncbi::CSeqDBVol::x_GetAmbChar",
+        ),
+    ),
     (
         "MEMB_BIT error: conflicting bit found.",
         ThrowSite {
@@ -1301,6 +1325,10 @@ pub struct SeqDb {
     utf8_claimed: AtomicBool,
     /// Whether the loads modelled now are not NCBI's (`SeqDb::without_scope_utf8_loads`).
     scope_utf8_held: AtomicBool,
+    /// NCBI's DB-split scan stop when `m_NumThreads` is positive (`seqdbimpl.cpp:339-344,699-707`):
+    /// when true, preliminary block reads stop at the first OID whose `GetSequence` length is
+    /// negative.
+    mt_stop_at_negative: bool,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1880,6 +1908,7 @@ impl SeqDb {
             scope_utf8_ended: AtomicBool::new(false),
             utf8_claimed: AtomicBool::new(false),
             scope_utf8_held: AtomicBool::new(false),
+            mt_stop_at_negative: false,
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2100,7 +2129,14 @@ impl SeqDb {
                         i64::from(len)
                     }
                 }
-                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as i64,
+                SeqType::Nucleotide => {
+                    let len = volume.nucleotide_length_i32(0, 0)?;
+                    if len < 0 {
+                        -1
+                    } else {
+                        i64::from(len)
+                    }
+                }
             });
         }
         Ok(())
@@ -2684,6 +2720,41 @@ impl SeqDb {
         Ok((volume, self.volume_starts[range.volume] + range.first))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Sets whether multithreaded DB-split scans stop at the first OID whose `GetSequence` length
+    /// is negative (mirroring NCBI's `CSeqDBImpl::x_FillSeqBuffer` when `m_NumThreads` is positive).
+    pub fn set_mt_stop_at_negative(&mut self, stop: bool) {
+        self.mt_stop_at_negative = stop;
+    }
+
+    /// Whether multithreaded DB-split scans stop at the first negative-length OID.
+    pub fn mt_stop_at_negative(&self) -> bool {
+        self.mt_stop_at_negative
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// First ordinal id whose protein `GetSequence` length is negative (`start == 0` or signed
+    /// 32-bit `end - 1 - start < 0`), or [`Self::num_seqs`] if none. Used by streaming protein
+    /// scanners when [`Self::mt_stop_at_negative`] is enabled.
+    pub fn x_protein_mt_scan_count(&self) -> Result<u32, SeqDbError> {
+        const CHUNK: u32 = 16_384;
+        let count = self.num_seqs();
+        let mut first = 0u32;
+        while first < count {
+            let end = count.min(first.saturating_add(CHUNK));
+            let Some(range) = self.x_block_range(first, end) else {
+                break;
+            };
+            if let Some(rel) =
+                self.volumes[range.volume].x_first_negative_protein_in(range.first, range.end)?
+            {
+                return Ok(range.first_ordinal + rel);
+            }
+            first = range.end_ordinal();
+        }
+        Ok(count)
+    }
+
     /// Reads the protein sequences of `range` for a search (`Volume::read_protein_search_block`),
     /// validating `.psq` ranges without allocating bytes for proteins whose NCBI 32-bit length is
     /// not positive (`<= 0`).
@@ -2692,7 +2763,13 @@ impl SeqDb {
         range: BlockRange,
     ) -> Result<SequenceBlock, SeqDbError> {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.read_protein_search_block(range.first, range.end, range.first_ordinal, first_oid)
+        volume.read_protein_search_block_mt(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
+            self.mt_stop_at_negative,
+        )
     }
 
     /// Reads the one protein sequence `ordinal` for a search, skipping byte reads when its NCBI
@@ -2704,6 +2781,45 @@ impl SeqDb {
             at.vol_oid + 1,
             at.id,
             self.location_oid(&at),
+        )
+    }
+
+    /// Reads the nucleotide sequences of `range` for a search
+    /// (`Volume::read_nucleotide_search_block_mt`), honoring [`Self::mt_stop_at_negative`].
+    pub fn read_nucleotide_search_block(
+        &self,
+        range: BlockRange,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.read_nucleotide_search_block_mt(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
+            self.mt_stop_at_negative,
+        )
+    }
+
+    /// Reads the one nucleotide sequence `ordinal` for search traceback or retrieval
+    /// (`Volume::read_nucleotide_search_block_mt` with `stop_at_negative = false`).
+    pub fn read_nucleotide_search_sequence(
+        &self,
+        ordinal: u32,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_nucleotide_search_sequence_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`Self::read_nucleotide_search_sequence`] at `at`.
+    pub fn read_nucleotide_search_sequence_at(
+        &self,
+        at: SeqLocation,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.volumes[at.volume].read_nucleotide_search_block_mt(
+            at.vol_oid,
+            at.vol_oid + 1,
+            at.id,
+            self.location_oid(&at),
+            false,
         )
     }
 
@@ -2821,19 +2937,53 @@ impl SeqDb {
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] into
-    /// the worker's buffer `kept` (`Volume::x_read_protein_search_block_into`).
+    /// the worker's buffer `kept` (`Volume::x_read_protein_search_block_into_mt`).
     pub fn x_read_protein_search_block_into(
         &self,
         range: BlockRange,
         kept: &mut Vec<u8>,
     ) -> Result<SequenceBlock, SeqDbError> {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.x_read_protein_search_block_into(
+        volume.x_read_protein_search_block_into_mt(
             range.first,
             range.end,
             range.first_ordinal,
             first_oid,
             kept,
+            self.mt_stop_at_negative,
+        )
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_block`] into the worker's
+    /// buffer `kept`.
+    pub fn x_read_nucleotide_search_block_into(
+        &self,
+        range: BlockRange,
+        kept: &mut Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.x_read_nucleotide_search_block_into_mt(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
+            kept,
+            self.mt_stop_at_negative,
+        )
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_sequence`] with the bytes
+    /// in a buffer that glibc maps from 1 MiB on.
+    pub fn x_read_nucleotide_search_sequence_mapped(
+        &self,
+        ordinal: u32,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].x_read_nucleotide_search_block_mapped(
+            at.vol_oid,
+            at.vol_oid + 1,
+            ordinal,
+            self.location_oid(&at),
         )
     }
 
@@ -2858,6 +3008,17 @@ impl SeqDb {
     /// [`SeqDb::nucleotide_length`] of the nucleotide at `at`.
     pub fn nucleotide_length_at(&self, at: SeqLocation) -> Result<usize, SeqDbError> {
         self.volumes[at.volume].nucleotide_length(at.vol_oid, self.location_oid(&at))
+    }
+
+    /// Signed 32-bit length of nucleotide `ordinal` as NCBI's `GetSeqLengthExact` /
+    /// `x_GetSequence` compute it (`Volume::nucleotide_length_i32`).
+    pub fn nucleotide_length_i32(&self, ordinal: u32) -> Result<i32, SeqDbError> {
+        self.nucleotide_length_i32_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::nucleotide_length_i32`] of the nucleotide at `at`.
+    pub fn nucleotide_length_i32_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
+        self.volumes[at.volume].nucleotide_length_i32(at.vol_oid, self.location_oid(&at))
     }
 
     /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal`.

@@ -4880,6 +4880,32 @@ fn open_search_database(
             .after_calls(args.first_query_ordinal > 0)
             .keeping_scope(keeps_scope, separate_xml2);
             let rps = resolved.rps_search.is_some();
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:211-214
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let mt_stop = if rps {
+                false
+            } else if matches!(
+                args.app,
+                crate::algorithm::blastp::args::BlastpApp::Psiblast
+            ) {
+                resolved.num_threads > 1
+            } else {
+                let max_db = if resolved.word_size > 4 {
+                    2_500_000_000
+                } else {
+                    740_000_000
+                };
+                crate::algorithm::common::database::ncbi_mt_splits_db(
+                    resolved.num_threads,
+                    args.mt_mode,
+                    database.seqdb().total_length(),
+                    Some(args.query.as_path()),
+                    max_db,
+                    200_000,
+                )
+            };
+            let database = database.with_mt_stop_at_negative(mt_stop);
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
             } else {

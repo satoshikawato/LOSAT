@@ -23,6 +23,46 @@ use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+/// Whether NCBI's application runs this search in multithreaded DB-split mode (positive
+/// `m_NumThreads` on `CSeqDB`, so `CSeqDBImpl::x_FillSeqBuffer` stops scanning at the first OID
+/// whose `GetSequence` length is negative).
+///
+/// With `num_threads <= 1` or `-mt_mode 1` (split by queries), each search node runs with 1
+/// thread on `CSeqDB` (`m_NumThreads` stays zero). With `-mt_mode 0` (auto), NCBI splits by
+/// queries only when `total_length < max_db_size` and the query file size exceeds `min_q_size`.
+pub(crate) fn ncbi_mt_splits_db(
+    num_threads: usize,
+    mt_mode: Option<u8>,
+    total_length: u64,
+    query_file: Option<&std::path::Path>,
+    max_db_size: u64,
+    min_q_size: u64,
+) -> bool {
+    if num_threads <= 1 {
+        return false;
+    }
+    match mt_mode {
+        Some(1) => false,
+        Some(2) => true,
+        _ => {
+            if total_length >= max_db_size {
+                return true;
+            }
+            let query_size = query_file
+                .filter(|path| path.as_os_str() != "-")
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|meta| meta.len())
+                .unwrap_or(0);
+            query_size <= min_q_size
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
 /// Opens the database `name` (the `-db` value as NCBI keeps it, `seqdb::db_argument_name`)
 /// of the sequence type `seqtype` for a search: the one function through which a search
@@ -5054,6 +5094,9 @@ pub(crate) fn x_check_protein_stores(
             }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
+        }
+        if block.stopped_at_negative() {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }

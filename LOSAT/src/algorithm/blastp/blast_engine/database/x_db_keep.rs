@@ -175,11 +175,12 @@ fn x_search_block<K>(
     first_diag_offset: i32,
     kit: &mut XKit,
     process_subject: &K,
-) -> Result<Vec<BlastpSubjectResult>>
+) -> Result<(Vec<BlastpSubjectResult>, bool)>
 where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
 {
     let block = x_read_search_block_into(db, range, &mut kit.bytes, program)?;
+    let stopped = block.stopped_at_negative();
     kit.scratch.prepare_independent_subject(first_diag_offset);
     let mut with_hits = Vec::new();
     let mut subject_result = BlastpSubjectResult::new(0);
@@ -199,13 +200,13 @@ where
         }
     }
     block.x_into_kept(&mut kit.bytes);
-    Ok(with_hits)
+    Ok((with_hits, stopped))
 }
 
 /// No NCBI counterpart (scheduling only): the heap bytes of a block's results while they wait.
-fn x_kept_bytes(found: &Result<Vec<BlastpSubjectResult>>) -> usize {
+fn x_kept_bytes(found: &Result<(Vec<BlastpSubjectResult>, bool)>) -> usize {
     use std::mem::size_of;
-    let Ok(results) = found else {
+    let Ok((results, _)) = found else {
         return 0;
     };
     results
@@ -237,7 +238,7 @@ struct XWindow<'a, P> {
     merged: usize,
     /// The results of the blocks taken and not merged and their heap bytes, block j in slot j mod
     /// the window.
-    slots: Vec<Option<(Result<Vec<BlastpSubjectResult>>, usize)>>,
+    slots: Vec<Option<(Result<(Vec<BlastpSubjectResult>, bool)>, usize)>>,
     /// The blocks within this many of the oldest not merged are taken whatever the bytes.
     floor: usize,
     /// The heap bytes of the results in `slots`, and the most of them above which only the blocks
@@ -349,9 +350,13 @@ fn x_window_worker<S, K, P>(
             merge.merged += 1;
             merge.waiting_bytes -= bytes;
             match found {
-                Ok(block_results) => {
+                Ok((block_results, stopped)) => {
                     for mut subject_result in block_results {
                         merge.sink.add(&mut subject_result);
+                    }
+                    if stopped {
+                        merge.stopped = true;
+                        break;
                     }
                 }
                 Err(error) => {
@@ -431,11 +436,13 @@ where
     if let Some(error) = state.error {
         return Err(error);
     }
-    debug_assert_eq!(state.merged, state.taken, "every block taken is merged");
-    debug_assert_eq!(
-        state.waiting_bytes, 0,
-        "every block merged gave back its bytes"
-    );
+    if !state.stopped {
+        debug_assert_eq!(state.merged, state.taken, "every block taken is merged");
+        debug_assert_eq!(
+            state.waiting_bytes, 0,
+            "every block merged gave back its bytes"
+        );
+    }
     Ok(())
 }
 
@@ -501,6 +508,7 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = x_read_search_block_into(db, range, &mut bytes, database.program)?;
+        let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             process_subject(
                 &mut scratch,
@@ -512,6 +520,9 @@ where
         }
         next_ordinal = range.end_ordinal();
         block.x_into_kept(&mut bytes);
+        if stopped {
+            break;
+        }
     }
     Ok(())
 }

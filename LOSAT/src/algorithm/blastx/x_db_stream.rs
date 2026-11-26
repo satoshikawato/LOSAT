@@ -140,9 +140,16 @@ impl<'a> XStreamDb<'a> {
 
     /// As `new`, with blocks of `block_bytes` (the unit tests read blocks of a few sequences).
     fn with_block_bytes(db: &'a SeqDb, longest: usize, block_bytes: u64) -> Self {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        let count = if db.mt_stop_at_negative() {
+            db.x_protein_mt_scan_count()
+                .unwrap_or_else(|_| db.num_seqs()) as usize
+        } else {
+            db.num_seqs() as usize
+        };
         Self {
             db,
-            count: db.num_seqs() as usize,
+            count,
             longest,
             block_bytes,
             x_checked: std::sync::atomic::AtomicBool::new(false),
@@ -300,10 +307,11 @@ impl<'a> XStreamDb<'a> {
             .db
             .read_protein_search_block(range)
             .map_err(read_error)?;
+        let end = ordinal + part.len();
         self.x_check(&part)?;
         Ok(XBlock {
             first: ordinal,
-            end: range.end_ordinal() as usize,
+            end,
             parts: vec![part],
         })
     }

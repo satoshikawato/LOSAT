@@ -665,17 +665,17 @@ impl<'a> Volume<'a, '_> {
     }
 
     /// The length returned by `GetSequence` for the sequence at `at`: signed 32-bit for protein
-    /// (`x_GetSequence`), exact length for nucleotide.
+    /// (`x_GetSequence`) and nucleotide (`x_GetSequence` / `GetSeqLengthExact`).
     fn sequence_len(&self, at: SeqLocation) -> Result<i64, SeqDbError> {
         match self.db.seqtype() {
             SeqType::Protein => self.db.protein_sequence_len_at(at).map(i64::from),
-            SeqType::Nucleotide => self.db.nucleotide_length_at(at).map(|n| n as i64),
+            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1306-1473
     /// The rest of `GetBioseq` of the OID at `at` whose definition lines are `set`: its length
-    /// (none for no letters or negative protein length), a nucleotide's letters with its
+    /// (none for no letters or negative signed 32-bit length), a nucleotide's letters with its
     /// ambiguities, and the taxonomy lookups of its sources, whose texts are posted.
     fn bioseq(
         &mut self,
@@ -685,7 +685,7 @@ impl<'a> Volume<'a, '_> {
     ) -> Result<Option<Failure>, Stop> {
         let len = match self.db.seqtype() {
             SeqType::Protein => self.db.protein_length_i32_at(at).map(i64::from),
-            SeqType::Nucleotide => self.db.nucleotide_length_at(at).map(|n| n as i64),
+            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
         };
         match len {
             Ok(n) if n < 1 => return Ok(Some(Failure::own("bioseq", "no bioseq"))),
@@ -695,7 +695,7 @@ impl<'a> Volume<'a, '_> {
         if self.db.seqtype() == SeqType::Nucleotide {
             let letters = self
                 .db
-                .read_sequence_at(at)
+                .read_nucleotide_search_sequence_at(at)
                 .and_then(|block| block.nucleotide_seq_data(0).map(|_| ()));
             if let Err(error) = letters {
                 return Failure::of("bioseq", &error).map(Some);

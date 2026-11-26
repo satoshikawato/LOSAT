@@ -24,6 +24,8 @@ fn seq_data_keeps_the_stored_bits_of_ncbi2na_and_clears_them_for_ncbi4na() {
         data_start: 0,
         seq_offsets: vec![0, 2, 12, 17],
         amb_offsets: vec![2, 4, 14],
+        stopped_at_negative: false,
+        amb_error: None,
     };
     assert_eq!(
         block.nucleotide_seq_data(0).unwrap(),
@@ -599,4 +601,119 @@ fn sparse_protein_volumes_match_ncbi_32bit_lengths_and_keep_nucleotide_widened()
         assert_eq!(db.exact_totals().unwrap(), (expected_total, 40));
         assert_eq!(db.included_length().unwrap(), 40);
     }
+}
+
+#[test]
+fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
+    use crate::seqdb::{BlockRange, SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let dir = TempDir::unique("mt-neg-amb-unit");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+
+    // 1. Protein volume with non-ascending sequence offset at OID 2 (len = -10).
+    write_v4_index(
+        &root.join("pneg.pin"),
+        SeqType::Protein,
+        21,
+        13,
+        &[1, 6, 20, 11, 16],
+        None,
+    );
+    write_sparse_psq(
+        &root.join("pneg.psq"),
+        20,
+        &[(1, &[1, 2, 3, 4]), (11, &[5, 6, 7, 8])],
+    );
+    std::fs::write(root.join("pneg.phr"), b"").unwrap();
+
+    let mut db = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
+    let full = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 4,
+        first_ordinal: 0,
+    };
+    let blk_1t = db.read_protein_search_block(full).unwrap();
+    assert!(!blk_1t.stopped_at_negative());
+    assert_eq!(blk_1t.len(), 4);
+    assert_empty_sentinels(&blk_1t, 2);
+    assert_eq!(blk_1t.protein(3), &[5, 6, 7, 8]);
+
+    db.set_mt_stop_at_negative(true);
+    assert_eq!(db.x_protein_mt_scan_count().unwrap(), 2);
+    let blk_mt = db.read_protein_search_block(full).unwrap();
+    assert!(blk_mt.stopped_at_negative());
+    assert_eq!(blk_mt.len(), 2);
+    assert_eq!(blk_mt.protein(0), &[1, 2, 3, 4]);
+
+    // 2. Nucleotide volume with OID 0 regular (4 bases), OID 1 amb == start (len = -4),
+    // OID 2 amb > next (reads 2 bytes past next, defers AMBIGUITY_DATA_ERROR), OID 3 regular.
+    // seq_offsets = [0, 2, 4, 6, 8], amb = [2, 2, 8, 8, 8], nsq len = 8.
+    write_v4_index(
+        &root.join("nirr.nin"),
+        SeqType::Nucleotide,
+        16,
+        4,
+        &[0, 2, 4, 6, 8],
+        Some(&[2, 2, 8, 8, 8]),
+    );
+    std::fs::write(
+        root.join("nirr.nsq"),
+        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    std::fs::write(root.join("nirr.nhr"), b"").unwrap();
+
+    let mut ndb = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
+    assert_eq!(ndb.nucleotide_length_i32(0).unwrap(), 4);
+    assert_eq!(ndb.nucleotide_length_i32(1).unwrap(), -4);
+    assert_eq!(ndb.nucleotide_length_i32(2).unwrap(), 12);
+    assert!(ndb
+        .nucleotide_ambiguity(2)
+        .unwrap_err()
+        .is_ambiguity_data_error());
+
+    let nrange = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 4,
+        first_ordinal: 0,
+    };
+    let nblk_1t = ndb.read_nucleotide_search_block(nrange).unwrap();
+    assert!(!nblk_1t.stopped_at_negative());
+    assert_eq!(nblk_1t.len(), 4);
+    assert_eq!(nblk_1t.nucleotide_len(1).unwrap(), 0);
+    assert_eq!(nblk_1t.nucleotide_len(2).unwrap(), 12);
+    assert!(nblk_1t
+        .nucleotide_blastna(2)
+        .unwrap_err()
+        .is_ambiguity_data_error());
+
+    ndb.set_mt_stop_at_negative(true);
+    let nblk_mt = ndb.read_nucleotide_search_block(nrange).unwrap();
+    assert!(nblk_mt.stopped_at_negative());
+    assert_eq!(nblk_mt.len(), 1);
+
+    // 3. Nucleotide volume with amb[0] == 0 -> reads before mmap -> NcbiCrashes refusal.
+    write_v4_index(
+        &root.join("namb0.nin"),
+        SeqType::Nucleotide,
+        4,
+        4,
+        &[0, 2],
+        Some(&[0, 2]),
+    );
+    std::fs::write(root.join("namb0.nsq"), [0u8; 2]).unwrap();
+    std::fs::write(root.join("namb0.nhr"), b"").unwrap();
+    let zdb = SeqDb::open_search_in(b"namb0", SeqType::Nucleotide, &path).unwrap();
+    assert!(matches!(
+        zdb.nucleotide_length_i32(0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+    assert!(matches!(
+        zdb.read_nucleotide_search_sequence(0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
 }

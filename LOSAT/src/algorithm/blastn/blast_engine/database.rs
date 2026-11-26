@@ -156,9 +156,9 @@ fn x_read_block(
     kept: &mut Vec<u8>,
 ) -> Result<SequenceBlock, SeqDbError> {
     if super::x_bn_mapped() {
-        db.x_read_block_into(range, kept)
+        db.x_read_nucleotide_search_block_into(range, kept)
     } else {
-        db.read_block(range)
+        db.read_nucleotide_search_block(range)
     }
 }
 
@@ -196,12 +196,12 @@ impl<T> XWorker<T> {
     }
 }
 
-/// `SeqDb::read_sequence`, mapped with LOSAT_X_BNMAPPED.
+/// `SeqDb::read_nucleotide_search_sequence`, mapped with LOSAT_X_BNMAPPED.
 fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
     if super::x_bn_mapped() {
-        db.x_read_sequence_mapped(ordinal)
+        db.x_read_nucleotide_search_sequence_mapped(ordinal)
     } else {
-        db.read_sequence(ordinal)
+        db.read_nucleotide_search_sequence(ordinal)
     }
 }
 
@@ -260,6 +260,9 @@ pub(super) struct BlastnDatabase {
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
     /// prefetch can fail at (`batch_prefetch`).
     parsed_seqids: bool,
+    /// Requested `-num_threads` of this search (used to refuse `amb > next` traceback reads at
+    /// 2+ threads where NCBI BLAST+ aborts).
+    mt_threads: usize,
 }
 
 /// The length and the ambiguity runs of the database sequences that one report call wrote
@@ -405,6 +408,34 @@ impl BlastnDatabase {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Configures multithreaded DB-split scan stop and records the requested thread count.
+    pub(super) fn with_mt_mode(
+        mut self,
+        num_threads: usize,
+        mt_mode: Option<u8>,
+        word_size: usize,
+        query_file: Option<&std::path::Path>,
+    ) -> Self {
+        self.mt_threads = num_threads;
+        let (max_db, min_q) = if word_size < 10 {
+            (150_000_000, 1_500_000)
+        } else {
+            (6_000_000_000, 10_000_000)
+        };
+        let stop = shared::ncbi_mt_splits_db(
+            num_threads,
+            mt_mode,
+            self.db.total_length(),
+            query_file,
+            max_db,
+            min_q,
+        );
+        self.db.set_mt_stop_at_negative(stop);
+        self
+    }
+
     /// The database of a call of the run after other calls whose loads its record does not hold
     /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
     /// run's first, `first_query_ordinal` above 0).
@@ -467,6 +498,7 @@ impl BlastnDatabase {
             taxdb: shared::TaxdbRun::default(),
             loaded_before_batch: Default::default(),
             parsed_seqids,
+            mt_threads: 1,
         })
     }
 
@@ -1174,27 +1206,29 @@ where
         if round.is_empty() {
             break;
         }
-        let found: Vec<Result<Vec<(u32, R)>>> = pool.install(|| {
+        let found: Vec<Result<(Vec<(u32, R)>, bool)>> = pool.install(|| {
             round
                 .par_iter()
                 .map_init(
                     || XWorker::new(new_scratch()),
-                    |worker, &range| -> Result<Vec<(u32, R)>> {
+                    |worker, &range| -> Result<(Vec<(u32, R)>, bool)> {
                         let block = x_read_block(db, range, &mut worker.bytes)
                             .map_err(search_read_error)?;
+                        let stopped = block.stopped_at_negative();
                         let mut kept = Vec::new();
                         for i in 0..block.len() {
                             let ordinal = range.first_ordinal + i as u32;
-                            if let Some(result) = search(
-                                &mut worker.scratch,
-                                ordinal,
-                                block_subject(&block, &range, i)?,
-                            ) {
+                            let subject = block_subject(&block, &range, i)?;
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                            if subject.length == 0 {
+                                continue;
+                            }
+                            if let Some(result) = search(&mut worker.scratch, ordinal, subject) {
                                 kept.push((ordinal, result));
                             }
                         }
                         x_done_kept_block(block, &mut worker.bytes);
-                        Ok(kept)
+                        Ok((kept, stopped))
                     },
                 )
                 .collect()
@@ -1202,8 +1236,12 @@ where
         // The sequences that keep nothing change no hit list, so the order of the
         // merges is the one-thread order.
         for block_results in found {
-            for (ordinal, result) in block_results? {
+            let (kept, stopped) = block_results?;
+            for (ordinal, result) in kept {
                 merge(ordinal, result);
+            }
+            if stopped {
+                return Ok(());
             }
         }
     }
@@ -1278,13 +1316,22 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = x_read_block(db, range, &mut bytes).map_err(search_read_error)?;
+        let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            if let Some(result) = search(&mut scratch, ordinal, block_subject(&block, &range, i)?) {
+            let subject = block_subject(&block, &range, i)?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            if subject.length == 0 {
+                continue;
+            }
+            if let Some(result) = search(&mut scratch, ordinal, subject) {
                 merge(ordinal, result);
             }
         }
         x_done_kept_block(block, &mut bytes);
+        if stopped {
+            break;
+        }
         next_ordinal = range.end_ordinal();
     }
     Ok(())
@@ -1345,6 +1392,7 @@ where
     S: Fn(&P) -> Vec<(usize, usize)> + Sync + Send,
 {
     let db = &database.db;
+    let mt_threads = database.mt_threads;
     let x_ranged = super::x_bn_tb_range();
     let x_min = super::x_tb_range_min();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-353
@@ -1371,7 +1419,7 @@ where
             let ranges = x_partial_ranges(spans(kept), length);
             let mut blastna = stored
                 .x_nucleotide_blastna_ranges(0, &ranges)
-                .map_err(database_error)?;
+                .map_err(|error| traceback_read_error(error, db.oid(ordinal), mt_threads))?;
             if let Some(masks) = &masks {
                 mask_hard_letters(&mut blastna, masks, &ranges);
             }
@@ -1400,6 +1448,8 @@ where
             masks.as_deref(),
             scratch,
             ordinal,
+            db.oid(ordinal),
+            mt_threads,
             kept,
             traceback,
         )?;
@@ -1451,21 +1501,47 @@ where
     Ok(results)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2358-2363
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
+/// Maps a traceback read error: at 2+ threads, `amb > next` (`AMBIGUITY_DATA_ERROR`) causes NCBI
+/// BLAST+ `blastn` to abort (`SIGABRT`), which LOSAT refuses; at 1 thread, NCBI reports the
+/// `BLAST Database error` with exit status 2.
+fn traceback_read_error(
+    error: SeqDbError,
+    oid: crate::seqdb::Oid,
+    mt_threads: usize,
+) -> anyhow::Error {
+    if mt_threads > 1 && error.is_ambiguity_data_error() {
+        return shared::refusal(
+            &format!(
+                "database sequence {oid} has an out-of-order ambiguity offset (amb > next), on \
+                 which NCBI BLAST+ aborts with multiple threads"
+            ),
+            PROGRAM,
+        );
+    }
+    database_error(error)
+}
+
 /// The traceback of `traceback_listed` on the whole sequence of `stored`.
 /// `hard_masks`: the masks of a search with `-db_hard_mask` (`mask_hard_letters`).
+#[allow(clippy::too_many_arguments)]
 fn x_traceback_whole<T, P, R, K>(
     stored: &SequenceBlock,
     length: usize,
     hard_masks: Option<&[(u32, u32)]>,
     scratch: &mut T,
     ordinal: u32,
+    oid: crate::seqdb::Oid,
+    mt_threads: usize,
     kept: &P,
     traceback: &K,
 ) -> Result<Option<R>>
 where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>, &P) -> Option<R>,
 {
-    let mut blastna = x_blastna(stored).map_err(database_error)?;
+    let mut blastna =
+        x_blastna(stored).map_err(|error| traceback_read_error(error, oid, mt_threads))?;
     if let Some(masks) = hard_masks {
         mask_hard_letters(&mut blastna, masks, &[(0, length)]);
     }

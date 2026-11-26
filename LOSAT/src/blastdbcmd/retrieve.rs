@@ -222,18 +222,15 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
-    /// `GetSeqLength` of `oid`: signed 32-bit `int` for proteins (wrapping `>= 2^31` to negative
-    /// as in NCBI's `GetSeqLengthProt`), widened unsigned 32-bit for nucleotides.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-323
+    /// `GetSeqLength` of `oid`: signed 32-bit `int` as returned by NCBI's `GetSeqLengthProt`
+    /// and `GetSeqLengthExact`.
     pub fn length(&self, oid: u32) -> Result<i64, Stop> {
         let at = self.at(oid)?;
         if self.protein {
             Ok(i64::from(self.db.protein_length_i32_at(at)?))
         } else {
-            let length = self.db.nucleotide_length_at(at)?;
-            u32::try_from(length)
-                .map(i64::from)
-                .map_err(|_| Stop::refused(format!("sequence {oid} is longer than 32 bits")))
+            Ok(i64::from(self.db.nucleotide_length_i32_at(at)?))
         }
     }
 
@@ -317,7 +314,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
         }
-        let block = self.db.read_sequence_at(at)?;
+        let block = self.db.read_nucleotide_search_sequence_at(at)?;
         Ok(match block.nucleotide_seq_data(0)? {
             (true, bytes) => DbSeqData::Ncbi2na(bytes),
             (false, bytes) => DbSeqData::Ncbi4na(bytes),

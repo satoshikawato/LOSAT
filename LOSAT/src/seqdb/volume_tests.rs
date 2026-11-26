@@ -725,12 +725,15 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
 
     // 1d. Poked `start` past `.psq` EOF with non-positive length does not fail range checks before
     // skipping/stopping, matching NCBI pointer-arithmetic-only `x_GetSequence`.
+    // OID 0: start=100_000, next=100_001 -> len=0 (skip, no stop);
+    // OID 1: start=100_001, next=1 -> len=-100_001 (skip at 1t, stop at MT);
+    // OID 2: start=1, next=6 -> len=4 (regular).
     write_v4_index(
         &root.join("ppast.pin"),
         SeqType::Protein,
         4,
         4,
-        &[1, 6, 100_000, 100_000],
+        &[100_000, 100_001, 1, 6],
         None,
     );
     write_sparse_psq(&root.join("ppast.psq"), 6, &[(1, &[1, 2, 3, 4])]);
@@ -745,10 +748,13 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
     let ppast_1t = ppast.read_protein_search_block(ppast_range).unwrap();
     assert!(!ppast_1t.stopped_at_negative());
     assert_eq!(ppast_1t.len(), 3);
+    assert!(ppast_1t.protein(0).is_empty());
+    assert!(ppast_1t.protein(1).is_empty());
+    assert_eq!(ppast_1t.protein(2), &[1, 2, 3, 4]);
     ppast.set_mt_stop_at_negative(true);
     let ppast_mt = ppast.read_protein_search_block(ppast_range).unwrap();
     assert!(ppast_mt.stopped_at_negative());
-    assert_eq!(ppast_mt.len(), 2);
+    assert_eq!(ppast_mt.len(), 1);
 
     // 2. Nucleotide volume with OID 0 regular (4 bases), OID 1 amb == start (len = -4),
     // OID 2 amb > next (reads 2 bytes past next, defers AMBIGUITY_DATA_ERROR), OID 3 regular.

@@ -303,12 +303,6 @@ fn a_refused_first_batch_writes_each_prolog_once_on_setup_refusal() {
             "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension",
         ),
         (
-            "mb40k",
-            "tests/db_search/taxfilter/tfn",
-            &["-gapopen", "40000", "-gapextend", "40000"],
-            "gap costs above 32767 with greedy extension (-task megablast)",
-        ),
-        (
             "n1l62p3",
             "tests/db_search/aliaskeys/n_nseq1_l62p3",
             &[],

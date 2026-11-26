@@ -17,8 +17,8 @@ use anyhow::Result;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::tabular::{
-    taxdb_warning_line, DeflineIds, TabularField, TabularKind, TabularNames, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    DeflineIds, TabularField, TabularKind, TabularNames, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 use crate::seqdb::SeqDb;
 
@@ -281,6 +281,7 @@ pub(crate) fn subject_lookup_failure(
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            lineless: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
     }
@@ -632,9 +633,9 @@ pub(crate) fn write_tabular_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     TabularWriter::new(spec, program_version, None).prolog(writer)?;

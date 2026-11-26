@@ -1,0 +1,392 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pn
+           4 sequences; 1,800 total letters
+
+
+
+Query= q0
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+NP_000001.1 alpha                                                     418     2e-121  1
+NP_000002.1 Unknown                                                   16.2    0.84    2
+NP_000006.1 Unknown                                                   17.1    0.97    1
+
+
+>NP_000001.1 alpha
+Length=450
+
+ Score = 418 bits (906),  Expect = 2e-121
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+ Frame = +1/+1
+
+Query  1    WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD  180
+            WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD
+Sbjct  1    WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD  180
+
+Query  181  WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI  360
+            WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI
+Sbjct  181  WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI  360
+
+Query  361  SMDYQQKASIMIRAHVVQIPWWYCPWTWFY  450
+            SMDYQQKASIMIRAHVVQIPWWYCPWTWFY
+Sbjct  361  SMDYQQKASIMIRAHVVQIPWWYCPWTWFY  450
+
+
+ Score = 341 bits (740),  Expect = 2e-98
+ Identities = 149/149 (100%), Positives = 149/149 (100%), Gaps = 0/149 (0%)
+ Frame = -2/-2
+
+Query  449  *NQVHGQYHHGICTT*ARIIIEAFC**SIEIHCQP*L*RQ*IGSSRISF*YSSIDQKPNG  270
+            *NQVHGQYHHGICTT*ARIIIEAFC**SIEIHCQP*L*RQ*IGSSRISF*YSSIDQKPNG
+Sbjct  449  *NQVHGQYHHGICTT*ARIIIEAFC**SIEIHCQP*L*RQ*IGSSRISF*YSSIDQKPNG  270
+
+Query  269  PIRCREPGSSSCLKP*CGA*LFQ*RNCIIQSRCH*NHTPFGSTPPRLRSHFG**EIHFTI  90
+            PIRCREPGSSSCLKP*CGA*LFQ*RNCIIQSRCH*NHTPFGSTPPRLRSHFG**EIHFTI
+Sbjct  269  PIRCREPGSSSCLKP*CGA*LFQ*RNCIIQSRCH*NHTPFGSTPPRLRSHFG**EIHFTI  90
+
+Query  89   Y**LVGNIREVLVGRLIED*PAGQQYGMV  3
+            Y**LVGNIREVLVGRLIED*PAGQQYGMV
+Sbjct  89   Y**LVGNIREVLVGRLIED*PAGQQYGMV  3
+
+
+ Score = 239 bits (516),  Expect(2) = 2e-89
+ Identities = 97/97 (100%), Positives = 97/97 (100%), Gaps = 0/97 (0%)
+ Frame = -1/-1
+
+Query  450  IKPGPRTIPPRNLHHMSTNHNRSFLLIIHRNTLPTIIMTPMNRFIQNIFLIFIHRPKTKR  271
+            IKPGPRTIPPRNLHHMSTNHNRSFLLIIHRNTLPTIIMTPMNRFIQNIFLIFIHRPKTKR
+Sbjct  450  IKPGPRTIPPRNLHHMSTNHNRSFLLIIHRNTLPTIIMTPMNRFIQNIFLIFIHRPKTKR  271
+
+Query  270  TNTMQRTRFQFLFKTLMRSLIIPITKLHHPITMPLKP  160
+            TNTMQRTRFQFLFKTLMRSLIIPITKLHHPITMPLKP
+Sbjct  270  TNTMQRTRFQFLFKTLMRSLIIPITKLHHPITMPLKP  160
+
+
+ Score = 93.2 bits (197),  Expect(2) = 2e-89
+ Identities = 37/37 (100%), Positives = 37/37 (100%), Gaps = 0/37 (0%)
+ Frame = -1/-1
+
+Query  111  MRNPFHNILIIGRKHQRGFGRQINRRLTSRTTIRNGP  1
+            MRNPFHNILIIGRKHQRGFGRQINRRLTSRTTIRNGP
+Sbjct  111  MRNPFHNILIIGRKHQRGFGRQINRRLTSRTTIRNGP  1
+
+
+ Score = 175 bits (376),  Expect(2) = 3e-87
+ Identities = 69/69 (100%), Positives = 69/69 (100%), Gaps = 0/69 (0%)
+ Frame = -3/-3
+
+Query  208  YSNNETASSNHDATETTHLSAAHHHDYVHISDNEKSISQYTDNWSETSERFWSAD**KTD  29
+            YSNNETASSNHDATETTHLSAAHHHDYVHISDNEKSISQYTDNWSETSERFWSAD**KTD
+Sbjct  208  YSNNETASSNHDATETTHLSAAHHHDYVHISDNEKSISQYTDNWSETSERFWSAD**KTD  29
+
+Query  28   QPDNNTEWS  2
+            QPDNNTEWS
+Sbjct  28   QPDNNTEWS  2
+
+
+ Score = 150 bits (322),  Expect(2) = 3e-87
+ Identities = 62/62 (100%), Positives = 62/62 (100%), Gaps = 0/62 (0%)
+ Frame = -3/-3
+
+Query  448  KTRSTDNTTTESAPHEHES**KLSADNP*KYTANHNYDANESVHPEYLSDIHP*TKNQTD  269
+            KTRSTDNTTTESAPHEHES**KLSADNP*KYTANHNYDANESVHPEYLSDIHP*TKNQTD
+Sbjct  448  KTRSTDNTTTESAPHEHES**KLSADNP*KYTANHNYDANESVHPEYLSDIHP*TKNQTD  269
+
+Query  268  QY  263
+            QY
+Sbjct  268  QY  263
+
+
+ Score = 158 bits (339),  Expect(3) = 7e-79
+ Identities = 64/64 (100%), Positives = 64/64 (100%), Gaps = 0/64 (0%)
+ Frame = +2/+2
+
+Query  257  CIVLVRLVFGLWMNIRKIFWMNRFIGVIIMVGSVFLWIISRKLLL*FVLMWCRFRGGIVR  436
+            CIVLVRLVFGLWMNIRKIFWMNRFIGVIIMVGSVFLWIISRKLLL*FVLMWCRFRGGIVR
+Sbjct  257  CIVLVRLVFGLWMNIRKIFWMNRFIGVIIMVGSVFLWIISRKLLL*FVLMWCRFRGGIVR  436
+
+Query  437  GPGF  448
+            GPGF
+Sbjct  437  GPGF  448
+
+
+ Score = 127 bits (272),  Expect(3) = 7e-79
+ Identities = 52/52 (100%), Positives = 52/52 (100%), Gaps = 0/52 (0%)
+ Frame = +3/+3
+
+Query  3    DHSVLLSGWSVFY*SADQNLSDVSDQLSVYCEMDFSLSEM*T*SWWCAAERC  158
+            DHSVLLSGWSVFY*SADQNLSDVSDQLSVYCEMDFSLSEM*T*SWWCAAERC
+Sbjct  3    DHSVLLSGWSVFY*SADQNLSDVSDQLSVYCEMDFSLSEM*T*SWWCAAERC  158
+
+
+ Score = 30.4 bits (60),  Expect(3) = 7e-79
+ Identities = 12/12 (100%), Positives = 12/12 (100%), Gaps = 0/12 (0%)
+ Frame = +2/+2
+
+Query  161  GFSGIVIG*CSF  196
+            GFSGIVIG*CSF
+Sbjct  161  GFSGIVIG*CSF  196
+
+
+ Score = 124 bits (265),  Expect(2) = 9e-44
+ Identities = 50/50 (100%), Positives = 50/50 (100%), Gaps = 0/50 (0%)
+ Frame = +3/+3
+
+Query  264  YWSVWFLVYG*ISERYSG*TDSLAS*LWLAVYFYGLSAESFYYDSCSCGA  413
+            YWSVWFLVYG*ISERYSG*TDSLAS*LWLAVYFYGLSAESFYYDSCSCGA
+Sbjct  264  YWSVWFLVYG*ISERYSG*TDSLAS*LWLAVYFYGLSAESFYYDSCSCGA  413
+
+
+ Score = 55.6 bits (115),  Expect(2) = 9e-44
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = +2/+2
+
+Query  2    GPFrivvrlvsllliCRPKPL*CFRPIISIL*NGFL  109
+            GPFRIVVRLVSLLLICRPKPL*CFRPIISIL*NGFL
+Sbjct  2    GPFRIVVRLVSLLLICRPKPL*CFRPIISIL*NGFL  109
+
+
+ Score = 17.1 bits (31),  Expect = 0.97
+ Identities = 8/24 (33%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -1/-1
+
+Query  357  TLPTIIMTPMNRFIQNIFLIFIHR  286
+            T+P   +  M+      FL+ IHR
+Sbjct  432  TIPPRNLHHMSTNHNRSFLLIIHR  361
+
+
+ Score = 17.1 bits (31),  Expect = 0.97
+ Identities = 8/24 (33%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -1/-1
+
+Query  432  TIPPRNLHHMSTNHNRSFLLIIHR  361
+            T+P   +  M+      FL+ IHR
+Sbjct  357  TLPTIIMTPMNRFIQNIFLIFIHR  286
+
+
+ Score = 14.4 bits (25),  Expect = 6.5
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +2/+2
+
+Query  410  CRFRGGIVR  436
+            C F  GI+R
+Sbjct  188  CSFVIGIIR  214
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 68644
+
+
+Query= q1
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+NP_000002.1 Unknown                                                   387     2e-112  1
+NP_000006.1 Unknown                                                   18.0    0.27    3
+NP_000001.1 alpha                                                     16.2    1.8     1
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=450
+
+ Score = 16.2 bits (29),  Expect = 1.8
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -3/-3
+
+Query  100  NQTDDY  83
+            NQTD Y
+Sbjct  280  NQTDQY  263
+
+
+ Score = 16.2 bits (29),  Expect = 1.8
+ Identities = 5/14 (36%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = +1/+1
+
+Query  58   RWNARPPVCNRLSG  99
+            +W +  P C R  G
+Sbjct  97   KWISHYPKCERNRG  138
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 68644
+
+
+Query= q2
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+NP_000001.1 alpha                                                     18.0    0.19   2
+NP_000002.1 Unknown                                                   18.9    0.27   1
+NP_000006.1 Unknown                                                   18.5    0.37   1
+
+
+>NP_000001.1 alpha
+Length=450
+
+ Score = 18.0 bits (33),  Expect(2) = 0.19
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1/-1
+
+Query  312  NHRIRFFTTTHRNS  271
+            NH   F    HRN+
+Sbjct  396  NHNRSFLLIIHRNT  355
+
+
+ Score = 17.1 bits (31),  Expect(2) = 0.19
+ Identities = 5/18 (28%), Positives = 8/18 (44%), Gaps = 0/18 (0%)
+ Frame = -3/-3
+
+Query  142  AKNHQSAPETENHKIYHH  89
+            + NH +   T     +HH
+Sbjct  187  SSNHDATETTHLSAAHHH  134
+
+
+ Score = 14.8 bits (26),  Expect = 4.7
+ Identities = 4/12 (33%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = +2/+2
+
+Query  107  ILCLRCRLMIFG  142
+            +LC+    ++FG
+Sbjct  251  VLCIVLVRLVFG  286
+
+
+ Score = 14.4 bits (25),  Expect = 6.5
+ Identities = 4/7 (57%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = -1/-1
+
+Query  21   HIFSHHT  1
+            H F  HT
+Sbjct  159  HTFRQHT  139
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 68644
+
+
+Query= q3
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+NP_000006.1 Unknown                                                   397     2e-115  1
+NP_000001.1 alpha                                                     17.1    0.97    1
+NP_000002.1 Unknown                                                   16.2    1.8     1
+
+
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=450
+
+ Score = 17.1 bits (31),  Expect = 0.97
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -3/+3
+
+Query  202  WSEWYL  185
+            WS W+L
+Sbjct  267  WSVWFL  284
+
+
+ Score = 15.7 bits (28),  Expect(2) = 2.2
+ Identities = 5/14 (36%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = +2/+2
+
+Query  17   VGSLNVLCMWMICG  58
+            V  + V+C   +CG
+Sbjct  122  VNVIVVVCCRKVCG  163
+
+
+ Score = 14.8 bits (26),  Expect(2) = 2.2
+ Identities = 5/13 (38%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+ Frame = +1/+1
+
+Query  379  DNYDCDILADAMY  417
+            D Y  DIL + ++
+Sbjct  292  DEYQKDILDEPIH  330
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 68644
+
+
+  Database: pn
+    Posted date:  Nov 24, 2026  8:43 PM
+  Number of letters in database: 1,800
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

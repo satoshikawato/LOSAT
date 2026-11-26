@@ -1507,7 +1507,8 @@ files and alias files over them: the list alone, under `NSEQ` and `LENGTH` (read
 the constructor's scan), ANDed with a range or an `OIDLIST`, nested, two alias files over one volume, beside the bare
 volume (sequences left with no line), over one or both volumes of `gm`, and the list files' forms and errors (binary,
 no last separator, a GI past 2^32, a taxid past 2^31-1, `#`, empty, a bad count, missing at the absolute path
-`/losat-idlist-fixture-missing/none.txt`, two files in one value). D1c-2 adds version 5 `SEQIDLIST` (text and binary
+`/losat-idlist-fixture-missing/none.txt`, two files in one value), and databases whose headers were rewritten with
+definition lines without a Seq-id (`ln`, `lnn`, `lm`, `x1`, `xw`, `pn`). D1c-2 adds version 5 `SEQIDLIST` (text and binary
 `.bsl`, versioned and unversioned ids, unparseable FASTA fallback, empty and 0-count lists, missing eager and lazy
 lists, combined with `GILIST`, `TAXIDLIST`, and user `-seqidlist`/`-negative_seqidlist`/`-taxids`/`-negative_taxids`)
 and version 5 `TAXIDLIST` (text, past `i32::MAX`, unknown, empty, non-numeric, missing eager and lazy, combined with

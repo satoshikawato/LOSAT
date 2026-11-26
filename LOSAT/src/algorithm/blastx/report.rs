@@ -515,6 +515,7 @@ impl ShownSubjects<'_> {
                         all_ids: false,
                         bioseq: false,
                         length: false,
+                        lineless: false,
                     }),
                 None => reported
                     .tabular_ids(oid)
@@ -640,13 +641,15 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
 
 /// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
 /// batches' rows whose subject lookup fails where NCBI has no result
-/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set).
+/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set), with the
+/// query (its index in `queries`, the call's: the batch's `query_ordinal` and the set) whose row
+/// NCBI stops at.
 fn check_failed_lookups(
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
-) -> Result<()> {
+) -> std::result::Result<(), (usize, anyhow::Error)> {
     if !crate::report::tabular::may_stop_at_failed_lookup_for(
         options.tabular,
         crate::blastinput::app::Program::Blastx,
@@ -682,12 +685,13 @@ fn check_failed_lookups(
                 }
                 shown.lookup_failure(options.tabular, &subjects[oid], oid)
             },
-            |oid| match shown {
+            |oid, failure| match shown {
                 ShownSubjects::Database { reported, .. } => {
                     crate::report::tabular::failed_database_subject(
                         reported.oid(oid),
                         reported.loads().thrown(oid),
                         reported.parsed_subject(oid),
+                        failure,
                     )
                 }
                 ShownSubjects::Fasta { .. } => {
@@ -696,8 +700,62 @@ fn check_failed_lookups(
             },
             crate::blastinput::app::Program::Blastx,
             options.program().upper,
-        )?;
+            options.taxdb_found,
+        )
+        .map_err(|error| {
+            let set = error
+                .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+                .map_or(0, crate::report::tabular::FailedLookupRefusal::set);
+            (batch.query_ordinal + set, error)
+        })?;
     }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// What NCBI writes to `stderr` before it stops at the tabular row of the query `stop` (its index
+/// in `queries`) that LOSAT refuses (`error`): the batch's warning of `-subject`'s prefetch, then
+/// for each query up to `stop` what the tabular report writes to the standard error of its report
+/// (`tabular::write_blastx_tabular`: its warnings and fetch texts, its formatter's warning, its
+/// subject reads; `FailedLookupRefusal::posts_before_stop`, whose reads name a subject by its
+/// `oid`). The batch's reader messages and `-db` prefetch texts came before the report.
+#[allow(clippy::too_many_arguments)]
+fn posts_before_lookup_stop(
+    stderr: &mut dyn Write,
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+    stop: usize,
+    error: &anyhow::Error,
+) -> Result<()> {
+    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
+        return Ok(());
+    };
+    if !options.gapped
+        && SubjectLoc::of(shown) == SubjectLoc::Interval
+        && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
+    {
+        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
+            options.program().lower,
+        ))?;
+    }
+    let (mut posts, mut reads) = (Vec::new(), Vec::new());
+    for batch in batches {
+        for qidx in 0..batch.queries.len() {
+            let ordinal = batch.query_ordinal + qidx;
+            if ordinal > stop {
+                break;
+            }
+            let mut text = query_warning(options, &queries[ordinal], batch.search_skipped);
+            text.extend_from_slice(shown.query_fetches(ordinal));
+            posts.push(crate::report::diag_log::Posts::of_lines(text));
+            reads.push(shown.query_reads(ordinal).clone());
+        }
+    }
+    refusal
+        .posts_before_stop(&posts, &reads, |oid| oid as u32)
+        .write(stderr, None)?;
     Ok(())
 }
 
@@ -754,13 +812,28 @@ pub(super) fn render_queries_with(
     // The rows of subjects whose lookup fails where NCBI has no result
     // (`report::tabular::check_failed_lookups`), before the batch's tabular report and before
     // the format writes a warning of the batch (the prefetch's below, the queries'), so that a
-    // format that fails alone leaves them to the next (`local::write_run`).
+    // format that fails alone leaves them to the next (`local::write_run`); a refusal that fails
+    // the call comes after those warnings up to the row's query (`posts_before_lookup_stop`).
     if options
         .tabular_report()
         .is_some_and(crate::report::tabular::TabularSpec::writes_rows)
-        && !writes(check_failed_lookups(options, subjects, shown, batches))?
     {
-        return Ok(());
+        let (stop, checked) = match check_failed_lookups(options, subjects, shown, batches) {
+            Ok(()) => (None, Ok(())),
+            Err((stop, error)) => (Some(stop), Err(error)),
+        };
+        match writes(checked) {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(error) => {
+                if let Some(stop) = stop {
+                    posts_before_lookup_stop(
+                        stderr, options, queries, shown, batches, stop, &error,
+                    )?;
+                }
+                return Err(error);
+            }
+        }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at
     // `native::reported_batch`)

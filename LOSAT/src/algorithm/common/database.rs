@@ -704,6 +704,43 @@ impl std::fmt::Display for PreliminaryReadError {
 
 impl std::error::Error for PreliminaryReadError {}
 
+/// The error of an `ErrorAfterBatchReports` whose batch NCBI's run stops in after more of the
+/// batch's posts than a failed search writes (the batch's reader messages, its search strategy
+/// request's posts and its UTF8String warning, which the caller writes): a tabular row at which
+/// NCBI stops in the batch's report (`report::tabular::FailedLookupRefusal`), after the batch's
+/// prefetch texts and the own warnings of its queries up to that row's query (`posts`), which
+/// NCBI writes before each query's report.
+#[derive(Debug)]
+pub(crate) struct ErrorAfterPosts {
+    pub(crate) posts: crate::report::diag_log::Posts,
+    pub(crate) error: anyhow::Error,
+}
+
+impl ErrorAfterPosts {
+    /// The error of a batch's failure (`ErrorAfterBatchReports::error`), its posts written first
+    /// to `diagnostics` (and the archive's messages) where it is an `ErrorAfterPosts`.
+    pub(crate) fn written(
+        error: anyhow::Error,
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> Result<anyhow::Error> {
+        match error.downcast::<Self>() {
+            Ok(after) => {
+                after.posts.write(diagnostics, archive)?;
+                Ok(after.error)
+            }
+            Err(error) => Ok(error),
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorAfterPosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl std::error::Error for ErrorAfterPosts {}
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
 /// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
 /// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
@@ -3641,6 +3678,19 @@ fn reported_header(
         _ => {}
     }
     match header {
+        // No NCBI counterpart: LOSAT's refusal. makeprofiledb writes no definition line without a
+        // Seq-id, and NCBI's reports of a profile database with one were not probed (line RG
+        // D1c-1c-b, survey 4.3): RPS-BLAST and RPS-tBLASTn refuse such a profile as before.
+        Ok(crate::seqdb::SequenceHeader::Parsed(set))
+            if matches!(program, "RPSBLAST" | "RPSTBLASTN")
+                && set.deflines.iter().any(|defline| defline.ids.is_empty()) =>
+        {
+            Err(parsed_refusal(
+                db.oid(ordinal),
+                "has a definition line without a Seq-id",
+                program,
+            ))
+        }
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
@@ -4131,8 +4181,12 @@ pub(crate) fn check_shown_parsed_subject(
     program: &str,
 ) -> Result<()> {
     let generated = subject.heading_generates_title();
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+    // Check the protein description title for punctuation-only titles that NCBI's
+    // `x_CleanAndCompress` reads past the end of; the `> 65`-byte description-id check lives in
+    // `description_line_refusal` so it runs only where a report prints the description line.
     if protein {
-        let (_, title) = subject.description(protein);
+        let (_, title, _) = subject.description_line(protein);
         let heading_reads_past_end = generated
             && subject
                 .bioseq_title(protein, false)
@@ -4194,6 +4248,7 @@ pub(crate) fn check_pairwise_parsed(
 pub(crate) fn description_line_refusal(
     subject: &crate::report::db_subject::ParsedSubject,
     load: crate::report::db_subject::HitLoad,
+    protein: bool,
 ) -> Option<String> {
     let unloaded = load == crate::report::db_subject::HitLoad::Throws || subject.scope_finds_none();
     if unloaded && subject.description_gi_unset() {
@@ -4201,6 +4256,8 @@ pub(crate) fn description_line_refusal(
     }
     let id_length = if unloaded {
         subject.thrown_description().0.len()
+    } else if subject.description_may_throw() {
+        subject.description_line(protein).0.len()
     } else {
         subject.description_start().len()
     };
@@ -4228,7 +4285,8 @@ pub(crate) fn refuse_described_lines(
     oid_of: impl Fn(u32) -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<()> {
-    match described_refusal(num_queries, reported, described, parsed, load_of)? {
+    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
+    match described_refusal(num_queries, reported, described, parsed, load_of, protein)? {
         Some((rank, reason)) => Err(parsed_refusal(oid_of(rank), &reason, program)),
         None => Ok(()),
     }
@@ -4253,7 +4311,8 @@ pub(crate) fn refuse_described_records(
         .map(|record| record.clone().filter(|record| !record.shown_as_record()))
         .collect();
     let loaded = |_| crate::report::db_subject::HitLoad::Loaded;
-    match described_refusal(num_queries, reported, described, &shown, loaded)? {
+    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
+    match described_refusal(num_queries, reported, described, &shown, loaded, protein)? {
         Some((index, reason)) => Err(shown[index as usize]
             .as_deref()
             .expect("a refused record has parsed ids")
@@ -4269,13 +4328,14 @@ fn described_refusal(
     mut described: impl FnMut(usize) -> Result<Vec<u32>>,
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     load_of: impl Fn(u32) -> crate::report::db_subject::HitLoad,
+    protein: bool,
 ) -> Result<Option<(u32, String)>> {
     let refusals: std::collections::BTreeMap<u32, String> = parsed
         .iter()
         .enumerate()
         .filter_map(|(rank, subject)| {
             let rank = u32::try_from(rank).ok()?;
-            description_line_refusal(subject.as_deref()?, load_of(rank))
+            description_line_refusal(subject.as_deref()?, load_of(rank), protein)
                 .map(|reason| (rank, reason))
         })
         .collect();
@@ -4326,10 +4386,14 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
-    /// Whether a tabular format can stop at a row whose subject lookups fail
-    /// (`report::tabular::may_stop_at_failed_lookup`: `sacc`, `saccver`, the default fields, a
+    /// Whether a tabular format can stop at a row whose subject lookup throws
+    /// (`report::tabular::stops_at_lookup_failure`: `sacc`, `saccver`, the default fields, a
     /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
     pub(crate) stops_at_failed_lookup: bool,
+    /// Whether a tabular format stops at a subject that has a definition line without a Seq-id
+    /// (`report::tabular::stops_at_lineless_accession`: `sallacc`), so that such a sequence may be
+    /// refused (`reports_may_refuse`).
+    pub(crate) stops_at_lineless: bool,
     /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
     /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
@@ -4743,16 +4807,26 @@ pub(crate) fn reports_may_refuse(
                     && description_line_refusal(
                         &subject,
                         crate::report::db_subject::HitLoad::Loaded,
+                        protein,
                     )
                     .is_some()
                 {
                     return Err(ReportRefusal::Headers);
                 }
                 // A sequence whose lookups fail (`ParsedSubject::lookup_failure`), where a field
-                // list can stop at it.
+                // list can stop at it (`failed_lookup_stop`: `sacc`/`saccver`/default/`staxid` at
+                // a thrown lookup, `sallacc` at a definition line without a Seq-id).
                 if shown.tabular
-                    && shown.stops_at_failed_lookup
-                    && !matches!(subject.lookup_failure(protein), Ok(None))
+                    && (shown.stops_at_failed_lookup || shown.stops_at_lineless)
+                    && match subject.lookup_failure(protein) {
+                        Ok(None) => false,
+                        Ok(Some(failure)) => {
+                            (shown.stops_at_failed_lookup
+                                && (failure.subject_id || failure.all_ids))
+                                || (shown.stops_at_lineless && failure.lineless)
+                        }
+                        Err(_) => true,
+                    }
                 {
                     return Err(ReportRefusal::Headers);
                 }
@@ -7232,7 +7306,8 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// has): the third vector holds, by rank, what the taxonomy database said about the taxid of each
 /// definition line of such a sequence (empty where nothing was asked), as NCBI's `HitDescr` loop
 /// asks it (`SubjectNames::of_parsed`): `Unnamed` for a definition line without a taxid, and no
-/// answer after the first `NotFound` (NCBI's loop ends there). The volume's lookups are those of
+/// answer after the first `NotFound` nor from the first definition line without a Seq-id on
+/// (NCBI's loop ends there). The volume's lookups are those of
 /// `ParsedSubject::volume_taxids`.
 ///
 /// On a database whose volume holds the offset error's taxid and another taxid of its slot
@@ -7337,7 +7412,16 @@ where
             continue;
         };
         let mut answers = Vec::new();
-        for taxid in defline_taxids(subject) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:370-371
+        // The loop throws at a line without a Seq-id before it looks its taxid up.
+        let ends = subject
+            .deflines()
+            .iter()
+            .position(|defline| defline.ids.is_empty());
+        for taxid in defline_taxids(subject)
+            .into_iter()
+            .take(ends.unwrap_or(usize::MAX))
+        {
             let answer = if taxid == 0 {
                 HitTaxonomy::Unnamed
             } else {
@@ -8594,9 +8678,10 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         if let Some(subject) = parsed {
             // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
             // A query Bioseq in the batch's scope resolves the Seq-align id before the BLAST
-            // database data loader is called, so a subject whose loader would throw on its
-            // normalized PDB handle is never loaded by the prefetch (line RG-KB item 12).
-            if subject.load_throws() {
+            // database data loader is called, so a subject whose loader would throw or return an
+            // empty handle on its normalized PDB handle is resolved to the query Bioseq and never
+            // fails `PrefetchSeqData` (line RG-KB item 12).
+            if subject.load_throws() || subject.scope_finds_none() {
                 let scope = query_scope.get_or_insert_with(|| (queries.scope)());
                 if scope.has_key(&subject.query_scope_keys().own) {
                     continue;

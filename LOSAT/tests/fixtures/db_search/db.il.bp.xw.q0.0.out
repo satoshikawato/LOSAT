@@ -1,0 +1,58 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: xw
+           2 sequences; 300 total letters
+
+
+
+Query= x0
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000201.1 Unknown                                                   317     8e-118
+NP_000204.1 short                                                     14.2    1.6   
+
+
+Sequence with id NP_000201 no longer exists in database...alignment skipped
+Sequence with id NP_000204 no longer exists in database...alignment skipped
+Sequence with id NP_000204 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.328    0.139    0.531    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 33282
+
+
+  Database: xw
+    Posted date:  Nov 24, 2026  8:43 PM
+  Number of letters in database: 300
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

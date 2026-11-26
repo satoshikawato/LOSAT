@@ -296,11 +296,13 @@ impl DeflineSet {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:165-197
-// NCBI dereferences the best id of an empty list (accession kinds); every definition line
-// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none. `eGi` prints a
+// The full id of an empty list (a definition line without a Seq-id, which makeblastdb never
+// writes) is the empty string, which `Unknown` replaces; NCBI takes the label of the null best
+// id of an empty list for the accession kinds and stops, so a `sallacc` of such a line is
+// refused before the report (`report::tabular::LookupFailure::lineless`). `eGi` prints a
 // number: the tabular `sgi` and `sallgi` are `BlastDefline::gi` of the definition lines, as
 // `seq_id_list` replaces no GI (`report::db_subject::ParsedSubject::tabular_gi`,
-// `all_tabular_ids`).
+// `all_tabular_ids`; 0 for a line without a Seq-id).
 /// The tabular id of `kind` of the id list `ids` (`s_GetSeqIdListString`): `Unknown` for an
 /// empty result. The subject fields (`sseqid`, `sacc`, `saccver`) take the ids of the subject
 /// Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.

@@ -23,6 +23,7 @@ use crate::seqdb::DbSequence;
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
+use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
@@ -32,6 +33,15 @@ use super::defline::{
     SourceTaxname, UnknownEncoding,
 };
 use super::html_ids::{self, HtmlHeading};
+
+/// LOSAT's refusal of the organism report (outfmt 18) at a definition line without a Seq-id
+/// (`ParsedSubject::tax_deflines`).
+const LINELESS_TAX_REPORT: &str = "has a definition line without a Seq-id, at which NCBI BLAST+'s organism report (outfmt 18) stops for each HSP of the sequence and shows the lines before it once per HSP";
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:144-145
+/// `kMaxDescrLength`: the length past which the outfmt 0 description's walk of the definition
+/// lines stops (`ParsedSubject::description_meets_lineless_line`).
+const MAX_DESCRIPTION_LENGTH: usize = 4096;
 
 /// A reported database sequence with parsed Seq-ids: its definition lines, its Seq-align id
 /// and the definition line of its Bioseq.
@@ -728,8 +738,12 @@ impl ParsedSubject {
     // NCBI's.
     /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
     /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
-    /// error message each time it reads the definition line) and a definition line without a
-    /// Seq-id (NCBI's formatters take the best of none; makeblastdb writes none such).
+    /// error message each time it reads the definition line). A definition line without a Seq-id
+    /// (makeblastdb writes none such) beside one with a Seq-id is a subject as any other: NCBI's
+    /// scope loads it, and each format that walks its definition lines meets that line where its
+    /// own code says (`has_lineless_line`). A set without any Seq-id gets no Seq-align
+    /// (`algorithm::common::database::SeqAligned` drops its hits before the reports), so it never
+    /// comes here: LOSAT's internal error.
     pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
@@ -738,11 +752,11 @@ impl ParsedSubject {
         {
             return Err("has a stored title or Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
-        if set.deflines.iter().any(|defline| defline.ids.is_empty()) {
-            return Err("has a definition line without a Seq-id".into());
-        }
         let Some(alignment_id) = set.alignment_id().cloned() else {
-            return Err("has no Seq-id".into());
+            return Err(
+                "has no Seq-id in any definition line, which gets no Seq-align (internal error)"
+                    .into(),
+            );
         };
         let Some(own_line) = set.bioseq_defline(&alignment_id) else {
             return Err("has no definition line that holds its Seq-align id".into());
@@ -1808,26 +1822,26 @@ impl ParsedSubject {
     /// Which of NCBI's lookups of the subject's tabular ids throw (`report::tabular::FailedLookup`):
     /// `SetSubjectId` where the subject Bioseq's ids hold one that `GetSeqIdList` replaces
     /// (`lcl|Subject_`, `gnl|BL_ORD_ID`) and `GenerateDefline` throws, `x_SetSubjectIds` where a
-    /// definition line holds one (a `-subject` record's ids are not looked up there); `None`
-    /// where neither throws. `Err` as `tabular_ids`'.
+    /// definition line holds one (a `-subject` record's ids are not looked up there), with
+    /// whether a definition line has no Seq-id (`LookupFailure::lineless`, at which `sallacc`
+    /// stops); `None` where neither throws and every line has a Seq-id. `Err` as `tabular_ids`'.
     pub fn lookup_failure(
         &self,
         protein: bool,
     ) -> Result<Option<super::tabular::LookupFailure>, &'static str> {
         let subject_id = replaces_an_id(&self.target().ids);
         let all_ids = !self.record && self.has_replaced_id();
-        if !subject_id && !all_ids {
-            return Ok(None);
-        }
-        Ok(self
-            .generated_title_word(protein)?
-            .is_none()
-            .then_some(super::tabular::LookupFailure {
-                subject_id,
-                all_ids,
+        let lineless = self.has_lineless_line();
+        let failed = (subject_id || all_ids) && self.generated_title_word(protein)?.is_none();
+        Ok(
+            (failed || lineless).then_some(super::tabular::LookupFailure {
+                subject_id: failed && subject_id,
+                all_ids: failed && all_ids,
                 bioseq: false,
                 length: false,
-            }))
+                lineless,
+            }),
+        )
     }
 
     /// The Seq-align id as `sallseqid` and `sallacc` print it (`tabular_id` of the id alone,
@@ -1956,26 +1970,140 @@ impl ParsedSubject {
     /// (`x_GetDeflineInfo`): where the title throws (NCBI's `HtmlDecode` cannot decode it), the
     /// `catch` keeps the Seq-align id and `Unknown` (`thrown_description`; line RG T4a2 review O1:
     /// `>gi|777|ref|XP_000009.1| ...` with `-subject -parse_deflines` shows `gi|777 Unknown`).
+    ///
+    /// The `catch` also takes a subject whose walk of the definition lines meets one without a
+    /// Seq-id (`description_meets_lineless_line`).
     pub fn description_line(&self, protein: bool) -> (Vec<u8>, Defline, bool) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:388-394
         // The scope's Bioseq handle is empty (`scope_finds_none`): `x_FillDeflineAndId` returns at
         // once, which leaves the Seq-align id and `Unknown` as the `catch` does (without the
         // `catch`'s links, `HtmlReport::description_links`; its GI is never set,
         // `description_gi_unset`).
-        let title = if self.scope_finds_none {
-            Err(UnknownEncoding)
-        } else {
-            self.bioseq_title(protein, true)
-        };
-        let Ok(mut title) = title else {
+        let mut title = if self.scope_finds_none {
             let (start, title) = self.thrown_description();
             return (start, title, true);
+        } else {
+            match self.bioseq_title(protein, true) {
+                Ok(title) if !self.description_meets_lineless_line(&title.text) => title,
+                _ => {
+                    let (start, title) = self.thrown_description();
+                    return (start, title, true);
+                }
+            }
         };
         let (start, wrote_gi) = self.description_id();
         if wrote_gi {
             title.text.splice(0..0, *b"  ");
         }
         (start, title, false)
+    }
+
+    /// Whether some definition line has no Seq-id (a hand-edited database; makeblastdb writes
+    /// none such). NCBI's formatters take the best id of its empty list, a null reference, where
+    /// they walk the lines: each format's `catch` decides what it writes (`description_line`,
+    /// `heading`, `xml_hit`, `SubjectNames::of_parsed`, `lookup_failure`, `tax_deflines`).
+    pub fn has_lineless_line(&self) -> bool {
+        self.set
+            .deflines
+            .iter()
+            .any(|defline| defline.ids.is_empty())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1585-1604
+    /// Whether `description_line` can take NCBI's `catch` branch (whose start is the Seq-align
+    /// id's, not the display id's): a definition line without a Seq-id, or a non-ASCII byte in the
+    /// target's title, source name, or empty-title PDB/patent id fields (the only inputs for which
+    /// `html_decode` can return `UnknownEncoding`).
+    pub fn description_may_throw(&self) -> bool {
+        if self.has_lineless_line() {
+            return true;
+        }
+        let title = self.target().title.as_deref().unwrap_or_default();
+        if !title.is_ascii() {
+            return true;
+        }
+        if !title.iter().all(|byte| b".,;~ ".contains(byte)) {
+            return false;
+        }
+        if self
+            .source
+            .name()
+            .ok()
+            .flatten()
+            .is_some_and(|name| !name.is_ascii())
+        {
+            return true;
+        }
+        self.target().ids.iter().any(|id| match id {
+            ParsedSeqId::Pdb(pdb) => pdb.chain_id.as_deref().is_some_and(|s| !s.is_ascii()),
+            ParsedSeqId::Patent(patent) => {
+                let number = match &patent.cit.id {
+                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+                };
+                !patent.cit.country.is_ascii() || !number.is_ascii()
+            }
+            _ => false,
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4748-4760
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-536
+    // `GetDisplayIds` takes the label of each line's best id up to the line that holds the
+    // Seq-align id, and the walk after the generated title takes it of every line before it looks
+    // at the title: a line without a Seq-id throws in either (its best id is null). The walk adds
+    // ` >`, `gi|N|` with `-show_gis` and a GI, the FASTA label of the line's `WorstRank`-best id,
+    // a space and the title for each titled line (an empty title too) whose ids do not match the
+    // display id, and only then stops once the text passes `kMaxDescrLength` (4096 bytes,
+    // showdefline.cpp:145): a line after that stop is not reached.
+    /// Whether the outfmt 0 description of the subject, whose description title (`GenerateDefline`
+    /// with `fLeavePrefixSuffix`) is `title`, reaches a definition line without a Seq-id: one
+    /// before the line of the display id (`display_defline`), or one that the walk of the lines
+    /// meets before its text passes 4096 bytes. NCBI's `catch` then writes the line
+    /// (`thrown_description`).
+    fn description_meets_lineless_line(&self, title: &[u8]) -> bool {
+        if !self.has_lineless_line() {
+            return false;
+        }
+        let Some(shown) = self.set.display_defline(&self.alignment_id) else {
+            return false;
+        };
+        if self.set.deflines[..shown.index]
+            .iter()
+            .any(|defline| defline.ids.is_empty())
+        {
+            return true;
+        }
+        let display = self.set.deflines[shown.index].display_id();
+        let mut length = title.len();
+        for defline in &self.set.deflines {
+            if defline.ids.is_empty() {
+                return true;
+            }
+            let Some(text) = &defline.title else {
+                continue;
+            };
+            if display.is_some_and(|display| {
+                defline
+                    .ids
+                    .iter()
+                    .any(|id| compare(id, display) == Sic::Yes)
+            }) {
+                continue;
+            }
+            let gi = defline.gi();
+            if self.show_gis && gi > 0 {
+                length += b"gi|".len() + gi.to_string().len() + 1;
+            }
+            let mut label = Vec::new();
+            if let Some(best) = defline.display_id() {
+                label::fasta(best, &mut label);
+            }
+            length += b" >".len() + label.len() + 1 + text.len();
+            if length > MAX_DESCRIPTION_LENGTH {
+                return false;
+            }
+        }
+        false
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1576-1604
@@ -2010,7 +2138,8 @@ impl ParsedSubject {
         matches!(self.alignment_id, ParsedSeqId::Local(_))
     }
 
-    /// The start of the outfmt 0 description line (`description`).
+    /// The start of the outfmt 0 description line (`description`) where its title does not make it
+    /// the line of NCBI's `catch` (`description_line`).
     pub fn description_start(&self) -> Vec<u8> {
         self.description_id().0
     }
@@ -2106,6 +2235,13 @@ impl ParsedSubject {
         };
         let (mut shown, mut id_label, mut hides) = (0, Vec::new(), false);
         for defline in &self.set.deflines {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2195-2198
+            // `x_FillAlnDispParams` takes the label of each line's best id first, before its
+            // link and title: a line without a Seq-id throws there (its best id is null), with
+            // or without a limit of the lines (`heading_skipped_id`).
+            if defline.ids.is_empty() {
+                return Ok(Err(self.skipped_id().to_vec()));
+            }
             if !every_line && !self.heading_shows(defline) {
                 continue;
             }
@@ -2182,12 +2318,13 @@ impl ParsedSubject {
     // next one throws too).
     /// The Seq-id text (`CSeq_id::GetSeqIdString` of the Seq-align id) that outfmt 0 writes in
     /// place of the alignments of a subject whose heading (`heading`, with `every_line`) shows the
-    /// generated title and NCBI cannot make it (`UnknownEncoding`); `None` otherwise.
+    /// generated title and NCBI cannot make it (`UnknownEncoding`), or that has a definition line
+    /// without a Seq-id (`has_lineless_line`, which every heading meets); `None` otherwise.
     pub fn heading_skipped_id(&self, protein: bool, every_line: bool) -> Option<Vec<u8>> {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1952-1981
         // `CAlnVec::GetBioseqHandle` throws on a subject whose Bioseq the scope does not get
         // (`scope_finds_none`), before any heading.
-        if self.scope_finds_none {
+        if self.scope_finds_none || self.has_lineless_line() {
             return Some(self.skipped_id().to_vec());
         }
         let generated = self.set.deflines.iter().any(|defline| {
@@ -2260,20 +2397,41 @@ impl ParsedSubject {
             })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:281-298
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
+    // `GetBioseqHandleDeflineAndId` takes the id list of each line while no line had a title
+    // (an empty list gives an empty string) and the label of the best id of each titled line
+    // after the first titled one: a line without a Seq-id throws only there (its best id is
+    // null), and the `Hit`'s `catch` writes the Seq-align id, `Unknown`, `Unknown` and 0.
     /// The outfmt 5 `Hit_id` and `Hit_def` (`DeflineSet::hit_id_and_def` with the GIs shown;
     /// an empty `Hit_def` is written `No definition line`) and `Hit_accession` (the label of
     /// the `Score`-best id of the subject Bioseq, without its version; a `general` id's tag).
-    pub fn xml_hit(&self) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    /// `None` where a definition line without a Seq-id has a title (an empty one too) and comes
+    /// after the first line with a title: the `Hit` is NCBI's `catch`'s
+    /// (`blast_xml::SubjectNames::of_parsed`).
+    pub fn xml_hit(&self) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+        let mut titled = false;
+        for defline in &self.set.deflines {
+            if defline.title.is_none() {
+                continue;
+            }
+            if titled && defline.ids.is_empty() {
+                return None;
+            }
+            titled = true;
+        }
         let (id, def) = self.set.hit_id_and_def(true);
         let mut accession = Vec::new();
         if let Some(best) = find_best(&self.target().ids, text_score) {
             label::format_label(best, false, &mut accession);
         }
-        (id, def, accession)
+        Some((id, def, accession))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:365-388
-    /// The `HitDescr` of each definition line (XML2 and JSON), without the scientific names.
+    /// The `HitDescr` of each definition line (XML2 and JSON), without the scientific names; those
+    /// of the lines from the first one without a Seq-id on are not written
+    /// (`blast_xml::SubjectNames::of_parsed`).
     pub fn hit_descriptions(&self) -> Vec<HitDescription> {
         self.set
             .deflines
@@ -2346,6 +2504,13 @@ impl ParsedSubject {
             .map(|defline| TaxDefline {
                 label: label_of(defline.display_id()),
                 title: match defline.title.as_deref() {
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:944-947
+                    // `x_FillTaxDispParams` takes the label of the line's best id first, null for a
+                    // line without a Seq-id: the `catch` of `x_InitTaxInfoMap` drops the rest of the
+                    // HSP's subject without marking it shown, so its next HSP shows the lines before
+                    // again (Owner question Q-D1c1cb-18 of line RG D1c-1c-b; LOSAT refuses it until
+                    // it is answered).
+                    _ if defline.ids.is_empty() => refused(LINELESS_TAX_REPORT, false),
                     Some(title) if !title.is_empty() => TaxTitle::Text(title.to_vec()),
                     _ => generated(),
                 },

@@ -961,9 +961,17 @@ pub(super) fn parsed_shown(
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
                 6 | 7 | 10 | 20
-            ) && crate::report::tabular::may_stop_at_failed_lookup_for(
+            ) && crate::report::tabular::stops_at_lookup_failure_for(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
                 crate::blastinput::app::Program::Tblastn,
+            )
+        }),
+        stops_at_lineless: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::stops_at_lineless_accession(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
             )
         }),
         tabular: formats.iter().any(|format| {

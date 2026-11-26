@@ -1054,10 +1054,14 @@ pub(crate) fn parsed_shown(
         tabular: formats.iter().any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: formats.iter().any(|format| {
             format.is_tabular()
-                && crate::report::tabular::may_stop_at_failed_lookup_for(
+                && crate::report::tabular::stops_at_lookup_failure_for(
                     format.tabular_spec(),
                     crate::blastinput::app::Program::Tblastx,
                 )
+        }),
+        stops_at_lineless: formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::stops_at_lineless_accession(format.tabular_spec())
         }),
         pairwise,
         structured: formats.iter().any(|format| format.is_structured_xml()),

@@ -2258,49 +2258,6 @@ fn write_tblastx_outputs(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1220
-    // The Seq-aligns (outfmt 8, 12) show the engine's identities and positives
-    // (`report::engine_counts`), read before the display counts replace the identities.
-    // The positives of the reports are the search matrix's (a name without a table stops the
-    // search before any report has a hit, `run_batch_loop`); BLOSUM62's counts keep their
-    // constant matrix (`Blosum62Score`).
-    let matrix = match run.args.scoring_matrix() {
-        TblastxMatrix::Table(matrix) => matrix,
-        TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
-    };
-    let (engine_counts, seqalign_identities, pairwise, pairwise_masks) =
-        if matrix == ScoringMatrix::Blosum62 {
-            report_counts(
-                Blosum62Score,
-                &mut hits,
-                outputs,
-                run,
-                &output_formats,
-                &query_code,
-                &db_code,
-            )
-        } else {
-            report_counts(
-                matrix,
-                &mut hits,
-                outputs,
-                run,
-                &output_formats,
-                &query_code,
-                &db_code,
-            )
-        };
-    // The tabular rows print record coordinates (`report::shift_to_records`); the outfmt 0
-    // rows above were read from the searched letters first.
-    report::shift_to_records(
-        &mut hits,
-        &run.ranges.input.placements,
-        run.ranges.subject_placements,
-    );
-    let pairwise = pairwise.map(std::sync::Arc::new);
-    if let (Some(hits_sink), Some(pairwise)) = (outputs.hits.as_mut(), pairwise.as_ref()) {
-        hits_sink(std::sync::Arc::clone(pairwise));
-    }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output (`tabular_subject_ids`).
     let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
@@ -2329,6 +2286,7 @@ fn write_tblastx_outputs(
         .database
         .as_ref()
         .map_or(&every_loaded, |database| &database.reported.loads);
+    let mut lookup_stop = None;
     for (output, format) in outputs
         .formats
         .iter_mut()
@@ -2376,11 +2334,12 @@ fn write_tblastx_outputs(
                         s_idx,
                     )
                 },
-                |s_idx| match &run.database {
+                |s_idx, failure| match &run.database {
                     Some(database) => crate::report::tabular::failed_database_subject(
                         database.oids.oid(database.reported.ordinals[s_idx]),
                         loads.thrown(s_idx),
                         parsed.get(s_idx).and_then(Option::as_deref),
+                        failure,
                     ),
                     None => crate::report::tabular::failed_record_title(
                         s_idx,
@@ -2389,9 +2348,106 @@ fn write_tblastx_outputs(
                 },
                 crate::blastinput::app::Program::Tblastx,
                 crate::blastinput::app::Program::Tblastx.name(),
+                run.args.tabular_taxdb.unwrap_or(false),
             );
-            output.refusal.check(checked)?;
+            if let Err(error) = output.refusal.check(checked) {
+                lookup_stop = Some(error);
+                break;
+            }
         }
+    }
+    // A refusal that fails the call at a query batch after the first comes after the reports of
+    // the batches before, as NCBI's run stops in that batch's report
+    // (`FailedLookupRefusal::batch_start`; checked before the hits are shifted and counted, so
+    // that those of the batches before are written as they are): those queries' reports, without
+    // the epilog, then what NCBI writes to the standard error of the batch's reports up to the row
+    // (`FailedLookupRefusal::posts_before_stop`: each query's `warnings`, as `run_batch_loop`
+    // writes them before an XML matrix failure, its formatter's warning and its subject reads),
+    // then the refusal.
+    if let Some(error) = lookup_stop {
+        let before = crate::report::tabular::FailedLookupRefusal::batch_start(
+            &error,
+            run.archive_spans.iter().map(|span| span.start),
+        );
+        if before > 0 {
+            fn head<T>(items: &[T], before: usize) -> &[T] {
+                &items[..before.min(items.len())]
+            }
+            hits.retain(|hsp| (hsp.hit.q_idx as usize) < before);
+            write_tblastx_outputs(
+                hits,
+                outputs,
+                &TblastxReportRun {
+                    queries: head(run.queries, before),
+                    query_ids: head(run.query_ids, before),
+                    query_stats: head(run.query_stats, before),
+                    searched: head(run.searched, before),
+                    warnings: head(run.warnings, before),
+                    query_reads: head(run.query_reads, before),
+                    epilog: false,
+                    archive_spans: &run.archive_spans[..run
+                        .archive_spans
+                        .iter()
+                        .take_while(|span| span.start < before)
+                        .count()],
+                    ..*run
+                },
+            )?;
+        }
+        if let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() {
+            let end = (refusal.set() + 1).min(run.warnings.len());
+            refusal
+                .posts_before_stop(
+                    &run.warnings[before.min(end)..end],
+                    run.query_reads.get(before..).unwrap_or_default(),
+                    |s_idx| s_idx as u32,
+                )
+                .write(&mut *outputs.diagnostics, run.args.archive.as_ref())?;
+        }
+        return Err(error);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1220
+    // The Seq-aligns (outfmt 8, 12) show the engine's identities and positives
+    // (`report::engine_counts`), read before the display counts replace the identities.
+    // The positives of the reports are the search matrix's (a name without a table stops the
+    // search before any report has a hit, `run_batch_loop`); BLOSUM62's counts keep their
+    // constant matrix (`Blosum62Score`).
+    let matrix = match run.args.scoring_matrix() {
+        TblastxMatrix::Table(matrix) => matrix,
+        TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
+    };
+    let (engine_counts, seqalign_identities, pairwise, pairwise_masks) =
+        if matrix == ScoringMatrix::Blosum62 {
+            report_counts(
+                Blosum62Score,
+                &mut hits,
+                outputs,
+                run,
+                &output_formats,
+                &query_code,
+                &db_code,
+            )
+        } else {
+            report_counts(
+                matrix,
+                &mut hits,
+                outputs,
+                run,
+                &output_formats,
+                &query_code,
+                &db_code,
+            )
+        };
+    // The tabular rows print record coordinates (`report::shift_to_records`); the outfmt 0
+    // rows above were read from the searched letters first.
+    report::shift_to_records(
+        &mut hits,
+        &run.ranges.input.placements,
+        run.ranges.subject_placements,
+    );
+    let pairwise = pairwise.map(std::sync::Arc::new);
+    if let (Some(hits_sink), Some(pairwise)) = (outputs.hits.as_mut(), pairwise.as_ref()) {
+        hits_sink(std::sync::Arc::clone(pairwise));
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     //

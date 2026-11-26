@@ -1148,6 +1148,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             all_ids,
             bioseq: false,
             length: false,
+            lineless: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
     };
@@ -1166,6 +1167,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         all_ids: true,
         bioseq: false,
         length: false,
+        lineless: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
@@ -1178,9 +1180,10 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         Some(&spec("qseqid sseqid staxid")),
         [vec![0, 1], vec![1, 0]],
         record,
-        |s_idx| failed_record_title(s_idx, b"Subject_9"),
+        |s_idx, _| failed_record_title(s_idx, b"Subject_9"),
         crate::blastinput::app::Program::Blastn,
         "BLASTN",
+        true,
     );
     assert!(result
         .unwrap_err()
@@ -1190,11 +1193,115 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         Some(&spec("qseqid sseqid staxid")),
         [vec![0, 1], vec![0, 1]],
         record,
-        |s_idx| failed_record_title(s_idx, b"x"),
+        |s_idx, _| failed_record_title(s_idx, b"x"),
         crate::blastinput::app::Program::Blastn,
         "BLASTN",
+        true,
     )
     .is_ok());
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probe `D/logs/d1c1cb/probe`: `6 qseqid sallacc` exits
+// 255 after `<query>\t<the accessions of the lines before>;`): the `sallacc` of a subject with a
+// definition line without a Seq-id takes the label of that line's null best id at every row,
+// with no `catch`; the other fields have a result (`Unknown`, 0, `N/A`). LOSAT refuses the
+// report there, naming the subject and the program.
+#[test]
+fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap()
+    };
+    let lineless = LookupFailure {
+        lineless: true,
+        ..LookupFailure::default()
+    };
+    for first in [true, false] {
+        assert_eq!(
+            failed_lookup_stop(Some(&spec("qseqid sallacc")), lineless, first),
+            Some(LINELESS_ACCESSION_NULL_POINTER)
+        );
+        assert!(failed_lookup_stop(
+            Some(&spec("qseqid sallseqid sallgi salltitles saccver")),
+            lineless,
+            first
+        )
+        .is_none());
+        assert!(failed_lookup_stop(None, lineless, first).is_none());
+    }
+    assert!(may_stop_at_failed_lookup(Some(&spec("qseqid sallacc"))));
+    let result = check_failed_lookups(
+        Some(&spec("qseqid sallacc")),
+        [vec![0], vec![1, 0]],
+        |s_idx| (s_idx == 1).then_some(lineless),
+        describe_database_subject,
+        crate::blastinput::app::Program::Blastp,
+        "BLASTP",
+        true,
+    );
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        format!(
+            "database sequence 1 has a definition line without a Seq-id (a hand-edited database); \
+             {LINELESS_ACCESSION_NULL_POINTER}, which is not supported by LOSAT's BLASTP"
+        )
+    );
+}
+
+fn describe_database_subject(s_idx: usize, failure: LookupFailure) -> String {
+    failed_database_subject(s_idx, None, None, failure)
+}
+
+// The refusal names the result set where NCBI stops; TBLASTN and TBLASTX write the reports of
+// the query batches before the batch of that set (`FailedLookupRefusal::batch_start`).
+#[test]
+fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
+    let lineless = LookupFailure {
+        lineless: true,
+        ..LookupFailure::default()
+    };
+    let spec = blastp_spec(
+        ReportFormat::Tabular,
+        &FormatChoice {
+            number: 6,
+            spec: "qseqid sallacc".to_string(),
+            delimiter: String::new(),
+        },
+    )
+    .unwrap();
+    let fail_subject_1 = |s_idx| (s_idx == 1).then_some(lineless);
+    let error = check_failed_lookups(
+        Some(&spec),
+        [vec![0], vec![], vec![0], vec![2, 1]],
+        fail_subject_1,
+        describe_database_subject,
+        crate::blastinput::app::Program::Tblastn,
+        "TBLASTN",
+        true,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<FailedLookupRefusal>().unwrap().set(),
+        3
+    );
+    // One query per batch, two per batch, the stopping set at a batch's start, one batch.
+    assert_eq!(FailedLookupRefusal::batch_start(&error, 0..4), 3);
+    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 2]), 2);
+    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 3]), 3);
+    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 1, 4]), 1);
+    assert_eq!(FailedLookupRefusal::batch_start(&error, []), 0);
+    // Another error stops the first batch.
+    assert_eq!(
+        FailedLookupRefusal::batch_start(&anyhow::anyhow!("another error"), [0, 2]),
+        0
+    );
 }
 
 #[test]
@@ -1496,9 +1603,10 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
             minus_subject_frame: false,
         }]],
         |_| Some(empty),
-        |_| "database sequence 0".to_string(),
+        |_, _| "database sequence 0".to_string(),
         Program::Tblastn,
         "TBLASTN",
+        true,
     )
     .is_ok());
     let err = check_failed_lookups(
@@ -1514,9 +1622,10 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
             },
         ]],
         |_| Some(empty),
-        |_| "database sequence 0".to_string(),
+        |_, _| "database sequence 0".to_string(),
         Program::Tblastn,
         "TBLASTN",
+        true,
     )
     .unwrap_err()
     .to_string();

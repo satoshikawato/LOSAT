@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.118
+- Version: 1.119
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -856,18 +856,30 @@
   re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
   brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
-  1.117 2026-11-24 / 2026-11-26 (DELTABLAST, the order of tied domain hits and tied hit segments,
+  1.117 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
+  `Q-D23=A` / `web-qa-20261119/DECISIONS.md` 49 of 2026-11-24: a `-logfile` naming an input file
+  read by the run — including `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`,
+  `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`,
+  `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`,
+  `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`,
+  `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files,
+  or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` /
+  `-filtering_db`, via relative paths, symlinks, hard links, or missing inputs that `-logfile`
+  would create — is refused before opening or creating the file, exit status 1, leaving existing
+  inputs unchanged, matching LOSAT Web's D19 rule; numbered after 1.116 at the merge of dev
+  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116);
+  1.118 2026-11-24 / 2026-11-26 (DELTABLAST, the order of tied domain hits and tied hit segments,
   psiblast line item PS13a: an approved difference decided by the Owner — Q-DL-TIE=B on 2026-11-24
   for domain-hit sorting and Q-DL-SEGTIE=A on 2026-11-26 for hit-segment sorting; numbered after
-  dev's 1.116; first 1.95, then 1.109, 1.110, 1.111, 1.113, 1.114, 1.115, 1.116);
-  1.118 2026-11-26 (rule-3 rejections of `losat deltablast` for damaged `.wcounts`/`.obsr` files
+  dev's 1.117; first 1.95, then 1.109, 1.110, 1.111, 1.113, 1.114, 1.115, 1.116, 1.117);
+  1.119 2026-11-26 (rule-3 rejections of `losat deltablast` for damaged `.wcounts`/`.obsr` files
   and a zero-count `.wcounts` column aligned to a non-`X` query residue, psiblast line item PS13a:
   empty 0-byte files at open where NCBI crashes on a null mapping, truncated headers/offsets/columns
   on hit where NCBI reads past its mapping, and zero-count `.wcounts` columns aligned to non-`X`
   residues where NCBI divides 0 by 0 and converts `log(NaN)` to `long` in `BLAST_Nint` with C99
   6.3.1.4p1 undefined behaviour; 1-to-3-byte files zero-pad to 4 bytes like POSIX mmap so their
   magic check matches NCBI; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  first 1.116, then 1.117)
+  first 1.116, then 1.117, then 1.118)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1127,7 +1139,14 @@ Explicit rejections (rule 3):
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
 maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
 NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
-together with D8, every sum above 2^30 is rejected).
+together with D8, every sum above 2^30 is rejected); and (version 1.117, line WQA item D23,
+Owner decision `Q-D23=A` of 2026-11-24) a `-logfile` pointing to any input file read by the run
+(all programs, command line and library API, matching LOSAT Web's D19 rule): NCBI BLAST+ 2.17.0
+opens `-logfile` in append mode before loading configuration or reading inputs, which causes
+`tblastx -query q.fa -logfile q.fa` to read its own warnings back in an endless loop (growing
+`q.fa` to 10 GiB in 5 minutes in probe `s2-query`), corrupts `.ncbirc` on its second read
+(`s2-ncbirc-self`), and appends diagnostics into `-subject` and other inputs; LOSAT refuses any
+such `-logfile` before opening or creating the file (exit status 1, existing inputs unchanged).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
@@ -2222,7 +2241,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 `tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
 `rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
 
-## Approved difference (DELTABLAST, the order of tied domain hits and hit segments, version 1.117)
+## Approved difference (DELTABLAST, the order of tied domain hits and hit segments, version 1.118)
 
 Decided by the Owner on 2026-11-24 (question Q-DL-TIE, answer B; psiblast line `DECISIONS.md` 103;
 the Owner's words are in [`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat deltablast`
@@ -4322,7 +4341,7 @@ file would differ, and NCBI's programs still could not open the database).
   and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
   partial build (`erase_after_refusal`).
 - `losat deltablast` damaged `.wcounts`/`.obsr` files and zero-count `.wcounts` columns (version
-  1.118, 2026-11-26, psiblast line item PS13a, Owner-delegated, standing instruction 2026-09-29,
+  1.119, 2026-11-26, psiblast line item PS13a, Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07):
   (a) At open (`CRpsFreqsFile` / `CRpsObsrFile`, `rps_aux.cpp:386-449`), NCBI maps the file and
   reads only the 4-byte `magic_number`. An empty file (0 bytes) crashes NCBI (`SIGSEGV` on a null

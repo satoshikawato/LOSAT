@@ -2012,7 +2012,7 @@ fn decodes(bytes: &[u8]) -> bool {
 /// the registry turns the file API's logging on, which a run of BLAST+ does not (line WQA's D11
 /// round 3, 2026-11-20: NCBI BLAST+ 2.17.0 tblastx `-logfile run.log` in a working directory of
 /// 4298 bytes writes `run.log` there, with nothing on the standard error).
-fn ncbi_cwd() -> Option<OsString> {
+pub(crate) fn ncbi_cwd() -> Option<OsString> {
     getcwd_reads(std::env::current_dir().ok()?.into_os_string())
 }
 
@@ -2027,7 +2027,7 @@ fn getcwd_reads(cwd: OsString) -> Option<OsString> {
 
 /// The path of the bytes `path` that `log_file_name` gives: any bytes on Unix and WASI.
 #[cfg(not(windows))]
-fn log_path(path: &[u8]) -> &Path {
+pub(crate) fn log_path(path: &[u8]) -> &Path {
     #[cfg(unix)]
     use std::os::unix::ffi::OsStrExt;
     #[cfg(target_os = "wasi")]
@@ -2042,7 +2042,7 @@ fn log_path(path: &[u8]) -> &Path {
 
 /// The path of the bytes `path` that `log_file_name` gives on Windows.
 #[cfg(windows)]
-fn log_path(path: &[u8]) -> &Path {
+pub(crate) fn log_path(path: &[u8]) -> &Path {
     // SAFETY: each path that `log_file_name` gives is made of the encoded bytes of the name and
     // of the working directory (WTF-8), joined at separators and cut at ASCII bytes (separators,
     // ':', spaces), which are boundaries of it, and at NCBI's cuts of bytes (3 of the working
@@ -2285,11 +2285,11 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
     }
 }
 
-/// The file of the last `-conffile` of `words` (`preparse`): none before a version word.
-fn conffile_of<S: AsRef<OsStr> + Clone>(words: &[S]) -> Option<OsString> {
+/// The file of the last `-conffile` of `words` and whether `words` requests a version (`preparse`).
+fn preparse_start<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Option<OsString>, bool) {
     match preparse(words) {
-        Preparsed::Words { conffile, .. } => conffile,
-        Preparsed::Version(_) => None,
+        Preparsed::Words { conffile, .. } => (conffile, false),
+        Preparsed::Version(_) => (None, true),
     }
 }
 
@@ -2324,6 +2324,9 @@ pub struct ApplicationStart {
     config: Result<ConfigLoad, String>,
     /// The settings after the start (`settings`).
     settings: Result<ApplicationSettings, String>,
+    /// Registry files read by this start (or looked up by its configuration load before
+    /// `-logfile` is opened): `.ncbirc` / `ncbi.ini`, `<program>.ini`, or `-conffile`.
+    registry_inputs: Vec<PathBuf>,
 }
 
 /// The configuration load of an application start.
@@ -2349,9 +2352,11 @@ impl ApplicationStart {
     /// `words` are the arguments after the program's name: the file of their last `-conffile`
     /// (`preparse`) is loaded in place of `<program>.ini`.
     pub fn of_process<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> ApplicationStart {
+        let (conffile, is_version) = preparse_start(words);
         application_start(
             program,
-            conffile_of(words).as_deref(),
+            conffile.as_deref(),
+            is_version,
             std::env::vars_os(),
             &|name: &str| std::env::var_os(name),
             &ProcessFacts::of_this_process(),
@@ -2368,6 +2373,7 @@ impl ApplicationStart {
         variables: &[(&str, &str)],
         files: &dyn RegistryFiles,
     ) -> ApplicationStart {
+        let (conffile, is_version) = preparse_start(words);
         let env = |name: &str| {
             variables
                 .iter()
@@ -2376,7 +2382,8 @@ impl ApplicationStart {
         };
         application_start(
             program,
-            conffile_of(words).as_deref(),
+            conffile.as_deref(),
+            is_version,
             variables
                 .iter()
                 .map(|(name, value)| (OsString::from(name), OsString::from(value))),
@@ -2394,6 +2401,13 @@ impl ApplicationStart {
     /// The program whose start this is.
     pub fn program(&self) -> &str {
         &self.program
+    }
+
+    /// The registry files that this application start reads or looks up during configuration load
+    /// (`.ncbirc` / `ncbi.ini`, `<program>.ini`, `-conffile`), for self-referencing `-logfile`
+    /// checks (`report::log_inputs`).
+    pub(crate) fn registry_inputs(&self) -> &[PathBuf] {
+        &self.registry_inputs
     }
 
     /// The NCBI application settings that LOSAT reproduces after the start, or LOSAT's refusal
@@ -2610,7 +2624,7 @@ fn application_settings(
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
 ) -> Result<ApplicationSettings, String> {
-    application_start(program, None, variables, env, process).settings()
+    application_start(program, None, false, variables, env, process).settings()
 }
 
 /// The application start of `program` (`ApplicationStart`) over the environment `variables`
@@ -2642,6 +2656,7 @@ fn application_settings(
 fn application_start(
     program: &str,
     conffile: Option<&OsStr>,
+    is_version: bool,
     mut variables: impl Iterator<Item = (OsString, OsString)>,
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
@@ -2652,6 +2667,7 @@ fn application_start(
         usage_report: Ok(String::new()),
         config: Ok(ConfigLoad::Loaded(String::new())),
         settings: Err(String::new()),
+        registry_inputs: Vec::new(),
     };
     // A start whose messages LOSAT would write under a variable that it refuses is refused
     // there.
@@ -2672,6 +2688,14 @@ fn application_start(
     let search_path = match registry_search_path(program, env, process) {
         Ok(path) => path,
         Err(reason) => {
+            if !is_version {
+                if let Some(name) = conffile {
+                    crate::report::log_inputs::push_file(
+                        &mut start.registry_inputs,
+                        PathBuf::from(name),
+                    );
+                }
+            }
             start.settings = Err(environment_refusal.clone().unwrap_or(reason));
             // NCBI's check of the `-conffile` file comes before its load and needs no search
             // path (`conf_file_path`).
@@ -2699,8 +2723,64 @@ fn application_start(
             )
         })
     };
-    // The usage report.
+    // Record the registry files read by this start (`.ncbirc` / `ncbi.ini`, and when not a
+    // `-version` run, `-conffile` or `<program>.ini` along `search_path` up to any existing hit),
+    // before any early return so self-referencing `-logfile` checks see them even on malformed or
+    // missing config files.
     let usage_report_reads = usage_report_reads_ncbirc(program, env);
+    if !dont_use_ncbirc {
+        let ncbirc_found = ncbirc.as_ref().map(|(_, path)| path.as_path());
+        if usage_report_reads {
+            if let Some(ncbirc_path) = ncbirc_found {
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    ncbirc_path.to_path_buf(),
+                );
+            }
+        }
+        if !is_version {
+            push_registry_search_candidates(
+                &mut start.registry_inputs,
+                &search_path,
+                OsStr::new(SYSTEM_WIDE_REGISTRY),
+                ncbirc_found,
+            );
+        }
+    }
+    if !is_version {
+        match conffile {
+            Some(name) => {
+                let path = Path::new(name);
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    path.to_path_buf(),
+                );
+                let has_directory = path
+                    .parent()
+                    .is_some_and(|parent| !parent.as_os_str().is_empty());
+                if !has_directory {
+                    let found = find_registry(&search_path, name, process.files);
+                    push_registry_search_candidates(
+                        &mut start.registry_inputs,
+                        &search_path,
+                        name,
+                        found.as_deref(),
+                    );
+                }
+            }
+            None => {
+                let ini_name = format!("{program}.ini");
+                let found = find_registry(&search_path, OsStr::new(&ini_name), process.files);
+                push_registry_search_candidates(
+                    &mut start.registry_inputs,
+                    &search_path,
+                    OsStr::new(&ini_name),
+                    found.as_deref(),
+                );
+            }
+        }
+    }
+    // The usage report.
     let mut usage_read = None;
     if usage_report_reads {
         match &ncbirc {
@@ -2806,6 +2886,25 @@ fn application_start(
         None => settings_of(env, ini_entries, ncbirc_entries, ncbirc_window_masker),
     };
     start
+}
+
+/// Appends each candidate `<dir>/<file_name>` along `search_path` up to and including `found` (or
+/// every directory when `found` is `None`), so missing registry paths that `-logfile` would create
+/// are caught alongside existing hits.
+fn push_registry_search_candidates(
+    out: &mut Vec<PathBuf>,
+    search_path: &[PathBuf],
+    file_name: &OsStr,
+    found: Option<&Path>,
+) {
+    for dir in search_path {
+        let candidate = dir.join(file_name);
+        let hit = found == Some(candidate.as_path());
+        crate::report::log_inputs::push_file(out, candidate);
+        if hit {
+            break;
+        }
+    }
 }
 
 /// LOSAT's refusal of the usage report's `[BLAST] BLAST_USAGE_REPORT` when it is not a Boolean

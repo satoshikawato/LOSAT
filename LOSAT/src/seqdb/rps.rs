@@ -22,6 +22,11 @@ mod cd_data;
 
 pub(crate) use cd_data::CdProfileFiles;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:549-575
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:355-363
+/// RPS-BLAST and DELTA-BLAST profile database file extensions beyond the protein BLAST volume files.
+pub(crate) const RPS_EXTENSIONS: [&str; 6] = ["rps", "loo", "aux", "freq", "wcounts", "obsr"];
+
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:43-44

@@ -429,7 +429,7 @@ pub(crate) const VOLUME_EXTENSIONS: [&str; 20] = [
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2663-2668
 /// `SeqDB_GetLMDBFileExtensions` without the letter of the molecule.
-const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf-lock"];
+pub(crate) const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf-lock"];
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1542-1593
 // NCBI finds the volumes of the existing database with its reader and

@@ -2775,8 +2775,52 @@ A `pdb` Seq-id whose chain is an INTEGER outside 0-255 without a chain-id (line 
 `pdbchain/pdbchain` of five sequences without a title, each with a `gb|AB60000<n>.1|` Seq-id and a `pdb` one with the
 chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n>|<letter>` and a rewrite of the stored
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
-`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
-(with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+`(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report.
+`pdbchain/pdbonly` (line RG-KB item 12; rows `db.pdbchain.only.*`) holds the same records with the pdb Seq-id alone:
+NCBI's data loader looks up the Seq-id of the id's handle, whose chain is the chain's low byte read back as a signed char (65
+for 321 and -191, 127 for 383), and serves no sequence where no stored id `Match`es it, so the Bioseq handle of the
+report is empty for 321, -191 and 383 (`ParsedSubject::scope_finds_none`): outfmt 0 `Unknown` without links and `no
+longer exists in database...alignment skipped`, outfmt 1 to 4 without those subjects, XML the `Hit` and `Hsp` of the
+`catch`, the tabular rows of a failed lookup (`sacc`, `saccver` and the default fields: NCBI's null pointer, LOSAT's
+refusal), no outfmt 18 row; `-show_gis` prints a GI that NCBI never set in a description line (refused where a line
+of such a subject is printed: row `db.pdbchain.only.blastp.0gs`; `-num_descriptions 0` prints none, `.0g`).
+`pdbchain/pdbnorm` (line RG-KB item 12, review 1; rows `db.pdbchain.norm.*`) holds six records whose only Seq-id is a pdb
+one written whole (molecule, chain, release date `rel` as a Date-std, chain-id), each with a taxid of `-taxid_map`
+(9606 or 10090; the organism report rows take `BLASTDB=tests/seqdb/taxdb/good`): `1ab6` (a lower-case molecule)
+chain 66 chain-id `A`, `1AB7` chain 66 chain-id `A` with a date of month 13 (a date that normalizes: year 1-4095,
+month 1-15, day 1-31, hour 0-30, minute and second 0-62, no season), and `1AB8` chain 200 without a chain-id (a chain
+in 128..255, the byte 0xC8 in its label) have no Bioseq (the handle looks up chain 65, 65 and -56); `1AB9` chain 66
+chain-id `A` with month 16, `1ABA` the same with the season `spring` (dates that do not normalize) and `1ABB` chain 65
+chain-id `A` with month 13 (the normalized chain is the stored one) load. `pdbchain/q_norm0.faa` (row
+`db.pdbchain.norm.blastp.5q`, review 2 of item 12) is the query of `1ab6`'s letters, whose BLAST XML `Hit` of the
+`catch` (`Unknown`) comes before NCBI's exception at `1AB8`'s label.
+`pdbchain/pdbtwo` (line RG-KB item 12, review 2; rows `db.pdbchain.two.*`) holds two records of two definition lines
+each: the first `pdb 1AB1` or `1AB2` chain 321 without a chain-id (the Seq-align id; untitled for `1AB1`, `t0` for
+`1AB2`), the second `pdb|1AB<n>|A` titled `t1`, which holds the Seq-id of the handle (taxids 100001 and 100002; the
+organism report takes `BLASTDB=tests/seqdb/taxdb/t5`). NCBI's data loader makes the reports' Bioseq of the second line:
+the description lines, the organism report's generated title and the heading's generated title of the untitled line
+show `t1`, while the heading, the tables and the XML documents list the sequence's own lines. Where no definition line
+holds the handle's id as NCBI's load reads the ids (one line with chain 321 then chain 65, the review probe
+`i12/review/p3` `e15b_oneline`), NCBI's load throws `oid headers do not contain target gi/seq_id`: LOSAT refuses the
+formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's (no row here).
+`pdbchain/q_pdb1ab1.faa` (decision KB-12-1 of line RG-KB item 12; rows `db.pdbchain.seen.*`) is the query `pdb|1AB1|A`
+of the duplicated record's letters: read with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321
+(chain 65), so NCBI's scope finds the query for that sequence of `pdbonly` and `pdbtwo`: the tables show the query's ids,
+`N/A` titles, its length and no taxonomy, the organism report its line without a taxid. `pdbchain/pdbn` (review 3 of
+item 12, F2; rows `db.pdbchain.seen.n.*` of TBLASTN, BLASTN and TBLASTX) is the nucleotide database of `pdbonly`'s first
+two records back-translated, with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb writes them, and
+`pdbchain/q_pdb1ab1.fna` the nucleotide query `pdb|1AB1|A` of the same letters back-translated (also BLASTX's against
+`pdbonly`, rows `db.pdbchain.seen.only.blastx.*`): NCBI's scope finds the query for `1AB1` in each program.
+`pdbchain/pdbnonly` (rows `db.pdbchain.nonly.tblastn.*`) is the one-sequence nucleotide database of `1AB1` with chain 321
+and no `chain-id` (empty Bioseq handle), paired with `q_pdb1ab1.faa` (plus-strand rows: `GetFrame` computes `(start % 3) + 1`
+without touching the handle) and `q_pdbn_minus.faa` (minus-strand row: `GetFrame` throws `CCoreException::eNullPtr`).
+`q_pdb1ab1_tail.fna` (300 bases from offset 360) and `q_pdb1ab1_straddle.fna` (301 bases from offset 150) test TBLASTX `qseq`
+against `pdbn` when a plus-strand HSP starts past the found query Bioseq's length (empty clipped slice, exit 0) vs straddles
+it with a clipped length not divisible by 3 (`eTranslateFailure`, refused).
+`descid/` (line RG-KB item 12, review 2 N2 and review 3 F3; rows `db.pd.n2.*`): the `-subject` sets `lng.fa` (protein) and
+`nlng.fa` (nucleotide) of `gb|AAA00001.1|` and a record whose `gnl` description id is longer than 65 bytes, and the queries
+`q_r0.faa` and `q_r0.fna`: with `-num_descriptions 1` the long id's description line is not printed, so NCBI's output
+has no padded line and LOSAT writes it (copied from the review-2 probe `p5db`).
 - `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
   and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
   the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,

@@ -219,7 +219,12 @@ pub(super) fn write_tblastn_tabular(
             parsed,
             records: tab.subject_records,
         },
-        ShownSubjects::Database { reported, oids, .. } => TabularSubjects::Database {
+        ShownSubjects::Database {
+            reported,
+            oids,
+            seen,
+            ..
+        } => TabularSubjects::Database {
             ids: tab.subject_ids,
             ordinals: &reported.ordinals,
             oids: *oids,
@@ -229,6 +234,7 @@ pub(super) fn write_tblastn_tabular(
             lengths: &lengths,
             taxonomy: &tab.inputs.taxonomy,
             loads: &reported.loads,
+            seen: *seen,
         },
     };
     let names = tab.inputs.names.as_ref();
@@ -280,8 +286,10 @@ pub(super) fn write_tblastn_tabular(
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {
-        for rank in reported_ranks(hitlists) {
-            subjects.values(rank, spec, PROGRAM)?;
+        for (q_idx, hitlist) in hitlists.iter().enumerate() {
+            for rank in reported_ranks(std::slice::from_ref(hitlist)) {
+                subjects.values_for(q_idx, rank, spec, PROGRAM)?;
+            }
         }
     }
     let code = GeneticCode::try_from_id(tab.genetic_code).map_err(anyhow::Error::msg)?;
@@ -379,7 +387,7 @@ pub(super) fn write_tblastn_tabular(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"
             );
-            let values = subjects.values(oid, spec, PROGRAM)?;
+            let values = subjects.values_for(q_idx, oid, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once); their query intervals in residues, which a `-query_loc` shift moves
@@ -397,11 +405,20 @@ pub(super) fn write_tblastn_tabular(
                 -1
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
-            let subject = values.nucleotide_subject(names, qcovs, -1);
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:917,1061-1067
+            // When NCBI's scope resolves the subject to a protein query Bioseq, `subject_is_na` is
+            // false, so `sstrand` prints `N/A`.
+            let seen_bioseq = subjects.seen_at(q_idx, oid);
+            let mut subject = values.nucleotide_subject(names, qcovs, -1);
+            if seen_bioseq.is_some() {
+                subject.nucleotide = false;
+            }
             // A subject whose lookups fail shows what the last found subject set
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
-                Some(kept) if table.fails(&subject) => Some(subjects.values(kept, spec, PROGRAM)?),
+                Some(kept) if table.fails(&subject) => {
+                    Some(subjects.values_for(q_idx, kept, spec, PROGRAM)?)
+                }
                 _ => None,
             };
             let kept = kept_values
@@ -569,12 +586,17 @@ pub(super) fn write_tblastn_tabular(
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1244
                 // The protein query has no strand (frame 0); the subject's frame is read in its
                 // whole record, as the XML's `Hit_frame` (`translation_frame`).
-                let s_frame = translation_frame(
-                    frame > 0,
-                    s_start.min(s_end),
-                    s_start.max(s_end),
-                    whole_length,
-                );
+                let s_frame = match seen_bioseq {
+                    Some(bioseq) => {
+                        crate::report::query_bioseq::ncbi_frame(frame > 0, s_start, bioseq.length())
+                    }
+                    None => translation_frame(
+                        frame > 0,
+                        s_start.min(s_end),
+                        s_start.max(s_end),
+                        whole_length,
+                    ),
+                };
                 let row = TabularHsp {
                     q_start: i64::from(q_start),
                     q_end: i64::from(q_end),

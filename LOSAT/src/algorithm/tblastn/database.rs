@@ -62,6 +62,12 @@ impl TblastnDatabase {
         self.db.oid_map()
     }
 
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(super) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -1016,7 +1022,7 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> us
 /// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
 /// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
 /// subjects.
-fn parsed_shown(
+pub(super) fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
     let pairwise = formats
@@ -1027,8 +1033,9 @@ fn parsed_shown(
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
                 6 | 7 | 10 | 20
-            ) && crate::report::tabular::stops_at_lookup_failure(
+            ) && crate::report::tabular::stops_at_lookup_failure_for(
                 super::tabular::tabular_spec(format.outfmt).as_ref(),
+                crate::blastinput::app::Program::Tblastn,
             )
         }),
         stops_at_lineless: formats.iter().any(|format| {
@@ -1211,6 +1218,7 @@ pub(super) fn reported_subjects(
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
     let shown = parsed_shown(formats);
@@ -1298,6 +1306,29 @@ pub(super) fn reported_subjects(
             list.oid = i32::try_from(rank).context("TBLASTN subject rank out of range")?;
         }
     }
+    let seen_all: std::collections::HashSet<u32> = if seen.any() {
+        ordinals
+            .iter()
+            .copied()
+            .filter(|&ordinal| {
+                seen.hides_ordinal(
+                    hitlists.iter().enumerate().filter_map(|(q_idx, hitlist)| {
+                        hitlist
+                            .lists()
+                            .iter()
+                            .any(|list| {
+                                !list.hsps.hsps.is_empty()
+                                    && u32::try_from(list.oid).ok() == Some(ordinal)
+                            })
+                            .then_some(q_idx)
+                    }),
+                    ordinal,
+                )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     let mut records = Vec::with_capacity(ordinals.len());
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();
@@ -1339,6 +1370,7 @@ pub(super) fn reported_subjects(
                     false,
                     taxdb,
                     ordinal,
+                    seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {

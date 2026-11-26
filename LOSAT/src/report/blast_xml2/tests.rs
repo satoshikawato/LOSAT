@@ -673,6 +673,7 @@ fn one_hsp_named(
                     taxonomy,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -831,6 +832,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -1363,6 +1365,7 @@ fn many_hits_16(
                         taxonomy: crate::report::blast_xml::records::UNNAMED,
                         descriptions: &[],
                         defline_thrown: false,
+                        unloaded: false,
                         lookup_throws: None,
                     },
                     |hsps| {

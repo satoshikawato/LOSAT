@@ -426,8 +426,9 @@ impl RecordsParsed {
     }
 
     /// The records of `records`. `pairwise` gets the parsed subjects first, for LOSAT's refusals of
-    /// them in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's), then come
-    /// the refusals of their tabular ids.
+    /// their titles in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's;
+    /// their description lines are refused where a report prints them, `write_pairwise`), then
+    /// come the refusals of their tabular ids.
     pub(crate) fn of(
         records: &[FastaRecord],
         show_gis: bool,
@@ -499,6 +500,8 @@ impl ShownSubjects<'_> {
                 Some(LookupFailure::thrown())
             }
             ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
+                // The scope's Bioseq handle is empty (`ParsedSubject::scope_finds_none`).
+                Some(parsed) if parsed.scope_finds_none() => Some(LookupFailure::empty_handle()),
                 Some(parsed)
                     if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
                 {
@@ -511,6 +514,7 @@ impl ShownSubjects<'_> {
                         subject_id: true,
                         all_ids: false,
                         bioseq: false,
+                        length: false,
                         lineless: false,
                     }),
                 None => reported
@@ -608,6 +612,24 @@ pub(super) fn sort_lists(batches: &mut [BatchResults], loc: SubjectLoc) {
     }
 }
 
+/// Whether the reports of `options` show NCBI's bytes for a reported sequence that the scope finds
+/// as a query of its batch (`report::query_bioseq`): BLASTX's tables that read no letter of the
+/// found Bioseq (`query_bioseq::tabular_shows`), the organism report, the Seq-annots and the
+/// archive (which write the Seq-align id alone), without `-query_loc`. RPSTBLASTN keeps LOSAT's
+/// refusal.
+pub(super) fn shows_query_bioseqs(options: &ResolvedOptions) -> bool {
+    options.rpstblastn.is_none()
+        && options.query_range.is_none()
+        && match options.outfmt {
+            8 | 9 | 11 | 12 | 18 => true,
+            6 | 7 | 10 | 20 => crate::report::query_bioseq::tabular_shows(
+                options.tabular,
+                crate::blastinput::app::Program::Blastx,
+            ),
+            _ => false,
+        }
+}
+
 /// The number of HSPs that the reports of `batches` show (`has_seqalign`).
 pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
     batches
@@ -628,10 +650,22 @@ fn check_failed_lookups(
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> std::result::Result<(), (usize, anyhow::Error)> {
-    if !crate::report::tabular::may_stop_at_failed_lookup(options.tabular) {
+    if !crate::report::tabular::may_stop_at_failed_lookup_for(
+        options.tabular,
+        crate::blastinput::app::Program::Blastx,
+    ) {
         return Ok(());
     }
     for batch in batches {
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
+        let row = |qidx: usize, oid: usize| match shown {
+            ShownSubjects::Database { reported, .. }
+                if reported.seen_of(batch.query_ordinal + qidx, oid).is_some() =>
+            {
+                crate::report::query_bioseq::SEEN_ROW
+            }
+            _ => oid,
+        };
         crate::report::tabular::check_failed_lookups(
             options.tabular,
             (0..batch.queries.len()).map(|qidx| {
@@ -643,14 +677,20 @@ fn check_failed_lookups(
                             .iter()
                             .any(|hsp| has_seqalign(hsp, options.gapped))
                     })
-                    .map(|list| list.oid)
+                    .map(move |list| row(qidx, list.oid))
             }),
-            |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
+            |oid| {
+                if oid == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
+                shown.lookup_failure(options.tabular, &subjects[oid], oid)
+            },
             |oid, failure| match shown {
                 ShownSubjects::Database { reported, .. } => {
                     crate::report::tabular::failed_database_subject(
                         reported.oid(oid),
                         reported.loads().thrown(oid),
+                        reported.parsed_subject(oid),
                         failure,
                     )
                 }
@@ -658,6 +698,7 @@ fn check_failed_lookups(
                     crate::report::tabular::failed_record_title(oid, subjects[oid].shown_id())
                 }
             },
+            crate::blastinput::app::Program::Blastx,
             options.program().upper,
             options.taxdb_found,
         )
@@ -1042,15 +1083,78 @@ fn write_pairwise(
     let view = options
         .pairwise_view()
         .expect("a pairwise report is outfmt 0 to 4");
-    // The query-anchored formats (outfmt 1 to 4, line RG T3c), before the call's first byte: a
-    // reported database sequence that NCBI's scope finds as a query of its batch, by its Seq-align
-    // id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // Before any byte of the batch's report (the prolog and the earlier batches, which come
+    // before, are NCBI's own prefix), the refusals of what the description lines show
+    // (`common::database::refuse_described_lines`, line RG-KB item 12 review 1; of the `-subject`
+    // records whose ids `-parse_deflines` read, `refuse_described_records`, review 2) and those of
+    // the query-anchored formats (outfmt 1 to 4, line RG T3c): a reported database sequence that
+    // NCBI's scope finds as a query of its batch, by its Seq-align id (a generated `lcl|Query_N`)
+    // or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's and TBLASTN's): NCBI
     // shows the query in its place.
-    if let (true, ShownSubjects::Database { reported, .. }) = (
-        view != crate::report::pairwise::PairwiseView::Pairwise,
-        shown,
-    ) {
+    if !records_parsed.is_empty() {
+        crate::algorithm::common::database::refuse_described_records(
+            queries.len(),
+            |q_idx| {
+                hits.iter()
+                    .filter(|hit| hit.hit.q_idx as usize == q_idx)
+                    .map(|hit| hit.hit.s_idx)
+                    .collect()
+            },
+            |q_idx| {
+                Ok(crate::report::pairwise::blastp_described_subjects(
+                    view.report_sort(options.report_sort()),
+                    None,
+                    options.num_descriptions as usize,
+                    q_idx,
+                    hits,
+                    |_, _| false,
+                ))
+            },
+            records_parsed,
+            options.program().upper,
+        )?;
+    }
+    if let ShownSubjects::Database { reported, .. } = shown {
+        let parsed = reported.parsed();
+        let described = |q_idx: usize| {
+            Ok(crate::report::pairwise::blastp_described_subjects(
+                view.report_sort(options.report_sort()),
+                None,
+                options.num_descriptions as usize,
+                q_idx,
+                hits,
+                |previous, s_idx| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        parsed,
+                        previous as usize,
+                        s_idx as usize,
+                    )
+                },
+            ))
+        };
+        // Asked only where a sequence has a description line that LOSAT refuses.
+        crate::algorithm::common::database::refuse_described_lines(
+            queries.len(),
+            |q_idx| {
+                hits.iter()
+                    .filter(|hit| hit.hit.q_idx as usize == q_idx)
+                    .map(|hit| hit.hit.s_idx)
+                    .collect()
+            },
+            described,
+            parsed,
+            |rank| reported.loads().load(rank as usize),
+            |rank| reported.oid(rank as usize),
+            options.program().upper,
+        )?;
+        let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
+        for hit in hits {
+            let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
+            if !ranks.contains(&hit.hit.s_idx) {
+                ranks.push(hit.hit.s_idx);
+            }
+        }
         let ids: Vec<(
             &str,
             Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
@@ -1065,37 +1169,15 @@ fn write_pairwise(
                 .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
                 .collect(),
         );
-        let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
-        for hit in hits {
-            let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
-            if !ranks.contains(&hit.hit.s_idx) {
-                ranks.push(hit.hit.s_idx);
-            }
-        }
-        let parsed = reported.parsed();
         crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
             queries.len(),
             |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
-            |q_idx| {
-                Ok(crate::report::pairwise::blastp_described_subjects(
-                    view.report_sort(options.report_sort()),
-                    None,
-                    options.num_descriptions as usize,
-                    q_idx,
-                    hits,
-                    |previous, s_idx| {
-                        crate::report::db_subject::rank_joins_as_copy(
-                            parsed,
-                            previous as usize,
-                            s_idx as usize,
-                        )
-                    },
-                ))
-            },
+            described,
             parsed,
             |rank| reported.oid(rank as usize),
             |q_idx| scopes.of_query(q_idx),
             scopes.generated(),
+            view != crate::report::pairwise::PairwiseView::Pairwise,
             options.program().upper,
         )?;
     }

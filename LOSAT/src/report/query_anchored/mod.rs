@@ -775,8 +775,11 @@ fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
     }
 }
 
-/// Writes the section of one query whose HSPs are `hsps` (none: nothing, as `DisplaySeqalign`
-/// returns before its first byte for an empty Seq-align set; `-num_alignments 0`).
+/// Writes the section of one query whose HSPs are `hsps`. The caller writes none for an empty
+/// Seq-align set (`-num_alignments 0`: `DisplaySeqalign` returns before its first byte); a set
+/// whose every aligned subject has no Bioseq (`pairwise::section_hsps` leaves them out of the
+/// merge) gives no HSP here: the line feed alone, as each frame's empty mix throws in the loop's
+/// `try`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1918
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2055-2111
@@ -794,7 +797,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     sequences: &dyn Sequences,
 ) -> io::Result<()> {
     if hsps.is_empty() {
-        return Ok(());
+        return writer.write_all(b"\n");
     }
     let (merged, num_distinct_frames) = merge_groups(hsps).map_err(unasked_merge_stop)?;
     writer.write_all(b"\n")?;
@@ -839,7 +842,10 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// Writes the section of one query whose letters NCBI's display cannot read (`pairwise::
 /// UnreadableQuery`, a PSSM query of the molecule `other`), whose HSPs are `hsps` with the query's
 /// Bioseq marked as not a protein (`Hsps::set_query_not_protein`), in the report of `program`
-/// (its name in LOSAT's words, as `PSIBLAST`). None: nothing, as `write_section`.
+/// (its name in LOSAT's words, as `PSIBLAST`). The caller writes none for an empty Seq-align set
+/// (`-num_alignments 0`); an empty `hsps` here means every aligned subject had no Bioseq
+/// (`pairwise::blastp_section_hsps` / `section_hsps` left them out), for which NCBI writes the
+/// line feed alone (`showalign.cpp:2000-2095`), as `write_section` does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2054-2112 (cited at
 /// `merge_groups` and `write_section`)
@@ -879,7 +885,7 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     program: &str,
 ) -> io::Result<()> {
     if hsps.is_empty() {
-        return Ok(());
+        return writer.write_all(b"\n");
     }
     let refusal = |failure| {
         Err(UnreadableMergeRefusal {

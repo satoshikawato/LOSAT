@@ -1,0 +1,89 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 279 total letters
+
+
+
+Query= ovr_p1 override protein
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             218     2e-79
+sp2 subject protein beta, distant                                     163     8e-58
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 218 bits (554),  Expect = 2e-79, Method: Compositional matrix adjust.
+ Identities = 107/120 (89%), Positives = 109/120 (91%), Gaps = 3/120 (3%)
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+               WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 163 bits (413),  Expect = 8e-58, Method: Compositional matrix adjust.
+ Identities = 87/123 (71%), Positives = 92/123 (75%), Gaps = 6/123 (5%)
+
+Query  2    WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSD  57
+            WMEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S 
+Sbjct  2    WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSG  61
+
+Query  58   IHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMH  117
+            IHPCN W CWIPK MA PGW  TDTLH+SEMGLWMH  P  MC MVR T  +LRHWKI  
+Sbjct  62   IHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINE  119
+
+Query  118  DAN  120
+              N
+Sbjct  120  ICN  122
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.511    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 24341
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

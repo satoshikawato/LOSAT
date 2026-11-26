@@ -36,7 +36,7 @@ const LOSAT_REFUSES: [&str; 8] = [
     "strideneg",
 ];
 
-/// Rows covered by approved exception 33 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.118,
+/// Rows covered by approved exception 35 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.120,
 /// Owner decision 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and
 /// wraps to produce false alias errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`, `a_dir_v1`
 /// that visit them) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the calculation and
@@ -453,7 +453,7 @@ fn must_refuse(name: &str) -> bool {
 }
 
 /// Expected LOSAT output for an approved widened-overflow row (`Q-D2b-OV=A`,
-/// `PD-LOSAT-NCBI-DEFECTS` exception 33): exact arithmetic avoids NCBI's signed overflow false
+/// `PD-LOSAT-NCBI-DEFECTS` exception 35): exact arithmetic avoids NCBI's signed overflow false
 /// errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`/`a_dir_v1` that visit them) and negative
 /// wraparound (`ends_intmin`), keeping every other line and warning identical to NCBI.
 fn expected_widened(name: &str) -> Run {

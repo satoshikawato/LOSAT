@@ -1,0 +1,2 @@
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+Warning: [blastn] Query_1 lcl|Query_1 r1 all N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

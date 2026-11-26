@@ -465,23 +465,34 @@ impl BlastnDatabase {
     /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
     /// as such (`SubjectMetadata::db_len_total`) on every target.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), "blastn")
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line (`shared::restrict_database`, whose warnings go to `diagnostics`), and the id of the
-    /// database mask `mask` checked as NCBI checks it there (`DbMaskOption::validate_at_open`).
+    /// database mask `mask` checked as NCBI checks it there (`DbMaskOption::validate_at_open`),
+    /// for the application `app` (NCBI's lower-case name: the prefix of the run's posts, which is
+    /// not BLASTN's where the run is another program's strategy).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
+        app: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
-        let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
+        let parsed_seqids = shared::restrict_database(
+            &mut db,
+            name,
+            list,
+            mask,
+            diagnostics,
+            settings,
+            PROGRAM,
+            app,
+        )?;
         // BLASTN has no Gumbel block: the setup of a batch with a valid context divides by the
         // statistics' number of sequences, a count of 0 LOSAT's refusal there
         // (`context_statistics`, `shared::check_setup_count`).
@@ -495,7 +506,7 @@ impl BlastnDatabase {
             db,
             name: name.to_string(),
             metadata,
-            taxdb: shared::TaxdbRun::default(),
+            taxdb: shared::TaxdbRun::running(app),
             loaded_before_batch: Default::default(),
             parsed_seqids,
             mt_threads: 1,
@@ -885,9 +896,10 @@ impl BlastnDatabase {
     pub(super) fn resolve_mask_option(
         &self,
         option: &DbMaskOption,
+        app: &str,
         warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     ) -> Result<Option<ResolvedMask>> {
-        option.resolve(&self.db, &self.name, PROGRAM, warning)
+        option.resolve(&self.db, &self.name, PROGRAM, app, warning)
     }
 
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
@@ -1684,7 +1696,9 @@ impl BlastnDatabase {
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, (earlier, one_by_one), titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        if let Some(warning) = shared::Utf8Read::post_of(first, &self.db, "blastn") {
+        if let Some(warning) =
+            shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"))
+        {
             posts.append(&warning);
         }
         read.map(|_| ())

@@ -2085,6 +2085,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            lineless: false,
         })
     );
     assert_eq!(
@@ -3294,4 +3295,235 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
         );
         assert_eq!(same.load(3), H(Some(weak)), "{after:?}");
     }
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probes `D/logs/d1c1cb/probe`, rows db.il.*.x1.*,
+// db.il.bp.xw.*): a definition line without a Seq-id beside lines with them. Each format's walk of
+// the lines takes the line's best id, null there, and its `catch` decides what is written.
+fn titled(lines: Vec<(Vec<ParsedSeqId>, Option<&str>)>) -> ParsedSubject {
+    let deflines = lines
+        .into_iter()
+        .map(|(ids, title)| BlastDefline {
+            title: title.map(|title| title.as_bytes().to_vec()),
+            ids,
+            ..BlastDefline::default()
+        })
+        .collect();
+    ParsedSubject::new(DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap()
+}
+
+// The description walk adds ` >`, the FASTA label and a space before each later title, and stops
+// only once the text passes 4096 bytes: a text of 4095 or 4096 bytes walks on to the line without
+// a Seq-id (NCBI's `catch`: the Seq-align id and `Unknown`), one of 4097 stops before it (rows
+// db.il.bp.xw.q0.0 and db.il.bp.xw.q1.0).
+#[test]
+fn the_description_walk_meets_a_line_without_a_seq_id_until_it_passes_4096_bytes() {
+    let second = gb("B00002", 1);
+    let mut label = Vec::new();
+    label::fasta(&second, &mut label);
+    let fixed = "s".len() + " >".len() + label.len() + " ".len();
+    for (total, caught) in [(4095, true), (4096, true), (4097, false)] {
+        let long = "w".repeat(total - fixed);
+        let subject = titled(vec![
+            (vec![gb("A00001", 1)], Some("s")),
+            (vec![second.clone()], Some(&long)),
+            (vec![], Some("tail")),
+        ]);
+        let (start, line, thrown) = subject.description_line(true);
+        assert_eq!(thrown, caught, "a text of {total} bytes");
+        if caught {
+            assert_eq!(text(&line.text), "Unknown");
+            assert_eq!(start, subject.thrown_description().0);
+        } else {
+            assert!(line.text.starts_with(b"s"), "{total}");
+        }
+    }
+}
+
+// `GetDisplayIds` labels each line up to the display line's, so a line without a Seq-id before it
+// throws whatever the lengths; the walk labels a line before it looks at its title, so an untitled
+// one throws there too (x1 OIDs 3 and 4).
+#[test]
+fn a_line_without_a_seq_id_before_the_display_line_or_without_a_title_is_met() {
+    let a = || vec![gb("A00001", 1)];
+    for (lines, caught) in [
+        (vec![(vec![], Some("zero")), (a(), Some("a"))], true),
+        (vec![(vec![], None), (a(), Some("a"))], true),
+        (vec![(a(), Some("a")), (vec![], None)], true),
+        (vec![(a(), Some("a")), (vec![], Some(""))], true),
+        (
+            vec![(a(), Some("a")), (vec![gb("B00002", 1)], Some("b"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).description_line(true).2, caught, "{shown}");
+    }
+}
+
+// `x_FillAlnDispParams` labels every line first: each HSP's heading is the skipped id.
+#[test]
+fn every_heading_of_a_subject_with_a_line_without_a_seq_id_is_the_skipped_id() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let skipped = subject.skipped_id().to_vec();
+    assert_eq!(
+        subject.heading(true, false, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(
+        subject.heading(true, true, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(subject.heading_skipped_id(true, false), Some(skipped));
+}
+
+// Outfmt 5 takes the id string of the first titled line (no throw for an empty list there) and
+// throws only at a titled line without a Seq-id after it (an empty title counts): the `Hit`'s
+// `catch` (`xml_hit` gives `None`).
+#[test]
+fn outfmt_5_catches_a_titled_line_without_a_seq_id_after_the_first_titled_line() {
+    let a = || vec![gb("A00001", 1)];
+    let no_id = Vec::new;
+    for (lines, named) in [
+        (vec![(a(), Some("a")), (no_id(), Some("b"))], false),
+        (vec![(a(), Some("a")), (no_id(), Some(""))], false),
+        (vec![(a(), Some("a")), (no_id(), None)], true),
+        (vec![(no_id(), Some("z")), (a(), Some("a"))], true),
+        (vec![(no_id(), None), (a(), Some("a"))], true),
+        (
+            vec![(no_id(), None), (a(), Some("a")), (no_id(), Some("c"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).xml_hit().is_some(), named, "{shown}");
+    }
+}
+
+// The tabular ids of a line without a Seq-id: `Unknown` and GI 0 (`sallseqid`, `sallgi`); its
+// `sallacc` is NCBI's null pointer (`LookupFailure::lineless`, refused by `failed_lookup_stop`).
+#[test]
+fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let all = subject.all_tabular_ids(true).unwrap();
+    assert!(!all.failed);
+    assert_eq!(text(&all.ids[1].id), "Unknown");
+    assert_eq!(all.ids[1].gi, 0);
+    assert_eq!(
+        subject.lookup_failure(true).unwrap(),
+        Some(crate::report::tabular::LookupFailure {
+            lineless: true,
+            ..Default::default()
+        })
+    );
+    let plain = titled(vec![(vec![gb("A00001", 1)], Some("a"))]);
+    assert_eq!(plain.lookup_failure(true).unwrap(), None);
+}
+
+// The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused
+// there, the lines before it as always; a set with no Seq-id at all gets no Seq-align (PR 2a) and
+// is an internal error here.
+#[test]
+fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
+    use crate::report::tax_report::TaxTitle;
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let lines = subject.tax_deflines(true);
+    assert!(matches!(&lines[0].title, TaxTitle::Text(title) if title == b"a"));
+    assert!(matches!(
+        &lines[1].title,
+        TaxTitle::Refused { reason, shown_only: false } if reason == LINELESS_TAX_REPORT
+    ));
+    let none = DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    };
+    assert!(ParsedSubject::new(none)
+        .unwrap_err()
+        .contains("internal error"));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
+// When a subject's description title throws (`UnknownEncoding`), NCBI's catch puts the Seq-align
+// id on the description line and pads/wraps using that id rather than the display id. The 65-byte
+// length check in `check_shown_parsed_subject` must measure the Seq-align id for both protein and
+// nucleotide databases (display <= 65 & alignment > 65 refuses; display > 65 & alignment <= 65
+// passes), and must also cover an empty nucleotide title whose source name throws.
+#[test]
+fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
+    use crate::algorithm::common::database::check_shown_parsed_subject;
+    use crate::report::defline::SourceTaxname;
+    let oid = || crate::seqdb::Oid::of_unrestricted(0);
+    let long_acc = "X".repeat(66);
+    let long_local = ParsedSeqId::Local(ObjectId::Str(vec![b'a'; 66]));
+
+    let make = |ids: Vec<ParsedSeqId>, title: Option<&[u8]>, taxid: Option<i32>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                ids,
+                title: title.map(|bytes| bytes.to_vec()),
+                taxid,
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        })
+        .unwrap()
+    };
+
+    let assert_long_id = |subject: &ParsedSubject, protein: bool, taxdb: bool, program: &str| {
+        let err = check_shown_parsed_subject(subject, protein, taxdb, oid, program)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+    };
+    let long_align_ids = vec![long_local.clone(), gb("NP_000001", 1)];
+    let long_display_ids = vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)];
+
+    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
+        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
+        let long_align_throwing = make(long_align_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_align_throwing.description_start().len() <= 65);
+        assert!(long_align_throwing.description_line(protein).0.len() > 65);
+        assert_long_id(&long_align_throwing, protein, false, program);
+
+        let long_align_ok = make(long_align_ids.clone(), Some(b"ok"), None);
+        assert!(check_shown_parsed_subject(&long_align_ok, protein, false, oid, program).is_ok());
+
+        // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
+        let long_display_throwing = make(long_display_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_display_throwing.description_start().len() > 65);
+        assert!(long_display_throwing.description_line(protein).0.len() <= 65);
+        assert!(
+            check_shown_parsed_subject(&long_display_throwing, protein, false, oid, program)
+                .is_ok(),
+            "{program}: throwing title uses short Seq-align id"
+        );
+
+        let long_display_ok = make(long_display_ids.clone(), Some(b"ok"), None);
+        assert_long_id(&long_display_ok, protein, false, program);
+    }
+
+    // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
+    let nucl_source_throwing = make(vec![long_local, gb("NM_000001", 1)], Some(b""), Some(9606))
+        .with_source(false, |_| {
+            SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
+        });
+    assert!(nucl_source_throwing.description_may_throw());
+    assert_long_id(&nucl_source_throwing, false, true, "BLASTN");
 }

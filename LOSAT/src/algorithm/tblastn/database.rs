@@ -581,6 +581,12 @@ pub(super) struct CallReads<'a> {
     excluded: Option<shared::FetchExcluded<'a>>,
     notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
     utf8: shared::CallUtf8,
+    /// NCBI's posts of the titles that each batch's Seq-aligns read, by the batch's first query
+    /// (`shared::seq_align_title_posts`, `take_title_posts`).
+    titled: std::sync::Mutex<Vec<(usize, crate::report::diag_log::Posts)>>,
+    /// Those of the failed batch, by its first query, which its Seq-aligns read before the
+    /// failure (`ErrorAfterBatchReports::title_posts`, `write_failed`).
+    failed_titled: std::sync::Mutex<Option<(usize, crate::report::diag_log::Posts)>>,
     one_by_one: bool,
 }
 
@@ -606,8 +612,22 @@ impl<'a> CallReads<'a> {
             excluded,
             notes,
             utf8: shared::CallUtf8::default(),
+            titled: Default::default(),
+            failed_titled: Default::default(),
             one_by_one: shared::prefetch_may_be_off(format),
         }
+    }
+
+    /// NCBI's posts of the titles that the batches' Seq-aligns read (`titles`), each with the
+    /// batch's first query: they follow the batch's request posts and its warning of a UTF8String
+    /// header, before its prefetch (`query_warnings::query_posts`, before the prefetches' posts).
+    pub(super) fn take_title_posts(&self) -> Vec<(usize, crate::report::diag_log::Posts)> {
+        std::mem::take(
+            &mut *self
+                .titled
+                .lock()
+                .expect("the title posts are not poisoned"),
+        )
     }
 
     /// The fetches of the batch of the queries `range` (`stage_d_pipeline::BatchFetches`).
@@ -683,11 +703,40 @@ impl<'a> CallReads<'a> {
             range.start,
             shared::Utf8Read::of_read(&read, Option::as_ref),
         );
+        // Whether this batch posts the call's warning of a UTF8String header (a batch before may
+        // have read it).
+        let utf8 = self.utf8.of_batch(range.start);
+        // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+        let aligned = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter_map(|list| u32::try_from(list.oid).ok());
         match read {
-            Ok(_) => Ok(None),
+            Ok(_) => {
+                let posts = shared::batch_title_posts(&database.db, aligned, utf8, PROGRAM)?;
+                if !posts.is_empty() {
+                    self.titled
+                        .lock()
+                        .expect("the title posts are not poisoned")
+                        .push((range.start, posts));
+                }
+                Ok(None)
+            }
             Err(error) => {
-                match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-                    Ok(failure) => Ok(Some(failure.error)),
+                match crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(
+                    error, aligned,
+                )
+                .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                {
+                    Ok(failure) => {
+                        let posts = failure.title_posts(&database.db, utf8, PROGRAM)?;
+                        *self
+                            .failed_titled
+                            .lock()
+                            .expect("the title posts are not poisoned") =
+                            Some((range.start, posts));
+                        Ok(Some(failure.error))
+                    }
                     Err(error) => Err(error),
                 }
             }
@@ -719,7 +768,8 @@ impl<'a> CallReads<'a> {
 
     /// Writes NCBI's warning of that read to `diagnostics` (and the archive's messages) where the
     /// failed batch of the queries `range` made it with its Seq-aligns, before the failure: after
-    /// the batch's reader messages and request posts.
+    /// the batch's reader messages and request posts; then the posts of the titles that those
+    /// Seq-aligns read before the failure (`titles`).
     pub(super) fn write_failed(
         &self,
         range: &std::ops::Range<usize>,
@@ -727,10 +777,19 @@ impl<'a> CallReads<'a> {
         archive: Option<&crate::report::archive::ArchiveHandle>,
     ) -> Result<()> {
         let db = self.database.map(|database| &database.db);
-        match self.utf8.failed_post(db, PROGRAM_NAME, range.start) {
-            Some(posts) => Ok(posts.write(diagnostics, archive)?),
-            None => Ok(()),
+        if let Some(posts) = self.utf8.failed_post(db, PROGRAM_NAME, range.start) {
+            posts.write(diagnostics, archive)?;
         }
+        if let Some((_, posts)) = self
+            .failed_titled
+            .lock()
+            .expect("the title posts are not poisoned")
+            .as_ref()
+            .filter(|(first, _)| *first == range.start)
+        {
+            posts.write(diagnostics, archive)?;
+        }
+        Ok(())
     }
 }
 
@@ -1024,6 +1083,12 @@ fn parsed_shown(
         prefetched: shared::prefetches_subjects(Some(prefetch_format(formats)))
             && !shared::prefetch_always_off(prefetch_format(formats)),
         one_by_one: shared::prefetch_may_be_off(prefetch_format(formats)),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Tblastn,
+            formats
+                .iter()
+                .map(|format| super::stage_e_report::format_number(format.outfmt)),
+        ),
     }
 }
 
@@ -1246,8 +1311,10 @@ pub(super) fn reported_subjects(
         let title = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
+                    &database.db,
+                    ordinal,
                     stored.replaced_bytes,
-                    || database.db.oid(ordinal),
+                    shown.titles,
                     PROGRAM,
                 )?;
                 if shown.pairwise {

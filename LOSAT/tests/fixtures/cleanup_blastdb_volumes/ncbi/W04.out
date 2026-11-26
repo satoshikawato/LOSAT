@@ -1,0 +1,11 @@
+usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run] [-version] [-verbose]
+
+Remove needless BLAST database volumes.
+
+options:
+  -h, --help           show this help message and exit
+  -db DB               BLAST database name
+  -dbtype {prot,nucl}  Molecule type
+  -dry-run             Do not delete any files, just list them
+  -version             show program's version number and exit
+  -verbose             Increase output verbosity

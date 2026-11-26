@@ -35,6 +35,8 @@ mod blastdbcmd_several_names;
 mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
+#[path = "../cleanup_blastdb_volumes_fixtures.rs"]
+mod cleanup_blastdb_volumes_fixtures;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]

@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.32 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.33 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -74,7 +74,11 @@
   log in the scope and in exception 10; the Owner's choice of 2026-11-24, `Q-KD-1=A`, line RG
   item KD; numbered after line RG item T6a's 1.30, first 1.30);
   1.32 2026-11-25 (`losat makembindex` in the scope and in exception 10; line RG item KD, RG
-  DECISIONS KD-mbi-pipe-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  DECISIONS KD-mbi-pipe-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.33 2026-11-26 (`losat cleanup-blastdb-volumes.py` in the scope and in exception 14 for its
+  `-version` line `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`; line RG item
+  D2c, RG DECISIONS D2c-1, D2c-2 and D2c-4; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -88,7 +92,7 @@ BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
 since version 1.16 `losat segmasker`, since version 1.18 `losat convert2blastmask` and since
 version 1.24 `losat windowmasker`, whose outputs do, since version 1.31 the log of `losat
-makeblastdb`, and since version 1.32 `losat makembindex`) that is not part of a search result: argument parsing, help text, thread
+makeblastdb`, since version 1.32 `losat makembindex`, and since version 1.33 `losat cleanup-blastdb-volumes.py`) that is not part of a search result: argument parsing, help text, thread
 warnings, since version 1.27 the memory used with more than 64 threads, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
 bar on a terminal, and since version 1.25 the statement of the running program's version in every
 output, search results included (exception 14). Search results, their outfmt
@@ -473,8 +477,8 @@ BLAST+.
      so a reader that takes the first word as the program (Biopython's outfmt 7 reader) still reads
      it. Alone: `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone: an archive's (outfmt 11) and a
      search strategy's `ident`, SAM's `@PG VN:`, the first line of `-version`
-     (`blastn: LOSAT 0.2.0`; dustmasker, segmasker and rpsbproc too, where NCBI's state their own
-     `1.0.0` and `0.5.1`) and the program's version in `-version-full-xml` and `-version-full-json`,
+     (`blastn: LOSAT 0.2.0`; dustmasker, segmasker, rpsbproc and `cleanup-blastdb-volumes.py` too, where NCBI's state their own
+     `1.0.0`, `0.5.1` and `1.0`) and the program's version in `-version-full-xml` and `-version-full-json`,
      blastdbcmd's `version LOSAT 0.2.0`. rpsbproc's banner reads
      `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` (NCBI's `v0.5.1`). The program's `<version>`
      in `-xmlhelp` holds LOSAT's version number, `0.2.0`, as `-version-full-xml`'s numbers do

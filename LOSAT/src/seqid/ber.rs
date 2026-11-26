@@ -506,6 +506,8 @@ pub(crate) trait PostSink {
     #[inline(always)]
     fn pop_frame(&mut self) {}
     #[inline(always)]
+    fn pop_frames(&mut self, _n: usize) {}
+    #[inline(always)]
     fn set_top_frame(&mut self, _frame: Frame) {}
     #[inline(always)]
     fn fix_string(&mut self, stored: &[u8], _pos_after: usize, value: &mut Vec<u8>) -> usize {
@@ -547,6 +549,10 @@ impl PostSink for PostCollector {
 
     fn pop_frame(&mut self) {
         self.stack.pop();
+    }
+
+    fn pop_frames(&mut self, n: usize) {
+        self.stack.truncate(self.stack.len().saturating_sub(n));
     }
 
     fn set_top_frame(&mut self, frame: Frame) {
@@ -1219,8 +1225,7 @@ fn read_container<'a, P: PostSink>(
         let more = match ber.more(end) {
             Ok(more) => more,
             Err(e) => {
-                ber.posts.pop_frame();
-                ber.posts.pop_frame();
+                ber.posts.pop_frames(2);
                 return Err(e.left(Frame::ArrayElement).left(array));
             }
         };
@@ -1229,8 +1234,7 @@ fn read_container<'a, P: PostSink>(
             break;
         }
         if let Err(e) = element(ber) {
-            ber.posts.pop_frame();
-            ber.posts.pop_frame();
+            ber.posts.pop_frames(2);
             return Err(e.left(Frame::ArrayElement).left(array));
         }
         ber.posts.pop_frame();
@@ -1285,8 +1289,7 @@ fn read_class<'a, P: PostSink>(
                 break;
             }
             Err(e) => {
-                ber.posts.pop_frame();
-                ber.posts.pop_frame();
+                ber.posts.pop_frames(2);
                 return Err(e.left(Frame::Member(current)).left(frame));
             }
         };
@@ -1296,13 +1299,11 @@ fn read_class<'a, P: PostSink>(
         let in_member = |e: BerError| e.left(Frame::Member(Some(name))).left(frame);
         if let Some(skipped) = (next..number).find(|&at| class.mandatory & (1 << at) != 0) {
             let err = ber.expected_member(class.members[usize::from(skipped)]);
-            ber.posts.pop_frame();
-            ber.posts.pop_frame();
+            ber.posts.pop_frames(2);
             return Err(in_member(err));
         }
         if let Err(e) = member(ber, number) {
-            ber.posts.pop_frame();
-            ber.posts.pop_frame();
+            ber.posts.pop_frames(2);
             return Err(in_member(if class.set_flag & (1 << number) != 0 {
                 e.member_read(name)
             } else {
@@ -1310,8 +1311,7 @@ fn read_class<'a, P: PostSink>(
             }));
         }
         if let Err(e) = ber.end_of_content(member_end) {
-            ber.posts.pop_frame();
-            ber.posts.pop_frame();
+            ber.posts.pop_frames(2);
             return Err(in_member(e));
         }
         ber.posts.pop_frame();

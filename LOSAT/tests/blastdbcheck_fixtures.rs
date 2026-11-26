@@ -604,6 +604,22 @@ fn refusal_lists_name_rows() {
     }
 }
 
+const PROT_ALL_FMT: [&str; 8] = [
+    "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+];
+
+fn copy_base_db(dst: &Path, stem: &str) {
+    fs::create_dir_all(dst).unwrap();
+    let prefix = format!("{stem}.");
+    for entry in fs::read_dir(base_in()).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if name.starts_with(&prefix) {
+            fs::copy(entry.path(), dst.join(name)).unwrap();
+        }
+    }
+}
+
 /// D2b-3 cross-program parity: `blastdbcmd`, `blastp`, and `blastn` share the same 4 KiB
 /// last-page zero-read behavior in `seqdb` and match NCBI BLAST+ 2.17.0 on the same truncated
 /// inputs (`p4_pin_10`, `p4_pin_cut`, `p4_psq_half`, `p4_phr_half`, `n4_nsq_half`).
@@ -622,17 +638,7 @@ fn zero_page_cross_program_parity() {
         let out = cmd.output().unwrap();
         (out.stdout, out.stderr, out.status.code().unwrap_or(-1))
     };
-    let cp_db = |dst: &Path, stem: &str| {
-        fs::create_dir_all(dst).unwrap();
-        let prefix = format!("{stem}.");
-        for entry in fs::read_dir(base_in()).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().into_string().unwrap();
-            if name.starts_with(&prefix) {
-                fs::copy(entry.path(), dst.join(name)).unwrap();
-            }
-        }
-    };
+    let cp_db = copy_base_db;
 
     let root = scratch("zp-xprog");
     fs::create_dir_all(&root).unwrap();
@@ -647,9 +653,7 @@ fn zero_page_cross_program_parity() {
     let q_prot_s = q_prot.to_str().unwrap();
     let q_nucl_s = q_nucl.to_str().unwrap();
     let blastp_args = ["-query", q_prot_s, "-db", "p4", "-outfmt", "6"];
-    let prot_all_args = [
-        "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
-    ];
+    let prot_all_args = PROT_ALL_FMT;
     let run_ok = |dir: &Path, sub: &str, args: &[&str]| -> Vec<u8> {
         let (out, err, rc) = run_prog(dir, sub, args);
         assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
@@ -847,15 +851,7 @@ fn nonasc_cross_program_parity() {
     let root = root.canonicalize().unwrap();
 
     let cp_db = |dst: &Path, stem: &str, with_tax: bool| {
-        fs::create_dir_all(dst).unwrap();
-        let prefix = format!("{stem}.");
-        for entry in fs::read_dir(base_in()).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().into_string().unwrap();
-            if name.starts_with(&prefix) {
-                fs::copy(entry.path(), dst.join(name)).unwrap();
-            }
-        }
+        copy_base_db(dst, stem);
         if with_tax {
             let tax = fixtures().join("files/tax/good");
             for f in ["taxdb.bti", "taxdb.btd"] {
@@ -907,13 +903,7 @@ fn nonasc_cross_program_parity() {
             "blastdbcmd",
             vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
         ),
-        (
-            "nonasc_seq_dbcmd_fmt",
-            "blastdbcmd",
-            vec![
-                "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
-            ],
-        ),
+        ("nonasc_seq_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
         (
             "nonasc_seq_blastp_t1",
             "blastp",
@@ -962,13 +952,7 @@ fn nonasc_cross_program_parity() {
             "blastdbcmd",
             vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
         ),
-        (
-            "nonasc_hdr_dbcmd_fmt",
-            "blastdbcmd",
-            vec![
-                "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
-            ],
-        ),
+        ("nonasc_hdr_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
         (
             "nonasc_hdr_blastp_q2_t1",
             "blastp",

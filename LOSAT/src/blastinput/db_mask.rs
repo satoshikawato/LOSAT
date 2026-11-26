@@ -22,12 +22,15 @@
 use crate::wording::{DATABASE_ERROR, OPTIONS_ERROR};
 use anyhow::Result;
 
+use std::ffi::OsString;
+
 use crate::algorithm::common::hard_chunk_walk::{HardStarts, NcbiStart, NcbiWalk};
 use crate::cli::NativeError;
 use crate::core::subject_split::HardSplitState;
 use crate::report::archive::fields;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
@@ -36,9 +39,9 @@ use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 #[derive(Debug, Clone, Default)]
 pub struct DbMaskArgs {
     /// `-db_soft_mask`.
-    pub db_soft_mask: Option<String>,
+    pub db_soft_mask: Option<OsString>,
     /// `-db_hard_mask` (refused for the masks of `HardMaskShape`: `ResolvedMask::check_losat_limits`).
-    pub db_hard_mask: Option<String>,
+    pub db_hard_mask: Option<OsString>,
 }
 
 impl DbMaskArgs {
@@ -75,7 +78,7 @@ pub enum FilteringAlgorithm {
     Id(i32),
     /// `m_FilteringAlgorithmString`: any other text, looked up by the database
     /// (`GetMaskAlgorithmId`, case-sensitive).
-    Name(String),
+    Name(Vec<u8>),
 }
 
 /// The masking of a `-db` search that the command line asks for.
@@ -97,9 +100,10 @@ impl DbMaskArgs {
             (None, Some(text)) => (MaskKind::Hard, text),
             (None, None) => return None,
         };
+        let bytes = os_str_bytes(text);
         Some(DbMaskOption {
             kind,
-            algorithm: FilteringAlgorithm::parse(text),
+            algorithm: FilteringAlgorithm::parse(&bytes),
         })
     }
 }
@@ -109,11 +113,11 @@ impl FilteringAlgorithm {
     // `x_ValidateMaskingAlgorithm` returns at once here: the database is not open yet.
     /// The algorithm that the option's text names: `+11` and `011` are the id 11; ` 11`, `11 `,
     /// `11x`, `2147483648` and the empty text are names.
-    pub fn parse(text: &str) -> Self {
+    pub fn parse(text: &[u8]) -> Self {
         // `s_IsNumericId` is `StringToInt` that converts (`seqdb::mask::is_numeric_id`).
-        match crate::ncbi_str::string_to_int(text.as_bytes(), 0) {
+        match crate::ncbi_str::string_to_int(text, 0) {
             Ok(id) => FilteringAlgorithm::Id(id),
-            Err(_) => FilteringAlgorithm::Name(text.to_string()),
+            Err(_) => FilteringAlgorithm::Name(text.to_vec()),
         }
     }
 }
@@ -126,7 +130,7 @@ pub struct ResolvedMask {
     /// The database-wide id of the algorithm (`GetFilteringAlgorithm`).
     pub id: i32,
     /// `GetFilteringAlgorithmKey`: the option's text where it was a name.
-    pub key: Option<String>,
+    pub key: Option<Vec<u8>>,
     /// The algorithm in the database of each name of the `-db` list, in the order of the list
     /// (`SDbInfo::filt_algorithm_name`, `filt_algorithm_options`).
     pub shown: Vec<MaskAlgorithm>,
@@ -147,7 +151,7 @@ impl DbMaskOption {
     pub fn validate_at_open(
         &self,
         db: &SeqDb,
-        db_name: &str,
+        db_name: &[u8],
         nucleotide: bool,
         program: &str,
     ) -> Result<()> {
@@ -161,14 +165,13 @@ impl DbMaskOption {
             .mask_algorithms()
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         if !algorithms.ids().contains(&id) {
-            return Err(NativeError {
-                exit: 1,
-                message: format!(
-                    "{OPTIONS_ERROR} Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
-                    if nucleotide { "nucleotide" } else { "protein" }
-                ).into(),
-            }
-            .into());
+            let kind = if nucleotide { "nucleotide" } else { "protein" };
+            let mut message =
+                format!("{OPTIONS_ERROR} Masking algorithm ID {id} is not supported in {kind} '")
+                    .into_bytes();
+            message.extend_from_slice(db_name);
+            message.extend_from_slice(b"' BLAST database\n");
+            return Err(NativeError { exit: 1, message }.into());
         }
         Ok(())
     }
@@ -188,7 +191,7 @@ impl DbMaskOption {
     pub fn resolve(
         &self,
         db: &SeqDb,
-        db_name: &str,
+        db_name: &[u8],
         program: &str,
         app: &str,
         warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
@@ -197,7 +200,7 @@ impl DbMaskOption {
             FilteringAlgorithm::Id(id) => (Some(*id), None),
             FilteringAlgorithm::Name(name) => {
                 let id = match db.mask_algorithms() {
-                    Ok(algorithms) => algorithms.id_of(name.as_bytes()).ok(),
+                    Ok(algorithms) => algorithms.id_of(name).ok(),
                     // NCBI catches its `CSeqDBException` and answers -1.
                     Err(error) if error.ncbi_message().is_some() => None,
                     Err(error) => {
@@ -210,12 +213,10 @@ impl DbMaskOption {
             }
         };
         let Some(id) = id.filter(|&id| id != -1) else {
-            warning(
-                format!(
-                    "Warning: [{app}] Subject mask not found in {db_name}, proceeding without subject masking.\n",
-                )
-                .as_bytes(),
-            )?;
+            let mut line = format!("Warning: [{app}] Subject mask not found in ").into_bytes();
+            line.extend_from_slice(db_name);
+            line.extend_from_slice(b", proceeding without subject masking.\n");
+            warning(&line)?;
             return Ok(None);
         };
         let shown = db.name_mask_details(id).map_err(|error| {
@@ -381,7 +382,7 @@ impl ResolvedMask {
         let algorithm = match self.key.as_deref() {
             Some(key) if !key.is_empty() => Param::new(
                 fields::DB_FILTERING_ALGORITHM_KEY,
-                ParamValue::Str(key.to_string()),
+                ParamValue::Str(key.to_vec()),
             ),
             _ => Param::new(
                 fields::DB_FILTERING_ALGORITHM_ID,

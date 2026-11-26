@@ -829,10 +829,16 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
 /// search: a database named `n/a` or `SRA` (compared without case), for which NCBI writes another
 /// third user object (`CreateSeqAnnotFromSeqAlignSet` above). The title of any other database is
 /// written as NCBI writes it, also with a byte that NCBI's stream replaces (`write_query_to`).
-pub fn check_database(format: SerialFormat, name: &str, program: Program) -> anyhow::Result<()> {
-    if name.eq_ignore_ascii_case("n/a") || name.eq_ignore_ascii_case("SRA") {
+pub fn check_database(
+    format: SerialFormat,
+    name: impl AsRef<[u8]>,
+    program: Program,
+) -> anyhow::Result<()> {
+    let name = name.as_ref();
+    if name.eq_ignore_ascii_case(b"n/a") || name.eq_ignore_ascii_case(b"SRA") {
+        let shown = String::from_utf8_lossy(name);
         anyhow::bail!(
-            "a database named \"{name}\" (which NCBI BLAST+ describes as no database or as SRA in output format {}) is not supported by LOSAT's {}",
+            "a database named \"{shown}\" (which NCBI BLAST+ describes as no database or as SRA in output format {}) is not supported by LOSAT's {}",
             format.outfmt(),
             program.name()
         );

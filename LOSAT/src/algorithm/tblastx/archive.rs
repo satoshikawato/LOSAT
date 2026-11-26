@@ -49,7 +49,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for TblastxArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -81,7 +81,10 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
     // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
@@ -125,7 +128,7 @@ pub(crate) fn handle_for(
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }
@@ -505,7 +508,7 @@ impl import::StrategyArgs for TblastxArgs {
             Setter::WordSize(n) => self.word_size = Some(*n),
             Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
             Setter::WindowSize(n) => self.window_size = Some(*n),
-            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
             Setter::CullingLimit(n) => self.culling_limit = Some(*n),
             Setter::MaxHspsPerSubject(n) => {
                 self.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
@@ -538,7 +541,7 @@ impl import::StrategyArgs for TblastxArgs {
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;
         if let Some(value) = collected.seg.value() {
-            self.seg = value;
+            self.seg = value.into();
         }
         // tblastx has no composition-based statistics: only mode 0 of a strategy runs.
         if collected

@@ -299,7 +299,7 @@ fn build_version(
     let mut messages = Vec::new();
     let result = (|| {
         let mut db = BuildDatabase::new(
-            out_base,
+            out_base.as_bytes(),
             title.as_bytes(),
             is_protein,
             &mut log,
@@ -505,13 +505,13 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         std::fs::create_dir(&out_dir).unwrap();
         let base = out_dir.join("db").to_string_lossy().into_owned();
         let args = MakedbArgs {
-            input: input.clone(),
+            input: std::ffi::OsString::from(&input),
             input_type: "fasta".to_string(),
             dbtype: if case.protein { "prot" } else { "nucl" }.to_string(),
-            title: Some(case.title.to_string()),
-            out: Some(base.clone()),
+            title: Some(std::ffi::OsString::from(case.title)),
+            out: Some(std::ffi::OsString::from(&base)),
             blastdb_version: 4,
-            max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            max_file_sz: std::ffi::OsString::from(case.max_file_sz.unwrap_or("3GB")),
             metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
@@ -609,13 +609,13 @@ fn makedb_version(
     version: i32,
 ) -> (i32, String, String) {
     let args = MakedbArgs {
-        input: input.to_string(),
+        input: std::ffi::OsString::from(input),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
-        title: Some("t".to_string()),
-        out: Some(out.to_string()),
+        title: Some(std::ffi::OsString::from("t")),
+        out: Some(std::ffi::OsString::from(out)),
         blastdb_version: version,
-        max_file_sz: max_file_sz.to_string(),
+        max_file_sz: std::ffi::OsString::from(max_file_sz),
         metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,

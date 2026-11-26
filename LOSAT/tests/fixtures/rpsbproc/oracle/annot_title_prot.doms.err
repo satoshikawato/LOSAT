@@ -1,0 +1,23 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.annot.E.data.ftable.E.data.prot.name.E
+Bad char [0xE9] in string at line 42
+proténame
+RPSBlast session 0 start...
+Calculating....
+End processing Query prot#name
+End processing Query from ptr prot
+End processing Query 
+End processing Query 
+End processing Query explicit title
+End processing Query before null
+RPSBlast session 1 done...
+All done, 6 queries processed
+

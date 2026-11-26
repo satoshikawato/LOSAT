@@ -1123,9 +1123,9 @@ pub(super) fn refuse_unreportable(
 // rows of the reports. `hit_list_to_seqalign_order` is `blast_engine`'s import (from `hsp`),
 // which only this module reads.
 use super::{
-    blastp_subject_tag, hit_list_to_seqalign_order, path_label, psiblast_pssms,
-    recount_shown_identities, write_pairwise_prologs, write_request_posts, BlastpSubjectSource,
-    ShownLetters, ShownQueries, ShownSubjects,
+    blastp_subject_tag, hit_list_to_seqalign_order, psiblast_pssms, recount_shown_identities,
+    write_pairwise_prologs, write_request_posts, BlastpSubjectSource, ShownLetters, ShownQueries,
+    ShownSubjects,
 };
 use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -1662,7 +1662,7 @@ pub(super) fn report_values(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:138-139
 pub(super) struct ReportLabels {
-    pub(super) subject_input_label: String,
+    pub(super) subject_input_label: Vec<u8>,
     pub(super) shown_num_sequences: i64,
     pub(super) shown_total_letters: i64,
     pub(super) shown_database: Option<crate::report::pairwise::PairwiseDatabase>,
@@ -1685,10 +1685,10 @@ pub(super) fn report_labels(
         total_db_len,
         ..
     } = *setup;
-    let subject_name_label = if subject_label.is_empty() {
-        path_label(&args.subject)
+    let subject_name_label: Vec<u8> = if subject_label.is_empty() {
+        crate::utils::os_bytes::os_str_bytes(args.subject.as_os_str()).into_owned()
     } else {
-        subject_label.to_string()
+        subject_label.as_bytes().to_vec()
     };
     let subject_input_label = blastp_subject_tag(args, subject_label);
     // The number of sequences that the `Database:` lines show: the sums over the names of the
@@ -1705,12 +1705,17 @@ pub(super) fn report_labels(
         None => total_db_len,
     };
     let context = ReportContext {
-        subject_name: Some(subject_name_label.clone()),
+        subject_name: Some(subject_name_label),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
         // The `# Database:` line of outfmt 7 shows the `-db` value as NCBI keeps it.
         database_name: Some(match database {
-            Some(database) => database.name().to_string(),
-            None => format!("User specified sequence set (Input: {subject_input_label})"),
+            Some(database) => database.name().to_vec(),
+            None => [
+                b"User specified sequence set (Input: ".as_slice(),
+                &subject_input_label,
+                b")",
+            ]
+            .concat(),
         }),
         program: args.app.ncbi_name().to_string(),
     };

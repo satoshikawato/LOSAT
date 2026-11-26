@@ -191,9 +191,9 @@ struct SearchFiles<'a> {
     label: &'a str,
     query: &'a std::path::Path,
     subject: Option<&'a std::path::Path>,
-    masker: Option<&'a str>,
+    masker: Option<&'a std::ffi::OsStr>,
     filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
-    repeats: Option<&'a str>,
+    repeats: Option<&'a std::ffi::OsStr>,
 }
 
 /// `SearchFiles` of the arguments `command`: `None` for a program that writes no strategy file.
@@ -293,7 +293,7 @@ pub fn open_strategy_file(
     }));
     others.extend(files.masker.map(|masker| RunFileName {
         option: "window_masker_db",
-        name: std::ffi::OsStr::new(masker),
+        name: masker,
     }));
     // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
     // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
@@ -325,9 +325,8 @@ pub fn open_strategy_file(
         if let Some(path) = read_there {
             let repeats = files.filter.is_none()
                 || files.repeats.is_some_and(|repeats| {
-                    path.as_os_str()
-                        .as_encoded_bytes()
-                        .starts_with(repeats.as_bytes())
+                    crate::utils::os_bytes::os_str_bytes(path.as_os_str())
+                        .starts_with(&crate::utils::os_bytes::os_str_bytes(repeats))
                 });
             others.push(RunFileName {
                 option: if repeats { "filtering_db" } else { "db" },

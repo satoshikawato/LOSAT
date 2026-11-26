@@ -1,0 +1,3 @@
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.subject.database
+Bad char [0xE9] in string at line 34
+ndbé

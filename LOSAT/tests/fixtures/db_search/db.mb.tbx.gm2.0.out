@@ -1,0 +1,189 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nmb_gm_2
+           3 sequences; 240 total letters
+
+
+
+Query= qn0
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+NM_000002.1 nseq0_dl1 bit2                                            65.2    5e-17  1
+
+
+>NM_000002.1 nseq0_dl1 bit2
+Length=80
+
+ Score = 65.2 bits (136),  Expect = 5e-17
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -3/-3
+
+Query  78  TFFQLTTKVTFHKGDLSLLSNVCSLH  1
+           TFFQLTTKVTFHKGDLSLLSNVCSLH
+Sbjct  78  TFFQLTTKVTFHKGDLSLLSNVCSLH  1
+
+
+ Score = 62.5 bits (130),  Expect = 3e-16
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +3/+3
+
+Query  3   EDCIHC*AKTNLLCEKSL*SSIGRTS  80
+           EDCIHC*AKTNLLCEKSL*SSIGRTS
+Sbjct  3   EDCIHC*AKTNLLCEKSL*SSIGRTS  80
+
+
+ Score = 61.6 bits (128),  Expect = 6e-16
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +1/+1
+
+Query  1   MKTAYIAKQRQISFVKSHFSRQLEER  78
+           MKTAYIAKQRQISFVKSHFSRQLEER
+Sbjct  1   MKTAYIAKQRQISFVKSHFSRQLEER  78
+
+
+ Score = 60.6 bits (126),  Expect = 1e-15
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -2/-2
+
+Query  79  DVLPIDD*SDFSQRRFVFA*QCMQSS  2
+           DVLPIDD*SDFSQRRFVFA*QCMQSS
+Sbjct  79  DVLPIDD*SDFSQRRFVFA*QCMQSS  2
+
+
+ Score = 60.2 bits (125),  Expect = 2e-15
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +2/+2
+
+Query  2   *RLHTLLSKDKSPL*KVTLVVNWKNV  79
+           *RLHTLLSKDKSPL*KVTLVVNWKNV
+Sbjct  2   *RLHTLLSKDKSPL*KVTLVVNWKNV  79
+
+
+ Score = 60.2 bits (125),  Expect = 2e-15
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -1/-1
+
+Query  80  RRSSN*RLK*LFTKEICLCLAMYAVF  3
+           RRSSN*RLK*LFTKEICLCLAMYAVF
+Sbjct  80  RRSSN*RLK*LFTKEICLCLAMYAVF  3
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 1008
+
+
+Query= qn1
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 1008
+
+
+Query= qn2
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+NM_000004.1 nseq2_dl0 bit2                                            65.3    4e-17  1
+
+
+>NM_000004.1 nseq2_dl0 bit2
+Length=80
+
+ Score = 65.3 bits (140),  Expect = 4e-17
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +1/+1
+
+Query  1   GVLSPADKTNVKAAWGKVGAHAGEYG  78
+           GVLSPADKTNVKAAWGKVGAHAGEYG
+Sbjct  1   GVLSPADKTNVKAAWGKVGAHAGEYG  78
+
+
+ Score = 63.2 bits (132),  Expect = 2e-16
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -1/-1
+
+Query  80  APYSPACAPTLPQAAFTLVLSAGLST  3
+           APYSPACAPTLPQAAFTLVLSAGLST
+Sbjct  80  APYSPACAPTLPQAAFTLVLSAGLST  3
+
+
+ Score = 62.0 bits (129),  Expect = 4e-16
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -3/-3
+
+Query  78  TILASVRADLTPGGLHVGLVSRAQHT  1
+           TILASVRADLTPGGLHVGLVSRAQHT
+Sbjct  78  TILASVRADLTPGGLHVGLVSRAQHT  1
+
+
+ Score = 58.8 bits (122),  Expect = 4e-15
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +2/+2
+
+Query  2   VC*ALLTRPT*RPPGVRSARTLASMV  79
+           VC*ALLTRPT*RPPGVRSARTLASMV
+Sbjct  2   VC*ALLTRPT*RPPGVRSARTLASMV  79
+
+
+ Score = 31.8 bits (63),  Expect = 6e-07
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = -2/-2
+
+Query  79  HHTrqrarrpyprrpsRWSCQQGSAH  2
+           HHTRQRARRPYPRRPSRWSCQQGSAH
+Sbjct  79  HHTRQRARRPYPRRPSRWSCQQGSAH  2
+
+
+ Score = 26.3 bits (51),  Expect = 2e-05
+ Identities = 9/9 (100%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = +3/+3
+
+Query  3   CAEPC*QDQ  29
+           CAEPC*QDQ
+Sbjct  3   CAEPC*QDQ  29
+
+
+
+Lambda      K        H
+   0.309    0.130    0.406 
+
+
+Effective search space used: 901
+
+
+  Database: nmb_gm_2
+    Posted date:  Nov 26, 2026  2:40 AM
+  Number of letters in database: 240
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

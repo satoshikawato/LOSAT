@@ -10,7 +10,6 @@ fn records(lengths: &[usize]) -> Vec<FastaRecord> {
             title: Vec::new(),
             sequence: vec![b'A'; length],
             lowercase_masks: Vec::new(),
-            warnings: Vec::new(),
             source: None,
             around: None,
             skipped: None,

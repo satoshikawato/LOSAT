@@ -203,6 +203,146 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
     assert!((0..8).all(|oid| !db.erases_a_line_of_oid(oid).unwrap()));
 }
 
+fn memb_fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/memb_bit/db")
+}
+
+fn open_memb(name: &str, seqtype: SeqType) -> Result<SeqDb, SeqDbError> {
+    SeqDb::open(memb_fixtures().join(name).to_str().unwrap(), seqtype)
+}
+
+const MB1_LINES: [(u32, usize); 6] = [(0, 1), (1, 2), (2, 0), (3, 0), (4, 0), (5, 0)];
+const MEMB_CONFLICT: Option<&[u8]> = Some(b"MEMB_BIT error: conflicting bit found.");
+
+#[test]
+fn memb_bit_selects_defline_memberships_and_tracks_filters_header_sets() {
+    let db0 = open_memb("mb_0", SeqType::Protein).unwrap();
+    assert!(!db0.drops_lineless_hits());
+    assert!(!db0.filters_header_sets(db0.location_of(0).unwrap()));
+    assert_eq!(
+        lines(&db0),
+        [(0, 2), (1, 2), (2, 1), (3, 1), (4, 2), (5, 1)]
+    );
+
+    let db1 = open_memb("mb_1", SeqType::Protein).unwrap();
+    assert!(db1.drops_lineless_hits());
+    assert!(db1.filters_header_sets(db1.location_of(0).unwrap()));
+    assert_eq!(lines(&db1), MB1_LINES);
+    assert_eq!(
+        (0..6)
+            .map(|oid| db1.erases_a_line_of_oid(oid).unwrap())
+            .collect::<Vec<_>>(),
+        [true, false, true, true, true, true]
+    );
+
+    // OID 1 dl1 carries memberships {1, 2}: only front() (1) is tested, so bit 2 erases it.
+    let db2 = open_memb("mb_2", SeqType::Protein).unwrap();
+    assert_eq!(
+        lines(&db2),
+        [(0, 1), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]
+    );
+
+    // Bits 31 and 32 (INT_MIN = 0x8000_0000) work on OID 4.
+    let db31 = open_memb("mb_31", SeqType::Protein).unwrap();
+    let db32 = open_memb("mb_32", SeqType::Protein).unwrap();
+    assert_eq!(db31.defline_set(4).unwrap().deflines.len(), 1);
+    assert_eq!(db32.defline_set(4).unwrap().deflines.len(), 1);
+    assert_eq!(
+        db32.defline_set(4).unwrap().deflines[0].title.as_deref(),
+        Some(b"seq4_dl0 bit32".as_slice())
+    );
+    assert_eq!(
+        db31.defline_set(4).unwrap().deflines[0].title.as_deref(),
+        Some(b"seq4_dl1 bit31".as_slice())
+    );
+}
+
+#[test]
+fn memb_bit_conflicts_and_parse_order_match_ncbi() {
+    // Parse order in ComputeMasks: SEQIDLIST before MEMB_BIT before TAXIDLIST.
+    let err_si = open_memb("ord_si_mb", SeqType::Protein).unwrap_err();
+    assert!(
+        err_si.to_string().contains("has multiple SEQID lists"),
+        "{err_si}"
+    );
+    let err_tx = open_memb("ord_mb_tx", SeqType::Protein).unwrap_err();
+    assert!(
+        err_tx
+            .to_string()
+            .contains("Cannot convert string 'abc' to Uint8"),
+        "{err_tx}"
+    );
+
+    // Deferred conflict without NeedTotalsScan: open succeeds, build_oid_list fails.
+    let db = open_memb("conflict_plain", SeqType::Protein).unwrap();
+    let err = db.build_oid_list().unwrap_err();
+    assert_eq!(err.ncbi_message().as_deref(), MEMB_CONFLICT);
+    let site = super::super::throw_site(b"MEMB_BIT error: conflicting bit found.").unwrap();
+    assert_eq!(
+        (site.file, site.line, site.function),
+        (
+            "include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp",
+            881,
+            None
+        )
+    );
+
+    // Parent 0 over child 1 conflicts; parent 1 over child 0 succeeds.
+    let db_0_1 = open_memb("nest_0_1", SeqType::Protein).unwrap();
+    assert_eq!(
+        db_0_1
+            .build_oid_list()
+            .unwrap_err()
+            .ncbi_message()
+            .as_deref(),
+        MEMB_CONFLICT
+    );
+    let db_1_0 = open_memb("nest_1_0", SeqType::Protein).unwrap();
+    assert!(db_1_0.build_oid_list().is_ok());
+    assert_eq!(lines(&db_1_0), MB1_LINES);
+
+    // Conflict with NeedTotalsScan (GILIST without NSEQ+LENGTH): fails at open.
+    let err_gi = open_memb("conflict_gi", SeqType::Protein).unwrap_err();
+    assert_eq!(err_gi.ncbi_message().as_deref(), MEMB_CONFLICT);
+}
+
+#[test]
+fn memb_bit_past_32_refuses_memberships_and_masklist_builds_oid_list() {
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-memb33-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("mb33.pal");
+    std::fs::write(
+        &alias,
+        format!(
+            "DBLIST {}\nMEMB_BIT 33\n",
+            memb_fixtures().join("pm5").display()
+        ),
+    )
+    .unwrap();
+    let db = SeqDb::open(dir.join("mb33").to_str().unwrap(), SeqType::Protein).unwrap();
+    // OID 2 has no memberships: deterministically erased without UB.
+    assert_eq!(db.defline_set(2).unwrap().deflines.len(), 0);
+    // OID 0 carries memberships: refused explicitly.
+    let err = db.defline_set(0).unwrap_err();
+    assert!(
+        matches!(&err, SeqDbError::Unsupported { message, .. } if message.contains("past the 32 bits")),
+        "{err}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    // MASKLIST + conflicting MEMB_BIT under NSEQ+LENGTH: read_mask_block reports OID-list error.
+    let nog_cc = memb_fixtures().join("nogless").join("cc");
+    let db_cc = SeqDb::open(nog_cc.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+    let range = db_cc.next_block(0, u64::MAX).unwrap();
+    let mut block = super::super::MaskBlock::default();
+    db_cc.read_mask_block(range, 0, &mut block);
+    let err = block.ranges(0).unwrap_err();
+    assert_eq!(err.error().ncbi_message().as_deref(), MEMB_CONFLICT);
+}
+
 #[test]
 fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
     use super::{compare_seq_id, set_difference_by, set_intersection_by, validate_compare_seqids};

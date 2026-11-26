@@ -462,7 +462,6 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
         title: whole.title.clone(),
         sequence: whole.sequence[start..end].to_vec(),
         lowercase_masks: x_chunk_masks(whole, start, end),
-        warnings: whole.warnings.clone(),
         // Not the whole letters of a record cut to `-query_loc` for outfmt 11: one copy per chunk.
         source: whole
             .source

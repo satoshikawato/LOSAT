@@ -732,6 +732,10 @@ impl SeqDb {
         column.read_blobs(range.first, range.end, &mut block.blobs);
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:895-907
+    // `x_GetSeqGI` builds NCBI's OID list (`x_GetOidList`) before reading `.nog` or the filtered
+    // header: an alias file whose OID list build fails (such as a conflicting `MEMB_BIT` under
+    // `NSEQ` and `LENGTH`) throws there even when the caller reads GI masks by OID directly.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
     /// `range`, or its error, into `block`, read by one [`GiMasks::reader`].
     fn read_gi_mask_block(
@@ -744,6 +748,10 @@ impl SeqDb {
         block.source = BlockSource::Gi;
         block.ranges.clear();
         block.gi_spans.clear();
+        if let Err(error) = self.build_oid_list() {
+            block.error = Some(error);
+            return;
+        }
         let mut reader = masks.reader(range.volume, &self.volumes[range.volume], algo_id);
         for vol_oid in range.first..range.end {
             let start = block.ranges.len();

@@ -1,8 +1,7 @@
 //! The stream against the independent C++ oracle of the pinned `CStreamLineReader`,
 //! `NcbiGetline`, `CPushback_Streambuf` and `IsIStreamEmpty`
-//! (`LOSAT/tests/unit/blastx_stage_e_io_stream_expected.tsv`, the table that BLASTX's copy
-//! of this stream is tested with: `algorithm/blastx/input.rs`,
-//! `pinned_cpp_stream_state_and_line_oracle`).
+//! (`LOSAT/tests/unit/blastx_stage_e_io_stream_expected.tsv`, which BLASTX's own copy of this
+//! stream was tested with before BLASTX read through this one).
 //!
 //! Columns: name, input bytes (hex, or `~byte:count` runs), seekable, run the empty
 //! check, read-fault offset (-1 for none), unused, `IsIStreamEmpty`, the lines joined by

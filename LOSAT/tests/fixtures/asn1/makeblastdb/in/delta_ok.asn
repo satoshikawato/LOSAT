@@ -1,0 +1,15 @@
+Seq-entry ::= seq {
+  id { local str "dok" },
+  descr { title "delta ok" },
+  inst {
+    repr delta,
+    mol dna,
+    length 9,
+    ext delta {
+      literal { length 4, seq-data ncbi2na '1B'H },
+      loc null NULL,
+      literal { length 2, seq-data gap { type unknown } },
+      literal { length 2, seq-data ncbi4na '12'H }
+    }
+  }
+}

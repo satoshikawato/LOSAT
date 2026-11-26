@@ -56,7 +56,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
 | `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
-| `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
+| `deltablast` | Standalone executable | Not yet provided |
 
 ## All five search programs
 
@@ -437,6 +437,25 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#convert2blastmask).
 
+## blast_formatter
+
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text.
+
+| Input | What happens |
+| :--- | :--- |
+| `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
+| An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
+| A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
+| An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, an element stated as `NULL` in a list, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
+| An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
+| A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
+| `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
+| An archive of the mapper | Refused. NCBI's programs write none. |
+| A value in an archive's results that LOSAT does not yet write in `-outfmt` `12`: a NaN or an infinite real number, a UTF8String, a NULL value or an OCTET STRING | Refused, with the value and the format named. NCBI BLAST+ stops at a NaN or an infinity in `-outfmt` `12` with an error of its JSON stream. |
+| `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
+
+An empty `-rid`, the archive's other errors (an archive of PHI-BLAST is NCBI's engine error), the errors of `-outfmt` and a failed write of the output come as in NCBI. `BL2SEQ_LEGACY` changes nothing in `-outfmt` `8`, `9` and `12`, in NCBI as in LOSAT.
+
 ## makembindex
 
 `makembindex` runs every option of its `-help` (`-xmlhelp` on the command line only).
@@ -502,10 +521,11 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 
 ## On the list for a later release
 
-- The programs `deltablast` and `blast_formatter`.
+- The program `deltablast`.
 - `makeprofiledb -dbtype cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `13` to `16`.
+- `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers

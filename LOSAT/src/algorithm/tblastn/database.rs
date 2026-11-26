@@ -334,24 +334,36 @@ impl TblastnDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-763
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-890
     /// The open of the taxonomy database by the rows `rows` of the final hit lists `hitlists`
     /// (subjects named by rank, `reported_subjects`) after their batch's prefetch
     /// (`shared::RowLookups::open_after_prefetch`): the rows of a subject that the reports load
-    /// (`HitLoads::loaded`; a row whose load throws looks nothing up).
+    /// (`HitLoads::loaded`; a row whose load throws looks nothing up). With `ends_on_throw`
+    /// (`AfterThrow::EndsReport` or `EndsRun`), a query's subjects stop at the first whose load
+    /// throws: its report loads nothing after it (`shared::one_by_one_query_reads`).
     pub(super) fn open_for_rows(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         rows: shared::RowLookups,
+        ends_on_throw: bool,
     ) -> Result<()> {
-        let subjects = hitlists
-            .iter()
-            .flat_map(KappaResultHitList::lists)
-            .filter(|list| !list.hsps.hsps.is_empty() && reported.loads.loaded(list.oid as usize))
-            .map(|list| {
+        let mut subjects = Vec::new();
+        for hitlist in hitlists {
+            for list in hitlist.lists() {
+                if list.hsps.hsps.is_empty() {
+                    continue;
+                }
                 let rank = list.oid as usize;
-                (reported.ordinals[rank], reported.parsed_subject(rank))
-            });
+                if ends_on_throw && reported.loads.thrown(rank).is_some() {
+                    break;
+                }
+                if reported.loads.loaded(rank) {
+                    subjects.push((reported.ordinals[rank], reported.parsed_subject(rank)));
+                }
+            }
+        }
         rows.open_after_prefetch(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
@@ -395,12 +407,13 @@ impl TblastnDatabase {
         rows: SubjectFetch,
         row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        (joins_copies, ends_on_throw): (bool, bool),
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let lists = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| reads_subject(list, rows));
-        let ranks: Vec<u32> = match pairwise {
+        let ranks: Vec<usize> = match pairwise {
             Some(reading) => pairwise_read_order(
                 lists,
                 |rank| Ok(reported.lengths[rank]),
@@ -415,22 +428,23 @@ impl TblastnDatabase {
             )?
             .subjects()
             .into_iter()
-            .map(|rank| rank as u32)
+            .filter(|&rank| reported.loads.reached(rank))
             .collect(),
-            None => lists.map(|list| list.oid as u32).collect(),
+            None => shared::one_by_one_query_reads(
+                lists.map(|list| list.oid as usize),
+                |rank| reported.parsed_subject(rank),
+                &reported.loads,
+                joins_copies,
+                ends_on_throw,
+            ),
         };
-        // Not a subject that no report reaches after one whose load throws (`HitLoads::reached`:
-        // a load that throws has read the candidates' headers, `common::database::load_read_texts`).
-        let subjects = ranks
-            .into_iter()
-            .filter(|&rank| reported.loads.reached(rank as usize))
-            .map(|rank| {
-                (
-                    rank,
-                    reported.ordinals[rank as usize],
-                    reported.parsed_subject(rank as usize),
-                )
-            });
+        let subjects = ranks.into_iter().map(|rank| {
+            (
+                rank as u32,
+                reported.ordinals[rank],
+                reported.parsed_subject(rank),
+            )
+        });
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, row_lookups, PROGRAM)
     }
 

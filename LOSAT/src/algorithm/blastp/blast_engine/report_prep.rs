@@ -744,15 +744,28 @@ pub(super) fn prefetch_reported_subjects(
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
-                            // Not a subject that no report reaches after one whose load throws
-                            // (`HitLoads::reached`: a load that throws has read the candidates'
-                            // headers, `common::database::load_read_texts`).
-                            let reached = |rank: &usize| hit_loads.reached(*rank);
-                            let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
-                                .filter(reached)
-                                .peekable();
+                            // Truncate per query at a throwing `Hit` for `EndsReport`/`EndsRun`
+                            // formats and collapse adjacent `joins_as_copy` copies for XML/XML2/JSON.
+                            let joins_copies = first_report.is_some_and(
+                                crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                            );
+                            let ends_on_throw = after_throw.run().is_some_and(|run| {
+                                matches!(
+                                    run.after,
+                                    crate::report::db_subject::AfterThrow::EndsReport
+                                        | crate::report::db_subject::AfterThrow::EndsRun
+                                )
+                            });
+                            let query_ranks =
+                                crate::algorithm::common::database::one_by_one_query_reads(
+                                    database::ListedTitles::fetched_ranks(shown, rows),
+                                    |rank| titles.parsed_subject(rank),
+                                    &hit_loads,
+                                    joins_copies,
+                                    ends_on_throw,
+                                );
                             if rows == crate::report::tabular::SubjectFetch::Every
-                                || fetched.peek().is_some()
+                                || !query_ranks.is_empty()
                             {
                                 // The first format writes the texts where it reads each
                                 // subject (`places_subject_reads`), else before the report.
@@ -773,21 +786,28 @@ pub(super) fn prefetch_reported_subjects(
                                             )
                                             .subjects()
                                             .into_iter()
-                                            .filter(reached)
+                                            .filter(|rank| hit_loads.reached(*rank))
                                             .collect(),
-                                            None => fetched.collect(),
+                                            None => query_ranks.clone(),
                                         };
                                     subject_reads.set(
                                         query,
                                         titles.subject_read_texts(database, ranks, row_lookups)?,
                                     );
                                 } else {
-                                    let messages = titles.prefetch_messages(database, fetched)?;
+                                    let messages = titles
+                                        .prefetch_messages(database, query_ranks.iter().copied())?;
                                     query_warning_lines[query].extend(messages);
                                 }
                             }
                             if prefetch_taxids {
-                                open_for_rows(shown)?;
+                                titles.open_for_rows(
+                                    database,
+                                    row_lookups,
+                                    query_ranks
+                                        .into_iter()
+                                        .filter(|&rank| hit_loads.loaded(rank)),
+                                )?;
                             }
                         }
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):

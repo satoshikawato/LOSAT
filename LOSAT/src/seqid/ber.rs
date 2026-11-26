@@ -1352,7 +1352,7 @@ pub fn title_replaced_chars(record: &[u8]) -> Vec<crate::report::serial::encoder
     use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
     let mut ber = Reader::new(record);
     ber.replaced_titles = Some(Vec::new());
-    let _ = read_set(&mut ber);
+    let _ = read_set(&mut ber, &mut Vec::new());
     let mut posts = Vec::new();
     for range in ber.replaced_titles.take().unwrap_or_default() {
         let end = StreamPosition::Byte(range.end as u64);

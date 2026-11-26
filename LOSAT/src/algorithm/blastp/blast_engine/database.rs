@@ -1139,17 +1139,19 @@ impl<'a> FetchNotes<'a> {
         })
     }
 
-    /// `refused_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a
-    /// batch's stream runs in `(ordinal ASC, query DESC)` order: `at` is `Some((ordinal, query))`
-    /// for an endless redo at that match, or `None` at the batch's end.
-    pub(super) fn refused_before_failure_oid(
+    /// First read of `select(&listed.fetched_utf8)` reached in `(ordinal ASC, query DESC)` order
+    /// inside `batch` up to `at` (`Some((ordinal, query))` for an endless redo, `None` at batch
+    /// end).
+    fn first_oid_before(
         &self,
+        select: fn(&XFetchedUtf8) -> &[XFetchedRead],
         heaps: &[BlastCompoHeap],
-        batch: std::ops::Range<usize>,
+        batch: &std::ops::Range<usize>,
         at: Option<(u32, usize)>,
-    ) -> Option<anyhow::Error> {
+    ) -> Option<(&BlastpDatabase, usize, u32)> {
         let (listed, database) = (self.listed?, self.database?);
-        if listed.fetched_utf8.unreadable.is_empty() {
+        let reads = select(&listed.fetched_utf8);
+        if reads.is_empty() {
             return None;
         }
         let batch_of = |_: usize| batch.clone();
@@ -1161,43 +1163,35 @@ impl<'a> FetchNotes<'a> {
                 })
         };
         let (query, ordinal) = listed.fetched_utf8.first_redone_oid(
-            &listed.fetched_utf8.unreadable,
+            reads,
             heaps,
             &batch_of,
             &listed.ordinals,
             &reached,
         )?;
+        Some((database, query, ordinal))
+    }
+
+    /// `refused_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0).
+    pub(super) fn refused_before_failure_oid(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch: std::ops::Range<usize>,
+        at: Option<(u32, usize)>,
+    ) -> Option<anyhow::Error> {
+        let (database, query, ordinal) =
+            self.first_oid_before(|u| &u.unreadable, heaps, &batch, at)?;
         Some(fetch_refused(database, query, ordinal))
     }
 
-    /// `fetched_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a
-    /// batch's stream runs in `(ordinal ASC, query DESC)` order: `at` is `Some((ordinal, query))`
-    /// for an endless redo at that match, or `None` at the batch's end.
+    /// `fetched_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0).
     pub(super) fn fetched_before_failure_oid(
         &self,
         heaps: &[BlastCompoHeap],
         batch: std::ops::Range<usize>,
         at: Option<(u32, usize)>,
     ) -> Option<Utf8Read> {
-        let (listed, database) = (self.listed?, self.database?);
-        if listed.fetched_utf8.reads.is_empty() {
-            return None;
-        }
-        let batch_of = |_: usize| batch.clone();
-        let reached = |read: &XFetchedRead| {
-            batch.contains(&read.query)
-                && at.is_none_or(|(ordinal, query)| {
-                    (read.key.ordinal, std::cmp::Reverse(read.query))
-                        <= (ordinal, std::cmp::Reverse(query))
-                })
-        };
-        let (_, ordinal) = listed.fetched_utf8.first_redone_oid(
-            &listed.fetched_utf8.reads,
-            heaps,
-            &batch_of,
-            &listed.ordinals,
-            &reached,
-        )?;
+        let (database, _, ordinal) = self.first_oid_before(|u| &u.reads, heaps, &batch, at)?;
         let at = database.db.location_of(ordinal)?;
         Some(Utf8Read {
             query: batch.start,

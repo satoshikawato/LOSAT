@@ -1,0 +1,6 @@
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	4.45e-117	315
+q1	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.94	15.8
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.29e-111	301
+q1	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.0	15.0
+
+Search has CONVERGED!

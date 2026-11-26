@@ -1,69 +1,13 @@
 //! Sequence data of a database volume: the conversions of
 //! `c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp` from a
-//! `CSeq_data` to the bytes of the sequence file, the ambiguity data of a
-//! nucleotide sequence, and the generator (`CRandom`) that picks the base
-//! stored in place of an ambiguous one.
+//! `CSeq_data` to the bytes of the sequence file and the ambiguity data of a
+//! nucleotide sequence (using `utils::random_gen::NcbiRandom` to pick the base
+//! stored in place of an ambiguous one).
 
 use super::bioseq::SeqData;
 use super::fasta_source::pack::iupacna_to_ncbi4na;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-
-// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:159-165
-// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98
-const STATE_SIZE: usize = 33;
-const STATE_OFFSET: usize = 12;
-
-/// `CRandom` with the lagged Fibonacci generator (`eGetRand_LFG`).
-#[derive(Debug, Clone)]
-pub(crate) struct Random {
-    state: [u32; STATE_SIZE],
-    rj: usize,
-    rk: usize,
-}
-
-impl Random {
-    // NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:227-231
-    // NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:296-308
-    pub(crate) fn new(seed: u32) -> Self {
-        let mut state = [0u32; STATE_SIZE];
-        state[0] = seed;
-        for i in 1..STATE_SIZE {
-            state[i] = 1_103_515_245u32
-                .wrapping_mul(state[i - 1])
-                .wrapping_add(12345);
-        }
-        let mut random = Self {
-            state,
-            rj: STATE_OFFSET,
-            rk: STATE_SIZE - 1,
-        };
-        for _ in 0..10 * STATE_SIZE {
-            random.get_rand();
-        }
-        random
-    }
-
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:222-241
-    // `m_RJ` and `m_RK` are never negative at the same step (they start 21
-    // apart and move together), so the unsigned indices wrap one at a time
-    // exactly as the signed ones do.
-    pub(crate) fn get_rand(&mut self) -> u32 {
-        let r = self.state[self.rk].wrapping_add(self.state[self.rj]);
-        self.state[self.rk] = r;
-        if self.rk == 0 {
-            self.rk = STATE_SIZE - 1;
-            self.rj -= 1;
-        } else {
-            self.rk -= 1;
-            self.rj = if self.rj == 0 {
-                STATE_SIZE - 1
-            } else {
-                self.rj - 1
-            };
-        }
-        r >> 1
-    }
-}
+use crate::utils::random_gen::NcbiRandom;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:141-147
 const MAX_REGION_LENGTH: u32 = 0xFFF;
@@ -95,7 +39,7 @@ impl AmbiguousRegion {
 struct AmbigDataBuilder {
     size: u32,
     regions: Vec<AmbiguousRegion>,
-    random: Random,
+    random: NcbiRandom,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:161-169
@@ -108,7 +52,7 @@ impl AmbigDataBuilder {
         Self {
             size,
             regions: Vec::new(),
-            random: Random::new(size),
+            random: NcbiRandom::new(size),
         }
     }
 
@@ -439,35 +383,141 @@ pub(crate) fn unknown_conversion() -> NcbiException {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:6123-6153,6436-6467
+// `CSeqVectorTypes::sx_GetConvertTable` builds the IUPACna -> NCBI8na table from `CSeqportUtil`,
+// whose `iupacna` alphabet covers ASCII 65..=89 (`A`..=`Y`, uppercase only; `U` and every other
+// byte, lowercase included, stay `0xff`).
+const fn seq_vector_iupacna_to_ncbi8na_table() -> [u8; 256] {
+    let mut table = [0xFFu8; 256];
+    table[b'A' as usize] = 1;
+    table[b'B' as usize] = 14;
+    table[b'C' as usize] = 2;
+    table[b'D' as usize] = 13;
+    table[b'G' as usize] = 4;
+    table[b'H' as usize] = 11;
+    table[b'K' as usize] = 12;
+    table[b'M' as usize] = 3;
+    table[b'N' as usize] = 15;
+    table[b'R' as usize] = 5;
+    table[b'S' as usize] = 6;
+    table[b'T' as usize] = 8;
+    table[b'V' as usize] = 7;
+    table[b'W' as usize] = 9;
+    table[b'Y' as usize] = 10;
+    table
+}
+const SEQ_VECTOR_IUPACNA_TO_NCBI8NA: [u8; 256] = seq_vector_iupacna_to_ncbi8na_table();
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seqport_util.cpp:6182-6215,6622-6653
+// `CSeqportUtil`'s `iupacaa` alphabet covers uppercase ASCII 65..=90 only; lowercase stays `0xff`.
+const fn seq_vector_iupacaa_to_ncbistdaa_table() -> [u8; 256] {
+    let mut table = [0xFFu8; 256];
+    let mut i = 0;
+    while i < 26 {
+        table[b'A' as usize + i] = STDAA_OF_LETTER[i];
+        i += 1;
+    }
+    table
+}
+const SEQ_VECTOR_IUPACAA_TO_NCBISTDAA: [u8; 256] = seq_vector_iupacaa_to_ncbistdaa_table();
+
+/// Why `SeqDB_SequenceHash` (`CSeqVector`) cannot hash a Bioseq's `Seq-data` for `length` letters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SequenceHashError {
+    /// `CSeqVector_CI::ThrowOutOfRangeSeq_inst` (`CSeqVectorException::eOutOfRange`).
+    OutOfRange(NcbiException),
+    /// `copy_2bit_any` / `copy_4bit_any` compare the truncating quotient of the block end against
+    /// the byte count, so 1..3 bases (2na) or 1 base (4na) past the data reads one byte past the
+    /// vector (undefined behaviour in NCBI).
+    PastEnd(&'static str),
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56-62
+// NCBI reference (598d8ae6): c++/include/objmgr/impl/seq_vector_cvt.hpp:47-131
+/// `CSeqVector_CI`'s cache check in blocks of 1024 residues before hashing `length` residues of
+/// a sequence buffer of `bytes` bytes holding `per_byte` residues per byte (1, 2 or 4).
+fn check_seq_vector_bounds(
+    coding: &'static str,
+    bytes: usize,
+    per_byte: usize,
+    length: usize,
+) -> Result<(), SequenceHashError> {
+    const CACHE_SIZE: usize = 1024;
+    let mut pos = 0usize;
+    while pos < length {
+        let end = (pos + CACHE_SIZE).min(length);
+        if end / per_byte > bytes {
+            return Err(SequenceHashError::OutOfRange(NcbiException::new(
+                ThrowSite {
+                    file: "src/objmgr/seq_vector_ci.cpp",
+                    line: 60,
+                    kind: "CSeqVectorException::eOutOfRange",
+                    function: Some("ncbi::objects::ThrowOutOfRangeSeq_inst"),
+                },
+                format!("reference out of range of Seq-inst data: {end}"),
+            )));
+        }
+        if end.div_ceil(per_byte) > bytes {
+            return Err(SequenceHashError::PastEnd(coding));
+        }
+        pos = end;
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:100-111
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
-// `eCoding_Ncbi` gives a protein's NCBIstdaa codes (the bytes of the sequence file) and a
-// nucleotide's NCBI4na code per base (after `s_FixBioseqDeltas`, whose gaps are 0x0f).
+// `eCoding_Ncbi` gives a protein's NCBIstdaa codes and a nucleotide's NCBI8na codes through
+// `CSeqVector`'s `CSeqportUtil` tables (after `s_FixBioseqDeltas`, whose gaps are 0x0f).
 /// `SeqDB_SequenceHash` of a bioseq: the hash of `-hash_index` over `length` residues of
-/// `seq_data`, `None` for a coding the writer cannot write (it stops before the hash is used).
-pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
+/// `seq_data`, `Ok(None)` for a coding the writer cannot write (it stops before the hash is used),
+/// or `Err` when `CSeqVector` throws `eOutOfRange` or reads past the packed bytes.
+pub(crate) fn sequence_hash(
+    seq_data: &SeqData,
+    length: u64,
+) -> Result<Option<u32>, SequenceHashError> {
     let length = length as usize;
-    Some(match seq_data {
-        SeqData::Ncbieaa(v) => hash(
-            v.iter()
-                .take(length)
-                .map(|&b| NCBIEAA_TO_NCBISTDAA[usize::from(b)]),
-        ),
-        SeqData::Iupacaa(v) => hash(
-            v.iter()
-                .take(length)
-                .map(|&b| IUPACAA_TO_NCBISTDAA[usize::from(b)]),
-        ),
-        SeqData::Ncbistdaa(v) => hash(v.iter().take(length).copied()),
+    let value = match seq_data {
+        SeqData::Ncbieaa(v) => {
+            check_seq_vector_bounds("ncbieaa", v.len(), 1, length)?;
+            hash(
+                v.iter()
+                    .take(length)
+                    .map(|&b| NCBIEAA_TO_NCBISTDAA[usize::from(b)]),
+            )
+        }
+        SeqData::Iupacaa(v) => {
+            check_seq_vector_bounds("iupacaa", v.len(), 1, length)?;
+            hash(
+                v.iter()
+                    .take(length)
+                    .map(|&b| SEQ_VECTOR_IUPACAA_TO_NCBISTDAA[usize::from(b)]),
+            )
+        }
+        SeqData::Ncbistdaa(v) => {
+            check_seq_vector_bounds("ncbistdaa", v.len(), 1, length)?;
+            hash(v.iter().take(length).copied())
+        }
+        SeqData::Iupacna(v) => {
+            check_seq_vector_bounds("iupacna", v.len(), 1, length)?;
+            hash(
+                v.iter()
+                    .take(length)
+                    .map(|&b| SEQ_VECTOR_IUPACNA_TO_NCBI8NA[usize::from(b)]),
+            )
+        }
         SeqData::Ncbi2na(v) => {
+            check_seq_vector_bounds("ncbi2na", v.len(), 4, length)?;
             hash((0..length).map(|i| 1u8 << ((v[i / 4] >> (6 - 2 * (i % 4))) & 3)))
         }
-        SeqData::Ncbi4na(v) => hash((0..length).map(|i| (v[i / 2] >> (4 - 4 * (i % 2))) & 0x0f)),
-        // No program of LOSAT hashes iupacna (makeprofiledb's writer has no hash index), and its
-        // codes through the object manager's sequence vector are not ported.
-        SeqData::Iupacna(_) | SeqData::Other => return None,
-    })
+        SeqData::Ncbi4na(v) => {
+            check_seq_vector_bounds("ncbi4na", v.len(), 2, length)?;
+            hash((0..length).map(|i| (v[i / 2] >> (4 - 4 * (i % 2))) & 0x0f))
+        }
+        SeqData::Other => return Ok(None),
+    };
+    Ok(Some(value))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
@@ -583,6 +633,26 @@ pub(crate) fn short_nucleotide_data(
         held,
         read,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+// `WriteDB_IupacnaToBinary` converts all `v.size()` bytes of the IUPACna string into NCBI4na. In
+// `x_ConvertIupacnaTo4na`, the pair loop indexes `sm_IupacnaTo4na` with a signed `char` (`*src_i`),
+// so any byte >= 0x80 in positions `0..(v.len() & !1)` reads before the static table (undefined
+// behaviour); the single odd overhang byte casts to `Uint1` and is defined (`0xf0`).
+/// The first byte >= 0x80 (with its 0-based position) in a pair position (`0..(v.len() & !1)`)
+/// of an IUPACna `Seq-data`; `None` for any other coding or when every pair byte is below 0x80.
+pub(crate) fn iupacna_high_byte(seq_data: &SeqData) -> Option<(usize, u8)> {
+    let SeqData::Iupacna(v) = seq_data else {
+        return None;
+    };
+    let pairs_len = v.len() & !1;
+    v[..pairs_len]
+        .iter()
+        .enumerate()
+        .find(|&(_, &byte)| byte >= 0x80)
+        .map(|(index, &byte)| (index, byte))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_general.cpp:80-88

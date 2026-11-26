@@ -136,7 +136,9 @@ impl RpsUnit {
         let (setup_total, setup_count) = if total > 0 {
             (total, count)
         } else if volume.num_oids() > 0 {
-            (i64::from(volume.protein_length(0)?), 1)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-938
+            let len = volume.protein_length_i32(0)?;
+            (if len < 0 { -1 } else { i64::from(len) }, 1)
         } else {
             (0, 0)
         };
@@ -631,7 +633,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(true) if reported => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST or SEQIDLIST), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST, SEQIDLIST, TAXIDLIST or MEMB_BIT), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;

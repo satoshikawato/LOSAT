@@ -1085,6 +1085,7 @@ impl<'a> PairwiseRows<'a> {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
+            query_left_of_record: false,
         }
     }
 }
@@ -1162,7 +1163,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_tabular<W: Write>(
+pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     hits: &[TblastxHsp],
     writer: &mut W,
     comments: bool,
@@ -1238,6 +1239,8 @@ pub(crate) fn write_tabular<W: Write>(
                 probe.end(hsp_index);
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
@@ -1247,6 +1250,8 @@ pub(crate) fn write_tabular<W: Write>(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1401,13 +1406,12 @@ impl TblastxOutputFormat {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as the
+    /// call's first report, the posts of that prefetch go with the query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-        // (`TaxdbPrinter`).
+        // The archive fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+        // lookups (`database::RowLookups::Taxids`).
         crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
     }
 
@@ -1554,8 +1558,9 @@ impl HitFilters<'_> {
     /// and the coverage, which the preliminary reap already applied to these HSPs): the contexts
     /// are the query's frames. The best e-value is not set again, as NCBI's is not. Every HSP here
     /// has a positive length (the one-hit word finder's HSPs of length 0 or less are dropped
-    /// before the re-evaluation, as NCBI's re-evaluation deletes them:
-    /// `link_one_hit_with_int4_ends`), so the `usize` offsets are NCBI's `Int4` ones.
+    /// before the re-evaluation, after its fetch of the subject, as NCBI's re-evaluation deletes
+    /// them: `subject_link::drop_unread_int4_inverted`), so the `usize` offsets are NCBI's `Int4`
+    /// ones.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
     pub(super) fn subject_besthit(&self, hsps: &mut Vec<TblastxHsp>) {

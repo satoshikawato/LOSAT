@@ -39,7 +39,13 @@ use crate::report::serial::asn_ber_reader::{
 pub(crate) use crate::report::serial::asn_ber_reader::{
     CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
-use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind};
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:464-477
+// `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`) call it for a
+// mandatory member that the record skips; it is the read check that `SERIAL_VERIFY_DATA_READ`
+// turns off (`object_frame::DataCheck`, the database reader's refusal:
+// `seqdb::SeqDb::refuse_unchecked_reads`).
+use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind, EXPECTED_MEMBER};
 pub(crate) const TAG_NUMBER_MASK: u8 = 31;
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 /// Deepest nesting accepted inside a skipped member.
@@ -147,16 +153,6 @@ const UNEXPECTED_MEMBER: ThrowSite = site(
     FORMAT_ERROR,
     Some("ncbi::CObjectIStreamAsnBinary::UnexpectedMember"),
 );
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
-// The members' read functions (`ReadMissingSimpleMember`, member.cpp:464-477) call it for a
-// mandatory member that the record skips; the data is verified unless `SERIAL_VERIFY_DATA_READ`
-// says otherwise.
-const EXPECTED_MEMBER: ThrowSite = site(
-    OBJISTR,
-    1037,
-    FORMAT_ERROR,
-    Some("ncbi::CObjectIStream::ExpectedMember"),
-);
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 const HANDLE_EOF: ThrowSite = site(
     OBJISTR,
@@ -172,12 +168,6 @@ const END_OF_FILE: ThrowSite = site(
     358,
     "CEofException::eEof",
     Some("ncbi::CIStreamBuffer::FillBuffer"),
-);
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:715-755
-const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
-    "src/serial/member.cpp",
-    752,
-    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
 );
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
@@ -259,7 +249,7 @@ impl Frame {
 enum Failure {
     /// NCBI's `CSerialException` as it leaves the frames of NCBI's object stack: the exception
     /// with its backlogs (`NCBI_RETHROW_SAME`) and its frame stack (`m_FrameStack`, which
-    /// `AddFrameInfo` extends, `NcbiException::add_frame_info`, and `ReportExtra` prints as
+    /// `AddFrameInfo` extends, `NcbiException::add_frame_infos`, and `ReportExtra` prints as
     /// ` at <frames>`).
     Serial { exception: NcbiException },
     /// The record ends where NCBI's stream needs a byte (the `CEofException` of
@@ -306,7 +296,7 @@ impl BerError {
     fn left(self, frame: Frame) -> Self {
         let failure = match *self.0 {
             Failure::Serial { mut exception } => {
-                exception.add_frame_info(frame.name());
+                exception.add_frame_infos(&[frame.name()]);
                 Failure::Serial { exception }
             }
             Failure::Eof { pos } => match frame {
@@ -368,17 +358,11 @@ impl BerError {
     #[inline(never)]
     fn member_read(self, member: &'static str) -> Self {
         match *self.0 {
-            Failure::Serial { exception } => {
-                let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-                BerError(Box::new(Failure::Serial {
-                    exception: exception.rethrow_same(
-                        file,
-                        line,
-                        function,
-                        format!("error while reading {member}"),
-                    ),
-                }))
-            }
+            Failure::Serial { exception } => BerError(Box::new(Failure::Serial {
+                exception: crate::report::serial::asn_types::read::rethrow_set_flag_member(
+                    exception, member,
+                ),
+            })),
             failure => BerError(Box::new(failure)),
         }
     }
@@ -927,11 +911,11 @@ impl<'a> Reader<'a> {
         self.open()
     }
 
-    /// A VisibleString as NCBI's reader gives it (`fix_visible_chars`), and the number of
-    /// bytes it replaced.
-    fn fixed_string(&mut self) -> Result<(Vec<u8>, usize), BerError> {
+    /// A VisibleString as NCBI's reader gives it (`fix_visible_chars`), written over `value`
+    /// (whose buffer is kept), and the number of bytes it replaced.
+    fn fixed_string_in(&mut self, value: &mut Vec<u8>) -> Result<usize, BerError> {
         let stored = self.visible_string()?;
-        Ok((fix_visible_chars(stored), replaced_bytes(stored)))
+        Ok(fix_visible_chars(stored, value))
     }
 
     /// Opens a SEQUENCE value of `type_name` (the ordinal-id decoder's lists).
@@ -1077,31 +1061,50 @@ impl<'a> Reader<'a> {
 // (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163).
 // NCBI also writes a warning for each such string; this reader reports none.
 // makeblastdb stores titles already repaired this way.
-pub(crate) fn fix_visible_chars(value: &[u8]) -> Vec<u8> {
-    value
-        .iter()
-        .map(|&c| if visible_char(c) { c } else { b'#' })
-        .collect()
+/// The stored VisibleString `value` as NCBI's reader gives it, written over `out`, and the number
+/// of bytes it replaced. One pass makes the bytes and counts the replaced ones, `FIX_LANES` bytes
+/// a step: each lane counts in a `u8`, added up every 255 steps (before it could pass 255), so
+/// the step takes as many bytes as the vector registers hold. An unallocated `out` is allocated
+/// once with `Vec::with_capacity` so fresh buffers skip `Vec::resize`'s amortized grow path; a
+/// kept buffer is cut or lengthened in place without clearing bytes it already holds.
+pub(crate) fn fix_visible_chars(value: &[u8], out: &mut Vec<u8>) -> usize {
+    if out.capacity() == 0 {
+        *out = Vec::with_capacity(value.len());
+    }
+    out.truncate(value.len());
+    out.resize(value.len(), 0);
+    let (steps, rest) = value.as_chunks::<FIX_LANES>();
+    let (out_steps, out_rest) = out.split_at_mut(steps.len() * FIX_LANES);
+    let (out_steps, _) = out_steps.as_chunks_mut::<FIX_LANES>();
+    let block = usize::from(u8::MAX);
+    let mut replaced = 0;
+    for (steps, out_steps) in steps.chunks(block).zip(out_steps.chunks_mut(block)) {
+        let mut lanes = [0u8; FIX_LANES];
+        for (step, fixed) in steps.iter().zip(out_steps) {
+            for lane in 0..FIX_LANES {
+                let (byte, kept) = visible_byte(step[lane]);
+                fixed[lane] = byte;
+                lanes[lane] += u8::from(!kept);
+            }
+        }
+        replaced += lanes.iter().map(|&n| usize::from(n)).sum::<usize>();
+    }
+    for (&stored, fixed) in rest.iter().zip(out_rest) {
+        let (byte, kept) = visible_byte(stored);
+        *fixed = byte;
+        replaced += usize::from(!kept);
+    }
+    replaced
 }
 
-/// Whether `c` is a byte of ' ' ..= '~', which `fix_visible_chars` keeps.
-fn visible_char(c: u8) -> bool {
-    (b' '..=b'~').contains(&c)
-}
+/// The bytes of one step of `fix_visible_chars`.
+const FIX_LANES: usize = 16;
 
-/// The number of bytes of a stored VisibleString that `fix_visible_chars` replaces. Each piece
-/// of at most 255 bytes is counted in a `u8`, which cannot pass 255 there, so the count takes
-/// as many bytes per step as the vector registers hold; a `usize` count per byte took 4.
-pub(crate) fn replaced_bytes(value: &[u8]) -> usize {
-    value
-        .chunks(usize::from(u8::MAX))
-        .map(|piece| {
-            let replaced = piece
-                .iter()
-                .fold(0u8, |n, &c| n + u8::from(!visible_char(c)));
-            usize::from(replaced)
-        })
-        .sum()
+/// The byte `c` as `fix_visible_chars` gives it, and whether it is a byte of ' ' ..= '~', which
+/// it keeps.
+fn visible_byte(c: u8) -> (u8, bool) {
+    let kept = (b' '..=b'~').contains(&c);
+    (if kept { c } else { b'#' }, kept)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:955-1000
@@ -1249,26 +1252,42 @@ fn begin_choice_variant(ber: &mut Reader<'_>, names: &[&str]) -> Result<(u8, End
 /// `general` ids `BL_ORD_ID` keep the volume-relative tag that the record stores
 /// (`SeqDb::defline_set` adds the volume start).
 pub fn decode_full_set(record: &[u8]) -> Result<DeflineSet, BerError> {
-    if record.is_empty() {
-        return Ok(DeflineSet::default());
-    }
-    let mut ber = Reader::new(record);
-    let deflines = read_set(&mut ber)?;
-    Ok(DeflineSet {
-        deflines,
-        utf8: ber.read_utf8(),
-    })
+    let mut set = DeflineSet::default();
+    decode_full_set_in(record, &mut set)?;
+    Ok(set)
 }
 
-/// `CObjectIStream::Read` of the root `Blast-def-line-set` (cited at `decode_full_set`).
-fn read_set(ber: &mut Reader<'_>) -> Result<Vec<BlastDefline>, BerError> {
-    let mut deflines = Vec::new();
+/// [`decode_full_set`] written over `set`, whose buffers (its lines, their titles, Seq-id lists
+/// and Seq-id strings) are kept: the decode of a reader that reads the header of one sequence after another
+/// (blastdbcmd, `SeqDb::header_set_in`) allocates them once, not for each sequence. Where the
+/// decode fails, `set` holds part of the record.
+pub fn decode_full_set_in(record: &[u8], set: &mut DeflineSet) -> Result<(), BerError> {
+    set.utf8 = false;
+    if record.is_empty() {
+        set.deflines.clear();
+        return Ok(());
+    }
+    let mut ber = Reader::new(record);
+    read_set(&mut ber, &mut set.deflines)?;
+    set.utf8 = ber.read_utf8();
+    Ok(())
+}
+
+/// `CObjectIStream::Read` of the root `Blast-def-line-set` (cited at `decode_full_set`), written
+/// over `deflines`.
+fn read_set(ber: &mut Reader<'_>, deflines: &mut Vec<BlastDefline>) -> Result<(), BerError> {
+    let mut count = 0;
     read_container(ber, Frame::SetArray, |ber| {
-        deflines.push(decode_defline(ber)?);
+        if count == deflines.len() {
+            deflines.push(BlastDefline::default());
+        }
+        decode_defline(ber, &mut deflines[count])?;
+        count += 1;
         Ok(())
     })
     .map_err(|e| e.left(Frame::Root))?;
-    Ok(deflines)
+    deflines.truncate(count);
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:298-309
@@ -1286,7 +1305,7 @@ pub fn utf8_string_path(record: &[u8]) -> Option<String> {
     }
     let mut ber = Reader::new(record);
     ber.find_utf8 = true;
-    match read_set(&mut ber) {
+    match read_set(&mut ber, &mut Vec::new()) {
         Err(BerError(failure)) => match *failure {
             Failure::Utf8 { path } => Some(path),
             _ => None,
@@ -1319,21 +1338,40 @@ const BLAST_DEF_LINE: Class = Class {
     set_flag: 0b11_1111,
 };
 
-fn decode_defline(ber: &mut Reader<'_>) -> Result<BlastDefline, BerError> {
-    let mut defline = BlastDefline::default();
+/// Decodes one `Blast-def-line` over `defline`, whose title, Seq-id list and Seq-id strings keep
+/// their buffers (`IdStrings`).
+fn decode_defline(ber: &mut Reader<'_>, defline: &mut BlastDefline) -> Result<(), BerError> {
+    let mut title = defline.title.take().unwrap_or_default();
+    let mut has_title = false;
+    defline.replaced_title_bytes = 0;
+    defline.replaced_id_bytes = 0;
+    defline.taxid = None;
+    defline.memberships = None;
+    defline.links = None;
+    defline.other_info = None;
     read_class(ber, &BLAST_DEF_LINE, |ber, member| {
         match member {
             DEFLINE_TITLE => {
-                let (title, replaced) = ber.fixed_string()?;
-                defline.title = Some(title);
-                defline.replaced_title_bytes = replaced;
+                defline.replaced_title_bytes = ber.fixed_string_in(&mut title)?;
+                has_title = true;
             }
             DEFLINE_SEQID => {
-                let (ids, replaced) = (&mut defline.ids, &mut defline.replaced_id_bytes);
+                let ids = &mut defline.ids;
+                let mut strings = IdStrings::default();
+                let mut count = 0;
                 read_container(ber, Frame::Array, |ber| {
-                    ids.push(decode_seq_id(ber, replaced)?);
+                    match ids.get_mut(count) {
+                        Some(place) => {
+                            strings.keep(std::mem::replace(place, ParsedSeqId::Gi(0)));
+                            *place = decode_seq_id(ber, &mut strings)?;
+                        }
+                        None => ids.push(decode_seq_id(ber, &mut strings)?),
+                    }
+                    count += 1;
                     Ok(())
                 })?;
+                ids.truncate(count);
+                defline.replaced_id_bytes = strings.replaced;
             }
             DEFLINE_TAXID => defline.taxid = Some(ber.int()?),
             DEFLINE_MEMBERSHIPS => defline.memberships = Some(read_int_list(ber)?),
@@ -1342,7 +1380,8 @@ fn decode_defline(ber: &mut Reader<'_>) -> Result<BlastDefline, BerError> {
         }
         Ok(())
     })?;
-    Ok(defline)
+    defline.title = has_title.then_some(title);
+    Ok(())
 }
 
 /// A `SEQUENCE OF INTEGER` member of `Blast-def-line` (NCBI's `list<int>`).
@@ -1390,8 +1429,8 @@ const SEQ_ID: [&str; 20] = [
     "named-annot-track",
 ];
 
-/// Decodes one `Seq-id`; `replaced` counts the bytes of its strings that NCBI's reader
-/// replaces (`fix_visible_chars`).
+/// Decodes one `Seq-id`, its strings read by `strings` (which counts the bytes NCBI's reader
+/// replaces, `fix_visible_chars`).
 ///
 /// Not inlined: inlined into the member closure of `decode_defline` (the release build does
 /// since the INTEGER reads became small), it keeps that closure, which runs for every member,
@@ -1400,48 +1439,151 @@ const SEQ_ID: [&str; 20] = [
 #[inline(never)]
 pub(crate) fn decode_seq_id(
     ber: &mut Reader<'_>,
-    replaced: &mut usize,
+    strings: &mut IdStrings,
 ) -> Result<ParsedSeqId, BerError> {
     read_choice(ber, &SEQ_ID, |ber, alternative| {
         Ok(match alternative {
-            0 => ParsedSeqId::Local(decode_object_id(ber, replaced)?),
+            0 => ParsedSeqId::Local(decode_object_id(ber, strings)?),
             1 => ParsedSeqId::Gibbsq(ber.int()?),
             2 => ParsedSeqId::Gibbmt(ber.int()?),
-            3 => ParsedSeqId::Giim(decode_giimport_id(ber, replaced)?),
-            4 => ParsedSeqId::Genbank(decode_textseq_id(ber, replaced)?),
-            5 => ParsedSeqId::Embl(decode_textseq_id(ber, replaced)?),
-            6 => ParsedSeqId::Pir(decode_textseq_id(ber, replaced)?),
-            7 => ParsedSeqId::Swissprot(decode_textseq_id(ber, replaced)?),
-            8 => ParsedSeqId::Patent(decode_patent_seq_id(ber, replaced)?),
-            9 => ParsedSeqId::Other(decode_textseq_id(ber, replaced)?),
-            10 => ParsedSeqId::General(decode_dbtag(ber, replaced)?),
+            3 => ParsedSeqId::Giim(decode_giimport_id(ber, strings)?),
+            4 => ParsedSeqId::Genbank(decode_textseq_id(ber, strings)?),
+            5 => ParsedSeqId::Embl(decode_textseq_id(ber, strings)?),
+            6 => ParsedSeqId::Pir(decode_textseq_id(ber, strings)?),
+            7 => ParsedSeqId::Swissprot(decode_textseq_id(ber, strings)?),
+            8 => ParsedSeqId::Patent(decode_patent_seq_id(ber, strings)?),
+            9 => ParsedSeqId::Other(decode_textseq_id(ber, strings)?),
+            10 => ParsedSeqId::General(decode_dbtag(ber, strings)?),
             11 => ParsedSeqId::Gi(ber.int8()?),
-            12 => ParsedSeqId::Ddbj(decode_textseq_id(ber, replaced)?),
-            13 => ParsedSeqId::Prf(decode_textseq_id(ber, replaced)?),
-            14 => ParsedSeqId::Pdb(decode_pdb_seq_id(ber, replaced)?),
-            15 => ParsedSeqId::Tpg(decode_textseq_id(ber, replaced)?),
-            16 => ParsedSeqId::Tpe(decode_textseq_id(ber, replaced)?),
-            17 => ParsedSeqId::Tpd(decode_textseq_id(ber, replaced)?),
-            18 => ParsedSeqId::Gpipe(decode_textseq_id(ber, replaced)?),
-            _ => ParsedSeqId::NamedAnnotTrack(decode_textseq_id(ber, replaced)?),
+            12 => ParsedSeqId::Ddbj(decode_textseq_id(ber, strings)?),
+            13 => ParsedSeqId::Prf(decode_textseq_id(ber, strings)?),
+            14 => ParsedSeqId::Pdb(decode_pdb_seq_id(ber, strings)?),
+            15 => ParsedSeqId::Tpg(decode_textseq_id(ber, strings)?),
+            16 => ParsedSeqId::Tpe(decode_textseq_id(ber, strings)?),
+            17 => ParsedSeqId::Tpd(decode_textseq_id(ber, strings)?),
+            18 => ParsedSeqId::Gpipe(decode_textseq_id(ber, strings)?),
+            _ => ParsedSeqId::NamedAnnotTrack(decode_textseq_id(ber, strings)?),
         })
     })
 }
 
-fn string(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Vec<u8>, BerError> {
-    let (value, count) = ber.fixed_string()?;
-    *replaced += count;
-    Ok(value)
+/// The strings that the decode of the Seq-ids of a definition line reads: the number of their
+/// bytes that NCBI's reader replaces (`fix_visible_chars`), and the buffers of the Seq-id that
+/// held the place before (`decode_defline`, which writes over the lines of the record read
+/// before), which the strings are read into in the order of their members: a line of the shape
+/// of the one before allocates no string.
+#[derive(Default)]
+pub(crate) struct IdStrings {
+    /// The number of the strings' bytes that read as '#'.
+    pub replaced: usize,
+    spare: [Vec<u8>; ID_STRINGS],
+    /// `spare[next..count]` are the buffers not yet read into.
+    next: usize,
+    count: usize,
+}
+
+/// The most strings of one `Seq-id` (a `pdb` id's `mol`, release date and `chain-id`; a patent's
+/// country, number and document type; a `Textseq-id`'s name, accession and release).
+const ID_STRINGS: usize = 3;
+
+impl IdStrings {
+    /// A VisibleString member of a Seq-id (`Reader::fixed_string_in`), read into a spare buffer.
+    #[inline]
+    fn read(&mut self, ber: &mut Reader<'_>) -> Result<Vec<u8>, BerError> {
+        let mut value = if self.next < self.count {
+            self.next += 1;
+            std::mem::take(&mut self.spare[self.next - 1])
+        } else {
+            Vec::new()
+        };
+        self.replaced += ber.fixed_string_in(&mut value)?;
+        Ok(value)
+    }
+
+    /// Makes the string buffers of `id`, the Seq-id at the place the next one is read into, the
+    /// spare buffers, in the order of its members. Kept out of line so its 20-variant match does
+    /// not bloat `read_set`'s stack frame or spill registers on fresh sets where it never runs.
+    #[inline(never)]
+    fn keep(&mut self, id: ParsedSeqId) {
+        (self.next, self.count) = (0, 0);
+        let mut put = |buffer: Vec<u8>| {
+            if self.count < ID_STRINGS {
+                self.spare[self.count] = buffer;
+                self.count += 1;
+            }
+        };
+        let text = |id: TextseqId, put: &mut dyn FnMut(Vec<u8>)| {
+            for buffer in [id.name, id.accession, id.release].into_iter().flatten() {
+                put(buffer);
+            }
+        };
+        match id {
+            ParsedSeqId::Local(ObjectId::Str(value)) => put(value),
+            ParsedSeqId::Local(ObjectId::Id(_))
+            | ParsedSeqId::Gibbsq(_)
+            | ParsedSeqId::Gibbmt(_)
+            | ParsedSeqId::Gi(_) => {}
+            ParsedSeqId::Giim(GiimportId { db, release, .. }) => {
+                for buffer in [db, release].into_iter().flatten() {
+                    put(buffer);
+                }
+            }
+            ParsedSeqId::Genbank(id)
+            | ParsedSeqId::Embl(id)
+            | ParsedSeqId::Pir(id)
+            | ParsedSeqId::Swissprot(id)
+            | ParsedSeqId::Other(id)
+            | ParsedSeqId::Ddbj(id)
+            | ParsedSeqId::Prf(id)
+            | ParsedSeqId::Tpg(id)
+            | ParsedSeqId::Tpe(id)
+            | ParsedSeqId::Tpd(id)
+            | ParsedSeqId::Gpipe(id)
+            | ParsedSeqId::NamedAnnotTrack(id) => text(id, &mut put),
+            ParsedSeqId::Patent(PatentSeqId { cit, .. }) => {
+                put(cit.country);
+                match cit.id {
+                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => put(number),
+                }
+                if let Some(doc_type) = cit.doc_type {
+                    put(doc_type);
+                }
+            }
+            ParsedSeqId::General(Dbtag { db, tag }) => {
+                put(db);
+                if let ObjectId::Str(value) = tag {
+                    put(value);
+                }
+            }
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol, rel, chain_id, ..
+            }) => {
+                put(mol);
+                match rel {
+                    Some(Date::Str(value)) => put(value),
+                    Some(Date::Std(date)) => {
+                        if let Some(season) = date.season {
+                            put(season);
+                        }
+                    }
+                    None => {}
+                }
+                if let Some(chain_id) = chain_id {
+                    put(chain_id);
+                }
+            }
+        }
+    }
 }
 
 /// Object_id_.cpp:108-115.
 const OBJECT_ID: [&str; 2] = ["id", "str"];
 
-fn decode_object_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<ObjectId, BerError> {
+fn decode_object_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<ObjectId, BerError> {
     read_choice(ber, &OBJECT_ID, |ber, alternative| {
         Ok(match alternative {
             0 => ObjectId::Id(ber.int()?),
-            _ => ObjectId::Str(string(ber, replaced)?),
+            _ => ObjectId::Str(strings.read(ber)?),
         })
     })
 }
@@ -1455,12 +1597,12 @@ const DBTAG: Class = Class {
     set_flag: 0b01,
 };
 
-fn decode_dbtag(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Dbtag, BerError> {
+fn decode_dbtag(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<Dbtag, BerError> {
     let (mut db, mut tag) = (Vec::new(), ObjectId::Id(0));
     read_class(ber, &DBTAG, |ber, member| {
         match member {
-            0 => db = string(ber, replaced)?,
-            _ => tag = decode_object_id(ber, replaced)?,
+            0 => db = strings.read(ber)?,
+            _ => tag = decode_object_id(ber, strings)?,
         }
         Ok(())
     })?;
@@ -1475,13 +1617,13 @@ const TEXTSEQ_ID: Class = Class {
     set_flag: 0b1111,
 };
 
-fn decode_textseq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<TextseqId, BerError> {
+fn decode_textseq_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<TextseqId, BerError> {
     let mut id = TextseqId::default();
     read_class(ber, &TEXTSEQ_ID, |ber, member| {
         match member {
-            0 => id.name = Some(string(ber, replaced)?),
-            1 => id.accession = Some(string(ber, replaced)?),
-            2 => id.release = Some(string(ber, replaced)?),
+            0 => id.name = Some(strings.read(ber)?),
+            1 => id.accession = Some(strings.read(ber)?),
+            2 => id.release = Some(strings.read(ber)?),
             _ => id.version = Some(ber.int()?),
         }
         Ok(())
@@ -1497,13 +1639,16 @@ const GIIMPORT_ID: Class = Class {
     set_flag: 0b111,
 };
 
-fn decode_giimport_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<GiimportId, BerError> {
+fn decode_giimport_id(
+    ber: &mut Reader<'_>,
+    strings: &mut IdStrings,
+) -> Result<GiimportId, BerError> {
     let (mut id, mut db, mut release) = (0, None, None);
     read_class(ber, &GIIMPORT_ID, |ber, member| {
         match member {
             0 => id = ber.int()?,
-            1 => db = Some(string(ber, replaced)?),
-            _ => release = Some(string(ber, replaced)?),
+            1 => db = Some(strings.read(ber)?),
+            _ => release = Some(strings.read(ber)?),
         }
         Ok(())
     })?;
@@ -1520,13 +1665,13 @@ const PATENT_SEQ_ID: Class = Class {
 
 fn decode_patent_seq_id(
     ber: &mut Reader<'_>,
-    replaced: &mut usize,
+    strings: &mut IdStrings,
 ) -> Result<PatentSeqId, BerError> {
     let (mut seqid, mut cit) = (0, None);
     read_class(ber, &PATENT_SEQ_ID, |ber, member| {
         match member {
             0 => seqid = ber.int()?,
-            _ => cit = Some(decode_id_pat(ber, replaced)?),
+            _ => cit = Some(decode_id_pat(ber, strings)?),
         }
         Ok(())
     })?;
@@ -1546,21 +1691,21 @@ const ID_PAT: Class = Class {
 /// The variants of `Id-pat.id` (Id_pat_.cpp:113-121).
 const ID_PAT_ID: [&str; 2] = ["number", "app-number"];
 
-fn decode_id_pat(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<IdPat, BerError> {
+fn decode_id_pat(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<IdPat, BerError> {
     let (mut country, mut id, mut doc_type) = (Vec::new(), None, None);
     read_class(ber, &ID_PAT, |ber, member| {
         match member {
-            0 => country = string(ber, replaced)?,
+            0 => country = strings.read(ber)?,
             1 => {
                 id = Some(read_choice(ber, &ID_PAT_ID, |ber, alternative| {
-                    let number = string(ber, replaced)?;
+                    let number = strings.read(ber)?;
                     Ok(match alternative {
                         0 => PatentNumber::Number(number),
                         _ => PatentNumber::AppNumber(number),
                     })
                 })?)
             }
-            _ => doc_type = Some(string(ber, replaced)?),
+            _ => doc_type = Some(strings.read(ber)?),
         }
         Ok(())
     })?;
@@ -1581,14 +1726,14 @@ const PDB_SEQ_ID: Class = Class {
     set_flag: 0b1011,
 };
 
-fn decode_pdb_seq_id(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<PdbSeqId, BerError> {
+fn decode_pdb_seq_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<PdbSeqId, BerError> {
     let (mut mol, mut chain, mut rel, mut chain_id) = (Vec::new(), None, None, None);
     read_class(ber, &PDB_SEQ_ID, |ber, member| {
         match member {
-            0 => mol = string(ber, replaced)?,
+            0 => mol = strings.read(ber)?,
             1 => chain = Some(ber.int()?),
-            2 => rel = Some(decode_date(ber, replaced)?),
-            _ => chain_id = Some(string(ber, replaced)?),
+            2 => rel = Some(decode_date(ber, strings)?),
+            _ => chain_id = Some(strings.read(ber)?),
         }
         Ok(())
     })?;
@@ -1611,10 +1756,10 @@ const DATE_STD: Class = Class {
     set_flag: 0b111_1111,
 };
 
-fn decode_date(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Date, BerError> {
+fn decode_date(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<Date, BerError> {
     read_choice(ber, &DATE, |ber, alternative| {
         Ok(match alternative {
-            0 => Date::Str(string(ber, replaced)?),
+            0 => Date::Str(strings.read(ber)?),
             _ => {
                 let mut date = DateStd {
                     year: 0,
@@ -1630,7 +1775,7 @@ fn decode_date(ber: &mut Reader<'_>, replaced: &mut usize) -> Result<Date, BerEr
                         0 => date.year = ber.int()?,
                         1 => date.month = Some(ber.int()?),
                         2 => date.day = Some(ber.int()?),
-                        3 => date.season = Some(string(ber, replaced)?),
+                        3 => date.season = Some(strings.read(ber)?),
                         4 => date.hour = Some(ber.int()?),
                         5 => date.minute = Some(ber.int()?),
                         _ => date.second = Some(ber.int()?),

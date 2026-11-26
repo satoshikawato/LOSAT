@@ -1,11 +1,9 @@
 //! NCBI's `CStreamLineReader` over the opened input stream (`IsIStreamEmpty`, the
 //! end-of-line detection, `UngetLine`, `PeekChar` and the line number).
 //!
-//! The stream and its pushback buffers are copied from BLASTX's port of the same NCBI
-//! code (`algorithm/blastx/input.rs`, `FastaStream`), which was checked against an
-//! independent C++ oracle of the pinned stream behaviour
-//! (`LOSAT/tests/unit/blastx_stage_e_io_stream_expected.tsv`); BLASTX keeps its own copy
-//! until session SX.
+//! The stream and its pushback buffers were checked against an independent C++ oracle of the
+//! pinned stream behaviour (`LOSAT/tests/unit/blastx_stage_e_io_stream_expected.tsv`); every
+//! program's reader, BLASTX's too, reads through them.
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
@@ -87,6 +85,15 @@ impl<R: Read> FastaStream<R> {
             bulk: true,
             no_position: false,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873 (cited at the read
+    // before the search, `blast_xml::prescan_queries`: NCBI reads ahead on the argument's one stream
+    // and puts it back at `orig_p`)
+    /// The input this stream reads, given back: the bytes it buffered are dropped, so the caller
+    /// puts the input's position where its next reading starts.
+    pub(crate) fn into_input(self) -> R {
+        self.input.into_inner()
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:306-358
@@ -419,8 +426,8 @@ impl FastaStream<crate::blastinput::input_files::InputFile> {
 /// How NCBI's stream over an opened input answers the refill of a pushback buffer, which asks
 /// for `in_avail()` bytes, at least one (`CPushback_Streambuf::underflow`, `x_FillBuffer`, quoted
 /// at `raw_peek`). The one place that tells standard input from a file for every FASTA reader
-/// of an opened input (`FastaStream::from_file` here and BLASTX's and RPSTBLASTN's
-/// `algorithm::blastx::input::FastaStream::from_file`).
+/// of an opened input (`FastaStream::from_file`, which BLASTX's and RPSTBLASTN's
+/// query and subject readers use too).
 #[derive(Clone, Copy)]
 pub(crate) struct InputBackend {
     /// `in_avail()` once the get area is used up (`backend_available`).
@@ -586,6 +593,11 @@ impl<R: Read> LineReader<R> {
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
     pub(crate) fn at_eof(&mut self) -> bool {
         !self.unget_line && self.stream.at_eof()
+    }
+
+    /// The input under the reader, given back (`FastaStream::into_input`).
+    pub(crate) fn into_input(self) -> R {
+        self.stream.into_input()
     }
 
     /// The first byte of the next line, `0` for an empty line (`None` at the end).

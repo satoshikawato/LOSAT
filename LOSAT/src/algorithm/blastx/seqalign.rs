@@ -59,7 +59,7 @@ pub(super) enum SeqalignSubjects<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &super::args::ResolvedOptions,
     queries: &[FastaRecord],
@@ -74,10 +74,7 @@ pub(super) fn write_blastx_seqalign(
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: options.gapped,
-        program_type: options
-            .rpstblastn
-            .is_some()
-            .then_some(crate::report::record::ProgramType::RpsTblastn),
+        program_type: options.program_type(),
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
@@ -157,6 +154,7 @@ pub(super) fn query_records<'a>(
                 subject: subject_index,
                 q_offset: hsp.hsp.q_start,
                 q_end: hsp.hsp.q_end,
+                q_left_out: i32::try_from(hsp.query_left_out)?,
                 s_offset: hsp.hsp.s_start,
                 s_end,
                 q_frame: hsp.hsp.frame,

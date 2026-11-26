@@ -1,0 +1,37 @@
+# TBLASTN 2.17.0+
+# Query: BDT61857.1 innexin [Penaeus monodon majanivirus A]
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT61857.1	m_plus	63.478	230	84	0	125	354	1640	2329	5.10e-101	283
+BDT61857.1	m_plus	42.857	105	27	1	56	127	1243	1557	5.10e-101	93.6
+BDT61857.1	m_plus	89.091	55	6	0	1	55	933	1097	8.06e-27	103
+BDT61857.1	m_minus	28.000	50	26	2	19	60	1679	1536	7.5	18.9
+# TBLASTN 2.17.0+
+# Query: BDT61859.1 hypothetical protein [Penaeus monodon majanivirus A]
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT61859.1	m_plus	39.130	138	73	3	48	178	7175	7576	1.09e-17	71.2
+BDT61859.1	v_mut_8pct	60.000	15	6	0	91	105	1706	1750	3.2	18.9
+BDT61859.1	v_slice	36.364	33	19	1	145	177	1396	1304	4.2	18.5
+BDT61859.1	v_slice	44.444	18	10	0	145	162	1591	1538	6.1	18.1
+BDT61859.1	v_slice	39.130	23	14	0	140	162	2179	2111	9.2	17.7
+# TBLASTN 2.17.0+
+# Query: BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT61866.1	m_minus	59.811	739	275	12	1	729	2579	399	0.0	768
+BDT61866.1	v_slice	54.138	737	294	12	1	730	13822	15921	0.0	711
+BDT61866.1	m_plus	40.000	15	9	0	410	424	4932	4888	4.4	20.8
+# TBLASTN 2.17.0+
+# Query: BDT62090.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62090.1	v_slice	99.404	671	4	0	1	671	2397	385	0.0	1290
+BDT62090.1	v_slice	69.697	66	8	3	1	59	2891	2709	7.04e-18	79.0
+BDT62090.1	v_slice	31.250	32	22	0	527	558	4376	4471	4.2	20.8
+BDT62090.1	v_slice	33.333	27	18	0	527	553	4595	4675	6.8	20.0
+BDT62090.1	v_mut_8pct	31.250	32	22	0	517	548	1796	1701	

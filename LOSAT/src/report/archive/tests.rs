@@ -195,7 +195,10 @@ fn the_search_space_option_carries_over_unsearched_batches() {
             },
             OptionsHandle::default(),
         );
-        handle.options().set_database_filter(None, length).unwrap();
+        handle
+            .options()
+            .set_database_filter(Vec::new(), length)
+            .unwrap();
         handle
     };
     assert_eq!(
@@ -438,6 +441,44 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
     }
 }
 
+/// The error archive after the report stream's failure in outfmt 11 (`error_lines` of
+/// `ostream::ReportStream::finish`'s error: the 802.4 post of the archive's `Close` and
+/// "BLAST failed to write output"). NCBI 2.17.0 writes it into the failed stream and posts its
+/// write fault at byte 356 (blastn), its length (`T/t6/survey` blastn.f11.q1 full2).
+#[test]
+fn the_error_archive_of_a_failed_report_has_ncbis_length() {
+    let handle = ArchiveHandle::new(
+        ArchiveEncoding::Text,
+        ArchiveRequest {
+            program: "blastn",
+            application: "blastn",
+            service: "plain",
+            algorithm: Vec::new(),
+            database: None,
+            step_number: None,
+        },
+        OptionsHandle::default(),
+    );
+    let error: anyhow::Error = crate::cli::NativeError {
+        exit: 6,
+        message: "Error: (802.4) [blastn] [Cannot close serializing output stream] \
+                  Exception: basic_ios::clear: iostream error\nBLAST failed to write output\n"
+            .into(),
+    }
+    .into();
+    let lines = error_lines(&error, false).expect("the output error's lines");
+    // The fault is at the end of the buffer's first write: the document without the
+    // separator, which is a write of its own (`WriteSeparator`).
+    assert_eq!(
+        writer::error_archive_fault(ArchiveEncoding::Text, &lines),
+        356
+    );
+    let mut sink = Vec::new();
+    write_error_archive(&handle, &lines, &mut sink).unwrap();
+    assert_eq!(sink.len(), 357);
+    assert!(sink.ends_with(b"}\n"));
+}
+
 /// psiblast's archive of a round (`ArchiveRound`, psiblast_app.cpp:259-271): `Web_StepNumber` is
 /// the round's number with `-db` (none with `-subject`), and a PSSM round records the
 /// composition-based statistics of its set-up in place of the handle's.
@@ -601,6 +642,32 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
     assert!(!pssm_holds_null_element(&fixture_pssm(
         "db_search/db.ps.asn.rnd.6.asn"
     )));
+}
+
+// Line PS item PS7c: the archive block of a Lambda the results do not keep (`stats::tables::ancillary_kept`).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_the_missing_one() {
+    let params = |lambda| KarlinParams {
+        lambda,
+        k: 0.041,
+        h: 0.14,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+    for lambda in [f64::NAN, f64::NEG_INFINITY, -0.5] {
+        let block = ka_block(&params(lambda), true);
+        assert_eq!(
+            (block.lambda, block.k, block.h, block.gapped),
+            (-1.0, -1.0, -1.0, true)
+        );
+    }
+    let block = ka_block(&params(0.267), false);
+    assert_eq!(
+        (block.lambda, block.k, block.h, block.gapped),
+        (0.267, 0.041, 0.14, false)
+    );
+    // +inf is kept, as NCBI's test keeps it.
+    assert_eq!(ka_block(&params(f64::INFINITY), true).lambda, f64::INFINITY);
 }
 
 /// A delayed member of another format whose read posts a replaced byte is written through

@@ -3,6 +3,7 @@
 // A run of many queries is drawn a screenful at a time, and is one Tab stop (VirtualRows).
 import { computed } from 'vue';
 import type { ResultsBrowser, ResultsState } from '../application/results';
+import { runInputRecords } from '../domain/run';
 import { withUnit } from '../domain/units';
 import { formatCount, formatCounted } from './format';
 import VirtualRows from './VirtualRows.vue';
@@ -11,7 +12,7 @@ const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 const ROW_PX = 30;
 const selectedPosition = computed(() => props.state.queries.findIndex((query) => query.qIdx === props.state.qIdx));
 const unit = computed(() => props.state.loaded?.units.query ?? '');
-const total = computed(() => props.state.loaded?.run.snapshot.query.records.length ?? 0);
+const total = computed(() => (props.state.loaded === undefined ? 0 : runInputRecords(props.state.loaded.run, 'query').length));
 
 function setText(event: Event): void {
   const queryText = (event.target as HTMLInputElement).value;

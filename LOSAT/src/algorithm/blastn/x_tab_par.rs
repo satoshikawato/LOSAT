@@ -46,7 +46,7 @@
 //! No NCBI counterpart for the windows and buffers: they choose where the same bytes are made and
 //! change no value NCBI computes.
 
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, OnceLock};
 
 use crate::api::local_blast::FormatProbe;
@@ -98,7 +98,7 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
 /// `write_output_blastn_hitlists_to_writer`'s report: its rows formatted on `pool` (from `pool`)
 /// where the switch's rule allows, else by the serial writer.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_output<W: Write>(
+pub(crate) fn write_output<W: crate::report::ostream::ReportWrite>(
     pool: Option<&SearchPool<'_>>,
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
@@ -112,11 +112,18 @@ pub(crate) fn write_output<W: Write>(
     epilog: Option<usize>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut QueryWarnings<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     match pool {
         // The serial writer writes the rows of subjects whose load throws
-        // (`write_output_blastn_hitlists_to_writer`).
-        Some(pool) if probe.is_none() && !super::tracing::enabled() && !loads.any_throws() => {
+        // (`write_output_blastn_hitlists_to_writer`) and reports with a `-db` HSP starting left
+        // of its query record.
+        Some(pool)
+            if probe.is_none()
+                && !super::tracing::enabled()
+                && !loads.any_throws()
+                && left_of_record.is_none() =>
+        {
             if !hit_lists.is_empty() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BNTABPAR", true);
             }
@@ -151,6 +158,7 @@ pub(crate) fn write_output<W: Write>(
                 epilog,
                 probe,
                 warnings,
+                left_of_record,
             )
         }
     }
@@ -233,7 +241,7 @@ impl Iterator for Pieces<'_> {
 
 /// The serial writer's bytes, with each window's pieces formatted on `pool` (module docs).
 #[allow(clippy::too_many_arguments)]
-fn write_on_pool<W: Write>(
+fn write_on_pool<W: crate::report::ostream::ReportWrite>(
     pool: &SearchPool<'_>,
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
@@ -305,6 +313,7 @@ fn write_on_pool<W: Write>(
                 &config,
                 &mut hsp_index,
                 None,
+                None,
             )?;
             rows -= take;
             list += 1;
@@ -312,6 +321,8 @@ fn write_on_pool<W: Write>(
         }
         Ok((buffer, reads))
     };
+    // Whether a query's report was written (its `CBlastTabularInfo` lives).
+    let mut started = false;
     loop {
         let mut window = Vec::new();
         let mut rows = 0;
@@ -330,6 +341,10 @@ fn write_on_pool<W: Write>(
         let buffers = map(pool, &window, &format);
         for (piece, buffer) in window.iter().zip(buffers) {
             if piece.header {
+                // `~CBlastTabularInfo` of the query before flushes the stream.
+                if std::mem::replace(&mut started, true) {
+                    writer.ncbi_flush()?;
+                }
                 if let Some(warnings) = warnings.as_deref_mut() {
                     warnings.before_query(piece.q_idx, &mut *writer)?;
                 }
@@ -343,6 +358,9 @@ fn write_on_pool<W: Write>(
                 warnings.as_deref_mut(),
             )?;
         }
+    }
+    if started {
+        writer.ncbi_flush()?;
     }
     write_tabular_epilog(writer, output_format, epilog)
 }

@@ -25,8 +25,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::hsp::BlastpHitList;
@@ -87,7 +85,7 @@ pub(crate) fn write_blastp_seqalign(
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
     engine_counts: &EngineCounts,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
@@ -161,6 +159,7 @@ pub(crate) fn query_records<'a>(
                 subject,
                 q_offset: hsp.q_start as i32 - 1 - q_shift,
                 q_end: hsp.q_end as i32 - q_shift,
+                q_left_out: 0,
                 s_offset: hsp.s_start as i32 - 1 - s_shift,
                 s_end: hsp.s_end as i32 - s_shift,
                 q_frame: 0,

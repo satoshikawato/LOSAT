@@ -32,8 +32,9 @@ use rayon::prelude::*;
 use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
 pub(super) use crate::algorithm::common::database::{
-    HeaderReadError, PreliminaryReadError, Utf8Read,
+    ErrorAfterPosts, PreliminaryReadError, Utf8Read,
 };
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
@@ -150,6 +151,21 @@ impl BlastpDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch (or of a query's
+    /// rounds in psiblast; `shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
@@ -256,6 +272,11 @@ impl BlastpDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// The number of sequences the statistics' setup reads (`DbStatistics::setup_count`), NCBI's
     /// `Int4`.
     pub(super) fn statistics_num_sequences(&self) -> i32 {
@@ -300,11 +321,6 @@ impl BlastpDatabase {
         program: &str,
     ) -> Result<Option<crate::report::tabular::TabularNames>> {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, program)
-    }
-
-    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
-    pub(super) fn open_for_tabular_rows(&self, program: &str) -> Result<()> {
-        self.taxdb.open_for_rows(&self.db, program)
     }
 }
 
@@ -365,23 +381,26 @@ fn prepare_search_block(
 ) -> Result<()> {
     let sequences = block.len();
     let invalid = holds_non_residue_byte(block.protein_bytes());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
     // A well-formed block holds one sentinel byte before its first sequence and one
-    // after every sequence.
+    // after every sequence. Sequences with NCBI 32-bit length <= 0 (empty or >= 2^31) are
+    // skipped by NCBI and stored as `[0, 0]`.
     let sentinels_in_place = (0..sequences).all(|i| {
         let with_sentinels = block.protein_with_sentinels(i);
-        (i > 0 || with_sentinels[0] == NCBISTDAA_GAP)
-            && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP
+        with_sentinels.len() == 2
+            || (with_sentinels[0] == NCBISTDAA_GAP
+                && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP)
     });
     if !invalid && sentinels_in_place {
         return Ok(());
     }
     for i in 0..sequences {
+        let with_sentinels = block.protein_with_sentinels(i);
+        if with_sentinels.len() == 2 {
+            continue;
+        }
         let ordinal = block.first_ordinal() + i as u32;
-        shared::check_protein_sequence(
-            block.protein_with_sentinels(i),
-            || oids.oid(ordinal),
-            program,
-        )?;
+        shared::check_protein_sequence(with_sentinels, || oids.oid(ordinal), program)?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's {program}")
 }
@@ -406,7 +425,7 @@ fn holds_non_residue_byte(bytes: &[u8]) -> bool {
 /// name `program`.
 fn read_search_block(db: &SeqDb, range: BlockRange, program: &str) -> Result<SequenceBlock> {
     let block = db
-        .read_block(range)
+        .read_protein_search_block(range)
         .map_err(|error| shared::search_read_error(error, program))?;
     prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)
@@ -449,15 +468,18 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
         return diag_offset;
     };
     for bounds in offsets.windows(2) {
-        // The sequence and the sentinel byte after it.
-        let subject_length = (bounds[1] - bounds[0]).saturating_sub(1);
-        if subject_length == 0 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+        // The sequence and the sentinel byte after it; proteins whose NCBI 32-bit length is <= 0
+        // (`0` or `>= 2^31`) are skipped and do not advance the diagonal offset.
+        let subject_length =
+            crate::seqdb::ncbi_protein_length((bounds[1] - bounds[0]).saturating_sub(1));
+        if subject_length <= 0 {
             continue;
         }
         if diag_offset >= i32::MAX / 4 {
             diag_offset = window;
         } else {
-            diag_offset += subject_length as i32 + window;
+            diag_offset += subject_length + window;
         }
     }
     diag_offset
@@ -1026,7 +1048,7 @@ impl<'a> FetchNotes<'a> {
     /// failed (`redo_run::sw_batch_failed`) or did not end (`redo_run::sw_endless`) at the turn of
     /// the list after `before` of the kept lists of query `query` (`usize::MAX`: after the batch's
     /// last list), with `heaps` as the redo left them: NCBI posted its warning before its error,
-    /// its crash or its endless redo (`HeaderReadError::utf8`).
+    /// its crash or its endless redo (`ErrorAfterBatchReports::utf8`).
     pub(in crate::algorithm::blastp) fn fetched_before_failure(
         &self,
         heaps: &[BlastCompoHeap],
@@ -1083,17 +1105,16 @@ impl<'a> FetchNotes<'a> {
 /// LOSAT's refusal of a search whose redo or traceback fetches the sequence `ordinal`, whose
 /// header cannot be read (`shared::FetchExcluded::refusal_at`), from the list of query `query`:
 /// NCBI's search ends in that query's batch, after the reports of the batches before, so the
-/// refusal fails that batch (`HeaderReadError`, whose batches before are searched again and
+/// refusal fails that batch (`ErrorAfterBatchReports`, whose batches before are searched again and
 /// reported), as `-use_sw_tback`'s failed batch does (the Owner's form of 2026-11-16 for
 /// line RG's Q-X2c).
 #[cold]
 #[inline(never)]
 fn fetch_refused(database: &BlastpDatabase, query: usize, ordinal: u32) -> anyhow::Error {
-    HeaderReadError {
+    ErrorAfterBatchReports::of_batch(
         query,
-        error: shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
-        utf8: None,
-    }
+        shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
+    )
     .into()
 }
 
@@ -1130,7 +1151,7 @@ impl<'a> CallTitles<'a> {
     /// Seq-aligns of the call's batches, of a header with a UTF8String where a VisibleString is
     /// expected, the call's (`utf8`): its warning comes before anything the batch writes after its
     /// search (`header_read`), and before an error of the batch's prefetch
-    /// (`HeaderReadError::after_reads`).
+    /// (`ErrorAfterBatchReports::after_reads`).
     pub(super) fn titles<'l>(
         &self,
         listed: Option<&'l ListedSubjects>,
@@ -1331,7 +1352,7 @@ impl ListedSubjects {
     // title of the first definition line, the others appended as ` >id title`).
     /// Reads the definition lines of the subjects of the final hit lists (`hit_lists`,
     /// after the redo and before anything is dropped from them), in NCBI's order. A reader
-    /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
+    /// error of NCBI's own is an `ErrorAfterBatchReports` that names the query whose hit list
     /// reached it; LOSAT's refusals are errors of their own.
     pub(super) fn read_titles<'a>(
         &'a self,
@@ -1883,22 +1904,20 @@ impl ListedTitles<'_> {
     /// refusal made here, before any byte is written (a scientific name of any bytes is written
     /// as NCBI's streams write it).
     ///
-    /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
-    /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
-    /// x_GetTaxonomy`, once per volume and taxid) are returned as `TaxdbNotes`, which
-    /// `write_blastp_xml` writes at the first `Hit` that needs them, and those of the lookup of
-    /// each `Hit` are written there too.
+    /// NCBI's messages about the taxonomy database go to standard error: those of the loads are
+    /// the batches' prefetches' or reads' (`report_prep::prefetch_reported_subjects`, modelled
+    /// before this call); those of opening it where a `Hit`'s lookup opened it are returned as
+    /// `TaxdbNotes`, which `write_blastp_xml` writes at the first `Hit` that asks, and those of the
+    /// lookup of each `Hit` are written there too.
     ///
     /// Of the reported subjects, those that the reports load (`loads`, `hit_loads`: the reads of
-    /// a subject whose `Hit` throws, and of one shown only after it, are never made, so the texts
-    /// of opening the taxonomy database and of a volume's first lookup of a taxid go to the loads
-    /// that make them; review 1 of line DBID pfoff-1, H1).
+    /// a subject whose `Hit` throws, and of one shown only after it, are never made; review 1 of
+    /// line DBID pfoff-1, H1).
     pub(super) fn read_taxids(
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         loads: &HitLoads,
-        batches: &Option<Vec<shared::XmlBatchLoads>>,
     ) -> Result<(
         Vec<i32>,
         Vec<HitTaxonomy>,
@@ -1913,7 +1932,6 @@ impl ListedTitles<'_> {
             &self.listed.ordinals,
             &reported,
             &self.parsed,
-            &|| batches.clone(),
             self.program,
         )
     }
@@ -1945,7 +1963,7 @@ impl ListedTitles<'_> {
         &self,
         database: &BlastpDatabase,
         ranks: impl IntoIterator<Item = usize>,
-        rows_open: bool,
+        rows: shared::RowLookups,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         shared::subject_read_texts(
             &database.db,
@@ -1957,30 +1975,25 @@ impl ListedTitles<'_> {
                     self.parsed_subject(rank),
                 )
             }),
-            rows_open,
+            rows,
             self.program,
         )
     }
 
-    /// `shared::scope_utf8_hit_reads` of the subjects of ranks `ranks` (an XML2 or JSON report's
-    /// `Hit`s, in order, of a batch whose prefetch is off).
-    pub(super) fn scope_utf8_hit_reads(
+    /// The open of the taxonomy database by the rows `rows` of the subjects of ranks `ranks`, the
+    /// reports of a query batch whose prefetch is on, after it (`shared::RowLookups::open_after_prefetch`).
+    pub(super) fn open_for_rows(
         &self,
         database: &BlastpDatabase,
-        after: Option<crate::report::db_subject::RunThrow>,
+        rows: shared::RowLookups,
         ranks: impl IntoIterator<Item = usize>,
-    ) -> crate::report::query_warnings::QueryReads {
-        shared::scope_utf8_hit_reads(
+    ) -> Result<()> {
+        rows.open_after_prefetch(
             &database.db,
             &database.taxdb,
-            after,
-            ranks.into_iter().map(|rank| {
-                (
-                    rank as u32,
-                    self.listed.ordinals[rank],
-                    self.parsed_subject(rank),
-                )
-            }),
+            ranks
+                .into_iter()
+                .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
             self.program,
         )
     }
@@ -2003,7 +2016,7 @@ impl ListedTitles<'_> {
             .iter()
             .find(|span| {
                 !span.is_empty()
-                    && !prefetch.reads_one_by_one(span.start)
+                    && prefetch.prefetches(span.start)
                     && ranks((*span).clone()).into_iter().any(|rank| {
                         self.parsed_subject(rank)
                             .is_some_and(|subject| subject.prefetch_stops().is_some())
@@ -2041,61 +2054,10 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` (the batch of
-    /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-    /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
-    /// which BLASTP writes after the stop (the search of those batches again, `HeaderReadError`),
-    /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
-    /// traceback beyond the cut, which no report reads), recorded where the batch stops. Of both,
-    /// the subjects that those reports load (`loads`, `hit_loads` of `before`: not one whose
-    /// `Hit` throws, nor one shown only after it; review 1 of line DBID pfoff-1, H1). `Ok`: the
-    /// warning of a UTF8String header that a load of a batch that does not stop posts
-    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
-    pub(super) fn batch_prefetch_stop(
-        &self,
-        database: &BlastpDatabase,
-        before: &[Option<BlastpHitList>],
-        loaded: impl IntoIterator<Item = usize>,
-        loads: &HitLoads,
-        ranks: impl IntoIterator<Item = usize>,
-        queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<Vec<u8>> {
-        shared::held_batch_prefetch_stop(
-            &database.db,
-            &database.taxdb,
-            Self::reported_ranks(before)
-                .filter(|&rank| loads.loaded(rank))
-                .map(|rank| self.prefetch_subject(rank)),
-            loaded
-                .into_iter()
-                .filter(|&rank| loads.loaded(rank))
-                .map(|rank| self.prefetch_subject(rank)),
-            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
-            self.program,
-            queries,
-        )
-    }
-
-    /// NCBI's warning of a UTF8String header that a load of the prefetch of the subjects of ranks
-    /// `ranks` (a batch of the XML2 and JSON formats whose prefetch is on and does not stop) posts
-    /// (`shared::scope_utf8_prefetch_post`); empty where none.
-    pub(super) fn scope_utf8_prefetch(
-        &self,
-        database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
-    ) -> Result<Vec<u8>> {
-        let subjects: Vec<shared::PrefetchSubject<'_>> = ranks
-            .into_iter()
-            .map(|rank| self.prefetch_subject(rank))
-            .collect();
-        shared::scope_utf8_prefetch_post(&database.db, &subjects, self.program)
-    }
-
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
     /// loaded for a call's batches (`shared::TaxdbRun::note_loaded`): psiblast's round of a query,
-    /// a call of its own, for the stop of a later round's or query's prefetch, and the batches
-    /// before a stop of the XML2 and JSON formats; `batch`: the query batch of the loads (the
+    /// a call of its own, for the stop of a later round's or query's prefetch; `batch`: the query
+    /// batch of the loads (the
     /// round's query, `TaxdbRun::note_loaded`).
     pub(super) fn note_loaded<I: IntoIterator<Item = usize>>(
         &self,
@@ -2114,11 +2076,10 @@ impl ListedTitles<'_> {
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
     /// them by their Seq-align ids (`shared::prefetch_reads`), for `batch_prefetch`:
     /// those it finds as themselves, and one whose lookup throws on its id
-    /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there); one that it finds
-    /// nowhere is left out (the prefetch reads nothing for it). Such a failure is refused where
-    /// the reports read the subjects they show (`reads`): the prefetch then leaves those after
-    /// it unloaded, which NCBI's formatters read one by one (its scope can match an id of a
-    /// sequence read before weakly, as with the prefetch off). One whose lookup fails on a file
+    /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there, and its reports load
+    /// the subjects one by one after it, `shared::BatchPrefetch::loads_one_by_one`, line DBID
+    /// pfoff-7); one that it finds nowhere is left out (the prefetch reads nothing for it). One
+    /// whose lookup fails on a file
     /// with NCBI's exception (`ParsedSubject::prefetch_stops`) is kept: the batch's prefetch stops
     /// there (`shared::batch_prefetch`). A lookup that fails on a file with LOSAT's error and
     /// another sequence that NCBI can read for one and whose definition lines do not hold its
@@ -2134,15 +2095,48 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: &[usize],
         taxids: bool,
-        reads: bool,
     ) -> Result<Vec<usize>> {
+        // A failing prefetch may have loaded each other subject of the batch, beyond the cut too,
+        // before its failure (`ReportRead::prefetch_fails`): where one of them holds an id that
+        // NCBI's scope takes for the Seq-align id that throws, its reports write that one's
+        // record for it (the walk of the reports' loads sees the shown subjects alone).
+        let loaded: std::collections::HashSet<u32> = ranks
+            .iter()
+            .filter(|&&rank| {
+                self.parsed_subject(rank)
+                    .is_none_or(|subject| subject.lookup_throws().is_none())
+            })
+            .map(|&rank| self.listed.ordinals[rank])
+            .collect();
+        let any = !loaded.is_empty();
         let mut kept = Vec::with_capacity(ranks.len());
         for &rank in ranks {
             let Some(subject) = self.parsed_subject(rank) else {
                 kept.push(rank);
                 continue;
             };
-            if (subject.prefetch_fails() && !reads) || subject.prefetch_stops().is_some() {
+            if subject.prefetch_fails() {
+                let prefetched =
+                    |holder: crate::seqdb::DbSequence| loaded.contains(&holder.ordinal());
+                if let Some(holder) = subject.held_before((prefetched, any), (prefetched, any)) {
+                    let reason = subject
+                        .fetched(
+                            false,
+                            false,
+                            crate::report::db_subject::HitLoad::Held(holder),
+                        )
+                        .err()
+                        .unwrap_or_default();
+                    return Err(shared::parsed_refusal(
+                        self.oids.oid(self.listed.ordinals[rank]),
+                        &format!(
+                            "{reason}, and is in psiblast's traceback hit list, whose batch's prefetch fails at it after it may have loaded that sequence (NCBI BLAST+ 2.17.0 prefetches the list also beyond -max_target_seqs, where no report shows it)"
+                        ),
+                        self.program,
+                    ));
+                }
+            }
+            if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
                 kept.push(rank);
                 continue;
             }
@@ -2185,9 +2179,10 @@ impl ListedTitles<'_> {
     /// throws (`shared::TaxdbRun::load_throws`), a read whose load looks such a taxid up
     /// (`shared::blob_taxids`) gets none, with parsed Seq-ids or without. `prefetch`: whether
     /// each query's batch prefetches (the round's), which reads them all by their own ids before
-    /// the PSSM; one whose prefetch is off reads them one by one (`ParsedSubject::pssm_read`'s
-    /// `one_by_one`). `taxids`: whether the batches look the subjects' taxids up (`taxdb.bti` on
-    /// the search path); only then, and only for the queries whose batch reads one by one, does
+    /// the PSSM; one whose prefetch is off or fails reads them one by one
+    /// (`shared::BatchPrefetch::loads_one_by_one`, `ParsedSubject::pssm_read`'s `one_by_one`).
+    /// `taxids`: whether the batches look the subjects' taxids up (`taxdb.bti` on the search
+    /// path); only then, and only for the queries whose batch loads one by one, does
     /// `pssm_load_texts` make the PSSM's loads of a query, from its hit list after the
     /// formatter's cut (`cut`: the length of each query's list after it, `prune_by_size`;
     /// `usize::MAX` for none), with what that cut drops and the blobs of the reads that do not
@@ -2204,7 +2199,7 @@ impl ListedTitles<'_> {
         let mut reads = PssmReads::default();
         // The queries whose PSSM's reads can load a sequence that the batch did not read before
         // (`pssm_load_texts`).
-        let keeps_loads = |query: usize| taxids && prefetch.reads_one_by_one(query);
+        let keeps_loads = |query: usize| taxids && prefetch.loads_one_by_one(query);
         let any_loads = (0..hit_lists.len()).any(keeps_loads);
         // Every load of a sequence with a positive taxid throws (`shared::TaxdbRun::load_throws`):
         // the read of such a subject gets no letters, with parsed Seq-ids or without.
@@ -2243,7 +2238,7 @@ impl ListedTitles<'_> {
             {
                 if let Some(subject) = self
                     .parsed_subject(hsp_list.oid as usize)
-                    .filter(|_| prefetch.reads_one_by_one(query))
+                    .filter(|_| prefetch.loads_one_by_one(query))
                 {
                     let reach = hsp_list
                         .hsps
@@ -2266,7 +2261,7 @@ impl ListedTitles<'_> {
                     }
                 } else {
                     read.insert(hsp_list.oid as usize);
-                    if prefetch.reads_one_by_one(query)
+                    if prefetch.loads_one_by_one(query)
                         && *records_loads
                             .get_or_insert_with(|| database.taxdb.prefetch_can_stop(&database.db))
                     {
@@ -2300,9 +2295,10 @@ impl ListedTitles<'_> {
                 };
                 let ordinal = self.listed.ordinals[rank];
                 // A lookup that fails on a file with NCBI's exception (a list of version 5
-                // databases with and without the accession table): the read catches it, so the
-                // PSSM reads no letters (`Failed to retrieve sequence`) and loads nothing.
-                if subject.prefetch_stops().is_some() {
+                // databases with and without the accession table), or that throws on the id
+                // itself (`gnl|PIG|abc`, line DBID pfoff-7): the read catches it, so the PSSM
+                // reads no letters (`Failed to retrieve sequence`) and loads nothing.
+                if subject.prefetch_stops().is_some() || subject.prefetch_fails() {
                     reads.read.insert(rank, None);
                     if any_loads {
                         reads.other_blobs.insert(rank, None);
@@ -2311,7 +2307,9 @@ impl ListedTitles<'_> {
                 }
                 // Also another holder of the id whose Bioseq the scope gets where it read it
                 // before (`shared::ScopeBioseq::instead`).
-                if let Err(reason) = subject.pssm_read(batch_reads.one_by_one(rank as u32)) {
+                let one_by_one = batch_reads.one_by_one(rank as u32);
+                let sought = shared::weak_sought(&database.db, subject, ordinal, one_by_one);
+                if let Err(reason) = sought.as_ref().unwrap_or(subject).pssm_read(one_by_one) {
                     reads
                         .refused
                         .get_or_insert((self.oids.oid(ordinal), reason, self.program));
@@ -2344,13 +2342,26 @@ impl ListedTitles<'_> {
                 match scope.letters() {
                     Some(blob) if blob == ordinal => {}
                     Some(other) => {
-                        let letters = database
+                        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:443-451
+                        // `CSeqDBVol::GetBioseq` returns a null Bioseq when the signed 32-bit
+                        // `x_GetSequence` length is less than 1 (zero or 2^31 or more), so
+                        // `CSeqVector` throws and `x_GetSubjectSequence` yields an empty sequence.
+                        let len = database
                             .db
-                            .read_sequence(other)
-                            .map_err(|error| shared::database_error(error, self.program))?
-                            .protein(0)
-                            .to_vec();
-                        reads.read.insert(rank, Some(letters));
+                            .protein_length_i32(other)
+                            .map_err(|error| shared::database_error(error, self.program))?;
+                        if len < 1 {
+                            reads.read.insert(rank, None);
+                        } else {
+                            let letters = database
+                                .db
+                                .read_sequence(other)
+                                .map_err(|error| shared::database_error(error, self.program))?
+                                .protein(0)
+                                .to_vec();
+                            reads.read.insert(rank, Some(letters));
+                        }
                     }
                     None => {
                         reads.read.insert(rank, None);
@@ -2458,6 +2469,7 @@ impl ListedTitles<'_> {
                     ReportRead {
                         one_by_one: true,
                         batch: read.batch,
+                        prefetch_fails: false,
                     },
                     ReportKeys::Entries(order.iter().map(|&(rank, _)| Some(rank)).collect()),
                 )],
@@ -2474,11 +2486,16 @@ impl ListedTitles<'_> {
                 // A holder whose letters end before every included Seq-align's range: each read
                 // throws and warns, as LOSAT's.
                 if let Some(holder) = holder {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                    // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0; `GetBioseq`
+                    // returns a null Bioseq when the length is less than 1, so every range read
+                    // throws and warns.
                     let letters = database
                         .db
-                        .protein_length(holder.ordinal())
+                        .protein_length_i32(holder.ordinal())
                         .map_err(|error| shared::database_error(error, self.program))?;
-                    if usize::try_from(letters).unwrap_or(usize::MAX) < reach {
+                    if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
                         continue;
                     }
                 }
@@ -2836,11 +2853,14 @@ impl ListedTitles<'_> {
     /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
     /// `hit_lists` are in the order of the reports; `prefetch` tells by query whether its
     /// batch prefetches, else its reports read the subjects one by one
-    /// (`ParsedSubject::fetched`'s `one_by_one`). `loads`: what the reports do at each subject's
-    /// `Hit` (`hit_loads`, the one answer: a `Hit` that throws, a subject that no report loads).
+    /// (`ParsedSubject::fetched`'s `one_by_one`; the weak matches of a subject that they read one
+    /// by one are looked for in `database`, `shared::weak_sought`). `loads`: what the reports do
+    /// at each subject's `Hit` (`hit_loads`, the one answer: a `Hit` that throws, a subject that no
+    /// report loads).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_parsed_reports(
         &self,
+        database: Option<&BlastpDatabase>,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         fetched: bool,
@@ -2856,8 +2876,15 @@ impl ListedTitles<'_> {
             let reads = Self::batch_reads(hit_lists, prefetch);
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
-                    subject
-                        .fetched(taxonomy, reads.one_by_one(rank as u32), loads.load(rank))
+                    let one_by_one = reads.one_by_one(rank as u32);
+                    let ordinal = self.listed.ordinals[rank];
+                    let sought = database.and_then(|database| {
+                        shared::weak_sought(&database.db, subject, ordinal, one_by_one)
+                    });
+                    sought
+                        .as_ref()
+                        .unwrap_or(subject)
+                        .fetched(taxonomy, one_by_one, loads.load(rank))
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 self.oids.oid(self.listed.ordinals[rank]),
@@ -2898,8 +2925,8 @@ impl ListedTitles<'_> {
 
     /// What the XML2 and JSON reports of the final hit lists `hit_lists` (in the order of the
     /// reports) do at each subject's `Hit`, by rank (`HitLoads::of`, the one answer of the
-    /// call): `prefetch` tells by query whether its batch reads one by one
-    /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
+    /// call): `prefetch` tells by query whether its batch loads one by one
+    /// (`BatchPrefetch::report_read`); the `Hit`s are those that `blast_xml::write_blastp_xml`
     /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
     /// lookup throws (the call's answer, `FormatThrow::of_outfmts` and `FormatThrow::of_search`;
     /// every subject is loaded where it writes nothing, `FormatThrow::run`), at the rows that load
@@ -3060,7 +3087,7 @@ impl ListedTitles<'_> {
 // would not fail after some rows. Past the preliminary stage (whose reader errors come in the
 // first block, which reads the whole database as every batch does), the failures of a database
 // search that depend on its hits are those of the definition lines of the reported subjects:
-// NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
+// NCBI's reader error (`ErrorAfterBatchReports`, the batch of the query that reaches it fails after the
 // reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles` and
 // `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
@@ -3243,7 +3270,7 @@ pub(super) fn x_titles_allow_blocks(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 8, 9, 12 and 5.
 // These reports show no tabular id and no outfmt 0 title, so of the failures that
 // `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
-// reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
+// reader error (`ErrorAfterBatchReports`), more than one definition line, and a stored title with a byte
 // outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`;
 // outfmt 5's stream writes such a title as NCBI's does, so there the check only keeps such a
 // database off the block search). A new function, so that
@@ -3460,10 +3487,10 @@ impl PssmReads {
     /// LOSAT's refusal of the reads, where a PSSM is made (`-out_pssm` and `-out_ascii_pssm`, and
     /// a round that makes the next round's PSSM).
     /// The included subjects with parsed Seq-ids, by rank, that the PSSM of the call's query
-    /// `query` reads by their Seq-align ids where its batch reads one by one (prefetch off:
-    /// `shared::BatchPrefetch::reads_one_by_one`), before the cut: loads of NCBI's BLAST
+    /// `query` reads by their Seq-align ids where its batch loads one by one (prefetch off or
+    /// failing: `shared::BatchPrefetch::loads_one_by_one`), before the cut: loads of NCBI's BLAST
     /// database data loader that no prefetch made (`shared::TaxdbRun::note_loaded`; where the
-    /// prefetch is on, it loaded them first). Empty for the other queries, where no PSSM reads
+    /// prefetch is on and does not fail, it loaded them first). Empty for the other queries, where no PSSM reads
     /// are made, and where no prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`:
     /// nothing reads them then).
     pub(super) fn one_by_one(&self, query: usize) -> &[usize] {

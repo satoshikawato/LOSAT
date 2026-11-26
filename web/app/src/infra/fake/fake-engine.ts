@@ -221,9 +221,33 @@ export class FakeEngine implements EngineGateway, ToolEngine {
    */
   async start(argv: readonly string[] = []): Promise<StartResult> {
     const database = argv.some((word) => word === '-db' || word.startsWith('-db='));
+    const valueOf = (flag: string): string | null => {
+      for (let i = argv.length - 1; i >= 1; i--) {
+        const w = argv[i]!;
+        if (w === flag) return argv[i + 1] ?? null;
+        if (w.startsWith(`${flag}=`)) return w.slice(flag.length + 1);
+      }
+      return null;
+    };
+    const queryFile = valueOf('-in_pssm') ?? valueOf('-in_msa');
+    const outPssm = valueOf('-out_pssm');
+    const outAsciiPssm = valueOf('-out_ascii_pssm');
+    const saveEachPssm = argv.includes('-save_each_pssm');
     return {
       ok: true,
-      start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database },
+      start: {
+        conffile: null,
+        logFile: null,
+        strategyFile: null,
+        dryRun: false,
+        registerInputs: false,
+        prints: null,
+        database,
+        queryFile,
+        outPssm,
+        outAsciiPssm,
+        saveEachPssm,
+      },
     };
   }
 
@@ -261,7 +285,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       onPhase(phase);
       if (phase === 'preparing') readRecords = this.register(request);
     }
-    if (request.query.bytes.length === 0 || request.subject?.bytes.length === 0) {
+    if ((request.query !== undefined && request.query.bytes.length === 0) || request.subject?.bytes.length === 0) {
       // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
       // then `fail`; line WQA's sweep, D3, 2026-11-19), and the output that the CLI leaves before its error, the
       // argv's own, with the others dropped (line WQA's sweep, D15, 2026-11-20): here marked lines.
@@ -283,6 +307,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
+    const runFiles = fakePssmRunFiles(request.argv);
     // Its warning goes to the diagnostics (stream 3), as without -logfile.
     return {
       path: 'fake',
@@ -291,6 +316,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       messages: 'diagnostics',
       ...(windowMasker === undefined ? {} : { windowMasker }),
       ...(readRecords === undefined ? {} : { readRecords }),
+      ...(runFiles.length === 0 ? {} : { runFiles }),
     };
   }
 
@@ -319,8 +345,10 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     }
     // A reader's error ends the run, as the engine's run does after the query batches before it
     // (line WQA's D10, 2026-11-19): the fake writes nothing first.
-    const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
-    if (readerError !== undefined) throw new Error(readerError);
+    if (request.query !== undefined) {
+      const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
+      if (readerError !== undefined) throw new Error(readerError);
+    }
     if (query === undefined && subject === undefined) return undefined;
     return { ...(query === undefined ? {} : { query }), ...(subject === undefined ? {} : { subject }) };
   }
@@ -335,7 +363,10 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
+    const queries =
+      request.query !== undefined
+        ? fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200)
+        : [{ id: fakeQueryFileId(request.argv), length: 120 }];
     const subjects =
       request.subject !== undefined
         ? fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3)
@@ -395,6 +426,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
             s_end: sEnd,
             query_frame: translated.query ? 1 : null,
             subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
+            query_length: query.length,
             subject_length: subject.length,
             query_aligned: null,
             subject_aligned: null,
@@ -479,4 +511,31 @@ function ownOutput(argv: readonly string[]): RunOutput {
 /** The program of a run: the first word of its argv. */
 function programOf(request: EngineRunRequest): ProgramId {
   return request.argv[0] as ProgramId;
+}
+
+function fakeArgValue(argv: readonly string[], flag: string): string | undefined {
+  for (let i = argv.length - 1; i >= 1; i--) {
+    const word = argv[i]!;
+    if (word === flag) return argv[i + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+function fakeQueryFileId(argv: readonly string[]): string {
+  return fakeArgValue(argv, '-in_pssm') ?? fakeArgValue(argv, '-in_msa') ?? 'query_pssm';
+}
+
+function fakePssmRunFiles(argv: readonly string[]): readonly { readonly name: string; readonly bytes: Uint8Array; readonly option: 'out_pssm' | 'out_ascii_pssm' }[] {
+  const encoder = new TextEncoder();
+  const files: { readonly name: string; readonly bytes: Uint8Array; readonly option: 'out_pssm' | 'out_ascii_pssm' }[] = [];
+  const outPssm = fakeArgValue(argv, '-out_pssm');
+  if (outPssm !== undefined && outPssm !== '') {
+    files.push({ name: outPssm, bytes: encoder.encode(`PssmWithParameters ::= {\n  -- ${FAKE_MARKER}\n}\n`), option: 'out_pssm' });
+  }
+  const outAscii = fakeArgValue(argv, '-out_ascii_pssm');
+  if (outAscii !== undefined && outAscii !== '') {
+    files.push({ name: outAscii, bytes: encoder.encode(`Last position-specific scoring matrix computed (${FAKE_MARKER})\n`), option: 'out_ascii_pssm' });
+  }
+  return files;
 }

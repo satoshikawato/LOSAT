@@ -72,10 +72,14 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 14 since reading `-logfile` against the run's
-/// real files (normalized stream 8 and stream 12 names, the *start* field `log_file_name`, case-2
-/// refusal of an existing run file, and a tool's `/dev/stdout` on stream 11; line WQA D19,
-/// 2026-11-25); 13 since `losat_web2_tool`, which runs
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 15 since adding `psiblast` (single- and
+/// multi-round, `-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`,
+/// `-save_pssm_after_last_round`) and `tblastn -in_pssm` (file queries with `query_handle = 0`,
+/// PSSM output files on stream 8, *start* fields `query_file`, `out_pssm`, `out_ascii_pssm`,
+/// `save_each_pssm`, and multi-round `round` on HSP records; line PS PSW1); 14 since reading
+/// `-logfile` against the run's real files (normalized stream 8 and stream 12 names, the *start*
+/// field `log_file_name`, case-2 refusal of an existing run file, and a tool's `/dev/stdout` on
+/// stream 11; line WQA D19, 2026-11-25); 13 since `losat_web2_tool`, which runs
 /// `windowmasker` with the command line's words in the run's working directory, streams its
 /// standard output on stream 11 and the files that it writes on stream 12 as they are written, and
 /// gives its exit status on stream 2, and since `losat_web2_validate` checks a `windowmasker` argv
@@ -99,7 +103,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    14
+    15
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

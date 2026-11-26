@@ -128,7 +128,9 @@ mod tests {
 
     #[test]
     fn options_the_adapter_owns_or_refuses_are_not_described() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+        for program in [
+            "blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx",
+        ] {
             let described = describe(program).unwrap();
             for flag in ADAPTER_OWNED {
                 assert!(
@@ -153,31 +155,46 @@ mod tests {
         }
     }
 
-    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
-    // the adapter's `describe` does not list it (the browser's list, `records_refused`). The search
-    // strategy file of the five programs is a file of the run (line RG's F1w): listed.
+    // Since line PS's PSW1, tblastn's `-in_pssm` and psiblast's PSSM/MSA options are described
+    // and supported in the browser; `records_refused` is empty for all programs.
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
-        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
         for program in [
             Program::Blastn,
             Program::Blastp,
+            Program::Psiblast,
             Program::Blastx,
+            Program::Tblastn,
             Program::Tblastx,
         ] {
             assert!(records_refused(program).is_empty());
         }
-        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+        for program in [
+            "blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx",
+        ] {
             let described = describe(program).unwrap();
-            for flag in records_refused(Program::parse(program).unwrap()) {
-                assert!(
-                    !described.contains(&format!("\"-{flag}\"")),
-                    "{program} lists -{flag}"
-                );
-            }
             assert!(
                 described.contains("\"-export_search_strategy\""),
                 "{program} does not list -export_search_strategy"
+            );
+        }
+        let tblastn = describe("tblastn").unwrap();
+        assert!(tblastn.contains("\"-in_pssm\""), "tblastn lists -in_pssm");
+        let psiblast = describe("psiblast").unwrap();
+        for flag in [
+            "-in_pssm",
+            "-in_msa",
+            "-num_iterations",
+            "-out_pssm",
+            "-out_ascii_pssm",
+            "-save_pssm_after_last_round",
+            "-save_each_pssm",
+            "-inclusion_ethresh",
+            "-pseudocount",
+        ] {
+            assert!(
+                psiblast.contains(&format!("\"{flag}\"")),
+                "psiblast lists {flag}"
             );
         }
     }

@@ -92,7 +92,9 @@ const loaded = computed(() => props.state.loaded);
 const hsps = computed(() => props.state.hsps);
 const query = computed(() => props.state.queries.find((q) => q.qIdx === props.state.qIdx));
 const subject = computed(() => props.state.subjects.find((s) => s.sIdx === props.state.sIdx));
-const queryLength = computed(() => (loaded.value === undefined ? 1 : runInputRecords(loaded.value.run, 'query')[props.state.qIdx ?? -1]?.length ?? 1));
+const queryLength = computed(() =>
+  loaded.value === undefined ? 1 : (runInputRecords(loaded.value.run, 'query')[props.state.qIdx ?? -1]?.length ?? query.value?.length ?? 1),
+);
 const subjectLength = computed(() => subject.value?.length ?? 1);
 const queryId = computed(() => query.value?.id ?? '');
 const subjectId = computed(() => subject.value?.first.sseqid ?? '');

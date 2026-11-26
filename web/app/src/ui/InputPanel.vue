@@ -22,7 +22,7 @@ import {
 } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
 import { DB_BOOL_FILTER_FIELDS, DB_FILE_FILTER_FIELDS, DB_TEXT_FILTER_FIELDS } from '../domain/blast-db';
-import { programById, residueUnit, sequenceKind } from '../domain/programs';
+import { programById, querySourcesOf, residueUnit, sequenceKind } from '../domain/programs';
 import DatabasePicker from './DatabasePicker.vue';
 import { formatBytes, optionHelp } from './format';
 import HelpTip from './HelpTip.vue';
@@ -151,6 +151,25 @@ const region = computed(() => {
 
 /** Whether this panel is showing the local BLAST database picker (`-db`) instead of FASTA inputs. */
 const isDatabase = computed(() => props.role === 'subject' && props.state.subjectSource === 'database');
+/** Query input sources supported by the current program (`fasta`, plus `msa`/`pssm` for psiblast, `pssm` for tblastn). */
+const querySources = computed(() => (props.role === 'query' ? querySourcesOf(props.state.program) : []));
+/** Whether this panel is showing a PSSM (`-in_pssm`) or MSA (`-in_msa`) file picker instead of FASTA inputs. */
+const isQueryFile = computed(() => props.role === 'query' && props.state.querySource !== 'fasta');
+const queryFileFlag = computed<'-in_pssm' | '-in_msa'>(() => (props.state.querySource === 'msa' ? '-in_msa' : '-in_pssm'));
+const queryFileInput = ref<HTMLInputElement>();
+
+function onQueryFile(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file !== undefined) props.draft.setQueryFile(file);
+  input.value = '';
+}
+
+const legendTitle = computed(() => {
+  if (isDatabase.value) return 'Choose Subject Database';
+  if (isQueryFile.value) return props.state.querySource === 'msa' ? 'Choose Query MSA' : 'Choose Query PSSM';
+  return `Enter ${title.value} Sequence`;
+});
 
 /** Database filter options accepted by the current program's engine `describe`. */
 const describedFlags = computed(() => {
@@ -220,6 +239,10 @@ function onDrop(event: DragEvent): void {
   dragging.value = false;
   if (isDatabase.value) return;
   const files = [...(event.dataTransfer?.files ?? [])];
+  if (isQueryFile.value) {
+    if (files[0] !== undefined) props.draft.setQueryFile(files[0]);
+    return;
+  }
   if (files.length > 0) props.draft.addFiles(props.role, files);
 }
 </script>
@@ -233,7 +256,43 @@ function onDrop(event: DragEvent): void {
     @dragleave.self="dragging = false"
     @drop.prevent.stop="onDrop"
   >
-    <legend>{{ isDatabase ? 'Choose Subject Database' : `Enter ${title} Sequence` }}</legend>
+    <legend>{{ legendTitle }}</legend>
+
+    <div v-if="role === 'query' && querySources.length > 1" class="subject-source" role="radiogroup" aria-label="Query source" data-testid="query-source">
+      <label class="subject-source-option">
+        <input
+          type="radio"
+          name="query-source"
+          value="fasta"
+          :checked="state.querySource === 'fasta'"
+          data-testid="query-source-fasta"
+          @change="draft.setQuerySource('fasta')"
+        />
+        FASTA sequences
+      </label>
+      <label v-if="querySources.includes('msa')" class="subject-source-option">
+        <input
+          type="radio"
+          name="query-source"
+          value="msa"
+          :checked="state.querySource === 'msa'"
+          data-testid="query-source-msa"
+          @change="draft.setQuerySource('msa')"
+        />
+        MSA <span class="flag">-in_msa</span>
+      </label>
+      <label v-if="querySources.includes('pssm')" class="subject-source-option">
+        <input
+          type="radio"
+          name="query-source"
+          value="pssm"
+          :checked="state.querySource === 'pssm'"
+          data-testid="query-source-pssm"
+          @change="draft.setQuerySource('pssm')"
+        />
+        PSSM <span class="flag">-in_pssm</span>
+      </label>
+    </div>
 
     <div v-if="role === 'subject'" class="subject-source" role="radiogroup" aria-label="Subject source" data-testid="subject-source">
       <label class="subject-source-option">
@@ -260,7 +319,115 @@ function onDrop(event: DragEvent): void {
       </label>
     </div>
 
-    <template v-if="isDatabase">
+    <template v-if="isQueryFile">
+      <div class="subject-db-block" data-testid="query-file-block">
+        <div class="entry-label">
+          <span>{{ state.querySource === 'msa' ? 'Multiple sequence alignment (FASTA)' : 'PSSM checkpoint (ASN.1)' }}</span>
+          <span class="kind">{{ queryFileFlag }}</span>
+          <HelpTip
+            v-if="dbOptionHelp(queryFileFlag)"
+            :id="`query-file-${state.querySource}`"
+            :label="`About ${queryFileFlag}`"
+            :text="dbOptionHelp(queryFileFlag)"
+          />
+        </div>
+        <div class="db-picker" data-testid="query-file-picker">
+          <div class="db-picker-actions">
+            <button type="button" data-testid="query-file-choose" @click="queryFileInput?.click()">
+              {{ state.queryFile.file ? 'Change file…' : state.querySource === 'msa' ? 'Choose MSA file…' : 'Choose PSSM file…' }}
+            </button>
+            <input
+              ref="queryFileInput"
+              class="visually-hidden"
+              type="file"
+              tabindex="-1"
+              aria-hidden="true"
+              :aria-label="state.querySource === 'msa' ? 'Choose MSA file' : 'Choose PSSM file'"
+              data-testid="query-file-input"
+              @change="onQueryFile"
+            />
+            <span v-if="!state.queryFile.file" class="hint">or drop a file here</span>
+            <template v-else>
+              <span class="file-name" data-testid="query-file-name">
+                {{ state.queryFile.file.name }} ({{ formatBytes(state.queryFile.file.size) }})
+              </span>
+              <button type="button" class="link" data-testid="query-file-remove" @click="draft.setQueryFile(undefined)">Remove</button>
+            </template>
+          </div>
+          <p class="db-privacy muted">Read locally in this browser; nothing is uploaded.</p>
+        </div>
+      </div>
+
+      <template v-if="state.querySource === 'msa'">
+        <div class="param-row" :class="{ changed: state.queryFile.msaMasterIdx.trim() !== '' && !state.queryFile.ignoreMsaMaster }">
+          <label class="param-label" for="query-msa-master-idx">
+            MSA master sequence index <span class="flag">-msa_master_idx</span>
+          </label>
+          <div class="param-control">
+            <span class="control-tip">
+              <input
+                id="query-msa-master-idx"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="1"
+                :disabled="state.queryFile.ignoreMsaMaster"
+                :value="state.queryFile.msaMasterIdx"
+                data-testid="query-msa-master-idx"
+                @input="draft.setMsaMasterIdx(($event.target as HTMLInputElement).value)"
+              />
+              <HelpTip
+                v-if="dbOptionHelp('-msa_master_idx')"
+                id="query-msa-master-idx"
+                label="About -msa_master_idx"
+                :text="dbOptionHelp('-msa_master_idx')"
+              />
+            </span>
+          </div>
+        </div>
+        <div class="param-row" :class="{ changed: state.queryFile.ignoreMsaMaster }">
+          <label class="param-label" for="query-ignore-msa-master">
+            Ignore MSA master sequence <span class="flag">-ignore_msa_master</span>
+          </label>
+          <div class="param-control">
+            <span class="control-tip">
+              <input
+                id="query-ignore-msa-master"
+                type="checkbox"
+                :checked="state.queryFile.ignoreMsaMaster"
+                data-testid="query-ignore-msa-master"
+                @change="draft.setIgnoreMsaMaster(($event.target as HTMLInputElement).checked)"
+              />
+              <HelpTip
+                v-if="dbOptionHelp('-ignore_msa_master')"
+                id="query-ignore-msa-master"
+                label="About -ignore_msa_master"
+                :text="dbOptionHelp('-ignore_msa_master')"
+              />
+            </span>
+          </div>
+        </div>
+      </template>
+
+      <div class="param-row">
+        <label class="param-label" for="job-title">Job Title</label>
+        <div class="param-control fill">
+          <input
+            id="job-title"
+            type="text"
+            autocomplete="off"
+            :value="state.title"
+            aria-describedby="job-title-help"
+            data-testid="job-title"
+            @input="draft.setTitle(($event.target as HTMLInputElement).value)"
+          />
+          <p id="job-title-help" class="help">Enter a descriptive title for your search</p>
+        </div>
+      </div>
+    </template>
+
+    <template v-else-if="isDatabase">
       <div class="subject-db-block" data-testid="subject-db-block">
         <div class="entry-label">
           <span>Local BLAST database</span>

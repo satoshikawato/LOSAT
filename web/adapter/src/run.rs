@@ -24,6 +24,7 @@ use crate::json;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Blastp,
+    Psiblast,
     Tblastn,
     Blastn,
     Tblastx,
@@ -34,11 +35,11 @@ impl Program {
     pub fn parse(name: &str) -> Result<Self, String> {
         match name {
             "blastp" => Ok(Self::Blastp),
+            "psiblast" => Ok(Self::Psiblast),
             "tblastn" => Ok(Self::Tblastn),
             "blastn" => Ok(Self::Blastn),
             "tblastx" => Ok(Self::Tblastx),
             "blastx" => Ok(Self::Blastx),
-            "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
             "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
@@ -48,6 +49,7 @@ impl Program {
     pub fn name(self) -> &'static str {
         match self {
             Self::Blastp => "blastp",
+            Self::Psiblast => "psiblast",
             Self::Tblastn => "tblastn",
             Self::Blastn => "blastn",
             Self::Tblastx => "tblastx",
@@ -59,6 +61,7 @@ impl Program {
     pub fn api(self) -> losat::api::Program {
         match self {
             Self::Blastp => losat::api::Program::Blastp,
+            Self::Psiblast => losat::api::Program::Psiblast,
             Self::Tblastn => losat::api::Program::Tblastn,
             Self::Blastn => losat::api::Program::Blastn,
             Self::Tblastx => losat::api::Program::Tblastx,
@@ -70,9 +73,12 @@ impl Program {
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
         match self {
-            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx | Self::Blastx => {
-                &[0, 6, 7]
-            }
+            Self::Blastp
+            | Self::Psiblast
+            | Self::Tblastn
+            | Self::Blastn
+            | Self::Tblastx
+            | Self::Blastx => &[0, 6, 7],
         }
     }
 }
@@ -153,12 +159,12 @@ pub fn outputs(program: Program, requested: &Requested) -> Vec<Output> {
 fn outfmt_of(command: &mut Commands) -> &mut String {
     match command {
         Commands::Blastp(a) => &mut a.outfmt,
+        Commands::Psiblast(a) => &mut a.outfmt,
         Commands::Tblastn(a) => &mut a.outfmt,
         Commands::Blastn(a) => &mut a.outfmt,
         Commands::Tblastx(a) => &mut a.outfmt,
         Commands::Blastx(a) => &mut a.outfmt,
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
@@ -171,7 +177,7 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
 fn engine_program(program: Program) -> losat::web_adapter::EngineProgram {
     use losat::web_adapter::EngineProgram as Engine;
     match program {
-        Program::Blastp => Engine::Blastp,
+        Program::Blastp | Program::Psiblast => Engine::Blastp,
         Program::Tblastn => Engine::Tblastn,
         Program::Blastn => Engine::Blastn,
         Program::Tblastx => Engine::Tblastx,
@@ -271,12 +277,12 @@ pub fn prints(words: &[&str]) -> Option<&'static str> {
 fn names_subjects(command: &Commands) -> bool {
     match command {
         Commands::Blastp(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Psiblast(a) => a.subject.is_some() || a.db.is_some(),
         Commands::Tblastn(a) => a.subject.is_some() || a.db.is_some(),
         Commands::Blastn(a) => a.subject.is_some() || a.db.is_some(),
         Commands::Tblastx(a) => a.subject.is_some() || a.db.is_some(),
         Commands::Blastx(a) => a.subject.is_some() || a.db.is_some(),
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
@@ -341,6 +347,10 @@ fn read_outfmt(
     // check of a custom delimiter comes with the program's checks of the options (`validate`) and
     // in the engine's `run_local`.
     let engine = engine_program(program);
+    if program == Program::Psiblast {
+        losat::web_adapter::check_psiblast_outfmt(&outfmt, strategy)
+            .map_err(|error| format!("{error:#}"))?;
+    }
     losat::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
         .and_then(|format| match format {
             Some(_) => Ok(()),
@@ -420,12 +430,12 @@ pub fn enter_run_directory() {
 fn database_of(command: &Commands) -> Option<&str> {
     match command {
         Commands::Blastp(args) => args.db.as_deref(),
+        Commands::Psiblast(args) => args.db.as_deref(),
         Commands::Tblastn(args) => args.db.as_deref(),
         Commands::Blastn(args) => args.db.as_deref(),
         Commands::Tblastx(args) => args.db.as_deref(),
         Commands::Blastx(args) => args.db.as_deref(),
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => None,
@@ -437,6 +447,58 @@ fn database_of(command: &Commands) -> Option<&str> {
 /// an argv that the CLI's parser rejects.
 pub fn searches_database(words: &[&str]) -> bool {
     parse_words(words).is_ok_and(|(_, command)| database_of(&command).is_some())
+}
+
+/// The file query of `command` (`-in_pssm` of `psiblast`/`tblastn` or `-in_msa` of `psiblast`),
+/// read from the run's working directory (`/work`) instead of a registered FASTA query handle.
+fn query_file_of(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Psiblast(args) => args
+            .in_pssm
+            .as_deref()
+            .or(args.in_msa.as_deref())
+            .and_then(|path| path.to_str()),
+        Commands::Tblastn(args) => args.in_pssm.as_deref().and_then(|path| path.to_str()),
+        Commands::Blastp(args) => args
+            .psiblast_pssm
+            .as_ref()
+            .and_then(|pssm| {
+                pssm.in_pssm
+                    .as_deref()
+                    .or(pssm.in_msa.as_ref().map(|msa| msa.path.as_path()))
+            })
+            .and_then(|path| path.to_str()),
+        _ => None,
+    }
+}
+
+/// The query file name (`-in_pssm` or `-in_msa`) of `words`, if any.
+pub fn query_file(words: &[&str]) -> Option<String> {
+    let (_, command) = parse_words(words).ok()?;
+    query_file_of(&command).map(str::to_string)
+}
+
+/// Whether a run of `words` takes its query from a file in `/work` (`-in_pssm` or `-in_msa`)
+/// instead of a registered FASTA query handle (query handle 0).
+pub fn has_file_query(words: &[&str]) -> bool {
+    query_file(words).is_some()
+}
+
+/// The normalized PSSM output host names (`-out_pssm`, `-out_ascii_pssm`) and `-save_each_pssm`
+/// of a `psiblast` argv, for `start_json`.
+fn pssm_output_files(words: &[&str]) -> (Option<String>, Option<String>, bool) {
+    let Ok((_, Commands::Psiblast(args))) = parse_words(words) else {
+        return (None, None, false);
+    };
+    let host_name = |raw: Option<&str>| {
+        raw.and_then(|name| RunFiles::pssm_host_name(std::ffi::OsStr::new(name)))
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+    };
+    (
+        host_name(args.out_pssm.as_deref()),
+        host_name(args.out_ascii_pssm.as_deref()),
+        args.save_each_pssm,
+    )
 }
 
 /// The environment of the application start of a run in LOSAT Web (`start`): no variable but the
@@ -539,6 +601,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     // one (even when it starts with `-`).
     let mut registered: Vec<Vec<u8>> = Vec::new();
     let mut list_files: Vec<Vec<u8>> = Vec::new();
+    let mut read_always: Vec<Vec<u8>> = Vec::new();
     let mut has_db = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
@@ -547,6 +610,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         };
         match name {
             "query" | "subject" => push_input(&mut registered, value),
+            "in_pssm" | "in_msa" => push_input(&mut read_always, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => has_db = true,
@@ -577,9 +641,12 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
+    if has_db {
+        read_always.extend(list_files);
+    }
     SearchRunFiles {
         registered,
-        read: if has_db { list_files } else { Vec::new() },
+        read: read_always,
     }
 }
 
@@ -703,7 +770,18 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         inputs_together(words)
     );
     json::optional_string(&mut out, prints);
-    let _ = write!(out, ",\"database\":{}}}", searches_database(words));
+    let (out_pssm, out_ascii_pssm, save_each_pssm) = pssm_output_files(words);
+    let _ = write!(
+        out,
+        ",\"database\":{},\"query_file\":",
+        searches_database(words)
+    );
+    json::optional_string(&mut out, query_file(words).as_deref());
+    out.push_str(",\"out_pssm\":");
+    json::optional_string(&mut out, out_pssm.as_deref());
+    out.push_str(",\"out_ascii_pssm\":");
+    json::optional_string(&mut out, out_ascii_pssm.as_deref());
+    let _ = write!(out, ",\"save_each_pssm\":{save_each_pssm}}}");
     Ok(out)
 }
 
@@ -848,6 +926,14 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
             })
             .map_err(|error| format!("{error:#}"))
             .and_then(|()| custom_check())?,
+        Commands::Psiblast(mut args) => subject_range(args.subject_loc.as_deref())
+            .and_then(|()| {
+                with_own(&mut args.outfmt);
+                let blastp = args.into_blastp_args()?;
+                losat::web_adapter::check_blastp_options(&blastp)
+            })
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
         Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| {
                 with_own(&mut args.outfmt);
@@ -940,15 +1026,48 @@ fn own_search(groups: &[Vec<Output>]) -> usize {
         .expect("the argv's format is one of the run's outputs (`outputs`)")
 }
 
+/// Byte ranges of one search call's part (the whole search, or one round of `psiblast`).
+struct RecordedPart {
+    /// Searched query index of a round (added to each hit's `q_idx`), 0 without rounds.
+    query: usize,
+    /// 1-based round number when `round_begin` was called (`psiblast` rounds), `None` otherwise.
+    round: Option<u32>,
+    /// True database OIDs indexed by each hit's compact `s_idx` in `-db` searches
+    /// (`FormatObserver::database_subjects`), `None` for `-subject` searches.
+    database_oids: Option<Vec<u32>>,
+    out6: Vec<Option<(u64, u64)>>,
+    out0: Vec<Option<(u64, u64)>>,
+    out0_subject: Vec<Option<(u64, u64)>>,
+}
+
+impl RecordedPart {
+    fn new(query: usize, round: Option<u32>) -> Self {
+        Self {
+            query,
+            round,
+            database_oids: None,
+            out6: Vec::new(),
+            out0: Vec::new(),
+            out0_subject: Vec::new(),
+        }
+    }
+
+    fn subject_index(&self, hit_s_idx: u32) -> u32 {
+        self.database_oids
+            .as_deref()
+            .and_then(|oids| oids.get(hit_s_idx as usize).copied())
+            .unwrap_or(hit_s_idx)
+    }
+}
+
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
-/// the subject heading (stream 0) that each section belongs to.
+/// the subject heading (stream 0) that each section belongs to, across rounds for `psiblast`.
 struct RangeRecorder {
     streams: Vec<u32>,
     positions: Vec<Arc<AtomicU64>>,
     open: Vec<Option<(HspIndex, u64)>>,
-    out6: Vec<Option<(u64, u64)>>,
-    out0: Vec<Option<(u64, u64)>>,
-    out0_subject: Vec<Option<(u64, u64)>>,
+    parts: Vec<RecordedPart>,
+    rounds: bool,
     /// The start of the heading being written, and the last complete heading.
     subject_start: Option<u64>,
     subject: Option<(u64, u64)>,
@@ -957,8 +1076,28 @@ struct RangeRecorder {
 }
 
 impl RangeRecorder {
+    fn new(streams: Vec<u32>, positions: Vec<Arc<AtomicU64>>) -> Self {
+        let len = streams.len();
+        Self {
+            streams,
+            positions,
+            open: vec![None; len],
+            parts: vec![RecordedPart::new(0, None)],
+            rounds: false,
+            subject_start: None,
+            subject: None,
+            fault: None,
+        }
+    }
+
     fn position(&self, format: usize) -> u64 {
         self.positions[format].load(Ordering::SeqCst)
+    }
+
+    fn current_mut(&mut self) -> &mut RecordedPart {
+        self.parts
+            .last_mut()
+            .expect("recorder has at least one part")
     }
 
     /// Forgets the events of the format `format`, which failed alone (`search`): its stream is
@@ -967,10 +1106,16 @@ impl RangeRecorder {
     fn forget(&mut self, format: usize) {
         self.open[format] = None;
         match self.streams[format] {
-            6 => self.out6.clear(),
+            6 => {
+                for part in &mut self.parts {
+                    part.out6.clear();
+                }
+            }
             0 => {
-                self.out0.clear();
-                self.out0_subject.clear();
+                for part in &mut self.parts {
+                    part.out0.clear();
+                    part.out0_subject.clear();
+                }
                 self.subject_start = None;
                 self.subject = None;
             }
@@ -995,6 +1140,21 @@ fn store(
 }
 
 impl FormatObserver for RangeRecorder {
+    fn round_begin(&mut self, query: usize, round: u32) {
+        if self.rounds {
+            self.parts.push(RecordedPart::new(query, Some(round)));
+        } else {
+            self.rounds = true;
+            self.parts[0] = RecordedPart::new(query, Some(round));
+        }
+        self.subject_start = None;
+        self.subject = None;
+    }
+
+    fn database_subjects(&mut self, subjects: Vec<losat::web_adapter::ReportedSubject>) {
+        self.current_mut().database_oids = Some(subjects.into_iter().map(|s| s.oid).collect());
+    }
+
     fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
         let start = self.position(format);
         if let Some((open, _)) = self.open[format].replace((hsp, start)) {
@@ -1015,10 +1175,13 @@ impl FormatObserver for RangeRecorder {
             return;
         }
         let range = (start, self.position(format));
-        let stored = match self.streams[format] {
-            6 => store(&mut self.out6, hsp, range),
-            0 => store(&mut self.out0, hsp, range).and_then(|()| match self.subject {
-                Some(subject) => store(&mut self.out0_subject, hsp, subject),
+        let stream = self.streams[format];
+        let subject = self.subject;
+        let part = self.current_mut();
+        let stored = match stream {
+            6 => store(&mut part.out6, hsp, range),
+            0 => store(&mut part.out0, hsp, range).and_then(|()| match subject {
+                Some(subject) => store(&mut part.out0_subject, hsp, subject),
                 None => Ok(()),
             }),
             _ => Ok(()),
@@ -1071,6 +1234,7 @@ fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<
 fn count_options(command: &Commands) -> [Option<usize>; 3] {
     match command {
         Commands::Blastp(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        Commands::Psiblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Tblastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Blastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Tblastx(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
@@ -1081,8 +1245,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
             a.num_alignments,
         ],
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
@@ -1093,14 +1256,14 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
 fn num_threads(command: &Commands) -> usize {
     match command {
         Commands::Blastp(a) => a.num_threads,
+        Commands::Psiblast(a) => a.num_threads,
         Commands::Tblastn(a) => a.num_threads,
         Commands::Blastn(a) => a.num_threads,
         Commands::Tblastx(a) => a.num_threads,
         // A positive `i32` (the parser's `positive`).
         Commands::Blastx(a) => a.num_threads as usize,
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
@@ -1115,36 +1278,23 @@ pub fn hit_list_size(command: &Commands, format: u32) -> usize {
         .hitlist_size
 }
 
-/// The searches of a run: the output formats grouped by hit list size, the group of the tabular
-/// formats first. One group is one `run_local` call, and every format of it is written from
-/// that search, as the CLI writes it alone: the CLI's search depends on the hit list size,
-/// which `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make
-/// differ between the pairwise format 0 and the tabular formats. Without those options the
-/// sizes are equal and the run is one search of every format. The output of the argv's `-outfmt`
-/// has the hit list size of its number's formats (that of the tabular formats above 4, that of
-/// format 0 for 1 to 4), so it joins their group: it adds no search.
-///
-/// In each group the argv's own format (`Output::requested`) comes first, then the tabular
-/// formats: the first format of a search writes the warnings that its formats share (the
-/// formatting handler's, the queries'), and the argv's are the ones that the CLI writes for the
-/// argv (the handler warns of `-num_descriptions`, `-line_length` and `-sorthits` for formats
-/// above 4 only and of `-sorthsps` for formats other than 0, blast_args.cpp:2947-2989), whatever
-/// the outcome of the run (line WQA's sweep, D3 review r2 M1, 2026-11-19: with the tabular
-/// formats first, a failed run whose argv asks for format 0 to 4 gave their lines). `search_all`
-/// adds the lines that the other formats' handler writes where the run completes.
 pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
+    type GroupKey = (usize, Option<losat::web_adapter::ListCut>);
     let [_, descriptions, alignments] = count_options(command);
+    let is_psiblast = matches!(command, Commands::Psiblast(_));
     let mut ordered: Vec<Output> = formats.to_vec();
     ordered.sort_by_key(|format| format.number <= 4);
-    let mut groups: Vec<(usize, Vec<Output>)> = Vec::new();
+    let mut groups: Vec<(GroupKey, Vec<Output>)> = Vec::new();
     for format in ordered {
         let size = match descriptions.is_none() && alignments.is_none() {
             true => 0,
             false => hit_list_size(command, format.number),
         };
-        match groups.iter_mut().find(|(group, _)| *group == size) {
+        let cut = is_psiblast.then(|| losat::web_adapter::psiblast_list_cut(format.number as i32));
+        let key = (size, cut);
+        match groups.iter_mut().find(|(group, _)| *group == key) {
             Some((_, group)) => group.push(format),
-            None => groups.push((size, vec![format])),
+            None => groups.push((key, vec![format])),
         }
     }
     groups
@@ -1174,13 +1324,13 @@ fn handler_warnings(program: Program, command: &Commands, number: u32) -> Vec<u8
     };
     match command {
         Commands::Blastp(a) => warn(&a.formatting),
+        Commands::Psiblast(a) => warn(&a.formatting),
         Commands::Tblastn(a) => warn(&a.formatting),
         Commands::Blastn(a) => warn(&a.formatting),
         Commands::Tblastx(a) => warn(&a.formatting),
         Commands::Blastx(a) => warn(&a.formatting),
         // Rejected by `Program::parse`.
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
+        Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => Vec::new(),
@@ -1285,7 +1435,8 @@ struct Searched {
     /// The streams of the formats that were written (not those of `refused`).
     writers: Vec<StreamWriter>,
     recorder: RangeRecorder,
-    hits: Option<std::sync::Arc<Vec<PairwiseHit>>>,
+    /// One hit list per search call / round (1 for single-round searches, N for `psiblast` rounds).
+    hits: Vec<std::sync::Arc<Vec<PairwiseHit>>>,
     ordinals: Option<Vec<usize>>,
     /// The formats that failed alone (`FormatRefusal::FailsAlone`): each one's stream and
     /// refusal, in the order of the formats. Their streams stay empty.
@@ -1331,18 +1482,11 @@ fn search(
         .iter()
         .map(|format| StreamWriter::new(format.stream))
         .collect();
-    let mut recorder = RangeRecorder {
-        streams: formats.iter().map(|format| format.stream).collect(),
-        positions: writers.iter().map(StreamWriter::position).collect(),
-        open: vec![None; formats.len()],
-        out6: Vec::new(),
-        out0: Vec::new(),
-        out0_subject: Vec::new(),
-        subject_start: None,
-        subject: None,
-        fault: None,
-    };
-    let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
+    let mut recorder = RangeRecorder::new(
+        formats.iter().map(|format| format.stream).collect(),
+        writers.iter().map(StreamWriter::position).collect(),
+    );
+    let mut collected: Vec<std::sync::Arc<Vec<PairwiseHit>>> = Vec::new();
     let mut later = vec![Vec::new(); formats.len()];
     // Outfmt 13 and 14: the master file goes to memory and the side files to a ZIP archive on the
     // format's stream, to which the master file is added after the run (`ArchivedFiles`).
@@ -1362,7 +1506,7 @@ fn search(
         .collect();
     let ordinals;
     let outcome = {
-        let mut on_hits = |hits| collected = Some(hits);
+        let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
             // The run's formats besides the argv's fail alone, each as the CLI's run of it alone
             // (`FormatRefusal::FailsAlone`): no search answers for another's formats. (A subject
@@ -1408,15 +1552,7 @@ fn search(
             }
             Commands::Tblastn(args) if database => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
-                losat::web_adapter::refuse_tblastn_pssm_query(&args).and_then(|()| {
-                    run_local_database_tblastn(
-                        args,
-                        query,
-                        query_end,
-                        settings.clone(),
-                        &mut outputs,
-                    )
-                })
+                run_local_database_tblastn(args, query, query_end, settings.clone(), &mut outputs)
             }
             Commands::Blastn(args) if database => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
@@ -1434,12 +1570,9 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, query_end, subject, "", "", &mut outputs)
             }
-            // The host has no PSSM files: `-in_pssm` is refused as by `validate`
-            // (`check_tblastn_options`), before the search.
             Commands::Tblastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
-                losat::web_adapter::refuse_tblastn_pssm_query(&args)
-                    .and_then(|()| run_local_tblastn(args, query, query_end, subject, &mut outputs))
+                run_local_tblastn(args, query, query_end, subject, &mut outputs)
             }
             Commands::Blastn(args) => {
                 ordinals = searched_queries(args.query_loc.as_deref(), query);
@@ -1458,7 +1591,7 @@ fn search(
             | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
-                unreachable!("rejected by Program::parse")
+                unreachable!("converted before search or rejected by Program::parse")
             }
         };
         // The refusals of the formats that failed alone, by format.
@@ -1578,12 +1711,12 @@ fn search(
 /// The HSPs of one (query, subject) pair, in the list's order.
 type Pairs = std::collections::HashMap<(u32, u32), Vec<usize>>;
 
-fn pairs(hits: &[PairwiseHit], only: impl Fn(usize) -> bool) -> Pairs {
+fn pairs(hits: &[PairwiseHit], part: &RecordedPart, only: impl Fn(usize) -> bool) -> Pairs {
     let mut pairs = Pairs::new();
     for (index, record) in hits.iter().enumerate() {
         if only(index) {
             pairs
-                .entry((record.hit.q_idx, record.hit.s_idx))
+                .entry((record.hit.q_idx, part.subject_index(record.hit.s_idx)))
                 .or_default()
                 .push(index);
         }
@@ -1592,8 +1725,8 @@ fn pairs(hits: &[PairwiseHit], only: impl Fn(usize) -> bool) -> Pairs {
 }
 
 /// Whether two searches found the same HSP: every field of the `PairwiseHit`, the numbers
-/// of `f64` by their bits.
-fn same_hsp(a: &PairwiseHit, b: &PairwiseHit) -> bool {
+/// of `f64` by their bits (comparing resolved subject indices across database rounds/runs).
+fn same_hsp(a: &PairwiseHit, a_s_idx: u32, b: &PairwiseHit, b_s_idx: u32) -> bool {
     let (x, y) = (&a.hit, &b.hit);
     x.identity.to_bits() == y.identity.to_bits()
         && x.length == y.length
@@ -1605,7 +1738,7 @@ fn same_hsp(a: &PairwiseHit, b: &PairwiseHit) -> bool {
         && x.num_ident == y.num_ident
         && x.query_frame == y.query_frame
         && x.query_length == y.query_length
-        && (x.q_idx, x.s_idx, x.raw_score) == (y.q_idx, y.s_idx, y.raw_score)
+        && (x.q_idx, a_s_idx, x.raw_score) == (y.q_idx, b_s_idx, y.raw_score)
         && (x.sort_query_offset, x.sort_query_end) == (y.sort_query_offset, y.sort_query_end)
         && (x.sort_subject_offset, x.sort_subject_end)
             == (y.sort_subject_offset, y.sort_subject_end)
@@ -1632,40 +1765,48 @@ fn same_hsp(a: &PairwiseHit, b: &PairwiseHit) -> bool {
 /// list evicts a subject before its alignment is extended), and such a pair stays without
 /// a section. Records, rows and sections that this leaves unlinked are still correct.
 fn link_format0(
-    first: &[PairwiseHit],
+    first_parts: &[Arc<Vec<PairwiseHit>>],
     first_recorder: &mut RangeRecorder,
-    second: &[PairwiseHit],
+    second_parts: &[Arc<Vec<PairwiseHit>>],
     second_recorder: &RangeRecorder,
 ) {
-    let headed = pairs(second, |index| {
-        second_recorder.out0.get(index).copied().flatten().is_some()
-    });
-    let ours = pairs(first, |_| true);
-    let same = same_hsp;
-    for (pair, theirs) in headed {
-        let Some(mine) = ours.get(&pair) else {
-            continue;
+    for (part_idx, (first, second)) in first_parts.iter().zip(second_parts).enumerate() {
+        let Some(first_part) = first_recorder.parts.get_mut(part_idx) else {
+            break;
         };
-        if mine.len() != theirs.len()
-            || !mine
-                .iter()
-                .zip(&theirs)
-                .all(|(&a, &b)| same(&first[a], &second[b]))
-        {
-            continue;
-        }
-        for (&a, &b) in mine.iter().zip(&theirs) {
-            for (target, source) in [
-                (&mut first_recorder.out0, &second_recorder.out0),
-                (
-                    &mut first_recorder.out0_subject,
-                    &second_recorder.out0_subject,
-                ),
-            ] {
-                if target.len() <= a {
-                    target.resize(a + 1, None);
+        let Some(second_part) = second_recorder.parts.get(part_idx) else {
+            break;
+        };
+        let headed = pairs(second, second_part, |index| {
+            second_part.out0.get(index).copied().flatten().is_some()
+        });
+        let ours = pairs(first, first_part, |_| true);
+        for (pair, theirs) in headed {
+            let Some(mine) = ours.get(&pair) else {
+                continue;
+            };
+            if mine.len() != theirs.len()
+                || !mine.iter().zip(&theirs).all(|(&a, &b)| {
+                    same_hsp(
+                        &first[a],
+                        first_part.subject_index(first[a].hit.s_idx),
+                        &second[b],
+                        second_part.subject_index(second[b].hit.s_idx),
+                    )
+                })
+            {
+                continue;
+            }
+            for (&a, &b) in mine.iter().zip(&theirs) {
+                for (target, source) in [
+                    (&mut first_part.out0, &second_part.out0),
+                    (&mut first_part.out0_subject, &second_part.out0_subject),
+                ] {
+                    if target.len() <= a {
+                        target.resize(a + 1, None);
+                    }
+                    target[a] = source.get(b).copied().flatten();
                 }
-                target[a] = source.get(b).copied().flatten();
             }
         }
     }
@@ -1872,7 +2013,13 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
         {
             Some(files) => {
-                files.push((name.to_vec(), bytes.to_vec()));
+                // Multi-round or multi-query psiblast without `-save_each_pssm` overwrites the
+                // same PSSM file path; replace in place so stream 8 holds the final CLI bytes.
+                if let Some(existing) = files.iter_mut().find(|(n, _)| n.as_slice() == name) {
+                    existing.1 = bytes.to_vec();
+                } else {
+                    files.push((name.to_vec(), bytes.to_vec()));
+                }
                 Ok(())
             }
             None => Err(std::io::Error::other(format!(
@@ -1944,7 +2091,7 @@ fn run_started(
             strategy,
             words,
             inputs,
-            &settings,
+            (run_files, &settings),
             &mut sink,
             &mut posted,
         )
@@ -1971,9 +2118,13 @@ fn run_started(
     Ok(())
 }
 
-/// The HSP records of the tabular search (`emit_hit_records`): its hits, the recorder of their
-/// ranges and the hits' ordinals.
-type HitRecords = (Arc<Vec<PairwiseHit>>, RangeRecorder, Option<Vec<usize>>);
+/// The HSP records of the tabular search (`emit_hit_records`): its hits (one per search call /
+/// round), the recorder of their ranges and the hits' ordinals.
+type HitRecords = (
+    Vec<Arc<Vec<PairwiseHit>>>,
+    RangeRecorder,
+    Option<Vec<usize>>,
+);
 
 /// What the searches of a run wrote (`search_all`): the streams of the formats and the HSP records
 /// of the tabular search.
@@ -1982,23 +2133,12 @@ struct Done {
     records: Option<HitRecords>,
 }
 
-/// The searches of a run of the parsed argv `parsed` (`run`), whose file of
-/// `-export_search_strategy` is `strategy` (`started_command`): the argv's own search writes it as
-/// the command line's run of the argv does (`losat::web_adapter::give_strategy`), and each other
-/// search writes one of the same name whose bytes no one keeps, so that it reads its records and
-/// refuses the file as the argv's search does. The messages that the command line
-/// writes to its standard error for the argv go to `diagnostics`, and what the other formats'
-/// standard error adds to them goes to stream 3 after them (`CallerSink::add`); for an error that
-/// ends the run, `posted` gets the NCBI message that the command line writes for it
-/// (`Failed::native`). Each output stream that fails while the run goes on (a format that failed
-/// alone, the formats of the other search when it failed) is signalled to the host with the place
-/// where the sink wrote its error (`CallerSink::error`, `emit::discard`).
 fn search_all(
     parsed: (Program, Commands, Requested),
     mut strategy: Option<StrategyFile>,
     words: &[&str],
     inputs: RunInputs,
-    settings: &ApplicationSettings,
+    (run_files, settings): (&RunFiles, &ApplicationSettings),
     diagnostics: &mut CallerSink<'_>,
     posted: &mut Option<Vec<u8>>,
 ) -> Result<Done, String> {
@@ -2038,6 +2178,18 @@ fn search_all(
                 Some(command) => command,
                 None => parse(words)?.1,
             };
+            if let Commands::Psiblast(psi) = command {
+                let mut blastp = psi
+                    .into_blastp_args()
+                    .map_err(|error| format!("{error:#}"))?;
+                let pssm_files = if position == own {
+                    run_files.clone()
+                } else {
+                    RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default())))
+                };
+                losat::web_adapter::give_pssm_run_files(&mut blastp, pssm_files);
+                command = Commands::Blastp(blastp);
+            }
             give_run_resources(&mut command, counts.as_ref(), settings);
             let file = match position == own {
                 true => strategy.take(),
@@ -2154,34 +2306,35 @@ fn search_all(
             }
         }
     }
-    let mut searched: Vec<Searched> = Vec::new();
-    let mut tabular_failed = false;
-    for (position, (result, _)) in outcomes.into_iter().enumerate() {
-        match result {
-            Ok(done) => searched.push(done),
-            Err(_) => tabular_failed |= position == 0,
-        }
-    }
+    let tabular_group = groups
+        .iter()
+        .position(|group| group.iter().any(|output| output.stream == 6));
+    let mut completed: Vec<Option<Searched>> = outcomes
+        .into_iter()
+        .map(|(result, _)| result.ok())
+        .collect();
     let mut writers = Vec::new();
     let mut records = None;
-    if !tabular_failed {
-        let mut first = searched.remove(0);
-        if let Some(hits) = &first.hits {
-            for other in searched.iter().filter(|other| !other.refused(0)) {
-                if let Some(second) = &other.hits {
-                    link_format0(hits, &mut first.recorder, second, &other.recorder);
+    if let Some(mut tabular) = tabular_group.and_then(|pos| completed[pos].take()) {
+        if !tabular.hits.is_empty() {
+            for other in completed.iter().flatten().filter(|other| !other.refused(0)) {
+                if !other.hits.is_empty() {
+                    link_format0(
+                        &tabular.hits,
+                        &mut tabular.recorder,
+                        &other.hits,
+                        &other.recorder,
+                    );
                 }
             }
         }
-        writers.append(&mut first.writers);
+        writers.append(&mut tabular.writers);
         // The HSP records point into stream 6 (§8): none where it failed alone.
-        if !first.refused(6) {
-            records = first
-                .hits
-                .map(|hits| (hits, first.recorder, first.ordinals));
+        if !tabular.refused(6) && !tabular.hits.is_empty() {
+            records = Some((tabular.hits, tabular.recorder, tabular.ordinals));
         }
     }
-    for other in &mut searched {
+    for mut other in completed.into_iter().flatten() {
         writers.append(&mut other.writers);
     }
     Ok(Done { writers, records })
@@ -2301,51 +2454,69 @@ impl<'t> Diagnostics<'t> {
 
 /// Emits one JSON object per HSP on stream 1 (docs/web/abi_v2.md §8); `ordinals` maps the
 /// engine's `q_idx` (searched queries) to the registered index (`searched_queries`).
-fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Option<&[usize]>) {
+fn emit_hit_records(
+    parts_hits: &[Arc<Vec<PairwiseHit>>],
+    recorder: &RangeRecorder,
+    ordinals: Option<&[usize]>,
+) {
     let mut lines = String::new();
     let mut ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-    for (index, record) in hits.iter().enumerate() {
-        let hit = &record.hit;
-        let q_idx = ordinals
-            .and_then(|ordinals| ordinals.get(hit.q_idx as usize).copied())
-            .unwrap_or(hit.q_idx as usize);
-        let rank = ranks.entry(q_idx).or_default();
-        let _ = write!(
-            lines,
-            "{{\"index\":{index},\"q_idx\":{q_idx},\"s_idx\":{},\"rank\":{rank},\"raw_score\":{},\"bit_score\":",
-            hit.s_idx, hit.raw_score
-        );
-        *rank += 1;
-        json::number(&mut lines, hit.bit_score);
-        lines.push_str(",\"e_value\":");
-        json::number(&mut lines, hit.e_value);
-        let _ = write!(
-            lines,
-            ",\"q_start\":{},\"q_end\":{},\"s_start\":{},\"s_end\":{},\"query_frame\":",
-            hit.q_start, hit.q_end, hit.s_start, hit.s_end
-        );
-        json::optional(&mut lines, record.query_frame);
-        lines.push_str(",\"subject_frame\":");
-        json::optional(&mut lines, record.subject_frame);
-        lines.push_str(",\"subject_length\":");
-        json::optional(&mut lines, record.subject_length);
-        lines.push_str(",\"query_aligned\":");
-        json::optional_string(&mut lines, record.query_seq.as_deref());
-        lines.push_str(",\"subject_aligned\":");
-        json::optional_string(&mut lines, record.subject_seq.as_deref());
-        lines.push_str(",\"out6\":");
-        json::range(&mut lines, recorder.out6.get(index).copied().flatten());
-        lines.push_str(",\"out0\":");
-        json::range(&mut lines, recorder.out0.get(index).copied().flatten());
-        lines.push_str(",\"out0_subject\":");
-        json::range(
-            &mut lines,
-            recorder.out0_subject.get(index).copied().flatten(),
-        );
-        lines.push_str("}\n");
-        if lines.len() >= crate::emit::CHUNK {
-            emit(STREAM_HITS, lines.as_bytes());
-            lines.clear();
+    let mut global_index: usize = 0;
+    for (part, hits) in recorder.parts.iter().zip(parts_hits) {
+        for (local_index, record) in hits.iter().enumerate() {
+            let hit = &record.hit;
+            let searched_q = part.query + hit.q_idx as usize;
+            let q_idx = ordinals
+                .and_then(|ordinals| ordinals.get(searched_q).copied())
+                .unwrap_or(searched_q);
+            let rank = ranks.entry(q_idx).or_default();
+            let s_idx = part.subject_index(hit.s_idx);
+            let _ = write!(
+                lines,
+                "{{\"index\":{global_index},\"q_idx\":{q_idx},\"s_idx\":{s_idx},\"rank\":{rank},\"raw_score\":{},\"bit_score\":",
+                hit.raw_score
+            );
+            *rank += 1;
+            global_index += 1;
+            json::number(&mut lines, hit.bit_score);
+            lines.push_str(",\"e_value\":");
+            json::number(&mut lines, hit.e_value);
+            let _ = write!(
+                lines,
+                ",\"q_start\":{},\"q_end\":{},\"s_start\":{},\"s_end\":{},\"query_frame\":",
+                hit.q_start, hit.q_end, hit.s_start, hit.s_end
+            );
+            json::optional(&mut lines, record.query_frame);
+            lines.push_str(",\"subject_frame\":");
+            json::optional(&mut lines, record.subject_frame);
+            lines.push_str(",\"query_length\":");
+            json::optional(
+                &mut lines,
+                (hit.query_length > 0).then_some(hit.query_length),
+            );
+            lines.push_str(",\"subject_length\":");
+            json::optional(&mut lines, record.subject_length);
+            lines.push_str(",\"query_aligned\":");
+            json::optional_string(&mut lines, record.query_seq.as_deref());
+            lines.push_str(",\"subject_aligned\":");
+            json::optional_string(&mut lines, record.subject_seq.as_deref());
+            lines.push_str(",\"out6\":");
+            json::range(&mut lines, part.out6.get(local_index).copied().flatten());
+            lines.push_str(",\"out0\":");
+            json::range(&mut lines, part.out0.get(local_index).copied().flatten());
+            lines.push_str(",\"out0_subject\":");
+            json::range(
+                &mut lines,
+                part.out0_subject.get(local_index).copied().flatten(),
+            );
+            if let Some(round) = part.round {
+                let _ = write!(lines, ",\"round\":{round}");
+            }
+            lines.push_str("}\n");
+            if lines.len() >= crate::emit::CHUNK {
+                emit(STREAM_HITS, lines.as_bytes());
+                lines.clear();
+            }
         }
     }
     emit(STREAM_HITS, lines.as_bytes());
@@ -2440,7 +2611,11 @@ mod tests {
             parse(&["blastx", "-query", "q", "-subject", "s"]),
             Ok((Program::Blastx, Commands::Blastx(_)))
         ));
-        assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
+        assert!(matches!(
+            parse(&["psiblast", "-query", "q", "-subject", "s"]),
+            Ok((Program::Psiblast, Commands::Psiblast(_)))
+        ));
+        assert!(parse(&["rpsblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [
             &["nosuch"][..],
@@ -2744,17 +2919,10 @@ mod tests {
     }
 
     fn recorder() -> RangeRecorder {
-        RangeRecorder {
-            streams: vec![0, 6],
-            positions: vec![Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))],
-            open: vec![None, None],
-            out6: Vec::new(),
-            out0: Vec::new(),
-            out0_subject: Vec::new(),
-            subject_start: None,
-            subject: None,
-            fault: None,
-        }
+        RangeRecorder::new(
+            vec![0, 6],
+            vec![Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))],
+        )
     }
 
     // `-parse_deflines` is the CLI's option (line WQA's sweep, D7, 2026-11-19): `validate` takes it,
@@ -2762,18 +2930,20 @@ mod tests {
     // *start* JSON's `register_inputs`), but not a dry run, which reads no input.
     #[test]
     fn parse_deflines_reads_the_inputs_together() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+        for program in [
+            "blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx",
+        ] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
             assert_eq!(validate(&words), Ok(true));
             assert!(inputs_together(&words), "{program}");
-            assert!(start_json(&words)
-                .unwrap()
-                .ends_with(",\"register_inputs\":true,\"prints\":null,\"database\":false}"));
+            assert!(start_json(&words).unwrap().ends_with(
+                ",\"register_inputs\":true,\"prints\":null,\"database\":false,\"query_file\":null,\"out_pssm\":null,\"out_ascii_pssm\":null,\"save_each_pssm\":false}"
+            ));
             let dry = [&words[..], &["-dryrun"]].concat();
             assert!(!inputs_together(&dry), "{program}");
-            assert!(start_json(&dry)
-                .unwrap()
-                .ends_with(",\"register_inputs\":false,\"prints\":null,\"database\":false}"));
+            assert!(start_json(&dry).unwrap().ends_with(
+                ",\"register_inputs\":false,\"prints\":null,\"database\":false,\"query_file\":null,\"out_pssm\":null,\"out_ascii_pssm\":null,\"save_each_pssm\":false}"
+            ));
             assert!(!inputs_together(&words[..5]), "{program}");
             assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }
@@ -2812,7 +2982,7 @@ mod tests {
             .collect();
         let programs: std::collections::BTreeSet<&str> =
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
-        assert_eq!(programs.len(), 5, "{programs:?}");
+        assert_eq!(programs.len(), 6, "{programs:?}");
         assert!(rows.len() >= 130, "{}", rows.len());
         let (mut shown, mut gaps, mut alone) = (0, 0, 0);
         for (id, argv) in &rows {
@@ -3219,7 +3389,7 @@ mod tests {
         ] {
             validate(words).unwrap_or_else(|error| panic!("{row}: {error}"));
             assert!(searches_database(words), "{row}");
-            assert!(start_json(words).unwrap().ends_with(",\"database\":true}"));
+            assert!(start_json(words).unwrap().contains(",\"database\":true,"));
             let streams = database_streams(words, query).unwrap_or_else(|e| panic!("{row}: {e}"));
             assert_eq!(text(&streams[&6]), text(&frozen(row)), "{row}");
         }
@@ -5904,7 +6074,11 @@ mod tests {
         valid.hsp_end(0, 0);
         assert!(valid.fault.is_none());
         assert_eq!(
-            (valid.out6.len(), valid.out0.len(), valid.out0_subject.len()),
+            (
+                valid.parts[0].out6.len(),
+                valid.parts[0].out0.len(),
+                valid.parts[0].out0_subject.len()
+            ),
             (1, 1, 1)
         );
     }
@@ -5923,10 +6097,10 @@ mod tests {
         recorder.hsp_begin(0, 1);
         recorder.forget(0);
         assert!(recorder.open.iter().all(Option::is_none));
-        assert!(recorder.out0.is_empty() && recorder.out0_subject.is_empty());
-        assert_eq!(recorder.out6.len(), 1);
+        assert!(recorder.parts[0].out0.is_empty() && recorder.parts[0].out0_subject.is_empty());
+        assert_eq!(recorder.parts[0].out6.len(), 1);
         recorder.forget(1);
-        assert!(recorder.out6.is_empty());
+        assert!(recorder.parts[0].out6.is_empty());
         assert!(recorder.fault.is_none());
     }
 

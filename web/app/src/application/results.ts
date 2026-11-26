@@ -504,10 +504,9 @@ export class ResultsBrowser {
   }
 
   /** The outfmt 6 row of a table row of the loaded run, split into its fields. */
-  row(row: number): Outfmt6Row {
+  row(row: number, loaded: LoadedRun = this.state.get().loaded!): Outfmt6Row {
     let fields = this.rows.get(row);
     if (fields === undefined) {
-      const loaded = this.state.get().loaded!;
       const range = out6Range(loaded.index.table, row);
       if (range === undefined) throw new Error(`HSP row ${row} has no outfmt 6 row`);
       fields = splitOutfmt6Row(decoder.decode(loaded.out6.subarray(range[0], range[1])));
@@ -767,13 +766,33 @@ export class ResultsBrowser {
   private queryEntries(loaded: LoadedRun, filters: ViewFilters): readonly QueryEntry[] {
     const text = (filters.queryText ?? '').toLowerCase();
     const entries: QueryEntry[] = [];
-    runInputRecords(loaded.run, 'query').forEach((record, qIdx) => {
-      const group = loaded.index.queries.get(qIdx);
-      if (filters.queriesWithHitsOnly && group === undefined) return;
-      const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
-      if (text !== '' && !id.toLowerCase().includes(text)) return;
-      entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
-    });
+    const records = runInputRecords(loaded.run, 'query');
+    if (records.length > 0) {
+      records.forEach((record, qIdx) => {
+        const group = loaded.index.queries.get(qIdx);
+        if (filters.queriesWithHitsOnly && group === undefined) return;
+        const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
+        if (text !== '' && !id.toLowerCase().includes(text)) return;
+        entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
+      });
+      return entries;
+    }
+    const queryFile = loaded.run.snapshot.queryFile;
+    if (queryFile === undefined) return entries;
+    if (loaded.index.queries.size === 0) {
+      if (filters.queriesWithHitsOnly) return entries;
+      const id = queryFile.name;
+      if (text !== '' && !id.toLowerCase().includes(text)) return entries;
+      entries.push({ qIdx: 0, id, length: 0, subjects: 0, hsps: 0 });
+      return entries;
+    }
+    for (const [qIdx, group] of loaded.index.queries) {
+      const first = group.subjects[0]?.rows[0];
+      const id = first === undefined ? queryFile.name : this.row(first, loaded).qseqid;
+      if (text !== '' && !id.toLowerCase().includes(text)) continue;
+      const length = first === undefined ? 0 : (loaded.index.table.queryLength[first] ?? 0);
+      entries.push({ qIdx, id, length, subjects: group.subjects.length, hsps: group.hspCount });
+    }
     return entries;
   }
 
@@ -843,7 +862,7 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   if (loaded === undefined) return undefined;
   if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
-  if (runInputRecords(loaded.run, 'query').length === 0) return 'empty-query';
+  if (loaded.run.snapshot.queryFile === undefined && runInputRecords(loaded.run, 'query').length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
   if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';

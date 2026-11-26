@@ -74,6 +74,7 @@ fn reader_of(program: Program, role: u32) -> (&'static str, bool) {
         (Program::Tblastn, ROLE_SUBJECT) => ("TBLASTN", false),
         (Program::Tblastn, _) => ("TBLASTN", true),
         (Program::Blastp, _) => ("BLASTP", true),
+        (Program::Psiblast, _) => ("PSIBLAST", true),
         (Program::Blastx, ROLE_SUBJECT) => ("BLASTX", true),
         (Program::Blastx, _) => ("BLASTX", false),
     }
@@ -384,8 +385,18 @@ pub fn register_inputs(
 ) -> Result<(u32, u32, String), String> {
     let (program, command) = crate::run::parse(words)?;
     let database = crate::run::searches_database(words);
+    let file_query = crate::run::has_file_query(words);
     if database && !subject.is_empty() {
         return Err("a run of -db has no subject input: give no subject bytes".to_string());
+    }
+    if file_query && !query.is_empty() {
+        return Err(
+            "a run of -in_pssm or -in_msa has no FASTA query input: give no query bytes"
+                .to_string(),
+        );
+    }
+    if database && file_query {
+        return Ok((0, 0, "{\"query\":null,\"subject\":null}".to_string()));
     }
     let data_loaders = crate::run::data_loaders(words)?;
     let read = |query: &[u8], subject: &[u8]| {
@@ -419,7 +430,15 @@ pub fn register_inputs(
     {
         return Err(empty_query_vector());
     }
-    let (subject_scan, query_scan) = match (subject_scan, scan(ROLE_QUERY)) {
+    let query_scan = if file_query {
+        Ok(scan::Scanned {
+            records: Vec::new(),
+            stop: None,
+        })
+    } else {
+        scan(ROLE_QUERY)
+    };
+    let (subject_scan, query_scan) = match (subject_scan, query_scan) {
         (Ok(subject_scan), Ok(query_scan)) => (subject_scan, query_scan),
         (Err(scan::ScanError::Refused { message, record }), _) => {
             // The CLI reads the subjects whole first: the query is not read.
@@ -443,22 +462,30 @@ pub fn register_inputs(
         query_end,
         subject: subjects,
     } = read(query, subject)?;
-    check_scan("query", &query_scan, &queries, &query_end)?;
-    check_scan("subject", &subject_scan, &subjects, &QueryEnd::Input)?;
+    if !file_query {
+        check_scan("query", &query_scan, &queries, &query_end)?;
+    }
+    if !database {
+        check_scan("subject", &subject_scan, &subjects, &QueryEnd::Input)?;
+    }
     let run: Vec<String> = words.iter().map(|word| word.to_string()).collect();
     let mut store = store().lock().expect("input store");
-    let query_handle = store.next_handle()?;
+    let query_handle = if file_query { 0 } else { store.next_handle()? };
     let subject_handle = if database { 0 } else { store.next_handle()? };
     let mut response = String::from("{\"query\":");
     let shown = |role: u32| Some((role, reader_of(program, role).1));
-    write_records(
-        &mut response,
-        query_handle,
-        &query_scan.records,
-        &queries,
-        &query_end,
-        shown(ROLE_QUERY),
-    );
+    if file_query {
+        response.push_str("null");
+    } else {
+        write_records(
+            &mut response,
+            query_handle,
+            &query_scan.records,
+            &queries,
+            &query_end,
+            shown(ROLE_QUERY),
+        );
+    }
     response.push_str(",\"subject\":");
     if database {
         response.push_str("null");
@@ -575,21 +602,29 @@ pub fn with_inputs<R>(
     work: impl FnOnce(&[FastaRecord], &QueryEnd, &[FastaRecord]) -> R,
 ) -> Result<R, String> {
     let database = crate::run::searches_database(words);
+    let file_query = crate::run::has_file_query(words);
     if database && subject != 0 {
         return Err(format!(
             "a run of -db takes no subject handle: give 0, not {subject}"
         ));
+    }
+    if file_query && query != 0 {
+        return Err(format!(
+            "a run of -in_pssm or -in_msa takes no query handle: give 0, not {query}"
+        ));
+    }
+    if database && file_query {
+        return Ok(work(&[], &QueryEnd::Input, &[]));
     }
     let mut store = store().lock().expect("input store");
     let roles = [
         (query, ROLE_QUERY, "query"),
         (subject, ROLE_SUBJECT, "subject"),
     ];
-    // A run of -db has no subject (handle 0, checked above); its query is checked as any query.
-    for &(handle, role, name) in roles
-        .iter()
-        .filter(|(_, role, _)| !(database && *role == ROLE_SUBJECT))
-    {
+    // A run of -db has no subject (handle 0); a run of -in_pssm/-in_msa has no query (handle 0).
+    for &(handle, role, name) in roles.iter().filter(|(_, role, _)| {
+        !(database && *role == ROLE_SUBJECT || file_query && *role == ROLE_QUERY)
+    }) {
         let entry = store
             .entries
             .get(&handle)
@@ -609,13 +644,17 @@ pub fn with_inputs<R>(
         }
     }
     let read_for = |handle: u32| store.entries[&handle].run.as_deref();
-    // A run of -db has the query's reading only: as its subject, the query's.
+    let query_read = if file_query {
+        read_for(subject)
+    } else {
+        read_for(query)
+    };
     let subject_read = if database {
         read_for(query)
     } else {
         read_for(subject)
     };
-    let read_together = match (read_for(query), subject_read) {
+    let read_together = match (query_read, subject_read) {
         (None, None) if crate::run::inputs_together(words) => {
             return Err(
                 "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
@@ -631,26 +670,31 @@ pub fn with_inputs<R>(
         }
     };
     let whole = !read_together && crate::run::keeps_whole_records(words);
-    let handles: &[u32] = if database {
-        &[query]
-    } else {
-        &[query, subject]
-    };
-    if whole {
-        set_sources(&mut store, handles, true);
+    let mut handles: Vec<u32> = Vec::with_capacity(2);
+    if !file_query {
+        handles.push(query);
     }
+    if !database {
+        handles.push(subject);
+    }
+    if whole {
+        set_sources(&mut store, &handles, true);
+    }
+    let empty_end = QueryEnd::Input;
+    let (queries, query_end): (&[FastaRecord], &QueryEnd) = if file_query {
+        (&[], &empty_end)
+    } else {
+        let entry = &store.entries[&query];
+        (&entry.records, &entry.end)
+    };
     let subjects: &[FastaRecord] = if database {
         &[]
     } else {
         &store.entries[&subject].records
     };
-    let result = work(
-        &store.entries[&query].records,
-        &store.entries[&query].end,
-        subjects,
-    );
+    let result = work(queries, query_end, subjects);
     if whole {
-        set_sources(&mut store, handles, false);
+        set_sources(&mut store, &handles, false);
     }
     Ok(result)
 }

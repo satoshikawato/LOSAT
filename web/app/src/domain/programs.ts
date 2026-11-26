@@ -636,7 +636,78 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       },
     ],
   },
+  {
+    id: 'psiblast',
+    label: 'PSIBLAST',
+    summary: 'PSIBLAST mode iteratively searches protein subjects using a protein query, MSA, or PSSM.',
+    searches: 'protein subjects',
+    ...PROGRAM_INPUTS.psiblast,
+    sections: [
+      { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize, cullingLimit] },
+      {
+        title: 'Scoring Parameters',
+        placement: 'algorithm',
+        fields: [matrix, gapOpen, gapExtend, compBasedStats],
+        ...PROTEIN_SCORING,
+      },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
+      {
+        title: 'PSI-BLAST Parameters',
+        placement: 'algorithm',
+        fields: [
+          { flag: '-num_iterations', label: 'Iterations', ...integer },
+          { flag: '-inclusion_ethresh', label: 'PSI-BLAST threshold', ...decimal },
+          { flag: '-pseudocount', label: 'Pseudocount constant', ...integer },
+          { flag: '-gap_trigger', label: 'Gap trigger', ...decimal },
+          {
+            flag: '-out_pssm',
+            label: 'Save PSSM checkpoint file',
+            kind: 'text',
+            hint: 'File name for ASN.1 PSSM output (downloadable after the run)',
+          },
+          {
+            flag: '-out_ascii_pssm',
+            label: 'Save ASCII PSSM file',
+            kind: 'text',
+            hint: 'File name for ASCII PSSM output (downloadable after the run)',
+          },
+          { flag: '-save_pssm_after_last_round', label: 'Save PSSM after last round', kind: 'flag' },
+          { flag: '-save_each_pssm', label: 'Save each iteration PSSM', kind: 'flag' },
+        ],
+      },
+      {
+        title: OTHER,
+        placement: 'algorithm',
+        fields: [
+          numDescriptions,
+          numAlignments,
+          lineLength,
+          sortHits,
+          sortHsps,
+          threshold,
+          windowSize,
+          xdropUngap,
+          xdropGap,
+          xdropGapFinal,
+          maxHsps,
+          sumStats,
+          subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
+        ],
+      },
+    ],
+  },
 ] satisfies ProgramDescriptor[]);
+
+export type QuerySource = 'fasta' | 'pssm' | 'msa';
+
+/** Query input sources supported by a program (`-query`, `-in_msa`, `-in_pssm`). */
+export function querySourcesOf(program: ProgramId): readonly QuerySource[] {
+  if (program === 'psiblast') return ['fasta', 'msa', 'pssm'];
+  if (program === 'tblastn') return ['fasta', 'pssm'];
+  return ['fasta'];
+}
 
 export function programById(id: ProgramId): ProgramDescriptor {
   const program = PROGRAMS.find((p) => p.id === id);
@@ -700,8 +771,13 @@ export function searchSummaryParts(
   program: ProgramDescriptor,
   task: string | undefined,
   database?: { readonly name?: string },
+  queryFile?: { readonly flag: '-in_pssm' | '-in_msa'; readonly name?: string },
 ): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
-  const query = program.queryNote === undefined ? '' : ` (${program.queryNote})`;
+  const queryLabel =
+    queryFile === undefined
+      ? program.queryNote
+      : `${queryFile.flag === '-in_pssm' ? 'PSSM' : 'MSA'}${queryFile.name ? ` ${queryFile.name}` : ''}`;
+  const query = queryLabel === undefined ? '' : ` (${queryLabel})`;
   const note = task === undefined ? undefined : program.taskNotes?.[task];
   const taskText = task === undefined ? '' : `, task ${task}${note === undefined ? '' : ` (${note})`}`;
   const target =

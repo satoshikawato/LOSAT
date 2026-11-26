@@ -70,8 +70,9 @@ const popoverAt = ref({ left: 0, top: 0 });
 
 const loaded = computed(() => props.state.loaded);
 const subjects = computed(() => props.state.subjects);
+const query = computed(() => props.state.queries.find((q) => q.qIdx === props.state.qIdx));
 const record = computed(() => (loaded.value === undefined ? undefined : runInputRecords(loaded.value.run, 'query')[props.state.qIdx ?? -1]));
-const queryLength = computed(() => Math.max(1, record.value?.length ?? 1));
+const queryLength = computed(() => Math.max(1, record.value?.length ?? query.value?.length ?? 1));
 const drawnSubjects = computed(() => (showAll.value ? subjects.value : subjects.value.slice(0, FIRST_SUBJECTS)));
 
 /**

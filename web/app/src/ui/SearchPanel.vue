@@ -102,7 +102,14 @@ const summaryParts = computed(() => {
         ? {}
         : { name: state.value.database.selected }
       : undefined;
-  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database);
+  const queryFile =
+    state.value.querySource !== 'fasta'
+      ? {
+          flag: state.value.querySource === 'msa' ? ('-in_msa' as const) : ('-in_pssm' as const),
+          ...(state.value.queryFile.file === undefined ? {} : { name: state.value.queryFile.file.name }),
+        }
+      : undefined;
+  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database, queryFile);
 });
 /**
  * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of

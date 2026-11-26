@@ -357,7 +357,13 @@ async function toAlignments(id: HspId): Promise<void> {
             </template>
             <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
             <template v-if="selectedSearch.snapshot.prints === undefined">
-              <template v-if="queryRecords.length === 1">
+              <template v-if="selectedSearch.snapshot.queryFile">
+                <dt>Query file</dt>
+                <dd data-testid="results-query-file">
+                  {{ selectedSearch.snapshot.queryFile.flag }} {{ selectedSearch.snapshot.queryFile.name }}
+                </dd>
+              </template>
+              <template v-else-if="queryRecords.length === 1">
                 <dt>Query ID</dt>
                 <dd data-testid="results-query-id">{{ recordName(queryRecords[0]!.id, 'query', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Query Length</dt>

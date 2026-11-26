@@ -116,10 +116,18 @@ pub(super) fn search_rounds(
                 .filter(|_| batches.stop_batch.is_some())
             {
                 refuse_before_output(args, subject_source)?;
-                write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                 outputs.diagnostics.write_all(warnings)?;
-                delta.open_domain_side(&mut *outputs.diagnostics)?;
-                return Err(batches.stop.expect("stop").1);
+                if let Err(error) = delta.open_domain_side(&mut *outputs.diagnostics) {
+                    if is_ncbi_stop(&error) {
+                        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                    }
+                    return Err(error);
+                }
+                let stop = batches.stop.expect("stop").1;
+                if is_ncbi_stop(&stop) {
+                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                }
+                return Err(stop);
             }
             // The request of a batch that NCBI made a query factory of, before any output; NCBI's
             // stream that throws while it writes the request (`encoder::NullElement`) ends the
@@ -572,6 +580,13 @@ fn round_reports<'r>(
     }
 }
 
+/// Whether `error` is an NCBI error that stops a deltablast batch after NCBI's `PrintProlog`
+/// (`deltablast_app.cpp:288`), rather than a LOSAT refusal before any report is written.
+fn is_ncbi_stop(error: &anyhow::Error) -> bool {
+    error.is::<crate::cli::NativeError>()
+        || error.is::<crate::algorithm::common::database::ErrorAfterPosts>()
+}
+
 /// The error of a failed round's call (`error`), with what NCBI writes before it. A header file
 /// that NCBI cannot read fails the round whose results reach it first, at its prefetch, after the
 /// reports of the rounds before (`search`'s rule for the batches): psiblast writes the outfmt 0
@@ -613,7 +628,7 @@ fn round_call_error(
         None => Default::default(),
     };
     let delta = args.delta.is_some();
-    if calls == 0 && !delta {
+    if calls == 0 {
         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
     }
     if round == 1 && !delta {
@@ -717,10 +732,23 @@ fn search_delta_batch(
             alone,
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:288
+    // Write the pairwise prolog before an NCBI error in batch 0; LOSAT refusals before the
+    // batch's reports leave stdout empty.
+    let with_prolog =
+        |error: anyhow::Error, outputs: &mut ReportOutputs<'_>| -> Result<anyhow::Error> {
+            if *calls == 0 && is_ncbi_stop(&error) {
+                write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+            }
+            Ok(error)
+        };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
     // One domain search of every query of the batch (`x_FindDomainHits`) comes before the first
     // query's PSSM.
-    let domains = delta.cdd_domains(&cdd_queries, pool, &mut *outputs.diagnostics)?;
+    let domains = match delta.cdd_domains(&cdd_queries, pool, &mut *outputs.diagnostics) {
+        Ok(domains) => domains,
+        Err(error) => return Err(with_prolog(error, outputs)?),
+    };
     let results = RoundResults::of(args, 1, subject_source);
     let state = IterationState::new(plan.num_iterations);
     let mut held = Vec::with_capacity(ids.len() * results.count);
@@ -728,7 +756,10 @@ fn search_delta_batch(
     let mut first_pssm = None;
     for (index, domains) in domains.into_iter().enumerate() {
         let query = batch_queries.start + index;
-        let cdd = delta.cdd_pssm(args, &plan.request, &cdd_queries[index], domains)?;
+        let cdd = match delta.cdd_pssm(args, &plan.request, &cdd_queries[index], domains) {
+            Ok(cdd) => cdd,
+            Err(error) => return Err(with_prolog(error, outputs)?),
+        };
         let mut current = cdd.pssm;
         // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:328-353
         // NCBI saves the batch's first PSSM only (`SavePssmToFile` of the first query's), its
@@ -748,7 +779,7 @@ fn search_delta_batch(
         let record = &searched_queries[query];
         // Round 1's query is that of the PSSM's Bioseq; round 2 starts from it again
         // (`pssm_round_args`), so the round's query is not kept.
-        let round_args = pssm_round_args(
+        let round_args = match pssm_round_args(
             args,
             modes,
             Some(&current),
@@ -758,7 +789,10 @@ fn search_delta_batch(
             *calls + held.len(),
             &mut None,
             Some(&cdd.query),
-        )?;
+        ) {
+            Ok(round_args) => round_args,
+            Err(error) => return Err(with_prolog(error, outputs)?),
+        };
         for result_index in 0..results.count {
             let (call_args, call_source, call_placements) =
                 results.call(result_index, &round_args, subject_source, subjects);
@@ -790,7 +824,7 @@ fn search_delta_batch(
             if let Some(failure) = call.call_source.database().and_then(|db| {
                 crate::algorithm::common::database::PsiSearchReadFailure::of(db.seqdb())
             }) {
-                return Err(failure.error(args.app.name()));
+                return Err(with_prolog(failure.error(args.app.name()), outputs)?);
             }
             let formatted = *calls + held.len();
             let searched = search_call(
@@ -819,16 +853,17 @@ fn search_delta_batch(
                     searched.expect("a round's call is not of the preliminary stage only")
                 }
                 Err(error) => {
-                    return Err(round_call_error(
+                    let error = round_call_error(
                         error,
                         args,
-                        formatted,
+                        *calls,
                         1,
                         &[],
                         subject_source,
                         subject_label,
                         outputs,
-                    )?)
+                    )?;
+                    return Err(with_prolog(error, outputs)?);
                 }
             };
             held.push((call, searched));
@@ -842,7 +877,9 @@ fn search_delta_batch(
     // `SavePssmToFile` of the batch's first PSSM: after the searches of the batch
     // (`CDeltaBlast::Run` has returned), before its prefetch.
     if let Some(first) = first_pssm.as_ref() {
-        write_round_pssm(args, files, first, outputs)?;
+        if let Err(error) = write_round_pssm(args, files, first, outputs) {
+            return Err(with_prolog(error, outputs)?);
+        }
     }
     let mut prefetched = Vec::with_capacity(held.len());
     for (formatted, (call, searched)) in held.into_iter().enumerate() {
@@ -870,18 +907,25 @@ fn search_delta_batch(
         match done {
             Ok((searched, done)) => prefetched.push((call, searched, done)),
             Err(error) => {
-                return Err(round_call_error(
+                let error = round_call_error(
                     error,
                     args,
-                    formatted,
+                    *calls,
                     1,
                     &[],
                     subject_source,
                     subject_label,
                     outputs,
-                )?)
+                )?;
+                return Err(with_prolog(error, outputs)?);
             }
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:288
+    // Write the pairwise prolog once all searches and prefetches of batch 0 have passed
+    // LOSAT's refusals; NCBI errors before this point write the prolog above.
+    if *calls == 0 {
+        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
     }
     let mut outcomes = Vec::with_capacity(cdd_queries_out.len());
     for (formatted, (call, searched, done)) in prefetched.into_iter().enumerate() {
@@ -910,7 +954,7 @@ fn search_delta_batch(
             return Err(round_call_error(
                 error,
                 args,
-                formatted,
+                formatted.max(1),
                 1,
                 &[],
                 subject_source,
@@ -1026,9 +1070,6 @@ fn run_queries(
         };
         let round_ones = match delta {
             Some(delta) => {
-                if calls == 0 {
-                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
-                }
                 outputs
                     .diagnostics
                     .write_all(&batches.warnings[first_query])?;

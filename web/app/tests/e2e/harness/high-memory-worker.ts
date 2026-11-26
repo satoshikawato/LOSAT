@@ -84,8 +84,8 @@ async function runMode(
       // As runtime.run: every thread worker ready before a run, also those whose thread of the
       // previous run is still returning (the ThreadHost has one set; a spawn does not wait for those).
       await host.prepare(request.threads - 1);
-      const query = abi.register(search.program, ROLE_QUERY, true, search.query);
-      const subject = abi.register(search.program, ROLE_SUBJECT, true, search.subject);
+      const query = abi.register(search.program, ROLE_QUERY, true, false, search.query);
+      const subject = abi.register(search.program, ROLE_SUBJECT, true, false, search.subject);
       const streams = new Map<number, Uint8Array[]>();
       abi.run([...search.argv, '-num_threads', String(request.threads)], query.handle, subject.handle, (stream, bytes) =>
         streams.set(stream, [...(streams.get(stream) ?? []), bytes.slice()]),

@@ -543,7 +543,7 @@ fn write_sequence_unbuffered(
             out.insert(&chunk[..used])?;
             used = 0;
         }
-        if line.len() + 1 <= chunk.len() {
+        if line.len() < chunk.len() {
             chunk[used..used + line.len()].copy_from_slice(line);
             chunk[used + line.len()] = b'\n';
             used += line.len() + 1;

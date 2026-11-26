@@ -2111,7 +2111,7 @@ fn report_converted_stats_handles_single_column_nullb_start() {
     use crate::utils::matrix::aa_char_to_ncbistdaa;
     let code = GeneticCode::try_from_id(1).unwrap();
     let query: Vec<u8> = b"MKT".iter().map(|&aa| aa_char_to_ncbistdaa(aa)).collect();
-    let subject = b"ATGAAAACG"; // 9 nt -> 3 aa, trailing NULLB at offset 3
+    let subject = b"ATGAAAACGATGAAA"; // 15 nt -> 5 aa, trailing NULLB at offset 5
     let converted = ConvertedKappaHsp {
         context: 0,
         hsp: GappedHsp {
@@ -2120,9 +2120,9 @@ fn report_converted_stats_handles_single_column_nullb_start() {
             q_start: 1,
             q_end: 0,
             q_gapped_start: 1,
-            s_start: 3,
-            s_end: 2,
-            s_gapped_start: 3,
+            s_start: 5,
+            s_end: 4,
+            s_gapped_start: 5,
         },
         edit_script: vec![GapEditOp::Sub(1)],
         matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,

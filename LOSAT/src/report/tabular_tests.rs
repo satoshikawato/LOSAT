@@ -1777,15 +1777,14 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
     };
     let mut rows = TabularRows::default();
     let mut buf = Vec::new();
-    assert!(writer
-        .row(&mut buf, &mut rows, &query, &empty_subject, None, &hsp)
-        .is_none());
-    assert_eq!(buf, b"q1\t1\t1\n");
+    let mut write_row =
+        |hsp: &TabularHsp<'_>| writer.row(&mut buf, &mut rows, &query, &empty_subject, None, hsp);
+    assert!(write_row(&hsp).is_none());
+    let first_row = buf.clone();
+    assert_eq!(first_row, b"q1\t1\t1\n");
     hsp.s_frame = -1;
-    let stop = writer
-        .row(&mut buf, &mut rows, &query, &empty_subject, None, &hsp)
-        .unwrap();
-    assert_eq!(buf, b"q1\t1\t1\n");
+    let stop = write_row(&hsp).unwrap();
+    assert_eq!(buf, first_row);
     assert!(stop.reason.contains("null pointer exception"), "{stop:?}");
     // Standalone `sframe`/`frames` never open the alignment block.
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));

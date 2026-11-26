@@ -374,10 +374,13 @@ fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
     }
 
     // 2. po_ow_last: dynamic search-time refusal (`last_range_overlap_merge_refusal`).
+    // Matches `ov_s2`: `WWW` at 60 (chunk [60, 55)) pairs with `WWW` at 70 (chunk [70, 72),
+    // length 2) in two-hit mode, leaving an HSP ending at 72 > final chunk offset 68.
     let mut m_ow = make_motif(202, 100);
     m_ow[50..53].copy_from_slice(b"WWW");
     let mut ow_seq = vec![b'A'; 240];
     ow_seq[20..120].copy_from_slice(&m_ow);
+    ow_seq[60..63].copy_from_slice(b"WWW");
     let po_ow_last_db = build_db(
         "po_ow_last",
         &ow_seq,

@@ -56,7 +56,7 @@ use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::core::blast_hits::{merge_subject_chunk_hsps, ChunkMergeHsp};
-use crate::core::subject_split::{HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+use crate::core::subject_split::{HardChunk, MAX_DBSEQ_LEN};
 use crate::seqdb::SeqDb;
 
 impl ChunkMergeHsp for BlastpPreliminaryHsp {
@@ -624,22 +624,16 @@ fn hard_chunk_loop(
         // merge into `masked.hits` (`Blast_HSPListsMerge`) reusing `scratch.preliminary_hsp_list`,
         // then apply `-subject_besthit` if enabled.
         let offset = chunk.offset as i32;
-        let strip_limit = i64::from(offset) + i64::from(DBSEQ_CHUNK_OVERLAP as i32);
-        let mut incoming_in_strip = false;
         let mut chunk_max_end: Option<i32> = None;
         for hsp in &mut scratch.preliminary_hsp_list {
             hsp.subject_start += offset;
             hsp.subject_end += offset;
             hsp.gapped_subject_start += offset;
-            if i64::from(hsp.subject_start) < strip_limit {
-                incoming_in_strip = true;
-            }
             chunk_max_end = Some(chunk_max_end.map_or(hsp.subject_end, |m| m.max(hsp.subject_end)));
         }
         if chunk.overlap_past_list
             && !masked.hits.is_empty()
             && earlier_range_end.is_some_and(|end| end > offset)
-            && incoming_in_strip
         {
             scratch.preliminary_hsp_list.clear();
             return Err(ShortChunkRefusal::LastRangeOverlap);

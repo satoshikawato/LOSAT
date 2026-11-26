@@ -45,7 +45,7 @@ use crate::algorithm::common::hard_chunk_scan::{
 };
 use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, HardTable, NcbiStart};
 use crate::core::blast_hits::merge_subject_chunk_hsps;
-use crate::core::subject_split::{HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+use crate::core::subject_split::{HardChunk, MAX_DBSEQ_LEN};
 use crate::seqdb::{SeqDb, SeqDbError};
 
 /// The program that the reader's errors name.
@@ -441,22 +441,16 @@ impl Masked<'_> {
             // HSP meets this final chunk across NCBI's out-of-bounds overlap read
             // (`overlap_past_list`), merge into `purged` (`Blast_HSPListsMerge`) without allocating
             // a copy, then apply `-subject_besthit` if enabled.
-            let strip_limit = i64::from(offset) + i64::from(DBSEQ_CHUNK_OVERLAP as i32);
-            let mut incoming_in_strip = false;
             let mut chunk_max_end: Option<i32> = None;
             for hsp in &mut chunk_purged {
                 hsp.s_start += offset;
                 hsp.s_end += offset;
                 hsp.s_gapped_start += offset;
-                if i64::from(hsp.s_start) < strip_limit {
-                    incoming_in_strip = true;
-                }
                 chunk_max_end = Some(chunk_max_end.map_or(hsp.s_end, |m| m.max(hsp.s_end)));
             }
             if chunk.overlap_past_list
                 && !purged.is_empty()
                 && earlier_range_end.is_some_and(|end| end > offset)
-                && incoming_in_strip
             {
                 return Err(last_range_overlap_merge_refusal(
                     db.oid(oid as u32),

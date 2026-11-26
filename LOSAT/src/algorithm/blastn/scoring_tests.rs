@@ -418,6 +418,19 @@ fn gapped_x_drops_that_ncbis_kernels_cannot_run_are_refused() {
     // Affine 1/-2 2/2: doubled 2/4 4/4, common factor gdb3(6, 4, 5) = 1.
     assert_eq!(greedy_xdrop_offset(13, 1, -2, 2, 2), 28);
     assert_eq!(greedy_xdrop_offset(i32::MIN, 1, -2, 2, 2), 2);
+    // Large megablast gap costs above 32767 up to i32::MAX (widened to 64 bits, no overflow).
+    assert_eq!(greedy_xdrop_offset(13, 1, -2, 32_768, 32_768), 28);
+    assert_eq!(greedy_xdrop_offset(13, 1, -2, 40_000, 40_000), 28);
+    assert_eq!(greedy_xdrop_offset(13, 1, -2, 1_000_000, 1_000_000), 28);
+    assert_eq!(
+        greedy_xdrop_offset(13, 1, -2, 2_000_000_000, 2_000_000_000),
+        28
+    );
+    assert_eq!(greedy_xdrop_offset(13, 1, -2, i32::MAX, i32::MAX), 28);
+    assert_eq!(greedy_xdrop_offset(13, 1, -2, i32::MAX, 2), 28);
+    // Even reward with high GCD (1000/-2000 40000/2000 -> gcd 500): (13000 + 500) / 500 + 1 = 28.
+    assert_eq!(greedy_xdrop_offset(13_000, 1000, -2000, 40_000, 2000), 28);
+    assert_eq!(greedy_xdrop_offset(20, 2, -3, i32::MAX, i32::MAX), 22);
 
     let check = |use_dp, (gapped, finale), (reward, penalty), (gap_open, gap_extend)| {
         check_gapped_x_dropoffs(
@@ -430,8 +443,12 @@ fn gapped_x_drops_that_ncbis_kernels_cannot_run_are_refused() {
         )
     };
     let refusal = |result: anyhow::Result<()>| result.expect_err("refused").to_string();
-    // Greedy: the defaults, INT_MIN at either stage, and the top of Int4 run.
+    // Greedy: the defaults, INT_MIN at either stage, large gap costs, and the top of Int4 run.
     assert!(check(false, (13, 54), (1, -2), (0, 0)).is_ok());
+    assert!(check(false, (13, 54), (1, -2), (40_000, 40_000)).is_ok());
+    assert!(check(false, (13, 54), (1, -2), (i32::MAX, i32::MAX)).is_ok());
+    assert!(check(false, (13, 54), (1, -2), (i32::MAX, 2)).is_ok());
+    assert!(check(false, (20, 80), (2, -3), (i32::MAX, i32::MAX)).is_ok());
     assert!(check(false, (i32::MIN, 54), (1, -2), (0, 0)).is_ok());
     assert!(check(false, (13, i32::MIN), (1, -2), (0, 0)).is_ok());
     assert!(

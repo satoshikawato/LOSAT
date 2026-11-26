@@ -1,6 +1,7 @@
 use super::*;
 use crate::blastinput::app::{FormatChoice, ReportFormat};
 use crate::common::Hit;
+use crate::report::tabular::taxdb_warning_line;
 
 fn hit(q: (usize, usize), s: (usize, usize), s_idx: u32) -> Hit {
     Hit {

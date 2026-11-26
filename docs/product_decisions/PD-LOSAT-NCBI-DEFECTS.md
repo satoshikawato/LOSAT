@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.116
+- Version: 1.117
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -837,9 +837,19 @@
   at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
   brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
   1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
-  1.115 2026-11-24 (approved exception 32, the Owner's decision of 2026-11-20 on line RG's question
+  1.115 2026-11-26 (approved exception 32, megablast greedy gap costs above 32767 and up to
+  `Int4` maximum, line RG item G1: the rule-3 explicit rejection of megablast gap costs above
+  32767 is removed; affine greedy gap-cost and distance arithmetic are widened to 64 bits over
+  non-empty distances so every gap cost accepted by the nucleotide Karlin-Altschul tables runs
+  without NCBI's signed 32-bit overflow or dense-table memory exhaustion; approved by the Owner
+  on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A to accept megablast gap costs above
+  32767 as an approved exception under the Owner's rules of 2026-10-10 「NCBI のバグを再現する
+  必要はない」 and 2026-10-22 「広い型になおしましょう」); numbered after 1.114 at the merge of
+  dev 42678f399 that brought line DBID item pfoff-7's 1.114; first 1.105, then 1.106, 1.107,
+  1.108, 1.113 and 1.114; exception 31 until the 1.113 merge);
+  1.116 2026-11-24 (approved exception 33, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`; numbered after 1.114; first 1.70, taking exception 22 at the merge
+  F2, `-import_search_strategy`; numbered after 1.115; first 1.70, taking exception 22 at the merge
   of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
   then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
   the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
@@ -865,11 +875,12 @@
   X-short-bat-2); then 1.113 and exception 32 at the merge of dev 245b7e2e3 that brought 1.109 to
   1.112 and exception 31 (line RG items D1c-2, X-short-bat-2, D3c-4 and psiblast line item PS7c);
   then 1.114 at the merge of dev fe1452e21 that brought 1.113 (psiblast line item PS14); then 1.115
-  at the merge of dev 42678f399 that brought 1.114 (line DBID item pfoff-7));
-  1.116 2026-11-24 (approved exception 33, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  at the merge of dev 42678f399 that brought 1.114 (line DBID item pfoff-7); then 1.116 and
+  exception 33 at the merge of dev 9758dbd59 that brought 1.115 and exception 32 (line RG item G1));
+  1.117 2026-11-24 (approved exception 34, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
   line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
   `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
-  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.115;
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.116;
   first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
   merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
   2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.95 at the merge of dev 73242b104 that
@@ -885,7 +896,8 @@
   of dev 245b7e2e3 that brought 1.109 to 1.112 and exception 31 (line RG items D1c-2, X-short-bat-2,
   D3c-4 and psiblast line item PS7c); then 1.115 at the merge of dev fe1452e21 that brought 1.113
   (psiblast line item PS14); then 1.116 at the merge of dev 42678f399 that brought 1.114 (line DBID
-  item pfoff-7))
+  item pfoff-7); then 1.117 and exception 34 at the merge of dev 9758dbd59 that brought 1.115 and
+  exception 32 (line RG item G1))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2659,7 +2671,6 @@ file would differ, and NCBI's programs still could not open the database).
   32768 or more, which NCBI's 16-bit field wraps to 0 or below (NCBI: every query invalid,
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
-- megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
 - Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
   extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
   and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
@@ -4825,9 +4836,47 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
     `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
     Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
 
-## Approved exception 32 (an imported strategy's subjects at more than one thread, version 1.115)
+## Approved exception 32 (megablast greedy gap costs past `Int4`, line RG item G1, version 1.115)
 
-Version 1.115, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.115, decided by the Owner on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A:
+accept megablast gap costs above 32767 up to 2147483647 as an approved exception, following the
+Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22
+「広い型になおしましょう」; not taken: option C, refusing values above NCBI's
+input-length-dependent 32-bit overflow boundary). Its version is in the list at the top;
+elsewhere it is cited by its number and name, "approved exception 32 (megablast greedy gap costs
+past `Int4`)". Line RG item G1.
+
+32. **Megablast affine greedy alignment with gap costs whose 32-bit setup or distance arithmetic
+    overflows or exhausts dense-table memory.** `s_BlastGreedyAlignMemAlloc`
+    (`core/blast_gapalign.c:171-267`) and `BLAST_AffineGreedyAlign`
+    (`core/greedy_align.c:755-1249`) compute doubled gap costs (for an odd reward),
+    `GE_cost = gap_extend + reward / 2`, `max_d * GE_cost`, `gap_open + GE_cost`,
+    `2 * (max_d + 1 + max_cost)`, and `d * score_common_factor` in signed `Int4`, and allocate
+    dense arrays sized by unreduced `max_d` and `max_cost`. When those products overflow `Int4`
+    (undefined behaviour in C) or exceed available memory, NCBI BLAST+ 2.17.0 fails in setup
+    with `BLAST engine error: Unknown error code -1` (exit status 3, from a sign-extended
+    negative `calloc` count or host-RAM exhaustion: for example `-gapopen 1000000 -gapextend
+    1000000` on `taxfilter/tfn`, where `max_d_1 = 560` overflows `2 * (max_d + 1 + max_cost)` at
+    955286, while 955285 needs 73 GB and exits 0 at 128 GB; or 535799 on a 4 kb subject where
+    535798 exits 0 at 128 GB), crashes mid-search with `free(): invalid pointer` or SIGSEGV (for
+    example `40000/2` at 8 GB, `2000000000/2`, `1073741824/2`, `2147483647/2147483647`), or wraps
+    `2 * gap_open` to a negative penalty (`2147483647/2` with odd reward wraps to -2 and alters
+    hits). LOSAT widens the affine greedy gap-cost, GCD, X-drop offset and distance arithmetic
+    to 64 bits (`algorithm::blastn::alignment::greedy`) and steps only over non-empty distances
+    without dense tables, so every `-gapopen` and `-gapextend` accepted by the nucleotide
+    Karlin-Altschul tables (including values above 32767 up to 2147483647) completes in low
+    memory. Wherever NCBI completes without `Int4` overflow or memory exhaustion (such as
+    `32768/32768`, `40000/40000`, `100000/100000`, `40000/2` at 64 GB, `2/40000`, high-GCD
+    `-reward 1000 -penalty -2000 -gapopen 40000 -gapextend 2000`, `955285/955285` on `tfn` at
+    128 GB, `1000000/1000000` on a 600 bp pair at 64 GB), LOSAT gives NCBI's exact bytes (with
+    LOSAT wording). Where NCBI overflows `Int4`, LOSAT writes the alignments of NCBI's nearby
+    non-overflowing run (the `ncbi-near` rows `db.g1.*` of `LOSAT/tests/db_search_manifest/blastn.g1.tsv`
+    and the `g1.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`). Before version 1.115
+    LOSAT refused megablast gap costs above 32767 (rule 3).
+
+## Approved exception 33 (an imported strategy's subjects at more than one thread, version 1.116)
+
+Version 1.116, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -4835,7 +4884,7 @@ duplication itself not a bug?"), that a search strategy whose subjects are seque
 alignment printed N times is not a result of the search), and a refusal of the combination (option B:
 the search itself is valid and its `-num_threads 1` result is deterministic).
 
-32. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
+33. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
     `-num_threads` from the command line's `-subject` only (`CMTArgs::x_ExtractAlgorithmOptions`, NCBI
     reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3203-3236): a strategy that carries its subjects
     (`s_ImportSearchStrategy`, NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628)
@@ -4865,9 +4914,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
-## Approved exception 33 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.116)
+## Approved exception 34 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.117)
 
-Version 1.116, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+Version 1.117, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
 2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
 Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22
@@ -4876,7 +4925,7 @@ C, whatever NCBI's build gives, and NCBI's result at several threads, which chan
 below, cannot be reproduced), and a refusal of the values at the import (option C: the searches are valid
 and their values of a nearby input are deterministic).
 
-33. **A negative `WindowSize` or `LongestIntronLength` of an imported strategy.** The command line takes
+34. **A negative `WindowSize` or `LongestIntronLength` of an imported strategy.** The command line takes
     0 or more for both (`-window_size`, `-max_intron_length`); a hand-edited strategy can carry any `int`,
     and NCBI runs it with no check.
     - *Window, arithmetic.* A window of 0 or less runs the one-hit word finder over NCBI's diagonal

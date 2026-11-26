@@ -305,7 +305,9 @@ fn database_check(
         taxonomy: format.writes_taxonomy(),
         words: format.printed_ids(),
         stops_at_failed_lookup: format.is_tabular()
-            && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
+            && crate::report::tabular::stops_at_lookup_failure(format.tabular_spec()),
+        stops_at_lineless: format.is_tabular()
+            && crate::report::tabular::stops_at_lineless_accession(format.tabular_spec()),
         prefetched: format.prefetches_subjects()
             && !crate::algorithm::common::database::prefetch_always_off(format.prefetch_format()),
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(

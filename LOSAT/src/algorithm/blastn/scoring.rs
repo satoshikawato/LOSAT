@@ -150,8 +150,7 @@ fn check_scoring_options_with(
 /// computation the range limit bounds): a reward of 0 or less with a penalty that is not 0
 /// (no valid query; reward 0 with penalty 0 is matrix-only scoring, which runs) and a reward of
 /// `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values after NCBI's
-/// conversion). The limit on greedy gap costs follows the table check
-/// (`check_greedy_gap_costs`).
+/// conversion).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     // Reward 0 with penalty 0 is matrix-only scoring (`coordination::engine_scoring_pair`).
@@ -183,21 +182,8 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// LOSAT's limit on gap costs with greedy extension (`-task megablast`), for scoring that
-/// NCBI's Karlin-Altschul tables accept: NCBI sizes the greedy distances in 32-bit
-/// integers (`blast_gapalign.c:233-236`), which larger costs can overflow.
-pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
-    let spec = scoring_spec(args);
-    if args.task == "megablast" && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
-        anyhow::bail!(
-            "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
-        );
-    }
-    Ok(())
-}
-
 /// LOSAT's refusal of matrix-only scoring (reward 0 and penalty 0) with the greedy extension of
-/// `-task megablast`, checked where `check_greedy_gap_costs` is (a batch with a valid query).
+/// `-task megablast`, checked in the greedy set-up of a batch or chunk with a valid query.
 /// NCBI sets up the greedy alignment with the option reward and penalty: with gap costs 0 and 0
 /// (megablast's own, also in an ungapped search, which sets it up too) it divides by their sum,
 /// 0 (SIGFPE, exit 136); with other gap costs the set-up passes, and the alignment divides by the
@@ -206,8 +192,7 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
 /// dynamic programming: both run (`TaskConfig::matrix_only`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183,191-193,208-209
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:979-981 (`match_score_half`
-/// is `match_score / 2`, :837)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:837,979-981
 pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let greedy = args.task == "megablast" && !args.no_greedy;
@@ -223,9 +208,6 @@ pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Re
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192
 use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
-
-/// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
-const MAX_GREEDY_GAP_COST: i32 = 32767;
 
 /// NCBI's error for scores or gap costs without Karlin-Altschul values, raised when the
 /// first batch with a valid query is set up: every query of that batch gets the message,

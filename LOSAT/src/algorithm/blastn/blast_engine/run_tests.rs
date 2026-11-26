@@ -659,7 +659,8 @@ fn merge_prelim_hit_lists_refuses_scaled_score_outside_int4() {
         Err(crate::core::blast_hits::ChunkMergeUndefined)
     ));
 
-    // Query-chunk merge surfaces a typed `ShortChunkSeedRefusal` naming the subject OID.
+    // Query-chunk merge surfaces a typed `ShortChunkSeedRefusal` naming the mapped database OID
+    // rather than the internal ordinal id (`PrelimHspList::oid`).
     let mut hitlist1 = HitList::new(3);
     hitlist1.update(PrelimHspList {
         oid: 42,
@@ -673,14 +674,17 @@ fn merge_prelim_hit_lists_refuses_scaled_score_outside_int4() {
         best_evalue: 0.0,
     });
     let mut combined_opt = Some(combined_hl);
-    let error = merge_prelim_hit_list(hitlist1, &mut combined_opt, [1_000, -1], 100)
-        .expect_err("scaled score > Int4::MAX must be refused");
+    let error = merge_prelim_hit_list(hitlist1, &mut combined_opt, [1_000, -1], 100, |ordinal| {
+        ordinal + 100
+    })
+    .expect_err("scaled score > Int4::MAX must be refused");
     assert!(
         error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
         "expected ShortChunkSeedRefusal, got {error:?}"
     );
     let text = error.to_string();
-    assert!(text.contains("BLASTN: sequence of OID 42"), "{text}");
+    assert!(text.contains("BLASTN: sequence of OID 142"), "{text}");
+    assert!(!text.contains("OID 42"), "{text}");
     assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
 }
 
@@ -1109,7 +1113,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     combined.update(list(2, &[60]));
     combined.update(list(7, &[40]));
     let mut combined = Some(combined);
-    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100).unwrap();
+    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100, |ordinal| ordinal).unwrap();
     let mut merged = combined.unwrap();
     assert_eq!(merged.hsplist_max, 3);
     merged.sort_by_evalue();
@@ -1120,7 +1124,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     let mut empty = None;
     let mut single = HitList::new(3);
     single.update(list(5, &[10]));
-    merge_prelim_hit_list(single, &mut empty, [0, 0], 100).unwrap();
+    merge_prelim_hit_list(single, &mut empty, [0, 0], 100, |ordinal| ordinal).unwrap();
     assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
 }
 

@@ -172,6 +172,10 @@ pub(super) struct PrelimBatch<'a> {
     /// the preliminary stage).
     pub(super) lcase_masking: bool,
     pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
+    /// The database's ordinal-to-OID map (`None` for a prepared `-subject` set, where the subject
+    /// index is already its sequence number), used to name a sequence by OID in chunk-merge
+    /// refusals (`record_batch_chunk_merge_error`).
+    pub(super) db_oids: Option<crate::seqdb::OidMap<'a>>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
     /// The seeds of the MegaBLAST database index that the batch is searched with (`None`
     /// without one, and for a batch split into query chunks: each chunk has its own), which
@@ -1060,22 +1064,40 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
-// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.120 (rule 3): records the earliest subject OID whose
-// subject-chunk merge produces an undefined scaled score (outside `Int4`) or zero length sum.
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.120 (rule 3): records the earliest subject (by ordinal id,
+// matching `read_db_seq_ranges` and preserving OID order) whose subject-chunk merge produces
+// an undefined scaled score (outside `Int4`) or zero length sum, naming the sequence by its
+// OID (`oid_of(ordinal)`).
 #[cold]
 #[inline(never)]
 fn record_chunk_merge_error(
     error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
     s_idx: usize,
+    oid_of: impl FnOnce(u32) -> u32,
 ) {
-    let oid = s_idx as u32;
+    let ordinal = s_idx as u32;
+    let oid = oid_of(ordinal);
     let error = crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
         oid, None, "BLASTN",
     );
     let mut first = error_cell.lock().expect("the error cell is not poisoned");
-    if first.as_ref().is_none_or(|(smallest, _)| oid < *smallest) {
-        *first = Some((oid, error));
+    if first
+        .as_ref()
+        .is_none_or(|(smallest, _)| ordinal < *smallest)
+    {
+        *first = Some((ordinal, error));
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
+#[cold]
+#[inline(never)]
+fn record_batch_chunk_merge_error(batch: &PrelimBatch<'_>, s_idx: usize) {
+    record_chunk_merge_error(batch.db_mask_error, s_idx, |ordinal| {
+        batch
+            .db_oids
+            .map_or(ordinal, |oids| oids.oid(ordinal).get())
+    });
 }
 
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that
@@ -1242,7 +1264,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             ) {
                                 Ok(hits) => hits,
                                 Err(_) => {
-                                    record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                                    record_batch_chunk_merge_error(batch, subject.s_idx);
                                     return Vec::new();
                                 }
                             };
@@ -1314,7 +1336,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         )
                         .is_err()
                         {
-                            record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                            record_batch_chunk_merge_error(batch, subject.s_idx);
                             return Vec::new();
                         }
                         if subject_besthit {
@@ -1378,7 +1400,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         ) {
                             Ok(hits) => hits,
                             Err(_) => {
-                                record_chunk_merge_error(batch.db_mask_error, subject.s_idx);
+                                record_batch_chunk_merge_error(batch, subject.s_idx);
                                 return Vec::new();
                             }
                         };
@@ -1729,10 +1751,6 @@ pub(super) fn finish_ungapped_prelim(
     }
 }
 
-#[cfg(all(
-    test,
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
+#[cfg(test)]
 #[path = "prelim_subject_tests.rs"]
 mod tests;

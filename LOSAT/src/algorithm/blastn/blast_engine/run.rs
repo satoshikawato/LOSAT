@@ -8126,6 +8126,23 @@ impl<'a> SubjectSource<'a> {
             SubjectSource::Database(_) => None,
         }
     }
+
+    /// The database's ordinal-to-OID map (`SeqDb::oid_map`); `None` for a prepared `-subject` set.
+    fn oid_map(self) -> Option<crate::seqdb::OidMap<'a>> {
+        match self {
+            SubjectSource::Database(database) => Some(database.oid_map()),
+            SubjectSource::Prepared(_) => None,
+        }
+    }
+
+    /// The OID of subject ordinal `ordinal`: the database's OID for `-db`, or `ordinal` itself
+    /// for a prepared `-subject` set.
+    fn subject_oid(self, ordinal: u32) -> u32 {
+        match self {
+            SubjectSource::Database(database) => database.oid_map().oid(ordinal).get(),
+            SubjectSource::Prepared(_) => ordinal,
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-153
@@ -11674,6 +11691,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         subject_besthit,
         lcase_masking,
         db_mask,
+        db_oids: subjects.oid_map(),
         db_mask_error: &db_mask_error,
         mb_index: index_seeds.as_ref(),
         encoded_query_concat_nomask,
@@ -12000,6 +12018,7 @@ fn search_query_chunks(
             chunk,
             context_offsets,
             batching.split.overlap as u32 as i32,
+            |ordinal| subjects.subject_oid(ordinal),
         )?;
     }
     // A batch with a valid context whose chunks have none (for instance valid letters only in a
@@ -12031,6 +12050,7 @@ fn merge_query_chunk(
     chunk: &QueryChunk,
     context_offsets: &[i32],
     chunk_overlap_size: i32,
+    oid_of: impl Fn(u32) -> u32,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12083,6 +12103,7 @@ fn merge_query_chunk(
             &mut merged[part.query],
             split_points,
             chunk_overlap_size,
+            &oid_of,
         )?;
     }
     for hit_list in merged.iter_mut().flatten() {
@@ -12105,6 +12126,7 @@ fn merge_prelim_hit_list(
     combined: &mut Option<HitList<PrelimHspList>>,
     split_offsets: [i32; 2],
     chunk_overlap_size: i32,
+    oid_of: impl Fn(u32) -> u32,
 ) -> Result<()> {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
@@ -12141,7 +12163,9 @@ fn merge_prelim_hit_list(
                 )
                 .map_err(|_| {
                     crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
-                        list2.oid, None, "BLASTN",
+                        oid_of(list2.oid),
+                        None,
+                        "BLASTN",
                     )
                 })?;
             } else {

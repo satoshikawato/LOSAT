@@ -22,6 +22,9 @@ pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:49-62
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-78
 pub struct BlastxArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    pub(crate) given: crate::cli::GivenArguments,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // The default `-` is standard input (`input_files::open_input`).
     pub query: PathBuf,
@@ -60,6 +63,13 @@ pub struct BlastxArgs {
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`import::apply`).
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
@@ -197,6 +207,7 @@ impl BlastxArgs {
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(BlastxArgs {
+            given: crate::cli::GivenArguments::from_args(args),
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             subject_loc: args.given_option("subject_loc")?,
@@ -210,6 +221,8 @@ impl BlastxArgs {
             searchsp: args.given_option("searchsp")?,
             out: args.given_option("out")?,
             export_search_strategy: args.given_option("export_search_strategy")?,
+            import_search_strategy: args.given_option("import_search_strategy")?,
+            import: Default::default(),
             task: args.option_or_default("task")?,
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:157-158
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1454
@@ -321,16 +334,22 @@ pub(crate) struct ProgramName {
     pub(crate) upper: &'static str,
     /// `blastx`: NCBI's messages (`Warning: [blastx] ...`) and its settings.
     pub(crate) lower: &'static str,
+    /// NCBI's name of the running application, the prefix of the run's diagnostics: `lower`,
+    /// or the application of the command line that runs another program's strategy
+    /// (`ResolvedOptions::app_name`).
+    pub(crate) app: &'static str,
 }
 
 impl ProgramName {
     pub(crate) const BLASTX: Self = Self {
         upper: "BLASTX",
         lower: "blastx",
+        app: "blastx",
     };
     pub(crate) const RPSTBLASTN: Self = Self {
         upper: "RPSTBLASTN",
         lower: "rpstblastn",
+        app: "rpstblastn",
     };
 
     fn of(rpstblastn: &Option<std::sync::Arc<dyn RpsTblastnSearch>>) -> Self {
@@ -344,7 +363,10 @@ impl ProgramName {
 impl ResolvedOptions {
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName::of(&self.rpstblastn)
+        ProgramName {
+            app: self.app_name,
+            ..ProgramName::of(&self.rpstblastn)
+        }
     }
 
     /// The program type of the run's results where BLASTX does not name it
@@ -587,6 +609,9 @@ pub struct ResolvedOptions {
     /// `native::run` and `local::run_local_database`; series NP, M4b); `None` before, and for a
     /// search without it.
     pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
+    /// NCBI's name of the running application, the prefix of the run's diagnostics
+    /// (`BlastxArgs::app_name`).
+    pub app_name: &'static str,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-193
@@ -629,6 +654,27 @@ impl ResolvedOptions {
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 impl BlastxArgs {
+    /// NCBI's name of the running application (`app`), the prefix of the run's diagnostics:
+    /// BLASTX's own runs name their program (`ProgramName::lower`: `rpstblastn` for RPSTBLASTN's,
+    /// which import no strategy), another running application its own.
+    pub(crate) fn app_name(&self) -> &'static str {
+        match self.app() {
+            crate::blastinput::app::Program::Blastx => ProgramName::of(&self.rpstblastn).lower,
+            app => app.ncbi_name(),
+        }
+    }
+
+    /// The running application: the program of the command line, the library call or the Web run,
+    /// which is not this program's when it runs another program's strategy
+    /// (`ImportRun::app`). Its name prefixes the run's diagnostics and its formatting handler
+    /// checks the formats.
+    pub(crate) fn app(&self) -> crate::blastinput::app::Program {
+        crate::report::archive::read::import::ImportRun::running(
+            self.import.as_ref(),
+            crate::blastinput::app::Program::Blastx,
+        )
+    }
+
     /// The NCBI application (`options::RequestKind`): RPSTBLASTN when `rpstblastn` is set, else
     /// BLASTX.
     pub(crate) fn request_kind(&self) -> crate::report::archive::options::RequestKind {
@@ -639,6 +685,15 @@ impl BlastxArgs {
         }
     }
 
+    /// The running application as a `RequestKind`: RPSTBLASTN when `rpstblastn` is set, else the
+    /// running application (`app`).
+    pub(crate) fn app_request_kind(&self) -> crate::report::archive::options::RequestKind {
+        if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::from(self.app())
+        }
+    }
     /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
     /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
     /// sets for such a search; a gapped one refuses the name first).
@@ -690,10 +745,19 @@ impl BlastxArgs {
         // The matrix as typed (BLOSUM62 when omitted) and its gap costs: with `-matrix`, a cost
         // not given is the matrix's BEST one.
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:255-275
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let matrix_name = self.matrix.clone().unwrap_or_else(|| "BLOSUM62".into());
         let (best_open, best_extend) = match &self.matrix {
-            Some(name) => protein_gap_existence_extend_params(name).unwrap_or((0, 0)),
-            None => (11, 1),
+            Some(name) if command_line => {
+                protein_gap_existence_extend_params(name).unwrap_or((0, 0))
+            }
+            _ => (11, 1),
         };
         let gap_open = self.gap_open.unwrap_or(best_open);
         let gap_extend = self.gap_extend.unwrap_or(best_extend);
@@ -757,7 +821,8 @@ impl BlastxArgs {
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`). A `-max_target_seqs` below 1 (a caller of `run_local`
         // sets it; the command line's is at least 1) is NCBI's hit list size below 1.
-        let counts = crate::blastinput::report_counts::report_counts(
+        let counts = crate::blastinput::report_counts::report_counts_from(
+            self.formatting.hitlist_start_count(),
             i32::from(outfmt),
             max_target_seqs_count(self.max_target_seqs),
             self.num_descriptions,
@@ -774,6 +839,15 @@ impl BlastxArgs {
                 "expect value or cutoff score must be greater than zero",
             )
             .into());
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
+        // filtering options, after the e-value and the intron length, which BLASTX may give)
+        if let Some(message) = crate::blastinput::app::hsp_filtering_error(
+            self.culling_limit,
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        ) {
+            return Err(SemanticOptionsError::from(message).into());
         }
         // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
         // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
@@ -801,6 +875,7 @@ impl BlastxArgs {
         // of `-word_size` 5, 6 and 7 are not the default, and stay.
         let threshold = match self.threshold {
             Some(threshold) => threshold,
+            None if !command_line => task_threshold,
             None if self.word_size == Some(5) => 19.3,
             None if self.word_size == Some(6) => 21.0,
             None if self.word_size == Some(7) => 20.25,
@@ -808,9 +883,12 @@ impl BlastxArgs {
             None => suggested_threshold(SuggestionProgram::TranslatedQuery, &matrix_name),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
-        let window_size = self
-            .window_size
-            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+        // (blastx's handle: window 40)
+        let window_size = match self.window_size {
+            Some(window) => window,
+            None if command_line => suggested_window_size(&matrix_name),
+            None => 40,
+        };
         // NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY without IDENTITY's
         // statistics table (`IDENTITYX`), and on IDENTITY with the compressed lookup table
         // (`-word_size` 5 to 7, blastx-fast): LOSAT refuses both (ungapped searches only: a gapped
@@ -827,6 +905,14 @@ impl BlastxArgs {
             self.program().lower,
             self.program().upper,
         )?;
+        // A search strategy's word size below 2 (the command line takes 2 or more): NCBI builds a
+        // lookup table of one letter, which LOSAT's tables do not have (as BLASTP).
+        if word_size < 2 {
+            bail!(
+                "-word_size {word_size} (the lookup table) is not supported by LOSAT's {}",
+                self.program().upper
+            );
+        }
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
@@ -878,7 +964,10 @@ impl BlastxArgs {
             effective_search_space: self.searchsp.unwrap_or(0),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307, `parameters::gumbel_block`).
-            old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+            old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+                self.import.as_ref(),
+                self.searchsp,
+            ),
             window_size,
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),
@@ -902,10 +991,16 @@ impl BlastxArgs {
             taxdb_found: false,
             subject_taxdb: None,
             filtered_empty: false,
-            num_threads: self.num_threads,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+            // A negative window (a search strategy's; the command line takes `-window_size` from
+            // 0) leaves NCBI's diagonal table with entries and an offset that carry from one
+            // subject to the next, and with `-num_threads` above 1 NCBI's threads share the
+            // subjects by timing: the search runs on one thread, as NCBI's `-num_threads 1`.
+            num_threads: if window_size < 0 { 1 } else { self.num_threads },
             query_range: None,
             rpstblastn: self.rpstblastn.clone(),
             db_mask: None,
+            app_name: self.app_name(),
         };
         // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
         super::parameters::check_gapped_x_drops(&options)?;
@@ -919,12 +1014,17 @@ impl BlastxArgs {
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<()> {
+        // An `-import_search_strategy` was imported by the caller (`import::apply`), before the
+        // run.
         super::native::run(&self, settings)
     }
 
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName::of(&self.rpstblastn)
+        ProgramName {
+            app: self.app_name(),
+            ..ProgramName::of(&self.rpstblastn)
+        }
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).

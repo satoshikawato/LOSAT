@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id {  }, descr { title "noid" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

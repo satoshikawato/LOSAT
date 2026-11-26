@@ -1088,9 +1088,9 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
             assert_eq!(
                 err,
                 format!(
-                    "a -logfile file '{existing}' that is a file of the run's directory (the \
-                     command line appends its messages to it; LOSAT Web reads the run's files \
-                     and writes none of them) is not supported by LOSAT's {}",
+                    "a -logfile file '{existing}' that is a file of the run's directory (LOSAT \
+                     Web reads the run's files and writes none of them) is not supported by \
+                     LOSAT's {}",
                     program.to_ascii_uppercase()
                 ),
                 "{program} {existing}"

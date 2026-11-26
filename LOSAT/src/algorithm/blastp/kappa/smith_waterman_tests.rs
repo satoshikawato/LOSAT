@@ -183,15 +183,21 @@ fn run_from(
     let mut heap_asks = 0;
     let mut scratch = SwMatchScratch::new();
     let mut kept = None;
+    let unadjusted = (!params.uses_composition_based_stats()).then(|| {
+        crate::core::composition_adjustment::smith_waterman_match::unadjusted_square_matrix(
+            ScoringMatrix::Blosum62,
+        )
+    });
     let result = redo_one_match_smith_waterman(
         &incoming(hsps),
         params,
         &matching_seq,
         std::slice::from_ref(&info),
-        0.267 / SCALE,
+        0.267 / params.score_divisor,
         &CALLBACKS,
         &mut workspace,
         &mut matrix,
+        unadjusted.as_ref(),
         cutoff_e,
         resume,
         &mut |query_index, _evalue, _score| {
@@ -500,6 +506,100 @@ fn a_redo_resumed_at_its_open_heap_test_equals_the_redo_answered_true() {
     }
     assert!(
         aligned > 100 && failed > 10 && endless > 10 && not_asked > 0,
+        "aligned {aligned} failed {failed} endless {endless} not asked {not_asked}"
+    );
+}
+
+// Item X4-c0: without composition-based statistics (`NoCompositionBasedStats`, scale 1.0,
+// unadjusted matrix), `redo_one_match_smith_waterman` uses the unadjusted matrix with rule
+// `DontAdjustMatrix`, leaves `matrix_state` empty, and resumes identically from a deferred heap
+// test across aligned, failed, endless, and unasked matches.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1332,1463-1476
+#[test]
+fn c0_unadjusted_redo_and_resumed_open_heap_test_match_known_true() {
+    const LETTERS: &[u8] = b"ARNDCQEGHILKMFPSTWYV";
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let (mut aligned, mut failed, mut endless, mut not_asked) = (0, 0, 0, 0);
+    let mut p = params_in(BlastCompoAdjustMode::NoCompositionBasedStats, false, 1);
+    p.score_divisor = 1.0;
+    p.gapping_params.gap_open = 11;
+    p.gapping_params.gap_extend = 1;
+    p.gapping_params.x_dropoff = 100;
+    for case in 0..200 {
+        let w_first = rng.below(2) == 0;
+        let query = encode(&format!("{}{QUERY}", if w_first { "W" } else { "" }));
+        let offset = i32::from(w_first);
+        let mut subject_text = match rng.below(3) {
+            0 => "W".to_string(),
+            1 => "D".to_string(),
+            _ => String::new(),
+        };
+        let mut hsps = Vec::new();
+        for _ in 0..1 + rng.below(3) {
+            let length = 12 + rng.below(30);
+            let start = rng.below(QUERY.len() - length);
+            let part: String = QUERY[start..start + length]
+                .bytes()
+                .map(|letter| {
+                    if rng.below(6) == 0 {
+                        char::from(LETTERS[rng.below(LETTERS.len())])
+                    } else {
+                        char::from(letter)
+                    }
+                })
+                .collect();
+            let at = subject_text.len() as i32;
+            subject_text.push_str(&part);
+            let (start, length) = (start as i32 + offset, length as i32);
+            hsps.push((start, start + length, at, at + length));
+            subject_text.push_str(&SPACER[..1 + rng.below(SPACER.len())]);
+        }
+        let subject = encode(&subject_text);
+        let evalues = (
+            1e6,
+            match rng.below(4) {
+                0 => 1e6,
+                1 => 1e-100,
+                _ => 10.0,
+            },
+        );
+        let call = |resume: Option<&SwMatchResume>, heap: &mut dyn FnMut() -> SwHeapAnswer| {
+            run_from(&query, &subject, &hsps, &p, evalues, resume, heap)
+        };
+        let (with_true, _) = call(None, &mut || SwHeapAnswer::Known(true));
+        let (with_false, _) = call(None, &mut || SwHeapAnswer::Known(false));
+        let (open, kept) = call(None, &mut || SwHeapAnswer::Deferred);
+        assert!(
+            with_true.matrix.is_none(),
+            "case {case}: CBS 0 leaves matrix_state empty"
+        );
+        assert_eq!(outcome(&open), outcome(&with_false), "case {case}");
+        assert_eq!(kept.is_some(), with_true.heap_asks == 1, "case {case}");
+        let Some(kept) = kept else {
+            not_asked += 1;
+            continue;
+        };
+        let (resumed, again) = call(Some(&kept), &mut || {
+            panic!("case {case}: resumed CBS 0 redo asks the heap again")
+        });
+        assert!(again.is_none(), "case {case}");
+        assert!(resumed.matrix.is_none(), "case {case}");
+        assert_eq!(outcome(&resumed), outcome(&with_true), "case {case}");
+        match &with_true.result {
+            Ok(result) => {
+                let made = alignments(result);
+                if !made.is_empty() {
+                    aligned += 1;
+                }
+            }
+            Err(error) if error.is::<SwRedoFailed>() => failed += 1,
+            Err(error) if error.is::<SwRedoEndless>() => endless += 1,
+            _ => {}
+        }
+    }
+    assert!(
+        aligned > 50 && failed > 5 && endless > 5 && not_asked > 0,
         "aligned {aligned} failed {failed} endless {endless} not asked {not_asked}"
     );
 }

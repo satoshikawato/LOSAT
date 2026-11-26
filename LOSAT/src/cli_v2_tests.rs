@@ -1331,9 +1331,9 @@ fn numeric_values_are_validated_before_io() {
 
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
-    // Smith-Waterman redo with composition-based statistics (item X4) and rejects it without
-    // them (`-comp_based_stats 0`, `-task blastp-short`, IDENTITY) where the search starts.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806:
+    // `-use_sw_tback` is a flag; LOSAT's BLASTP runs the Smith-Waterman redo in modes 1 to 3
+    // (item X4) and in mode 0 (item X4-c0, including IDENTITY's reset and `-task blastp-short`).
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
         panic!()
     };
@@ -1345,23 +1345,16 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-use_sw_tback without composition-based statistics"));
-    // IDENTITY's reset of the default mode 2 (`identity_cbs_reset`); `-task blastp-short` keeps
-    // the default mode 2 (it changes the matrix, the gap costs, the threshold, the word size and the
-    // filter, `blast_options_handle.cpp:389-395`) and runs.
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a).is_ok());
+    // IDENTITY's reset of the default mode 2 (`identity_cbs_reset`): options are accepted and
+    // the search fails the first searched batch with Traceback failed (item X4-c0).
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-matrix", "IDENTITY"])
         .unwrap()
         .command
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("(-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them)"));
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a).is_ok());
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-task", "blastp-short"])
         .unwrap()
         .command

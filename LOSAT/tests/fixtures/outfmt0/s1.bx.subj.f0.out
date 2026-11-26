@@ -1,0 +1,131 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_ti_bx.fa).
+           2 sequences; 158 total letters
+
+
+
+Query= bxq coding query in six frames
+
+Length=1229
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+okp ok protein                                                        117     3e-37
+TI:12347 trace subject (protein letters)                              43.1    2e-10
+
+
+>okp ok protein
+Length=67
+
+ Score = 117 bits (292),  Expect = 3e-37, Method: Compositional matrix adjust.
+ Identities = 61/73 (84%), Positives = 61/73 (84%), Gaps = 9/73 (12%)
+ Frame = -1
+
+Query  878  NMIHCRNVLILNAQIVAIAGLYACKQRMHT---WLEFLGISQRCKCCKWQFPLSQPFNDN  708
+            NMIHCRNVLILN QIVAIAGLYAC QRMHT   WLEFLGI QRCKCCKWQFPLSQ     
+Sbjct  1    NMIHCRNVLILNDQIVAIAGLYACGQRMHTCFWWLEFLGIQQRCKCCKWQFPLSQ-----  55
+
+Query  707  YSASQPVAEHYHE  669
+             SASQPVAEHYHE
+Sbjct  56   -SASQPVAEHYHE  67
+
+
+ Score = 14.6 bits (26),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 8/15 (53%), Gaps = 5/15 (33%)
+ Frame = +2
+
+Query  875  CYCVRWQDERVIFPM  919
+            C C +WQ     FP+
+Sbjct  44   CKCCKWQ-----FPL  53
+
+
+>TI:12347 trace subject (protein letters)
+Length=91
+
+ Score = 43.1 bits (100),  Expect = 2e-10, Method: Compositional matrix adjust.
+ Identities = 27/46 (59%), Positives = 30/46 (65%), Gaps = 8/46 (17%)
+ Frame = -2
+
+Query  1063  SHTMLVKMNPENPDCYHNGLKMSPNVYCPTSAFPDCKPKQQKVHPK  926
+             +HTM VKMN    DCYHNG KMS NVYC ++   DCK K  K H K
+Sbjct  54    AHTMYVKMNR---DCYHNG-KMS-NVYCTSA---DCKKKVHKSHGK  91
+
+
+ Score = 40.0 bits (92),  Expect = 3e-09, Method: Compositional matrix adjust.
+ Identities = 33/56 (59%), Positives = 36/56 (64%), Gaps = 16/56 (29%)
+ Frame = +1
+
+Query  4    HPMTMWATHIIKIVIIWTQVNVKCIWQPRERHGIWAAHPSGHFIVVIPEGWDHRHS  171
+            H MTMWATH     + WT VNVKC W+   RHG WAAH SGH +     GWDHRHS
+Sbjct  1    HHMTMWATHK----VAWT-VNVKC-WR---RHG-WAAH-SGHVV-----GWDHRHS  40
+
+
+ Score = 15.0 bits (27),  Expect = 1.4, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 8/10 (80%), Gaps = 2/10 (20%)
+ Frame = +2
+
+Query  974  SWTINI--WR  997
+            +WT+N+  WR
+Sbjct  12   AWTVNVKCWR  21
+
+
+ Score = 13.5 bits (23),  Expect = 4.7, Method: Composition-based stats.
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  492  THSIKW  509
+            TH + W
+Sbjct  8    THKVAW  13
+
+
+ Score = 12.7 bits (21),  Expect = 9.5, Method: Compositional matrix adjust.
+ Identities = 3/5 (60%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  523  VFCVS  509
+            V+C S
+Sbjct  74   VYCTS  78
+
+
+ Score = 12.7 bits (21),  Expect = 9.5, Method: Compositional matrix adjust.
+ Identities = 4/7 (57%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = -3
+
+Query  144  YHDYKMA  124
+            YH+ KM+
+Sbjct  66   YHNGKMS  72
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 43232
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_ti_bx.fa).
+    Posted date:  Unknown
+  Number of letters in database: 158
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

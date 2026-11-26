@@ -1,0 +1,11 @@
+# BLASTP 2.17.0+
+# Query: 1AB1_A query title
+# Database: tests/db_search/pdbchain/pdbonly
+# Fields: query id, subject id, subject length
+# 5 hits found
+pdb|1AB1|A	Unknown	0
+pdb|1AB1|A	pdb|1AB4|A	220
+pdb|1AB1|A	pdb|1AB1|A	220
+pdb|1AB1|A	Unknown	0
+pdb|1AB1|A	pdb|1AB5| 	220
+# BLAST processed 1 queries

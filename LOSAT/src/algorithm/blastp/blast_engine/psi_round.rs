@@ -539,7 +539,13 @@ fn run_queries(
                     }) {
                         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     }
-                    return Err(failure.error);
+                    return Err(
+                        crate::algorithm::common::database::ErrorAfterPosts::written(
+                            failure.error,
+                            &mut *outputs.diagnostics,
+                            args.archive.as_ref(),
+                        )?,
+                    );
                 }
                 return Err(error);
             }

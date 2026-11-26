@@ -1070,7 +1070,7 @@ pub(crate) fn write_html_post<R: Write + ?Sized>(
 /// between the report's bytes without a writer's place for them (BLASTX's reads of a batch's
 /// titles and its prefetch, before the batch's reports), which NCBI posts to `cerr`, tied to
 /// `cout`: after the report written before, the prolog that `-html` keeps in `cout`'s buffer too
-/// (`pairwise::flushes_after_prolog`; review 1 of line DBID pf7, H2).
+/// (`report::ostream::NcbiOstream`; review 1 of line DBID pf7, H2).
 pub(crate) struct PostsAfterReport<'w> {
     report: &'w mut dyn Write,
     posts: &'w mut dyn Write,
@@ -1371,6 +1371,42 @@ fn before_report(
         None => None,
     };
     Ok(posts.map(|posts| posts.placed_in(ledger)))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
+/// What NCBI writes to the standard error of a query batch's reports before it stops at a row
+/// of its last query's report (a `report::tabular::FailedLookupRefusal`), the one owner of that
+/// rule for the programs' refusals: for each of the batch's queries up to the row's (`posts`,
+/// from the batch's first query; `reads` the same way, shorter where the rest read nothing) the
+/// posts before its report (`QueryWarnings::before_query`), the warning of its report's formatter
+/// (`formatter`, `FailedLookupRefusal::formatter_warning`), then the texts of the subjects that
+/// its rows read one by one (`QueryWarnings::subject_read`, where the batch's prefetch is off);
+/// of the row's query only those that its rows up to the row read (`rows`: their subjects, as
+/// `reads` names them), which NCBI reads before the row fails.
+pub fn posts_before_stop(
+    posts: &[Posts],
+    reads: &[QueryReads],
+    rows: &[u32],
+    formatter: Option<&str>,
+) -> Posts {
+    let mut before = Posts::new();
+    let last = posts.len().saturating_sub(1);
+    for (query, query_posts) in posts.iter().enumerate() {
+        before.append(query_posts);
+        if let Some(line) = formatter {
+            before.lines(line.as_bytes());
+        }
+        let query_reads = reads.get(query).map_or(&[][..], Vec::as_slice);
+        before.loads(
+            query_reads
+                .iter()
+                .filter(|read| query < last || rows.contains(&read.subject))
+                .cloned()
+                .collect(),
+        );
+    }
+    before
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262

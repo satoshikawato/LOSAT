@@ -551,10 +551,10 @@ fn split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
 /// the list, each of which they open alone (`CAlignFormatUtil::GetBlastDbInfo`): split at
 /// spaces with the double quotes kept, without white space at the ends, empty names left
 /// out.
-pub(crate) fn report_names(dbname: &str) -> Vec<String> {
-    split_quoted(dbname.as_bytes(), true)
+pub(crate) fn report_names(dbname: &[u8]) -> Vec<Vec<u8>> {
+    split_quoted(dbname, true)
         .into_iter()
-        .map(|name| super::db_argument_name(&String::from_utf8_lossy(name)).to_string())
+        .map(|name| super::db_argument_name_bytes(name).to_vec())
         .filter(|name| !name.is_empty())
         .collect()
 }

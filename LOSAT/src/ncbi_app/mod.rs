@@ -159,6 +159,13 @@ impl Write for Noted<'_> {
 }
 
 impl Diag<'_> {
+    /// Whether diagnostics go to `cerr` (no `-logfile`, `-logfile -`, or a file that could not be
+    /// opened): `cerr` is tied to `cout`, so streams writing to `cout` flush before each post.
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+    pub(crate) fn is_cerr(&self) -> bool {
+        self.stdout.is_none() && matches!(self.target, DiagTarget::Stderr)
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at
     // `report::ostream::Cerr`: `cerr` is tied to `cout`)
     /// NCBI's writes of the run's output before a text that goes to `place`: `cerr` makes the
@@ -354,7 +361,7 @@ impl Diag<'_> {
             let mut text = short_usage(self.tool);
             // The diagnostics of a `-logfile` go to a stream that is not `cerr`: NCBI then says
             // where they are.
-            if self.stdout.is_some() || !matches!(self.target, DiagTarget::Stderr) {
+            if !self.is_cerr() {
                 text.push_str(
                     "Error in command-line arguments. See error logs for more details.\n",
                 );

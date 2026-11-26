@@ -542,7 +542,7 @@ fn checked_options(
             tool.refusal_name
         )
     })?;
-    crate::cli::reader::options(tool, &args, false)
+    crate::cli::reader::options(tool, &args)
 }
 
 /// A refusal of v1's reader, as its reader wrote them (a clap error of LOSAT's text).

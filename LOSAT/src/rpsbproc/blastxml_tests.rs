@@ -14,7 +14,7 @@ fn fixture(path: &str) -> String {
 
 /// The data files of `dir` (`data` or `data_with/<name>`, which holds all six).
 fn data(dir: &str) -> CddData {
-    let file = |name: &str| fixture(&format!("{dir}/{name}"));
+    let file = |name: &str| fixture(&format!("{dir}/{name}")).into_bytes();
     CddData::load(&DataFiles {
         cddids: file("cddid.tbl"),
         spfeats: file("cddannot.dat"),

@@ -4,6 +4,7 @@
 //! or 4.
 
 use crate::wording::DATABASE_ERROR;
+use std::ffi::OsString;
 use std::io::{BufRead, Read, Write};
 
 use super::asn_source::AsnFormat;
@@ -23,7 +24,7 @@ use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{
     diag_target, ApplicationSettings, DiagStream, ReadVerification,
 };
-use crate::ncbi_str::string_to_uint8_data_size;
+use crate::ncbi_str::string_to_uint8_data_size_bytes;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -45,7 +46,7 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 pub struct MakedbArgs {
     /// Input FASTA or ASN.1 file (`-` is standard input), or the input databases of -input_type
     /// blastdb
-    pub input: String,
+    pub input: OsString,
     /// Type of the data specified in input_file (fasta, blastdb, asn1_txt and asn1_bin are
     /// supported)
     pub input_type: String,
@@ -53,17 +54,17 @@ pub struct MakedbArgs {
     pub dbtype: String,
     /// Title for BLAST database [default: the input file name given to -in; for -input_type
     /// blastdb, the title of the input database]
-    pub title: Option<String>,
+    pub title: Option<OsString>,
     /// Name of BLAST database to be created [default: the input file name given to -in]
-    pub out: Option<String>,
+    pub out: Option<OsString>,
     /// Version of BLAST database to be created
     pub blastdb_version: i32,
     /// Maximum file size for BLAST database files
-    pub max_file_sz: String,
+    pub max_file_sz: OsString,
     /// Path prefix for location of database files in metadata
-    pub metadata_output_prefix: Option<String>,
+    pub metadata_output_prefix: Option<OsString>,
     /// File to which the program log should be redirected
-    pub logfile: Option<String>,
+    pub logfile: Option<OsString>,
     /// Create index of sequence hash values.
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
@@ -72,18 +73,18 @@ pub struct MakedbArgs {
     // `-dryrun`).
     pub taxid: Option<i32>,
     /// Text file mapping sequence IDs to taxonomy IDs. Format: `<SequenceId> <TaxonomyId><newline>`
-    pub taxid_map: Option<String>,
+    pub taxid_map: Option<OsString>,
     /// Comma-separated list of input files containing masking data as produced by NCBI masking
     /// applications (e.g. dustmasker, segmasker, windowmasker)
-    pub mask_data: Option<String>,
+    pub mask_data: Option<OsString>,
     /// Comma-separated list of strings to uniquely identify the masking algorithm
-    pub mask_id: Option<String>,
+    pub mask_id: Option<OsString>,
     /// Comma-separated list of free form strings to describe the masking algorithm details
-    pub mask_desc: Option<String>,
+    pub mask_desc: Option<OsString>,
     /// Create GI indexed masking data.
     pub gi_mask: bool,
     /// Comma-separated list of masking data output files.
-    pub gi_mask_name: Option<String>,
+    pub gi_mask_name: Option<OsString>,
     /// Option to parse seqid for FASTA input if set, for all other input types seqids are
     /// parsed automatically
     pub parse_seqids: bool,
@@ -148,8 +149,8 @@ pub enum MakedbError {
     /// prints after "BLAST failed to write output: ", exit status 6.
     Output(&'static str),
     /// NCBI's `CArgException` raised after the arguments were parsed: the text
-    /// makeblastdb prints after "Command line argument error: ".
-    Argument(String),
+    /// makeblastdb prints after "Command line argument error: ", as bytes.
+    Argument(Vec<u8>),
 }
 
 impl MakedbError {
@@ -187,6 +188,7 @@ impl MakedbError {
                 | WriteDbError::CreationBytes(_)
                 | WriteDbError::GiOnlyBetweenKeys { .. }
                 | WriteDbError::Options(_)
+                | WriteDbError::OptionsBytes(_)
                 | WriteDbError::Unsupported(_)
                 | WriteDbError::OrdinalIdWithoutIds,
             )
@@ -231,7 +233,7 @@ impl MakedbError {
                 format!("BLAST failed to write output: {message}").into()
             }
             MakedbError::Argument(message) => {
-                format!("Command line argument error: {message}").into()
+                [b"Command line argument error: ".as_slice(), message].concat()
             }
         }
     }
@@ -264,6 +266,10 @@ impl From<WriteDbError> for MakedbError {
 
 fn options_error(message: impl Into<String>) -> MakedbError {
     MakedbError::Build(WriteDbError::Options(message.into()))
+}
+
+fn options_error_bytes(message: Vec<u8>) -> MakedbError {
+    MakedbError::Build(WriteDbError::OptionsBytes(message))
 }
 
 fn unsupported(message: impl Into<String>) -> MakedbError {
@@ -318,11 +324,11 @@ fn is_losat_error(error: &MakedbError) -> bool {
 // makeblastdb splits `-in` without keeping the quotes (`keep_quote` false).
 /// `SeqDB_SplitQuoted`: the input names of `-in` (spaces separate names,
 /// double quotes keep a name with spaces together).
-fn split_quoted(names: &str) -> Vec<&str> {
+fn split_quoted(names: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let mut quoted = false;
     let mut begin = 0;
-    for (i, ch) in names.bytes().enumerate() {
+    for (i, &ch) in names.iter().enumerate() {
         if quoted {
             if ch == b'"' {
                 if begin < i {
@@ -348,18 +354,18 @@ fn split_quoted(names: &str) -> Vec<&str> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1717-1741
 /// `SeqDB_CombineAndQuote`: the names as one database list, separated by spaces, a name with a
 /// space between double quotes.
-fn combine_and_quote(names: &[&str]) -> String {
-    let mut out = String::new();
+fn combine_and_quote(names: &[&[u8]]) -> Vec<u8> {
+    let mut out = Vec::new();
     for name in names {
         if !out.is_empty() {
-            out.push(' ');
+            out.push(b' ');
         }
-        if name.contains(' ') {
-            out.push('"');
-            out.push_str(name);
-            out.push('"');
+        if name.contains(&b' ') {
+            out.push(b'"');
+            out.extend_from_slice(name);
+            out.push(b'"');
         } else {
-            out.push_str(name);
+            out.extend_from_slice(name);
         }
     }
     out
@@ -508,22 +514,23 @@ fn read_taxids(
     let Some(name) = args.taxid_map.as_deref() else {
         return Ok((None, None));
     };
+    let name_bytes = crate::utils::os_bytes::os_str_bytes(name);
     let not_accessible = || {
-        let attr = if name.is_empty() {
-            String::new()
-        } else {
-            format!(":  `{name}'")
-        };
-        MakedbError::Argument(format!(
-            "Argument \"taxid_map\". File is not accessible{attr}"
-        ))
+        let mut msg = b"Argument \"taxid_map\". File is not accessible".to_vec();
+        if !name_bytes.is_empty() {
+            msg.extend_from_slice(b":  `");
+            msg.extend_from_slice(&name_bytes);
+            msg.push(b'\'');
+        }
+        MakedbError::Argument(msg)
     };
     let mut file;
     let mut standard_input;
-    let reader: &mut dyn BufRead = if name == "-" {
+    let is_stdin = name_bytes.as_ref() == b"-";
+    let reader: &mut dyn BufRead = if is_stdin {
         standard_input = std::io::BufReader::new(stdin);
         &mut standard_input
-    } else if name.is_empty() {
+    } else if name_bytes.is_empty() {
         return Err(not_accessible());
     } else {
         file = std::io::BufReader::new(std::fs::File::open(name).map_err(|_| not_accessible())?);
@@ -538,11 +545,12 @@ fn read_taxids(
         .map_err(|error| match error {
             TaxIdMapError::Exception(e) => MakedbError::Build(WriteDbError::Exception(e)),
             TaxIdMapError::BlankLine(line) => unsupported(format!(
-                "line {line} of the -taxid_map file {name} holds only white space, which \
-                 makeblastdb 2.17.0 cannot read (it crashes)"
+                "line {line} of the -taxid_map file {} holds only white space, which \
+                 makeblastdb 2.17.0 cannot read (it crashes)",
+                String::from_utf8_lossy(&name_bytes)
             )),
         })?;
-    Ok((Some(taxids), (name == "-").then_some(failed)))
+    Ok((Some(taxids), is_stdin.then_some(failed)))
 }
 
 /// The value of `-max_file_sz`, read where makeblastdb reads it: after the constructor of
@@ -554,7 +562,8 @@ fn max_file_size(args: &MakedbArgs) -> Result<u64, MakedbError> {
     // A value NCBI cannot convert throws a `CStringException`, which `CATCH_ALL` reports
     // through its `CException` clause (`MakedbError::exit_code`): "Error: " and the
     // exception's report, exit status 255.
-    let bytes = string_to_uint8_data_size(&args.max_file_sz)
+    let raw = crate::utils::os_bytes::os_str_bytes(&args.max_file_sz);
+    let bytes = string_to_uint8_data_size_bytes(&raw)
         .map_err(|error| MakedbError::Build(WriteDbError::Exception(error.exception())))?;
     if bytes >= 0x1_0000_0000 {
         return Err(options_error("max_file_sz must be < 4 GiB"));
@@ -643,8 +652,11 @@ impl Read for CompressedInput<'_> {
 /// The sentence of a `-in` name ending in `.gz`, `.bz2` or `.zst` whose bytes are not that
 /// format, or are cut short (line GZ, DECISIONS 5; for `.gz`: where makeblastdb's decompressor
 /// fails, `compressed::GzipMembers`): exit status 1, the files of the build removed.
-fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> MakedbError {
-    unsupported(format!("-in: {}", compression.not_data(name, fault)))
+fn compressed_fault_error(name: &[u8], compression: Compression, fault: &str) -> MakedbError {
+    unsupported(format!(
+        "-in: {}",
+        compression.not_data(&String::from_utf8_lossy(name), fault)
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
@@ -654,17 +666,24 @@ fn compressed_fault_error(name: &str, compression: Compression, fault: &str) -> 
 // build reads it from its start. `ERR_POST` ends the message with a line feed.
 /// `x_VerifyInputFilesType` for FASTA and ASN.1 inputs (`check_fasta` is true only for FASTA).
 fn verify_input_files(
-    names: &[&str],
+    names: &[&[u8]],
     check_fasta: bool,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     for &seq_file in names {
-        match std::fs::metadata(seq_file) {
+        let path = crate::utils::os_bytes::path_of_bytes(seq_file);
+        match std::fs::metadata(&path) {
             Ok(meta) if meta.is_file() && meta.len() == 0 => {
-                return Err(options_error(format!("File {seq_file} is empty")));
+                return Err(options_error_bytes(
+                    [b"File ".as_slice(), seq_file, b" is empty"].concat(),
+                ));
             }
             Ok(meta) if meta.is_file() => {}
-            _ => return Err(options_error(format!("File {seq_file} does not exist"))),
+            _ => {
+                return Err(options_error_bytes(
+                    [b"File ".as_slice(), seq_file, b" does not exist"].concat(),
+                ));
+            }
         }
         if !check_fasta {
             continue;
@@ -672,18 +691,20 @@ fn verify_input_files(
         // A compressed name is guessed on its inflated bytes, as `x_VerifyInputFilesType` guesses
         // on its `CDecompressIStream` (makeblastdb.cpp:815-830); a fault of the compressed data
         // reads as "not FASTA".
-        let looks_like_fasta = std::fs::File::open(seq_file).is_ok_and(|file| {
-            match compression_of_name(std::path::Path::new(seq_file)) {
+        let looks_like_fasta =
+            std::fs::File::open(&path).is_ok_and(|file| match compression_of_name(&path) {
                 Some(compression) => appears_fasta(CompressedInput::new(file, compression)),
                 None => appears_fasta(file),
-            }
-        });
+            });
         if !looks_like_fasta {
-            let _ = write!(
-                err,
-                "Warning: [makeblastdb] \nInput file {seq_file} does NOT appear to be \
-                 FASTA (processing anyway).\nAdvise validating database with \
-                 'blastdbcheck -dbtype [prot|nucl] -db ${{DBNAME}}'\n\n"
+            let _ = err.write_all(
+                &[
+                    b"Warning: [makeblastdb] \nInput file ".as_slice(),
+                    seq_file,
+                    b" does NOT appear to be FASTA (processing anyway).\n\
+                      Advise validating database with 'blastdbcheck -dbtype [prot|nucl] -db ${DBNAME}'\n\n",
+                ]
+                .concat(),
             );
         }
     }
@@ -738,8 +759,13 @@ fn build_database_with_log(
         _ => None,
     };
 
-    let dbname = args.out.as_deref().unwrap_or(&args.input);
-    if blastdb_input && dbname == args.input {
+    let input_bytes = crate::utils::os_bytes::os_str_bytes(&args.input);
+    let out_bytes = args
+        .out
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
+    let dbname: &[u8] = out_bytes.as_deref().unwrap_or(&input_bytes);
+    if blastdb_input && dbname == input_bytes.as_ref() {
         return Err(options_error(
             "Cannot create a BLAST database from an existing one without changing the output \
              name, please provide a (different) database name using -out",
@@ -764,13 +790,13 @@ fn build_database_with_log(
     // truncated, so every space ends a token, an empty one included ("db "
     // is "db" and "", " db" is "" and "db"). A name with a space anywhere
     // gives more than one token; the empty name gives none.
-    if dbname == "-" || dbname.contains(' ') {
+    if dbname == b"-" || dbname.contains(&b' ') {
         return Err(options_error("Please provide a database name using -out"));
     }
     let title = match args.title.as_deref() {
-        Some(title) => title.as_bytes().to_vec(),
-        None if blastdb_input => input_database_title(&args.input, is_protein, registry_blastdb)?,
-        None => args.input.as_bytes().to_vec(),
+        Some(title) => crate::utils::os_bytes::os_str_bytes(title).into_owned(),
+        None if blastdb_input => input_database_title(&input_bytes, is_protein, registry_blastdb)?,
+        None => input_bytes.as_ref().to_vec(),
     };
     if title == b"-" {
         return Err(options_error("Please provide a title using -title"));
@@ -784,7 +810,7 @@ fn build_database_with_log(
     // all (`-in ""`) NCBI reads `names[0]` of an empty vector (makeblastdb 2.17.0: a
     // segmentation fault after the log line "Maximum file size"); LOSAT refuses that where
     // NCBI reads it, after `-max_file_sz` and `-taxid_map`, whose errors come first.
-    let names = split_quoted(&args.input);
+    let names = split_quoted(&input_bytes);
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1037-1050
     // A name ending in `.gz`, `.bz2` or `.zst` is read through its decoder (`CompressedInput`).
 
@@ -835,11 +861,27 @@ fn build_database_with_log(
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1288-1294
     // The mask files are read before the input is looked at. A failure ends the run at once
     // (`CATCH_ALL`), and the destructor's messages follow it (`end_messages`).
+    let mask_data = args
+        .mask_data
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
+    let mask_id = args
+        .mask_id
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
+    let mask_desc = args
+        .mask_desc
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
+    let gi_mask_name = args
+        .gi_mask_name
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
     let mask_options = MaskDataOptions {
-        mask_data: args.mask_data.as_deref(),
-        mask_id: args.mask_id.as_deref(),
-        mask_desc: args.mask_desc.as_deref(),
-        gi_mask_name: args.gi_mask_name.as_deref(),
+        mask_data: mask_data.as_deref(),
+        mask_id: mask_id.as_deref(),
+        mask_desc: mask_desc.as_deref(),
+        gi_mask_name: gi_mask_name.as_deref(),
         root: None,
     };
     let masked = {
@@ -851,7 +893,11 @@ fn build_database_with_log(
         *end_messages = destructor_messages(&db, error.as_ref());
         return error.map_or(Ok(()), Err);
     }
-    let user_path = metadata_user_path(args.metadata_output_prefix.as_deref().map(str::as_bytes));
+    let metadata_prefix = args
+        .metadata_output_prefix
+        .as_deref()
+        .map(crate::utils::os_bytes::os_str_bytes);
+    let user_path = metadata_user_path(metadata_prefix.as_deref());
     if blastdb_input {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
         // The seed of `-randomize` is the seconds of the clock (`time` with a null pointer), which
@@ -889,7 +935,7 @@ fn build_database_with_log(
             "-in names no input file; losat makeblastdb reads {what} files or the standard input"
         )));
     }
-    let from_stdin = names[0] == "-";
+    let from_stdin = names[0] == b"-";
     if let Some(format) = asn_format {
         let result = add_asn_and_close(
             &mut db,
@@ -933,7 +979,7 @@ fn build_database_with_log(
 /// The title of `-input_type blastdb` without `-title`: the title of the one database `input`
 /// names (`GetTitle`).
 fn input_database_title(
-    input: &str,
+    input: &[u8],
     is_protein: bool,
     registry_blastdb: Option<&[u8]>,
 ) -> Result<Vec<u8>, MakedbError> {
@@ -948,7 +994,7 @@ fn input_database_title(
         ));
     };
     let search = SearchPath::from_environment(registry_blastdb);
-    let db = SeqDb::open_in(name.as_bytes(), seq_type(is_protein), &search).map_err(input_error)?;
+    let db = SeqDb::open_in(name, seq_type(is_protein), &search).map_err(input_error)?;
     Ok(db.title().to_vec())
 }
 
@@ -978,7 +1024,7 @@ fn seq_type(is_protein: bool) -> SeqType {
 #[allow(clippy::too_many_arguments)]
 fn copy_input_databases(
     db: &mut BuildDatabase<'_>,
-    names: &[&str],
+    names: &[&[u8]],
     user_path: &[u8],
     is_protein: bool,
     registry_blastdb: Option<&[u8]>,
@@ -989,12 +1035,16 @@ fn copy_input_databases(
     let seqtype = seq_type(is_protein);
     let search = SearchPath::from_environment(registry_blastdb);
     for &name in names {
-        match SeqDb::open_in(name.as_bytes(), seqtype, &search) {
+        match SeqDb::open_in(name, seqtype, &search) {
             Ok(_) => {}
             Err(error) if error.ncbi_message().is_some() => {
-                let _ = writeln!(
-                    err,
-                    "Error: [makeblastdb] Unable to open input {name} as BLAST db"
+                let _ = err.write_all(
+                    &[
+                        b"Error: [makeblastdb] Unable to open input ".as_slice(),
+                        name,
+                        b" as BLAST db\n",
+                    ]
+                    .concat(),
                 );
             }
             Err(error) => return Err(input_error(error)),
@@ -1005,8 +1055,8 @@ fn copy_input_databases(
             "No valid input FASTA file or BLAST db is found.",
         ));
     }
-    let mut input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
-        .map_err(input_error)?;
+    let mut input =
+        SeqDb::open_in(&combine_and_quote(names), seqtype, &search).map_err(input_error)?;
     // The definition lines are read as the copy reaches them: a record that fails NCBI's check
     // of a mandatory member under a `SERIAL_VERIFY_DATA_READ` that turns it off is refused there
     // (`SeqDb::refuse_unchecked_reads`, `input_error`).
@@ -1074,7 +1124,7 @@ fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> V
 #[allow(clippy::too_many_arguments)]
 fn add_input_and_close(
     db: &mut BuildDatabase<'_>,
-    names: &[&str],
+    names: &[&[u8]],
     from_stdin: Option<Option<bool>>,
     user_path: &[u8],
     is_protein: bool,
@@ -1115,13 +1165,14 @@ fn add_input_and_close(
             // volumes were created." and exit status 0 (makeblastdb 2.17.0, a compressed name
             // too). A deterministic NCBI result, reproduced.
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
-            let Ok(mut file) = std::fs::File::open(name) else {
+            let path = crate::utils::os_bytes::path_of_bytes(name);
+            let Ok(mut file) = std::fs::File::open(&path) else {
                 continue;
             };
             // A compressed name is inflated while it is read (`CompressedInput`); a fault of
             // its data is reported by name, after the build removed its files as for any
             // failed input.
-            match compression_of_name(std::path::Path::new(name)) {
+            match compression_of_name(&path) {
                 Some(compression) => {
                     let mut input = CompressedInput::new(file, compression);
                     let result = add_fasta(db, &mut input, err);
@@ -1155,7 +1206,7 @@ fn add_input_and_close(
 #[allow(clippy::too_many_arguments)]
 fn add_asn_and_close(
     db: &mut BuildDatabase<'_>,
-    names: &[&str],
+    names: &[&[u8]],
     from_stdin: Option<Option<bool>>,
     format: AsnFormat,
     env: MakedbEnv,
@@ -1215,14 +1266,15 @@ fn add_asn_and_close(
     } else {
         verify_input_files(names, false, err)?;
         for &name in names {
-            let Ok(mut file) = std::fs::File::open(name) else {
+            let path = crate::utils::os_bytes::path_of_bytes(name);
+            let Ok(mut file) = std::fs::File::open(&path) else {
                 // File exists and is non-empty, but unreadable (e.g. mode 000): NCBI's
                 // `CNcbiIfstream` fails and `x_AddSeqEntries` hits EOF (`No sequences written`).
                 let mut empty = std::io::empty();
                 let _ = feed_one(db, &mut empty, err);
                 continue;
             };
-            match compression_of_name(std::path::Path::new(name)) {
+            match compression_of_name(&path) {
                 Some(compression) => {
                     let mut input = CompressedInput::new(file, compression);
                     let res = feed_one(db, &mut input, err);
@@ -1519,7 +1571,23 @@ pub(crate) fn run_with_env(
 ) -> i32 {
     let mut end_messages = Vec::new();
     let name = match args.logfile.as_deref() {
-        None | Some("-") => {
+        None => {
+            let result = build_database_with_log(
+                args,
+                env,
+                settings,
+                now,
+                platform,
+                stdin,
+                out,
+                None,
+                err,
+                None,
+                &mut end_messages,
+            );
+            return finish(result, &end_messages, err);
+        }
+        Some(name) if crate::utils::os_bytes::os_str_bytes(name).as_ref() == b"-" => {
             let result = build_database_with_log(
                 args,
                 env,
@@ -1540,7 +1608,7 @@ pub(crate) fn run_with_env(
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
     // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
     // owns the special names), and the log to `AsOutputFile` of the same name (`log_of`).
-    let target = diag_target(Some(std::ffi::OsStr::new(name)));
+    let target = diag_target(Some(name));
     let log = log_of(name);
     let mut diag = DiagStream {
         target: &target,
@@ -1569,9 +1637,10 @@ pub(crate) fn run_with_env(
             finish(result, &end_messages, &mut diag)
         }
         None => {
-            let error = MakedbError::Argument(format!(
-                "Argument \"logfile\". File is not accessible:  `{name}'"
-            ));
+            let mut msg = b"Argument \"logfile\". File is not accessible:  `".to_vec();
+            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
+            msg.push(b'\'');
+            let error = MakedbError::Argument(msg);
             let result = build_database_with_log(
                 args,
                 env,
@@ -1631,7 +1700,7 @@ impl Write for LogLines {
 /// one file the two streams land in it in the order they are written, as NCBI's two appending
 /// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
 /// which the WASI targets cannot make: the run stopped with "File is not accessible".)
-fn log_of(name: &str) -> Option<std::fs::File> {
+fn log_of(name: &std::ffi::OsStr) -> Option<std::fs::File> {
     if name.is_empty() {
         return None;
     }

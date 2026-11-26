@@ -54,9 +54,9 @@ pub(super) struct Case {
 impl Case {
     fn options(&self) -> MaskDataOptions<'_> {
         MaskDataOptions {
-            mask_data: self.mask_data.as_deref(),
-            mask_id: self.mask_id.as_deref(),
-            mask_desc: self.mask_desc.as_deref(),
+            mask_data: self.mask_data.as_deref().map(str::as_bytes),
+            mask_id: self.mask_id.as_deref().map(str::as_bytes),
+            mask_desc: self.mask_desc.as_deref().map(str::as_bytes),
             gi_mask_name: None,
             root: Some(&self.root),
         }
@@ -137,7 +137,7 @@ pub(super) fn run_case_with(
         };
         let warn_ref: Warn<'_> = &mut warn;
         let mut db = BuildDatabase::new(
-            out_base,
+            out_base.as_bytes(),
             case.title.as_bytes(),
             case.protein,
             &mut log,
@@ -1276,7 +1276,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     let mut log = Vec::new();
     let tmp = TempDir::unique("writedb-mask-destructor");
     let mut db = BuildDatabase::new(
-        &base_in(&tmp, "db"),
+        base_in(&tmp, "db").as_bytes(),
         b"t",
         true,
         &mut log,

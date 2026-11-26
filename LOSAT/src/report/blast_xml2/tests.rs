@@ -132,7 +132,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         app: "blastp",
         version: "BLASTP 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
-        db_name,
+        db_name: db_name.as_bytes(),
         matrix: Some("BLOSUM62"),
         expect: 10.0,
         gap_open: 11,

@@ -271,9 +271,9 @@ use output_format::*;
 pub struct FormatChoice {
     pub number: i32,
     /// The custom fields (`custom_fmt_spec`), without a `delim=` token.
-    pub spec: String,
+    pub spec: Vec<u8>,
     /// The custom delimiter (`custom_delim`), empty when none is given.
-    pub delimiter: String,
+    pub delimiter: Vec<u8>,
 }
 
 impl FormatChoice {
@@ -283,12 +283,13 @@ impl FormatChoice {
     }
 
     /// The format as LOSAT's reports read it: the number and the custom fields.
-    pub fn normalized(&self) -> String {
-        if self.spec.is_empty() {
-            self.number.to_string()
-        } else {
-            format!("{} {}", self.number, self.spec)
+    pub fn normalized(&self) -> Vec<u8> {
+        let mut out = self.number.to_string().into_bytes();
+        if !self.spec.is_empty() {
+            out.push(b' ');
+            out.extend_from_slice(&self.spec);
         }
+        out
     }
 }
 
@@ -324,7 +325,7 @@ impl EarlyFormat {
     /// The choice at the program's formatting handler, the last of its option handlers: a
     /// deferred value reads the value `outfmt` again, with NCBI's error (the one owner of where
     /// the value's error comes), any other is as read.
-    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+    pub fn at_formatting_handler(&self, outfmt: impl AsRef<[u8]>) -> anyhow::Result<FormatChoice> {
         match self {
             EarlyFormat::Parsed(choice) => Ok(choice.clone()),
             EarlyFormat::Deferred => parse_formatting_string(outfmt),
@@ -632,26 +633,43 @@ impl Program {
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
 /// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`; `NStr::StringToInt`
 /// is `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
-pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
-    use crate::ncbi_str::truncate_spaces_str;
-    let choice = truncate_spaces_str(spec);
-    let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
-    let mut custom = custom.to_string();
-    let mut delimiter = String::new();
-    if custom.starts_with("delim") {
-        let token = custom.split(' ').next().unwrap_or_default().to_string();
-        let Some((_, value)) = token.split_once('=') else {
+pub fn parse_formatting_string(spec: impl AsRef<[u8]>) -> anyhow::Result<FormatChoice> {
+    use crate::ncbi_str::truncate_spaces;
+    let choice = truncate_spaces(spec.as_ref());
+    let (choice, custom_slice) = match choice.iter().position(|&b| b == b' ') {
+        Some(pos) => (&choice[..pos], &choice[pos + 1..]),
+        None => (choice, &[][..]),
+    };
+    let mut custom = custom_slice.to_vec();
+    let mut delimiter = Vec::new();
+    if custom.starts_with(b"delim") {
+        let token_end = custom
+            .iter()
+            .position(|&b| b == b' ')
+            .unwrap_or(custom.len());
+        let token = custom[..token_end].to_vec();
+        let Some(eq) = token.iter().position(|&b| b == b'=') else {
             return Err(options_error(
                 "Delimiter format is invalid. Valid format is delim=<delimiter value>",
             ));
         };
-        delimiter = value.to_string();
-        custom = truncate_spaces_str(&custom.replace(&token, "")).to_string();
+        delimiter = token[eq + 1..].to_vec();
+        let mut replaced = Vec::with_capacity(custom.len());
+        let mut i = 0;
+        while i < custom.len() {
+            if !token.is_empty() && custom[i..].starts_with(&token) {
+                i += token.len();
+            } else {
+                replaced.push(custom[i]);
+                i += 1;
+            }
+        }
+        custom = truncate_spaces(&replaced).to_vec();
     }
-    let Ok(number) = crate::ncbi_str::string_to_int(choice.as_bytes(), 0) else {
-        return Err(options_error(&format!(
-            "'{choice}' is not a valid output format"
-        )));
+    let Ok(number) = crate::ncbi_str::string_to_int(choice, 0) else {
+        return Err(options_error_bytes(
+            &[b"'", choice, b"' is not a valid output format"].concat(),
+        ));
     };
     if !(0..END_VALUE).contains(&number) {
         return Err(NativeError {
@@ -808,7 +826,7 @@ pub(crate) fn html_links(
     html: bool,
     app: RequestKind,
     engine: RequestKind,
-    database: Option<&str>,
+    database: Option<&[u8]>,
     formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
     html_links_with(
@@ -827,7 +845,7 @@ fn html_links_with(
     html: bool,
     app: RequestKind,
     engine: RequestKind,
-    database: Option<&str>,
+    database: Option<&[u8]>,
     formats: &[i32],
     read_ncbirc: impl FnOnce(&str) -> Result<crate::report::formatter_registry::FormatterNcbirc, String>,
     read_registry: impl FnOnce(&str) -> Result<crate::report::formatter_registry::InitConfig, String>,
@@ -844,7 +862,7 @@ fn html_links_with(
         crate::report::html_ids::HtmlLinks {
             registry,
             ncbirc,
-            db_name: database.unwrap_or_default().as_bytes().to_vec(),
+            db_name: database.unwrap_or_default().to_vec(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
             // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`).
@@ -906,7 +924,10 @@ pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<
 /// has no number for it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<EarlyFormat> {
+pub fn early_format_choice(
+    outfmt: impl AsRef<[u8]>,
+    strategy: bool,
+) -> anyhow::Result<EarlyFormat> {
     match parse_formatting_string(outfmt) {
         Ok(choice) => Ok(EarlyFormat::Parsed(choice)),
         Err(_) if strategy => Ok(EarlyFormat::Deferred),
@@ -923,31 +944,32 @@ pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<Early
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:423-428
-pub fn parse_seg_option(value: &str) -> anyhow::Result<SegSpec> {
+pub fn parse_seg_option(value: impl AsRef<[u8]>) -> anyhow::Result<SegSpec> {
     read_seg_option(value).map_err(options_error)
 }
 
 /// `parse_seg_option` with NCBI's error as its message (a `CInputException`), for a program that
 /// reports it with its other deferred errors (BLASTX: `algorithm::blastx::args`).
-pub fn read_seg_option(value: &str) -> Result<SegSpec, &'static str> {
+pub fn read_seg_option(value: impl AsRef<[u8]>) -> Result<SegSpec, &'static str> {
+    let value = value.as_ref();
     match value {
-        "no" => return Ok(SegSpec::No),
-        "yes" => return Ok(SegSpec::Yes),
+        b"no" => return Ok(SegSpec::No),
+        b"yes" => return Ok(SegSpec::Yes),
         _ => {}
     }
-    let tokens: Vec<&str> = value.split(' ').collect();
+    let tokens: Vec<&[u8]> = value.split(|&b| b == b' ').collect();
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option");
     }
     let invalid = || "Invalid input for filtering parameters";
     // `NStr::StringToInt` of the first token, flags 0.
-    let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
+    let window = crate::ncbi_str::string_to_int(tokens[0], 0).map_err(|_| invalid())?;
     // NCBI reads the values with `NStr::StringToDouble` of the token (default flags,
     // `ncbi_str::string_to_double`: glibc's `strtod`, decimal or hexadecimal, which must end at
     // the end of the token).
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
-        *cut = crate::ncbi_str::string_to_double(token.as_bytes()).map_err(|_| invalid())?;
+        *cut = crate::ncbi_str::string_to_double(token).map_err(|_| invalid())?;
     }
     Ok(SegSpec::WindowLocutHicut {
         window,
@@ -973,11 +995,11 @@ pub enum CompositionMode {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:834-892
 pub fn parse_comp_based_stats(
-    value: &str,
+    value: impl AsRef<[u8]>,
     blastp: bool,
     ungapped: bool,
 ) -> anyhow::Result<(CompositionMode, bool)> {
-    let bytes = value.as_bytes();
+    let bytes = value.as_ref();
     let mode = match bytes.first() {
         Some(b'1') => CompositionMode::CompositionBasedStats,
         Some(b'D' | b'd' | b'2' | b'T' | b't') => CompositionMode::CompositionMatrixAdjust,

@@ -43,7 +43,8 @@ const V1_TABULAR_FIELDS: [&str; 30] = [
 /// token that is not a field).
 fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
     check_options(args)?;
-    let (format, fields) = v1_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
+    let (format, fields) =
+        v1_output_format(&args.outfmt.to_string_lossy()).map_err(anyhow::Error::msg)?;
     if let Some(fields) = fields {
         if format == OutputFormat::Pairwise {
             bail!("blastp outfmt 0 does not accept custom field lists");
@@ -96,7 +97,7 @@ pub(super) fn run_web_pair_bytes(
     let subjects = read_subjects(subject_fasta, "BLASTP", true)?;
     let queries = read_queries(query_fasta, "BLASTP", true)?;
     let mut output = Vec::new();
-    let outfmt = args.outfmt.clone();
+    let outfmt = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let mut stderr = std::io::stderr();
     let mut outputs = ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr);
     run_local(

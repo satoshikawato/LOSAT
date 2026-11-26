@@ -446,18 +446,6 @@ fn usage_name(argv: &[OsString]) -> &str {
         .unwrap_or("losat")
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
-// NCBI keeps the bytes of an option's value.
-/// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
-/// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on `cli::reader` (`reader::refusal_after_read`).
-pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
-    format!(
-        "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
-         which is not supported by LOSAT's {program}"
-    )
-}
-
 /// LOSAT's refusal of the run of `-name` in `program` (its name in LOSAT's refusals, `BLASTP`):
 /// what the argument is, from its row of the refusals (`ncbi_app::args::refusal`, `Refusal::Run`).
 pub(crate) fn run_refusal(program: &str, name: &str) -> String {
@@ -937,17 +925,9 @@ pub(crate) fn command_line_argument_error(message: impl AsRef<[u8]>) -> anyhow::
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
 /// The `-out` file `path` of a search, created where NCBI's argument handling opens it (after the
 /// subjects are read and the query is opened, before the options are processed): `inaccessible`
-/// when it cannot be made. `program` names the program whose file names must be UTF-8
-/// (`input_files::check_utf8_file_name`); `None` for BLASTX, which has no such check. The command
-/// line's programs (`open_out_file`) and the library's `run_to_file` (`api::local_blast::OutFile`)
-/// make the file here.
-pub(crate) fn create_out_file(
-    path: &std::path::Path,
-    program: Option<&str>,
-) -> anyhow::Result<std::fs::File> {
-    if let Some(program) = program {
-        crate::blastinput::input_files::check_utf8_file_name(path, "out", program)?;
-    }
+/// when it cannot be made. The command line's programs (`open_out_file`) and the library's
+/// `run_to_file` (`api::local_blast::OutFile`) make the file here.
+pub(crate) fn create_out_file(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
     std::fs::File::create(path).map_err(|_| inaccessible("out", path))
 }
 

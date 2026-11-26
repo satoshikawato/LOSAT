@@ -575,6 +575,16 @@ impl<F: RawFile> Stream<F> {
             self.setstate(IoState::FAIL);
         }
     }
+
+    /// Drops buffered bytes and closes the file descriptor without syncing, modelling a process
+    /// ended by SIGPIPE before `~ofstream()` runs (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception
+    /// 10).
+    pub(crate) fn discard_unflushed(&mut self) {
+        self.buf.held.clear();
+        if let Some(file) = self.buf.file.take() {
+            let _ = file.close();
+        }
+    }
 }
 
 impl<F: RawFile> std::fmt::Debug for Stream<F> {

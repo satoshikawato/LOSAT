@@ -127,7 +127,7 @@ fn source_signatures_and_pseudo_pssm_ids() {
 }
 
 fn fixture_files(dir: &str) -> DataFiles {
-    let file = |name: &str| format!("{dir}/{name}");
+    let file = |name: &str| format!("{dir}/{name}").into_bytes();
     DataFiles {
         cddids: file("cddid.tbl"),
         spfeats: file("cddannot.dat"),
@@ -156,7 +156,7 @@ fn fixture_data_loads_and_finds_its_rows() {
     assert!(data.find_domain(1).is_none());
     // A missing file is named as NCBI names it, in NCBI's order of loading.
     let missing = CddData::load(&fixture_files("/nonexistent")).unwrap_err();
-    assert!(matches!(missing, DataError::Missing(path) if path == "/nonexistent/cddid.tbl"));
+    assert!(matches!(missing, DataError::Missing(path) if path == b"/nonexistent/cddid.tbl"));
 }
 
 /// A copy of the fixture data in a new directory of the system's temporary directory.

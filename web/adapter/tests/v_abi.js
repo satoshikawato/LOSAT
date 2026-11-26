@@ -1771,7 +1771,7 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       program: "psiblast",
       queryFileFlag: "-in_pssm",
       queryFile: pssmAsn,
-      subject: subjIds,
+      subject: "tests/fasta/psiblast/q1_ref.faa",
       extra: ["-parse_deflines"],
     },
     {

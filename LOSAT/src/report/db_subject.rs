@@ -728,20 +728,21 @@ impl ParsedSubject {
     // probe of the ID2a review). LOSAT refuses that subject instead of repeating a defect of
     // NCBI's.
     /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
-    /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
-    /// error message each time it reads the definition line). A definition line without a Seq-id
-    /// (makeblastdb writes none such) beside one with a Seq-id is a subject as any other: NCBI's
-    /// scope loads it, and each format that walks its definition lines meets that line where its
-    /// own code says (`has_lineless_line`). A set without any Seq-id gets no Seq-align
+    /// write as NCBI: a stored Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error
+    /// message each time it reads the definition line; such a title is the reports' refusal,
+    /// `replaced_title_bytes`). A definition line without a Seq-id (makeblastdb writes none such)
+    /// beside one with a Seq-id is a subject as any other: NCBI's scope loads it, and each format
+    /// that walks its definition lines meets that line where its own code says
+    /// (`has_lineless_line`). A set without any Seq-id gets no Seq-align
     /// (`algorithm::common::database::SeqAligned` drops its hits before the reports), so it never
     /// comes here: LOSAT's internal error.
     pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
             .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+            .any(|defline| defline.replaced_id_bytes > 0)
         {
-            return Err("has a stored title or Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
+            return Err("has a stored Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
         let Some(alignment_id) = set.alignment_id().cloned() else {
             return Err(
@@ -1823,6 +1824,15 @@ impl ParsedSubject {
             .unwrap_or_default()
     }
 
+    /// Whether a stored title of its definition lines held a byte outside ' ' ..= '~', read as
+    /// '#' (`algorithm::common::database::check_reported_title`).
+    pub fn replaced_title_bytes(&self) -> bool {
+        self.set
+            .deflines
+            .iter()
+            .any(|defline| defline.replaced_title_bytes > 0)
+    }
+
     /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and
     /// its title (`description_line`).
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
@@ -2895,7 +2905,7 @@ impl FormatThrow {
     /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
     /// formatter writes it (`TabularSpec::of_app`), with `-html` where `html`.
     pub fn of_outfmt(
-        outfmt: &str,
+        outfmt: impl AsRef<[u8]>,
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
         html: bool,
@@ -2906,7 +2916,7 @@ impl FormatThrow {
         }
     }
 
-    fn report_format(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+    fn report_format(outfmt: impl AsRef<[u8]>) -> Option<crate::blastinput::app::ReportFormat> {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
         ReportFormat::from_number(parse_formatting_string(outfmt).ok()?.number)
     }
@@ -2915,13 +2925,13 @@ impl FormatThrow {
     /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
     /// format is `outfmt` (`CBlastFormat::ResetScopeHistory` returns without emptying the scope
     /// only for `eXml`, outfmt 5).
-    pub fn keeps_scope(outfmt: &str) -> bool {
+    pub fn keeps_scope(outfmt: impl AsRef<[u8]>) -> bool {
         Self::report_format(outfmt) == Some(crate::blastinput::app::ReportFormat::Xml)
     }
 
     /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
     /// through `read_reported_taxonomy`.
-    pub fn is_xml2(outfmt: &str) -> bool {
+    pub fn is_xml2(outfmt: impl AsRef<[u8]>) -> bool {
         Self::report_format(outfmt)
             .and_then(super::blast_xml2::Xml2Kind::of)
             .is_some()
@@ -2931,9 +2941,12 @@ impl FormatThrow {
     /// has no output format): whether NCBI's formatter keeps its scope across query batches
     /// ([`Self::keeps_scope`]), and whether any XML2/JSON format in the call is secondary
     /// (`!Self::is_xml2`).
-    pub fn scope_flags(outfmt: Option<&str>) -> (bool, bool) {
+    pub fn scope_flags(outfmt: Option<impl AsRef<[u8]>>) -> (bool, bool) {
         match outfmt {
-            Some(outfmt) => (Self::keeps_scope(outfmt), !Self::is_xml2(outfmt)),
+            Some(outfmt) => (
+                Self::keeps_scope(outfmt.as_ref()),
+                !Self::is_xml2(outfmt.as_ref()),
+            ),
             None => (false, false),
         }
     }
@@ -3021,8 +3034,8 @@ impl FormatThrow {
 
     /// [`FormatThrow::of_formats`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
     /// application, with `-html` where `html`.
-    pub fn of_outfmts<'a>(
-        outfmts: impl IntoIterator<Item = &'a str>,
+    pub fn of_outfmts<O: AsRef<[u8]>>(
+        outfmts: impl IntoIterator<Item = O>,
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
         html: bool,
@@ -3074,7 +3087,7 @@ impl From<Option<RunThrow>> for FormatThrow {
 /// (`app::parse_formatting_string`) and `app`'s formatter writes it (`TabularSpec::of_app`);
 /// `None` for a value that NCBI refuses.
 fn parsed_outfmt(
-    outfmt: &str,
+    outfmt: impl AsRef<[u8]>,
     app: crate::report::archive::options::RequestKind,
 ) -> Option<(
     crate::blastinput::app::ReportFormat,
@@ -3137,8 +3150,8 @@ pub fn unchanged_by_load_throws(
 
 /// [`unchanged_by_load_throws`] of every `-outfmt` value of `outfmts` of `program`'s run in
 /// `app`'s application (a value that NCBI refuses is not).
-pub fn unchanged_by_load_throws_outfmts<'a>(
-    outfmts: impl IntoIterator<Item = &'a str>,
+pub fn unchanged_by_load_throws_outfmts<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
     program: crate::blastinput::app::Program,
     app: crate::report::archive::options::RequestKind,
 ) -> bool {

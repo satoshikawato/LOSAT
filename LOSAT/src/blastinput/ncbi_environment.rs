@@ -1044,7 +1044,7 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
 /// its review's `d1` and `d3`: one `Found multiple` warning of a well-formed file so read, and
 /// one before each `Critical` of a malformed file).
 /// `Err` is LOSAT's refusal, which only `-window_masker_taxid` gives: a file LOSAT cannot read,
-/// a value that is not UTF-8, and `[NCBI] .Inherits`, whose files NCBI loads into the same layer.
+/// and `[NCBI] .Inherits`, whose files NCBI loads into the same layer.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1662
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (cited at
@@ -1094,7 +1094,7 @@ fn window_masker_ncbirc(
         }
     };
     Ok(NcbircWindowMasker {
-        value: file_text_entry(path, &read.entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH")?,
+        value: last_value(&read.entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH").map(<[u8]>::to_vec),
         load_posts,
         posts_once,
     })
@@ -1103,7 +1103,7 @@ fn window_masker_ncbirc(
 /// What `window_masker_ncbirc` reads of `.ncbirc` (no file: no value, no posts).
 #[derive(Default)]
 struct NcbircWindowMasker {
-    value: Option<String>,
+    value: Option<Vec<u8>>,
     load_posts: Posts,
     posts_once: bool,
 }
@@ -1115,7 +1115,7 @@ pub struct WindowMaskerRegistry {
     /// The directory where `-window_masker_taxid` looks for `<taxid>/wmasker.obinary`: `None`
     /// when no layer has the entry; NCBI uses the current directory for both `None` and an
     /// empty value.
-    pub path: Option<String>,
+    pub path: Option<Vec<u8>>,
     /// What NCBI posts each time it loads the registry (`window_masker_ncbirc`): the posts of a
     /// `.ncbirc` that is malformed or sets an entry again, or nothing.
     pub load_posts: Posts,
@@ -1436,16 +1436,18 @@ impl MatrixSearch {
     /// `ApplicationSettings::matrix_file` with these settings: the file that NCBI reads for the
     /// matrix `name`, which a search of the library looks up with the settings of its start
     /// (`api::start::CallStart::settings`), as the command line does with its own.
-    pub fn file(&self, name: &str) -> Result<Option<PathBuf>, String> {
-        Ok(find_matrix_file(name, self, &Path::is_file, &Path::is_dir)?
-            .filter(|file| std::fs::File::open(file).is_ok()))
+    pub fn file(&self, name: impl AsRef<[u8]>) -> Result<Option<PathBuf>, String> {
+        Ok(
+            find_matrix_file(name.as_ref(), self, &Path::is_file, &Path::is_dir)?
+                .filter(|file| std::fs::File::open(file).is_ok()),
+        )
     }
 }
 
 /// `ApplicationSettings::matrix_file` with `is_file` (`CFile::Exists`: a file, links followed)
 /// and `is_dir` (`CDir::Exists`), using the host platform's `PathRules`.
 fn find_matrix_file(
-    name: &str,
+    name: &[u8],
     search: &MatrixSearch,
     is_file: &dyn Fn(&Path) -> bool,
     is_dir: &dyn Fn(&Path) -> bool,
@@ -1459,7 +1461,7 @@ fn find_matrix_file(
 /// in tests).
 fn find_matrix_file_with_rules(
     rules: PathRules,
-    name: &str,
+    name: &[u8],
     search: &MatrixSearch,
     is_file: &dyn Fn(&Path) -> bool,
     is_dir: &dyn Fn(&Path) -> bool,
@@ -1467,7 +1469,7 @@ fn find_matrix_file_with_rules(
     let upper = name.to_ascii_uppercase();
     let found = |path: PathBuf| is_file(&path).then_some(path);
     let mut dirs: Vec<OsString> = Vec::new();
-    if rules.is_absolute(upper.as_bytes()) {
+    if rules.is_absolute(&upper) {
         dirs.push(OsString::new());
     } else {
         if let Some(data_path) = &search.data_path {
@@ -1483,7 +1485,8 @@ fn find_matrix_file_with_rules(
             }
         }
     }
-    let upper = OsStr::new(&upper);
+    let upper_path = crate::utils::os_bytes::path_of_bytes(&upper);
+    let upper = upper_path.as_os_str();
     for dir in &dirs {
         if let Some(file) = found(rules.make_path_os(dir, upper)) {
             return Ok(Some(file));
@@ -2595,8 +2598,8 @@ fn system_wide_posts(read: &RegistryRead, program: &str) -> String {
 /// `WindowMaskerPathGet()` is empty in blastn (only `WindowMaskerPathInit` sets it, and the
 /// applications do not call it).
 fn window_masker_path_of(
-    config: Option<Result<String, String>>,
-    plain: Option<Result<String, String>>,
+    config: Option<Vec<u8>>,
+    plain: Option<Vec<u8>>,
     ncbirc: Result<NcbircWindowMasker, String>,
 ) -> Result<WindowMaskerRegistry, String> {
     let NcbircWindowMasker {
@@ -2604,10 +2607,7 @@ fn window_masker_path_of(
         load_posts,
         posts_once,
     } = ncbirc?;
-    let path = match config.or(plain) {
-        Some(variable) => Some(variable?),
-        None => value,
-    };
+    let path = config.or(plain).or(value);
     Ok(WindowMaskerRegistry {
         path,
         load_posts,
@@ -2992,13 +2992,6 @@ fn settings_of(
             max_seqid_length = max_seqid_length_entry(path, entries);
         }
     }
-    let utf8_variable = |name: &str| {
-        env(name).map(|value| {
-            value.into_string().map_err(|_| {
-                format!("the environment variable {name} is not valid UTF-8; this is not supported by LOSAT")
-            })
-        })
-    };
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
     let bytes = |value: &OsStr| crate::utils::os_bytes::os_str_bytes(value).into_owned();
     let blastdb_entry = |file: Option<(&Path, &[RegistryEntry])>| {
@@ -3010,8 +3003,8 @@ fn settings_of(
         [blastdb_entry(ini), blastdb_entry(ncbirc)],
     );
     let window_masker_registry = window_masker_path_of(
-        utf8_variable("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH"),
-        utf8_variable("WINDOW_MASKER_PATH"),
+        env("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH").map(|value| bytes(&value)),
+        env("WINDOW_MASKER_PATH").map(|value| bytes(&value)),
         ncbirc_window_masker,
     );
     Ok(ApplicationSettings {

@@ -265,7 +265,7 @@ These inputs are refused where NCBI BLAST+ 2.17.0 crashes, writes outside its al
 - In an archive, Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg` (`dendiag`, `disc`, `spliced`, `sparse`) are refused.
 - A `Std-seg` alignment whose query id NCBI would take from a first location of the kind `packed-int`, `packed-pnt`, `mix`, `equiv`, `bond` or `feat` is refused. LOSAT does not look up those ids.
 - Residues in NCBI8aa and NCBIstdaa codes from 28 are refused.
-- A query without a title but with `annot` is refused.
+- A query without a title descriptor whose `annot` reaches a `NULL` `Seq-annot` or `Seq-feat` before a matching feature is refused. NCBI stops there with a NULL pointer stack trace.
 - A mask location other than a `packed-int` of one Seq-id is refused.
 - Data lines on which NCBI's loader reads outside the line are refused: `cdtrack.txt` lines that end without a root or after a field it skips.
 - For nucleotide queries, a first `Std-seg` with fewer than 2 ids is refused.

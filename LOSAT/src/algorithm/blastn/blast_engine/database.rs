@@ -247,7 +247,7 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 /// numbers as the search uses them.
 pub(super) struct BlastnDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     metadata: SubjectMetadata,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
@@ -433,8 +433,15 @@ impl BlastnDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
     /// as such (`SubjectMetadata::db_len_total`) on every target.
-    pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), "blastn")
+    pub(super) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            "blastn",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -443,13 +450,14 @@ impl BlastnDatabase {
     /// for the application `app` (NCBI's lower-case name: the prefix of the run's posts, which is
     /// not BLASTN's where the run is another program's strategy).
     pub(super) fn open_restricted(
-        name: &str,
+        name: impl AsRef<[u8]>,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
         app: &'static str,
     ) -> Result<Self> {
+        let name = name.as_ref();
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids = shared::restrict_database(
@@ -473,7 +481,7 @@ impl BlastnDatabase {
         };
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             metadata,
             taxdb: shared::TaxdbRun::running(app),
             loaded_before_batch: Default::default(),
@@ -492,22 +500,19 @@ impl BlastnDatabase {
     /// LOSAT does not know its place or the name opens other volumes than this database's.
     pub(super) fn index_volumes(
         &self,
-        indexname: &str,
+        indexname: &[u8],
     ) -> Result<Vec<(Vec<u8>, u32)>, Option<NcbiException>> {
         let path = self.db.search_path().ok_or(None)?;
-        let (paths, _) = crate::seqdb::SeqDb::volume_and_alias_paths(
-            indexname.as_bytes(),
-            SeqType::Nucleotide,
-            path,
-        )
-        .map_err(|error| {
-            if let Some(exception) = error.ncbi_exception() {
-                return Some(exception.clone());
-            }
-            let text = error.ncbi_message()?;
-            let site = error.throw_site()?;
-            Some(NcbiException::new(site, text))
-        })?;
+        let (paths, _) =
+            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
+                .map_err(|error| {
+                    if let Some(exception) = error.ncbi_exception() {
+                        return Some(exception.clone());
+                    }
+                    let text = error.ncbi_message()?;
+                    let site = error.throw_site()?;
+                    Some(NcbiException::new(site, text))
+                })?;
         paths
             .into_iter()
             .map(|vol_name| {
@@ -787,7 +792,7 @@ impl BlastnDatabase {
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -1609,7 +1614,9 @@ impl BlastnDatabase {
     /// fetches (`fetched`: the first that read a UTF8String header). NCBI's warning of the batch's
     /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
     /// request posts, before its prefetch), also where the read fails after it
-    /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
+    /// (`shared::Utf8Read::of_read`), then NCBI's posts of the titles that its Seq-aligns read
+    /// (`shared::batch_title_posts`, or those before a failed read,
+    /// `blastinput::app::ErrorAfterBatchReports::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
         (fetched, one_by_one): (Option<crate::seqdb::SeqLocation>, bool),
@@ -1620,12 +1627,36 @@ impl BlastnDatabase {
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, (earlier, one_by_one), titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        if let Some(warning) =
-            shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"))
-        {
-            posts.append(&warning);
+        let warning = shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"));
+        if let Some(warning) = &warning {
+            posts.append(warning);
         }
-        read.map(|_| ())
+        // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+        let aligned = hit_lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .map(|hsp_list| hsp_list.oid)
+        });
+        if let Err(error) = read {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error =
+                crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(error, aligned);
+            if let Some(failure) =
+                error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+            {
+                posts.append(&failure.title_posts(&self.db, warning.is_some(), PROGRAM)?);
+            }
+            return Err(error);
+        }
+        posts.append(&shared::batch_title_posts(
+            &self.db,
+            aligned,
+            warning.is_some(),
+            PROGRAM,
+        )?);
+        Ok(())
     }
 }
 
@@ -1737,6 +1768,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format(output_formats)),
         one_by_one: shared::prefetch_may_be_off(prefetch_format(output_formats)),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Blastn,
+            output_formats
+                .iter()
+                .map(|format| format.report_format() as i32),
+        ),
     }
 }
 
@@ -2305,7 +2342,13 @@ pub(super) fn reported_subjects(
             .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
         let (title, subject, source) = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, || db.oid(ordinal), PROGRAM)?;
+                shared::check_reported_title(
+                    db,
+                    ordinal,
+                    stored.replaced_bytes,
+                    shown.titles,
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
                     stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }

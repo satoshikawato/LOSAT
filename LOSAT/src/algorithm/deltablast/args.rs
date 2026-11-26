@@ -1,11 +1,13 @@
 //! Command-line arguments for DELTABLAST (`losat deltablast`)
 
 use anyhow::Result;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs, DeltaOptions};
 use crate::algorithm::psiblast::PsiblastArgs;
 use crate::algorithm::rpsblast::args::RpsblastArgs;
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-120
 // deltablast's arguments are psiblast's without `-ipglist`, `-negative_ipglist`, `-in_pssm`,
@@ -24,7 +26,7 @@ pub struct DeltablastArgs {
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // NCBI's argument reader reports the exclusion (`cli::reader`).
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`,
     /// `-negative_seqidlist` and `-no_taxid_expansion`: blastp's (line DI-8), which hold in every
     /// round (NCBI's `CLocalDbAdapter` of the first round searches every later one too).
@@ -94,14 +96,14 @@ pub struct DeltablastArgs {
     // (`ResolvedBlastpArgs::gap_trigger_bits`).
     pub gap_trigger: f64,
     pub window_size: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     pub gap_open: Option<i32>,
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     // NCBI's filtering handler (`blastinput/app.rs` `parse_seg_option`); no filtering when
     // omitted (`CPSIBlastOptionsHandle::SetQueryOptionDefaults`).
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
     pub soft_masking: Option<bool>,
@@ -110,12 +112,12 @@ pub struct DeltablastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    pub outfmt: String,
+    pub outfmt: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     pub num_iterations: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1086-1090
@@ -130,11 +132,11 @@ pub struct DeltablastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1160
     // The file is opened when a PSSM is written (`pssm.rs` `AsnPssmWriter`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_pssm: Option<String>,
+    pub out_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
     // The file is opened when a PSSM is written (`pssm.rs` `write_ascii_pssm_files`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_ascii_pssm: Option<String>,
+    pub out_ascii_pssm: Option<PathBuf>,
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
 
@@ -157,7 +159,7 @@ pub struct DeltablastArgs {
     pub pssm_check: crate::algorithm::psiblast::pssm::PssmCheckScope,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-120
     pub domain_inclusion_ethresh: f64,
-    pub rpsdb: String,
+    pub rpsdb: OsString,
     pub show_domain_hits: bool,
 }
 
@@ -239,7 +241,7 @@ impl DeltablastArgs {
     /// `-outfmt`, `PsiblastArgs::check_outfmt`, names deltablast in it).
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         PsiblastArgs::check_outfmt(
-            &self.outfmt,
+            os_str_bytes(&self.outfmt),
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
             BlastpApp::Deltablast,
@@ -335,17 +337,17 @@ impl DeltablastArgs {
     /// lower-case masking (the domain search reads the query that round 1 reads). A threshold of 0
     /// or less keeps the E-value 10 here: NCBI's options error comes after the domain database is
     /// opened (`blastp::blast_engine::delta_hooks`).
-    fn domain_search_args(rpsdb: &str, ethresh: f64, lcase_masking: bool) -> Result<BlastpArgs> {
+    fn domain_search_args(rpsdb: &OsStr, ethresh: f64, lcase_masking: bool) -> Result<BlastpArgs> {
         let rps = RpsblastArgs {
             query: PathBuf::from("-"),
-            db: Some(rpsdb.to_string()),
+            db: Some(rpsdb.to_os_string()),
             out: None,
             export_search_strategy: None,
             evalue: Some(if ethresh > 0.0 { ethresh } else { 10.0 }),
             dbsize: None,
             searchsp: None,
-            comp_based_stats: "1".to_string(),
-            outfmt: "0".to_string(),
+            comp_based_stats: OsString::from("1"),
+            outfmt: OsString::from("0"),
             show_gis: false,
             html: false,
             num_descriptions: None,
@@ -379,10 +381,16 @@ impl DeltablastArgs {
     /// deltablast's reading of `-comp_based_stats`: `D`, `d`, `T` and `t` are mode 1 (psiblast's
     /// are 2), so they are given to psiblast's reader as `1`; every other value is read as
     /// psiblast reads it (2 and 3 keep the warning of PSSM searches).
-    fn comp_based_stats_as_psiblast(value: &str) -> String {
-        match value.as_bytes().first() {
-            Some(b'D' | b'd' | b'T' | b't') => format!("1{}", &value[1..]),
-            _ => value.to_string(),
+    fn comp_based_stats_as_psiblast(value: &OsStr) -> OsString {
+        let bytes = os_str_bytes(value);
+        match bytes.first() {
+            Some(b'D' | b'd' | b'T' | b't') => {
+                let mut out = Vec::with_capacity(bytes.len());
+                out.push(b'1');
+                out.extend_from_slice(&bytes[1..]);
+                crate::utils::os_bytes::os_string_from_bytes(out)
+            }
+            _ => value.to_os_string(),
         }
     }
 }

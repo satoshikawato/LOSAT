@@ -122,7 +122,8 @@ impl DeltaRun {
         let Some(name) = self.options.domain.db.as_deref() else {
             return Ok(());
         };
-        let name = crate::seqdb::db_argument_name(name);
+        let name_bytes = crate::utils::os_bytes::os_str_bytes(name);
+        let name = crate::seqdb::db_argument_name_bytes(&name_bytes);
         if let Ok(db) = crate::algorithm::common::database::open_database(
             name,
             crate::seqdb::SeqType::Protein,

@@ -75,12 +75,13 @@ fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
 /// tabular writer, as the CLI's (`ResolvedOptions::tabular`), without a taxonomy database
 /// (DECISIONS 7 of line CLI C2; ABI v1's fields show no taxonomy).
 fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
-    let mut words = args.outfmt.split_whitespace();
+    let outfmt = args.outfmt.to_string_lossy();
+    let mut words = outfmt.split_whitespace();
     let number = words.next().unwrap_or_default().parse::<u8>()?;
     args.resolve_with_format(&crate::blastinput::app::FormatChoice {
         number: i32::from(number),
-        spec: words.collect::<Vec<_>>().join(" "),
-        delimiter: String::new(),
+        spec: words.collect::<Vec<_>>().join(" ").into_bytes(),
+        delimiter: Vec::new(),
     })
 }
 
@@ -108,6 +109,7 @@ pub(crate) fn run_pair(
     // which the CLI parser now accepts.)
     let v1_outfmt_number = args
         .outfmt
+        .to_string_lossy()
         .split_whitespace()
         .next()
         .and_then(|word| word.parse::<i32>().ok())

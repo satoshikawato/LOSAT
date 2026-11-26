@@ -18,7 +18,12 @@ fn the_masks_are_windowmaskers_of_the_strand_read() {
     ))
     .unwrap();
     let first: String = fasta.split('>').nth(1).unwrap().lines().skip(1).collect();
-    let masker = open(&counts_path("mg1655_u9.obinary"), &FileCounts, "blastn").unwrap();
+    let masker = open(
+        counts_path("mg1655_u9.obinary").as_bytes(),
+        &FileCounts,
+        "blastn",
+    )
+    .unwrap();
     let plus = masker.masks(first.as_bytes(), false).unwrap();
     assert_eq!(
         plus[..3],
@@ -44,7 +49,7 @@ fn the_masks_are_windowmaskers_of_the_strand_read() {
 
 #[test]
 fn the_checks_of_the_file_are_ncbis() {
-    let missing = open("nosuch.obinary", &FileCounts, "blastn").unwrap_err();
+    let missing = open(b"nosuch.obinary", &FileCounts, "blastn").unwrap_err();
     assert_eq!(missing.exit, 255);
     assert_eq!(
         missing.message,
@@ -54,7 +59,7 @@ fn the_checks_of_the_file_are_ncbis() {
     // A directory opens and reads nothing on Unix and on WASI: the unknown format. Windows
     // cannot open a directory as a file, so the open fails first there: the "could not open"
     // exception.
-    let directory = open(env!("CARGO_MANIFEST_DIR"), &FileCounts, "blastn").unwrap_err();
+    let directory = open(env!("CARGO_MANIFEST_DIR").as_bytes(), &FileCounts, "blastn").unwrap_err();
     if cfg!(any(unix, target_os = "wasi")) {
         assert_eq!(directory.exit, 1);
         assert_eq!(
@@ -71,9 +76,14 @@ fn the_checks_of_the_file_are_ncbis() {
             String::from_utf8_lossy(&directory.message)
         );
     }
-    let binary = open(&counts_path("dm2L_u9.binary"), &FileCounts, "blastn").unwrap();
+    let binary = open(
+        counts_path("dm2L_u9.binary").as_bytes(),
+        &FileCounts,
+        "blastn",
+    )
+    .unwrap();
     assert!(binary.build_error().is_none());
-    assert_eq!(binary.name, counts_path("dm2L_u9.binary"));
+    assert_eq!(binary.name, counts_path("dm2L_u9.binary").as_bytes());
 }
 
 // NCBI BLAST+ 2.17.0 blastn `-window_masker_taxid` (line NP M/STATE.md, "NCBI 2.17.0 の実機"):
@@ -99,13 +109,17 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
     )
     .unwrap();
     let root = WindowMaskerRegistry {
-        path: Some(dir.to_str().unwrap().to_string()),
+        path: Some(dir.to_str().unwrap().as_bytes().to_vec()),
         ..WindowMaskerRegistry::default()
     };
     let root = &root;
     let found = open_taxid(562, root, &FileCounts, "blastn").unwrap();
     assert_eq!(found.taxid, Some(562));
-    assert!(found.name.ends_with("wmasker.obinary"), "{}", found.name);
+    assert!(
+        found.name.ends_with(b"wmasker.obinary"),
+        "{}",
+        String::from_utf8_lossy(&found.name)
+    );
     assert!(found.build_error().is_none());
     assert_eq!(found.filter_option(), FilterOption::Taxid(562));
     assert!(found.load_posts(true).is_empty() && found.load_posts(false).is_empty());
@@ -128,7 +142,7 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         .build_error()
         .is_none());
     let missing = open_taxid(9606, root, &FileCounts, "blastn").unwrap();
-    assert_eq!(missing.name, "");
+    assert_eq!(missing.name, b"");
     let none = &Posts::new();
     let (warnings, error) =
         batch_error(missing.build_error().unwrap(), 2, none, none, "blastn").unwrap();

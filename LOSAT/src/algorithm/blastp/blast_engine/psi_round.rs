@@ -592,6 +592,23 @@ fn round_call_error(
         Ok(failure) => failure,
         Err(error) => return Ok(error),
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262, 572-576
+    // NCBI's warning of its first read of a UTF8String header, where the round's Seq-aligns made
+    // it before the failure (once per run: a round before posted its own), then the posts of the
+    // titles that its Seq-aligns read before the failure. Checked before the round writes its
+    // prolog or warnings so a refusal of the failed round's title posts (e.g. both 803.10 and
+    // 803.7 in one round) stops cleanly when nothing has been written yet.
+    let database = subject_source.database();
+    let utf8 = database.and_then(|database| {
+        failure
+            .utf8
+            .as_ref()?
+            .post(database.seqdb(), args.app.ncbi_name())
+    });
+    let titled = match database {
+        Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
+        None => Default::default(),
+    };
     let delta = args.delta.is_some();
     if calls == 0 && !delta {
         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
@@ -600,12 +617,7 @@ fn round_call_error(
         outputs.diagnostics.write_all(reader_warnings)?;
         super::write_request_posts(args, &mut *outputs.diagnostics)?;
     }
-    if let Some(posts) = subject_source.database().and_then(|database| {
-        failure
-            .utf8
-            .as_ref()?
-            .post(database.seqdb(), args.app.ncbi_name())
-    }) {
+    for posts in utf8.iter().chain([&titled]) {
         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
     }
     crate::algorithm::common::database::ErrorAfterPosts::written(
@@ -1608,7 +1620,7 @@ fn write_round_epilogs(
         }
         let report = crate::report::BlastpPairwiseReport {
             version: crate::wording::REPORT_VERSION.to_string(),
-            database_name: blastp_database_name(args, subject_label).into(),
+            database_name: blastp_database_name(args, subject_label),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
             matrix_name: Some(args.matrix_name.clone()),

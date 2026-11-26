@@ -145,13 +145,14 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     inputs
 }
 
-/// Collects input files for `windowmasker` (single owner shared by CLI D23 and LOSAT Web D19):
-/// returns `(for_logfile, for_out, databases)` where `for_out` is the subset opened and read after
-/// opening `-out` (`-in` of `-mk_counts` without `-fa_list` or `-infmt blastdb`, and `-ustat` of
-/// masking).
+/// Collects input files for `windowmasker` (single owner shared by CLI D23 and LOSAT Web D19/D19b):
+/// returns `(for_logfile, for_out, databases, databases_for_out)` where `for_out` is the subset
+/// opened and read after opening `-out` (`-in` of `-mk_counts`, including entries read from
+/// `-fa_list true`, and `-ustat` of masking) and `databases_for_out` is true when `-mk_counts`
+/// without `-convert` reads its `-infmt blastdb` entries after opening `-out`.
 pub(crate) fn windowmasker_read_parts<S: AsRef<OsStr>>(
     words: &[S],
-) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<OsString>) {
+) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<OsString>, bool) {
     let mut mk_counts = false;
     let mut convert = false;
     let mut fa_list = false;
@@ -176,14 +177,23 @@ pub(crate) fn windowmasker_read_parts<S: AsRef<OsStr>>(
     let mut for_log = Vec::new();
     let mut for_out = Vec::new();
     let mut databases = Vec::new();
+    let databases_for_out = mk_counts && !convert;
     if let Some(ref raw_in) = input {
-        if infmt_blastdb {
-            push_db_list(&mut databases, raw_in);
-        } else if mk_counts && !convert && !fa_list {
-            for part in split_os_byte(raw_in, b',') {
-                push_non_stdin_file(&mut for_log, &part);
-                push_non_stdin_file(&mut for_out, &part);
+        if mk_counts && !convert {
+            if fa_list {
+                push_non_stdin_file(&mut for_log, raw_in);
             }
+            for entry in crate::windowmasker::counts::file_list(raw_in, fa_list) {
+                let entry_os = crate::utils::os_bytes::os_string_from_bytes(entry);
+                if infmt_blastdb {
+                    push_db_list(&mut databases, &entry_os);
+                } else {
+                    push_non_stdin_file(&mut for_log, &entry_os);
+                    push_non_stdin_file(&mut for_out, &entry_os);
+                }
+            }
+        } else if infmt_blastdb && !convert {
+            push_db_list(&mut databases, raw_in);
         } else {
             push_non_stdin_file(&mut for_log, raw_in);
         }
@@ -199,11 +209,11 @@ pub(crate) fn windowmasker_read_parts<S: AsRef<OsStr>>(
             push_non_empty_file(&mut for_log, list);
         }
     }
-    (for_log, for_out, databases)
+    (for_log, for_out, databases, databases_for_out)
 }
 
 fn collect_windowmasker_inputs<S: AsRef<OsStr>>(words: &[S], inputs: &mut RunInputs) {
-    let (for_log, _for_out, databases) = windowmasker_read_parts(words);
+    let (for_log, _for_out, databases, _databases_for_out) = windowmasker_read_parts(words);
     for path in for_log {
         push_file(&mut inputs.files, path);
     }
@@ -380,7 +390,7 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                         .and_then(|s| s.window_masker_registry.ok())
                         .and_then(|r| r.path)
                         .filter(|p| !p.is_empty())
-                        .map(PathBuf::from)
+                        .map(crate::utils::os_bytes::path_from_bytes)
                         .unwrap_or_else(|| PathBuf::from("."));
                     push_file(
                         &mut inputs.files,

@@ -51,9 +51,8 @@ pub struct RpsSearch {
     /// PR, item PS12c); without them NCBI's traceback does not read it.
     pub(crate) use_sw_tback: bool,
     /// Whether this RPS search is DELTA-BLAST's domain search (`CDeltaBlast::x_FindDomainHits`):
-    /// refusals name `"DELTABLAST"`, the one-time `.loo` check releases its mapped pages before
-    /// the search so single-query iterations do not hold unused pages, and concurrent diagonal
-    /// tables are bounded so peak RSS stays at or below NCBI's single-threaded domain search.
+    /// refusals name `"DELTABLAST"`, and the one-time `.loo` hit check reads the overflow array
+    /// through a 1 MiB sliding buffer so unused `.loo` pages are not faulted into the resident set.
     pub(crate) domain_search: bool,
 }
 
@@ -763,23 +762,7 @@ impl RpsRun<'_> {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // For DELTA-BLAST's domain search, bound the number of concurrent diagonal tables so
-            // peak RSS on large single-volume domain databases (e.g. `cdd_delta`, 32 MiB per
-            // table) stays at or below NCBI's single-threaded `x_FindDomainHits` at 16+ threads.
-            const DELTA_DOMAIN_DIAG_BUDGET: usize = 192 * 1024 * 1024;
-            let diag_bytes = super::wordfinder::diag_table_length(
-                concat_length,
-                self.window,
-                rows.len(),
-                longest,
-            ) as usize
-                * std::mem::size_of::<u32>();
-            let budget_workers = if self.options.domain_search && diag_bytes > 0 {
-                (DELTA_DOMAIN_DIAG_BUDGET / diag_bytes).max(1)
-            } else {
-                usize::MAX
-            };
-            let active = pool.threads().min(units.len()).min(budget_workers);
+            let active = pool.threads().min(units.len());
             if pool.enabled() && active > 1 {
                 use rayon::prelude::*;
                 let next = std::sync::atomic::AtomicUsize::new(0);

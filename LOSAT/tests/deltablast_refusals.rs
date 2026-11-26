@@ -439,7 +439,48 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
         "q_none.faa",
         &["-rpsdb", e0.to_str().unwrap(), "-outfmt", "6"],
     );
-    assert_refused(&run, "e0", "shorter than its 4-byte magic number");
+    assert_refused(&run, "e0", "file is empty");
+
+    // 1-to-3-byte .wcounts / .obsr (PR #1664 R2 ③', NCBI 2.17.0 short_magic_probe):
+    // POSIX mmap zero-fills the remainder of the last page, so NCBI's 4-byte magic check is
+    // defined. w1/w3b fail at open with NCBI corrupt error (exit 3) on both queries; w2/w3/o2
+    // zero-pad to 0x1e17 (valid magic), exit 0 on q_none (matches NCBI), and refuse cleanly
+    // on q_serpin (where NCBI exits 3 "Errors in conserved domain profile" or SIGSEGV).
+    for (name, file, bytes) in [
+        ("w1", "deltatest.wcounts", &[0x17u8][..]),
+        ("w3b", "deltatest.wcounts", &[0x17u8, 0x1f, 0x00][..]),
+    ] {
+        let db = copy_db_without(&delta_dir, "deltatest", &temp.0.join(name), "");
+        std::fs::write(temp.0.join(name).join(file), bytes).unwrap();
+        for q in ["q_none.faa", "q_serpin.faa"] {
+            let run = run_query(q, &["-rpsdb", db.to_str().unwrap(), "-outfmt", "6"]);
+            assert_eq!(run.rc, 3, "{name} {q}: {}", run.stderr);
+            assert!(
+                run.stderr
+                    .contains("is either corrupt or constructed for an incompatible architecture"),
+                "{name} {q}: {}",
+                run.stderr
+            );
+        }
+    }
+    for (name, file, bytes) in [
+        ("w2", "deltatest.wcounts", &[0x17u8, 0x1e][..]),
+        ("w3", "deltatest.wcounts", &[0x17u8, 0x1e, 0x00][..]),
+        ("o2", "deltatest.obsr", &[0x17u8, 0x1e][..]),
+    ] {
+        let db = copy_db_without(&delta_dir, "deltatest", &temp.0.join(name), "");
+        std::fs::write(temp.0.join(name).join(file), bytes).unwrap();
+        let run = run_query(
+            "q_none.faa",
+            &["-rpsdb", db.to_str().unwrap(), "-outfmt", "6"],
+        );
+        assert_eq!(run.rc, 0, "{name} q_none: {}", run.stderr);
+        let run = run_query(
+            "q_serpin.faa",
+            &["-rpsdb", db.to_str().unwrap(), "-outfmt", "6"],
+        );
+        assert_refused(&run, &format!("{name} q_serpin"), "shorter than its header");
+    }
 
     // Zero-count .wcounts column: refused on a non-X query residue, succeeds on an X query residue.
     let zc = copy_db_without(&delta_dir, "deltatest", &temp.0.join("zc"), "");

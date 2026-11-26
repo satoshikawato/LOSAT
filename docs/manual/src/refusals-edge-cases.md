@@ -233,7 +233,7 @@ These inputs are refused where NCBI BLAST+ 2.17.0 crashes, writes outside its al
 - A domain database in which the id of a profile finds another profile or none.
 - A query whose domain hit has a segment outside the query or of negative length. NCBI writes outside its alignment.
 - A query whose letters give Karlin-Altschul parameters with the domain search's matrix (BLOSUM62) but not with `-matrix`.
-- A `.wcounts` or `.obsr` file shorter than its 4-byte magic number (at open; NCBI crashes on an empty file or reads past a 1-to-3-byte file). A 4-byte or longer file with a wrong magic number gets NCBI's corrupt-profile error; one with a valid magic number opens cleanly when no domain hit reads it.
+- An empty (0-byte) `.wcounts` or `.obsr` file (at open; NCBI dereferences a null mapping and crashes). A 1-to-3-byte file is zero-padded to 4 bytes (as POSIX memory mapping zero-fills the rest of the last page) and checked like a 4-byte or longer file: a wrong magic number gets NCBI's corrupt-profile error, and a valid magic number opens cleanly when no domain hit reads it.
 - When a domain hit reads `.wcounts` or `.obsr`: a file shorter than its profile-count header, offset table, or requested profile data; an offset table that does not hold the hit profile's OID or has out-of-order offsets; or a profile holding fewer columns than the hit covers (NCBI reads past the mapping).
 - A `.wcounts` column whose residue counts sum to 0 aligned to a query residue other than `X` (NCBI divides 0 by 0 to get NaN and converts `log(NaN)` to an integer with undefined behaviour). When aligned to `X`, NCBI sets the frequency ratios to 0 without using the column, and LOSAT matches NCBI.
 

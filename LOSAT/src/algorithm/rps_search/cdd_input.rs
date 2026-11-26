@@ -195,7 +195,8 @@ impl Hit {
             *slot = None;
         }
         new_segments.extend(slots.into_iter().flatten());
-        // `compare_hitseg_range`: by the subject's start (the starts are distinct).
+        // `compare_hitseg_range`: by the subject's start (Rust's stable sort keeps equal starts in
+        // intersection order; PD-LOSAT-NCBI-DEFECTS 1.116 / Owner Q-DL-SEGTIE=A, 2026-11-26).
         new_segments.sort_by_key(|segment| segment.subject.from);
         self.segments = new_segments;
     }

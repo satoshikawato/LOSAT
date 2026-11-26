@@ -36,9 +36,11 @@ struct CdFile {
 
 impl CdFile {
     /// Opens `<base><extension>`: NCBI's errors for a file that cannot be mapped and for a wrong
-    /// magic number; a file shorter than its 4-byte magic number (NCBI crashes on an empty file or
-    /// reads past a 1-to-3-byte file) is LOSAT's refusal. The profile count and offset table are
-    /// read only when a hit domain asks for them (`profile_offsets`), matching NCBI's open.
+    /// magic number; an empty (0-byte) file (NCBI dereferences a null mapping and crashes) is
+    /// LOSAT's refusal. For a 1-to-3-byte file, POSIX mmap zero-fills the remainder of the last
+    /// page so NCBI's 4-byte `magic_number` read is defined; LOSAT zero-pads the available bytes
+    /// to 4 and applies the same magic check. The profile count and offset table are read only
+    /// when a hit domain asks for them (`profile_offsets`), matching NCBI's open.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:255-264
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:386-400
@@ -49,7 +51,7 @@ impl CdFile {
         let shown = String::from_utf8_lossy(&shown_bytes).into_owned();
         let mut path = base.as_os_str().to_os_string();
         path.push(extension);
-        let source = FreqSource::open(&PathBuf::from(path)).map_err(|_| {
+        let map_error = || {
             RpsOpenError::Ncbi(
                 [
                     b"Cannot memory map RPS-BLAST database file: ",
@@ -57,13 +59,19 @@ impl CdFile {
                 ]
                 .concat(),
             )
-        })?;
+        };
+        let source = FreqSource::open(&PathBuf::from(path)).map_err(|_| map_error())?;
+        let len = source.len().map_err(|_| map_error())? as u64;
+        if len == 0 {
+            return Err(RpsOpenError::Refused(format!(
+                "a profile database whose {extension} file is empty (NCBI BLAST+ crashes on a null mapping) is not supported by LOSAT's {program}"
+            )));
+        }
         let mut magic_bytes = [0u8; 4];
-        source.read_at(&mut magic_bytes, 0).map_err(|_| {
-            RpsOpenError::Refused(format!(
-                "a profile database whose {extension} file is shorter than its 4-byte magic number (NCBI BLAST+ crashes on an empty file or reads past it) is not supported by LOSAT's {program}"
-            ))
-        })?;
+        let to_read = usize::try_from(len.min(4)).unwrap_or(4);
+        source
+            .read_at(&mut magic_bytes[..to_read], 0)
+            .map_err(|_| map_error())?;
         let magic = i32::from_le_bytes(magic_bytes);
         if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
             return Err(RpsOpenError::Ncbi(
@@ -75,11 +83,6 @@ impl CdFile {
                 .concat(),
             ));
         }
-        let len = source.len().map_err(|_| {
-            RpsOpenError::Refused(format!(
-                "a profile database whose {extension} file is shorter than its 4-byte magic number (NCBI BLAST+ crashes on an empty file or reads past it) is not supported by LOSAT's {program}"
-            ))
-        })? as u64;
         Ok(Self {
             source,
             len,

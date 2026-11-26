@@ -138,3 +138,27 @@ fn a_single_hit_is_not_trimmed() {
     let kept = remove_multiple_cd_hits(hits.clone()).expect("one hit");
     assert_eq!(kept, hits);
 }
+
+#[test]
+fn intersected_segments_with_equal_subject_start_keep_stable_order() {
+    // Adjacent subject ranges [0, 10] and [10, 20] (a gap in the query of the kept hit) intersect
+    // with a segment covering [0, 20], producing pieces [0, 10] and [10, 10] / [10, 20] that tie
+    // on `subject.from == 10`. Rust's stable sort keeps their intersection order (Owner
+    // Q-DL-SEGTIE=A, 2026-11-26; PD-LOSAT-NCBI-DEFECTS 1.116).
+    let mut target = hit(1, 1e-3, &[(0, 0, 20)]);
+    let ranges = vec![Range { from: 0, to: 10 }, Range { from: 10, to: 20 }];
+    target.intersect_with_ranges(&ranges, true);
+    assert_eq!(spans(&target), [(0, 10, 0, 10), (10, 20, 10, 20)]);
+    // Explicit point-segment tie at subject.from = 10: [10, 10] followed by [10, 15].
+    let mut target2 = hit(1, 1e-3, &[(0, 0, 15)]);
+    let ranges2 = vec![
+        Range { from: 0, to: 10 },
+        Range { from: 10, to: 10 },
+        Range { from: 10, to: 15 },
+    ];
+    target2.intersect_with_ranges(&ranges2, true);
+    assert_eq!(
+        spans(&target2),
+        [(0, 10, 0, 10), (10, 10, 10, 10), (10, 15, 10, 15)]
+    );
+}

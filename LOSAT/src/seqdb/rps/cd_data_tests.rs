@@ -190,20 +190,41 @@ fn a_wrong_magic_number_is_ncbis_error() {
 }
 
 #[test]
-fn a_file_shorter_than_four_bytes_is_refused_and_short_valid_magic_opens_until_hit() {
+fn empty_file_is_refused_and_short_1_to_3_byte_files_zero_pad_magic_like_ncbi() {
     let dir = scratch("short");
     let base = write_files(&dir);
-    // 0-byte and 3-byte files cannot hold the 4-byte magic number.
+    // 0-byte file: NCBI dereferences a null mapping and crashes; LOSAT refuses.
     std::fs::write(dir.join("cd.obsr"), []).unwrap();
     assert!(matches!(
         CdProfileFiles::open(&base, "DELTABLAST"),
         Err(RpsOpenError::Refused(_))
     ));
+    // 1-to-3-byte files: POSIX mmap zero-fills the remainder of the last page, so NCBI's 4-byte
+    // magic check is defined. Wrong zero-padded magic -> NCBI corrupt error; valid zero-padded
+    // magic (`0x17 0x1e` -> `0x00001e17 = RPS_MAGIC_NUM_28`) -> opens cleanly until a hit reads it.
     std::fs::write(dir.join("cd.obsr"), [0u8; 3]).unwrap();
     assert!(matches!(
         CdProfileFiles::open(&base, "DELTABLAST"),
-        Err(RpsOpenError::Refused(_))
+        Err(RpsOpenError::Ncbi(_))
     ));
+    std::fs::write(dir.join("cd.obsr"), [0x17u8]).unwrap();
+    assert!(matches!(
+        CdProfileFiles::open(&base, "DELTABLAST"),
+        Err(RpsOpenError::Ncbi(_))
+    ));
+    std::fs::write(dir.join("cd.obsr"), [0x17u8, 0x1f, 0x00]).unwrap();
+    assert!(matches!(
+        CdProfileFiles::open(&base, "DELTABLAST"),
+        Err(RpsOpenError::Ncbi(_))
+    ));
+    for valid_short in [&[0x17u8, 0x1e][..], &[0x17u8, 0x1e, 0x00][..]] {
+        std::fs::write(dir.join("cd.obsr"), valid_short).unwrap();
+        let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+        assert!(matches!(
+            columns(&files, 0, 0, 1),
+            Err(RpsOpenError::Refused(_))
+        ));
+    }
     // A 4-byte file with a wrong magic number gets NCBI's corrupt-magic error at open.
     std::fs::write(dir.join("cd.obsr"), [0u8; 4]).unwrap();
     assert!(matches!(
@@ -218,8 +239,19 @@ fn a_file_shorter_than_four_bytes_is_refused_and_short_valid_magic_opens_until_h
         columns(&files, 0, 0, 1),
         Err(RpsOpenError::Refused(_))
     ));
-    // Same for a 4-byte `.wcounts` with valid magic and a 20-byte truncated header.
+    // Same for 1-to-3-byte, 4-byte, and 20-byte truncated `.wcounts`.
     let base = write_files(&dir);
+    std::fs::write(dir.join("cd.wcounts"), [0x17u8]).unwrap();
+    assert!(matches!(
+        CdProfileFiles::open(&base, "DELTABLAST"),
+        Err(RpsOpenError::Ncbi(_))
+    ));
+    std::fs::write(dir.join("cd.wcounts"), [0x17u8, 0x1e]).unwrap();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    assert!(matches!(
+        columns(&files, 0, 0, 1),
+        Err(RpsOpenError::Refused(_))
+    ));
     std::fs::write(
         dir.join("cd.wcounts"),
         (RPS_MAGIC_NUM_28 as u32).to_le_bytes(),

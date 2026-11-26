@@ -950,20 +950,21 @@ impl RpsVolumeSetup {
     /// The profiles' letters come when the search needs them (`ProfileLetters`). A volume that this
     /// set-up has checked opens as `reopen` opens it: its files are those it checked (the run's),
     /// and NCBI's own errors of them come again where each search opens them.
-    /// Uses `pool` for parallel `.loo` hit checking (`RpsVolumeFiles::open_for_in_pool`) and
-    /// optionally remaps `.loo` after checking (`drop_loo_pages`).
+    /// Uses `pool` for parallel `.loo` hit checking over the mapping, or reads the overflow array
+    /// through a 1 MiB sliding buffer (`buffered_loo_check`) to keep unused `.loo` pages out of
+    /// the resident set (`RpsVolumeFiles::open_for_in_pool`).
     pub(crate) fn open_in_pool(
         &mut self,
         volume: &Volume,
         cbs: bool,
         pool: Option<&crate::utils::threading::SearchPool<'_>>,
-        drop_loo_pages: bool,
+        buffered_loo_check: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let path = canonical_volume_path(volume.base());
         if self.checked.contains(&path) {
             return self.reopen(volume, cbs);
         }
-        let files = match self.files_in_pool(volume, cbs, true, pool, drop_loo_pages)? {
+        let files = match self.files_in_pool(volume, cbs, true, pool, buffered_loo_check)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -1034,7 +1035,7 @@ impl RpsVolumeSetup {
         cbs: bool,
         check_hits: bool,
         pool: Option<&crate::utils::threading::SearchPool<'_>>,
-        drop_loo_pages: bool,
+        buffered_loo_check: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
@@ -1049,7 +1050,7 @@ impl RpsVolumeSetup {
                 &lengths,
                 self.program,
                 pool,
-                drop_loo_pages,
+                buffered_loo_check,
             )
         } else {
             let regroup = self

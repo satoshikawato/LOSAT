@@ -200,13 +200,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     const LETTERS: &[u8; BLASTAA_SIZE] =
         crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID;
-    match object
-        .pssm
-        .query
-        .as_ref()
-        .and_then(SeqEntry::seq)
-        .and_then(|query| query.inst.seq_data.as_ref())
-    {
+    let query = object.pssm.query.as_ref().and_then(SeqEntry::seq);
+    let mut codes = match query.and_then(|query| query.inst.seq_data.as_ref()) {
         Some(SeqData::Ncbistdaa(codes)) => codes.clone(),
         Some(SeqData::Iupacaa(text)) => text
             .iter()
@@ -223,7 +218,23 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
             SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
         )
         | None => Vec::new(),
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:202, 253-258
+    // NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:61-74 (`CPssm::GetQueryLength`)
+    // `PrintAsciiPssm` loops up to `GetQueryLength()`: 0 when `Seq-inst.length` is absent, and
+    // `length` when the query has one letter more than its Seq-inst's `length` (searched as its
+    // first `length` letters, `in_pssm`; NCBI BLAST+ 2.17.0, line PS item PS7c).
+    match query.and_then(|query| query.inst.length) {
+        None => codes.clear(),
+        Some(length)
+            if usize::try_from(length)
+                .is_ok_and(|length| length >= 1 && length + 1 == codes.len()) =>
+        {
+            codes.pop();
+        }
+        Some(_) => {}
     }
+    codes
 }
 
 /// The files of the input PSSM (`InPssmRounds::files`).

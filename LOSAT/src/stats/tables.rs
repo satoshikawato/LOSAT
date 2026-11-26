@@ -5,6 +5,19 @@ use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::protein_tables::ProteinTableRow;
 use crate::config::{NuclScoringSpec, ProteinScoringSpec, ScoringMatrix};
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:50-58
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:97-109
+/// Whether NCBI's ancillary data of a query's results keeps a Karlin-Altschul block whose Lambda
+/// is `lambda` (`s_InitializeKarlinBlk`, for each of its four blocks: `kbp_std`, `kbp_gap`,
+/// `kbp_psi`, `kbp_gap_psi`): a Lambda of 0 or more. A negative one or a NaN (which a PSSM's file
+/// can give) leaves the block out. The one owner of the rule for every reader of those blocks:
+/// the query footers (`report::pairwise`), the ASCII PSSM's footer (`psiblast::pssm`), the XML
+/// statistics (BLASTP's and TBLASTN's), the archive's block (`report::archive::ka_block`) and
+/// the PSSM engine's statistical parameters (`core::psi::PsiScoreBlk`).
+pub(crate) fn ancillary_kept(lambda: f64) -> bool {
+    lambda >= 0.0
+}
+
 /// Karlin-Altschul statistical parameters
 #[derive(Debug, Clone, Copy)]
 pub struct KarlinParams {

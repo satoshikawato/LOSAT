@@ -14,7 +14,9 @@
 //! its elements (`Input::ARRAY_FRAMES`, `Input::element_frame`, `Input::end_element`) are those
 //! of the generic reader.
 
-use super::read::{alias_target, is_missing_value, set_flag_error, Pointee, TypedReader, NO_TYPE};
+use super::read::{
+    alias_target, is_missing_value, set_flag_error, Pointee, PostSink, TypedReader, NO_TYPE,
+};
 use super::{resolved, type_info, Kind, Member, Value, DELAYED};
 use crate::report::serial::asn_input::{Input, R};
 use crate::report::serial::object_frame::FrameKind;
@@ -72,7 +74,7 @@ macro_rules! in_names {
     };
 }
 
-impl<I: Input> TypedReader<I> {
+impl<I: Input, P: PostSink> TypedReader<I, P> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
     // the binary stream's, objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109

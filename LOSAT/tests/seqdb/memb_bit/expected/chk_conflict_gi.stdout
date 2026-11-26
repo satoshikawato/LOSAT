@@ -1,0 +1,24 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is DISABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 1-th OID.
+
+Testing 1 volume(s).
+ <R>/db/pm5
+  <R>/db/pm5 / MetaData:   [ERROR] caught exception.
+  <R>/db/pm5 / MetaData: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbimpl.cpp", line 1620: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBImpl::GetTaxInfo() - Taxid 9606 not found
+
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 3 alias(es).
+ <R>/db/conflict_gi.pal
+  <R>/db/conflict_gi.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <R>/db/conflict_gi.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp", line 881: Error: (CSeqDBException::eInvalid) MEMB_BIT error: conflicting bit found.
+
+ <R>/db/mb_1.pal
+ <R>/db/mb_2.pal
+ Result=FAILURE. 1 errors reported in 3 alias(es).
+
+Total errors: 2

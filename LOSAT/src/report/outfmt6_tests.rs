@@ -161,3 +161,14 @@ fn outfmt7_query_lines_follow_the_ncbi_oracle() {
         assert_eq!(out, line, "{defline:?}");
     }
 }
+
+// Line PS item PS7c: an infinite bit score (a PSSM whose gapped Lambda is `PLUS-INFINITY`) is
+// printed by C's `%5.3le` as `inf` in the field of 5, in both writers.
+#[test]
+fn an_infinite_bit_score_fills_a_field_of_five() {
+    assert_eq!(format_bitscore_ncbi(f64::INFINITY), "  inf");
+    let mut out = Vec::new();
+    write_bitscore_ncbi(&mut out, f64::INFINITY).unwrap();
+    assert_eq!(out, b"  inf");
+    assert_eq!(format_bitscore_ncbi(123456.0), "1.235e+05");
+}

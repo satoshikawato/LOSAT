@@ -10,7 +10,7 @@ use std::io;
 
 use crate::ncbi_app::Diag;
 use crate::report::archive::masks::write_ranges_seq_loc;
-use crate::report::db_subject::bioseq_facts;
+use crate::report::defline::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
 use crate::report::ostream::{CutBuffer, ReportWrite};
 use crate::report::seqid::SeqId;

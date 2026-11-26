@@ -53,6 +53,12 @@ export type ValidationResult =
 export interface StartInfo {
   readonly conffile: string | null;
   readonly logFile: string | null;
+  /**
+   * The command line's normalized file name under which a run gives the `-logfile` file on stream 8
+   * (`logs` for `logs/`, `run.log` for `./run.log` and ` run.log`, `/tmp/run.log` outside the
+   * working tree, `/dev/stdout` for `/dev/stdout`; null where `-logfile` never makes a file).
+   */
+  readonly logFileName?: string | null;
   readonly strategyFile: string | null;
   readonly dryRun: boolean;
   /**

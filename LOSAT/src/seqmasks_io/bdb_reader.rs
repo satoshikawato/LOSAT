@@ -18,7 +18,7 @@
 
 use crate::blastinput::ncbi_environment::DatabaseSettings;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_facts;
+use crate::report::defline::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
 use crate::seqdb::alias::SearchPath;
 use crate::seqdb::{NucleotideAmbiguity, SeqDb, SeqDbError, SeqType};

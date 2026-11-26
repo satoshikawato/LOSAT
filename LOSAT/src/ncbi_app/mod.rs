@@ -11,13 +11,14 @@
 pub(crate) mod args;
 pub(crate) mod files;
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed, TextPlace,
 };
-use crate::report::run_files::{OpenFiles, RunFiles};
+use crate::report::run_files::{OpenFiles, RunFiles, ToolLog};
 use crate::report::serial::encoder::ReplacedChar;
 
 use args::{ArgException, Args, ArgsError};
@@ -97,6 +98,9 @@ pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
 /// standard error stream, on which the usage of an argument error is printed.
 pub(crate) struct Diag<'a> {
     target: &'a DiagTarget,
+    /// When `Some`, `-logfile` names the run's standard output (`ToolLog::Stdout` in a `Receiver`
+    /// run): each diagnostic message goes into the run's shared `out` writer as it is posted.
+    stdout: Option<&'a dyn Fn(&[u8])>,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -120,6 +124,7 @@ impl<'a> Diag<'a> {
     ) -> Self {
         Diag {
             target,
+            stdout: None,
             stderr,
             tool,
             record: None,
@@ -209,6 +214,10 @@ impl Diag<'_> {
         }
         if let Some(record) = &mut self.record {
             record.extend_from_slice(text);
+        }
+        if let Some(write) = self.stdout {
+            write(text);
+            return;
         }
         let mut stderr = Noted {
             stream: &mut *self.stderr,
@@ -329,7 +338,7 @@ impl Diag<'_> {
             let mut text = short_usage(self.tool);
             // The diagnostics of a `-logfile` go to a stream that is not `cerr`: NCBI then says
             // where they are.
-            if !matches!(self.target, DiagTarget::Stderr) {
+            if self.stdout.is_some() || !matches!(self.target, DiagTarget::Stderr) {
                 text.push_str(
                     "Error in command-line arguments. See error logs for more details.\n",
                 );
@@ -579,6 +588,21 @@ pub(crate) fn run_in(
     )
 }
 
+/// A shared standard-output writer for a `Receiver` tool run whose `-logfile` is `/dev/stdout`
+/// (`ToolLog::Stdout`): both the tool's `out` and its `Diag` reach the same stream (`run_app`)
+/// without changing `RunFiles::Disk`.
+struct SharedOut<'a, 'b>(&'a RefCell<&'b mut dyn Write>);
+
+impl Write for SharedOut<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
+    }
+}
+
 /// The run of `run`, `run_with` and `run_in` after the application start `start` (whose usage
 /// report's messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the
 /// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
@@ -605,8 +629,59 @@ fn run_app(
     } else {
         files
     };
-    let mut target = files.log_target(log_file(words));
-    start.write_log_setup(&mut target, err);
+    match files.log_target(log_file(words)) {
+        Err(reason) => {
+            let mut diag = Diag::new(&DiagTarget::Stderr, err, tool);
+            diag.refuse(&crate::seqmasks_io::run::unsupported(
+                &reason,
+                tool.refusal_name,
+            ))
+        }
+        Ok(ToolLog::Target(mut target)) => {
+            start.write_log_setup(&mut target, err);
+            run_app_target(
+                tool,
+                words,
+                (input, out, err),
+                body,
+                (start, xml_help),
+                &files,
+                (target, None),
+            )
+        }
+        Ok(ToolLog::Stdout) => {
+            let shared = RefCell::new(out);
+            let write_stdout = |text: &[u8]| {
+                let _ = shared.borrow_mut().write_all(text);
+            };
+            if let Ok(text) = start.usage_report() {
+                write_stdout(text.as_bytes());
+            }
+            let mut shared_out = SharedOut(&shared);
+            run_app_target(
+                tool,
+                words,
+                (input, &mut shared_out, err),
+                body,
+                (start, xml_help),
+                &files,
+                (DiagTarget::Stderr, Some(&write_stdout)),
+            )
+        }
+    }
+}
+
+/// The body of `run_app` once the `-logfile` target (and optional shared stdout writer for
+/// `ToolLog::Stdout`) has been set up.
+fn run_app_target<'a>(
+    tool: &'static Tool,
+    words: &[OsString],
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &'a mut dyn Write),
+    body: Body,
+    (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
+    files: &OpenFiles,
+    (mut target, stdout): (DiagTarget, Option<&'a dyn Fn(&[u8])>),
+) -> i32 {
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
@@ -621,8 +696,19 @@ fn run_app(
     };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).
-    let loaded = start.write_config_load(&mut target, err);
+    let loaded = match stdout {
+        Some(write) => {
+            let mut buf = Vec::new();
+            let outcome = start.write_config_load(&mut DiagTarget::Stderr, &mut buf);
+            if !buf.is_empty() {
+                write(&buf);
+            }
+            outcome
+        }
+        None => start.write_config_load(&mut target, err),
+    };
     let mut diag = Diag::new(&target, err, tool);
+    diag.stdout = stdout;
     match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
@@ -630,7 +716,7 @@ fn run_app(
     }
     // NCBI's XML, which the command line's run writes (`cli::xml_help_text`); the library API
     // writes none.
-    let args = match read(tool, &words, out, &mut diag, xml_help, &files) {
+    let args = match read(tool, &words, out, &mut diag, xml_help, files) {
         Ok(args) => args,
         Err(ReadEnd::Exit(status)) => return status,
         Err(ReadEnd::Refused(reason)) => return diag.refuse(&reason),
@@ -647,7 +733,7 @@ fn run_app(
     let status = if dryrun {
         match tool.dry_run {
             Some(init) => init(
-                &args.with_files(&files),
+                &args.with_files(files),
                 &settings,
                 &mut files::Cin::new(input),
                 out,
@@ -657,7 +743,7 @@ fn run_app(
         }
     } else {
         body(
-            &args.with_files(&files),
+            &args.with_files(files),
             &settings,
             &mut files::Cin::new(input),
             out,

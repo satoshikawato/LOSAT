@@ -1052,6 +1052,76 @@ pub(crate) fn parse_in(
     })
 }
 
+// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT Web
+// scans the argv before parsing so both parsed and unparsed argvs use one reader backed by the
+// program's own argument definitions (`arguments`, `resolve_known_desc`).
+/// Scans `words` (the command line after the program's name) using `program`'s argument
+/// definitions (`arguments`), calling `visit(canonical_name, value)` for each recognized option
+/// before `--`: `None` for a flag (`Kind::Flag`, without `=`), `Some(value)` for an option that
+/// takes a value (`-name=value`, or `-name` followed by the next word whatever it is). Unknown
+/// words, positional words, and flags consume one word.
+pub(crate) fn scan_argv<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    mut visit: impl FnMut(&'static str, Option<&OsStr>),
+) {
+    let Some(arguments) = arguments(program) else {
+        return;
+    };
+    let mut at = 0;
+    while at < words.len() {
+        let word = words[at].as_ref();
+        let bytes = word.as_encoded_bytes();
+        if bytes == b"--" {
+            break;
+        }
+        if bytes.len() > 1 && bytes[0] == b'-' {
+            let after_dash = &bytes[1..];
+            let (name_bytes, eq_value) = match after_dash.iter().position(|&b| b == b'=') {
+                Some(eq) => (&after_dash[..eq], Some(&after_dash[eq + 1..])),
+                None => (after_dash, None),
+            };
+            let desc = is_argument_name(name_bytes)
+                .then(|| std::str::from_utf8(name_bytes).ok())
+                .flatten()
+                .and_then(|name| resolve_known_desc(arguments, name));
+            if let Some(desc) = desc {
+                if desc.kind == Kind::Flag {
+                    if eq_value.is_none() {
+                        visit(desc.name(), None);
+                    }
+                } else if let Some(val_bytes) = eq_value {
+                    // SAFETY: `val_bytes` follows an ASCII `=` in `word`, so it starts on a
+                    // valid encoded boundary and ends at the end of `word`.
+                    let val = unsafe { OsStr::from_encoded_bytes_unchecked(val_bytes) };
+                    visit(desc.name(), Some(val));
+                } else if let Some(next) = words.get(at + 1) {
+                    visit(desc.name(), Some(next.as_ref()));
+                    at += 2;
+                    continue;
+                }
+            }
+        }
+        at += 1;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
+/// Looks up the argument description for the valid argument name `name` in `arguments`, following
+/// aliases (`find_desc`) and NCBI's `-file` / `-verbatim` suffixes.
+fn resolve_known_desc(arguments: Arguments, name: &str) -> Option<&'static Desc> {
+    let find = |n: &str| find_desc(arguments, n);
+    find(name).or_else(|| {
+        let dash = name.rfind('-').filter(|&dash| dash != 0)?;
+        let suffix = &name[dash + 1..];
+        if suffix.eq_ignore_ascii_case("file") || suffix.eq_ignore_ascii_case("verbatim") {
+            find(&name[..dash])
+        } else {
+            None
+        }
+    })
+}
+
 // No NCBI counterpart: NCBI has no Web engine.
 /// The arguments of the words `given` of `tool` (each name and its value's bytes, `None` for a
 /// flag) that another reader has checked: LOSAT Web's ABI v1, whose frozen reader checks its
@@ -1109,20 +1179,11 @@ fn create_arg(
         ));
     };
     let bytes = arg1.as_encoded_bytes();
-    let find = |name: &str| find_desc(arguments, name);
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
     // The confidential arguments read their value from a file (`-name-file`); LOSAT's programs
     // have none, but the lookup of the name before the dash stays: `-info-file` is `-info`, and
     // `-db-file NAME` is `-db NAME` (the separator is looked for after the whole name).
-    let desc = find(name).or_else(|| {
-        let dash = name.rfind('-').filter(|&dash| dash != 0)?;
-        let suffix = &name[dash + 1..];
-        if suffix.eq_ignore_ascii_case("file") || suffix.eq_ignore_ascii_case("verbatim") {
-            find(&name[..dash])
-        } else {
-            None
-        }
-    });
+    let desc = resolve_known_desc(arguments, name);
     let Some(desc) = desc else {
         if name.is_empty() {
             // `n_plain` is `kMax_UInt` here: the positional arguments have not started.

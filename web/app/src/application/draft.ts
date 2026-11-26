@@ -657,8 +657,7 @@ export class SearchDraft {
     delete next[DB_HARD_MASK_FLAG];
     if (mode !== 'none') {
       const flag = mode === 'soft' ? DB_SOFT_MASK_FLAG : DB_HARD_MASK_FLAG;
-      const text = algorithm !== undefined ? algorithm : current.value;
-      next[flag] = text.trim() === '' ? true : text;
+      next[flag] = algorithm !== undefined ? algorithm : current.value;
     }
     this.set({
       database: Object.freeze({ ...database, filterValues: Object.freeze(next) }),
@@ -674,18 +673,12 @@ export class SearchDraft {
     this.setDatabaseMask(current.mode, text);
   }
 
-  /** Sets or clears a text or boolean database filter (`-taxids`, `-negative_taxids`, `-no_taxid_expansion`, `-db_soft_mask`, `-db_hard_mask`). */
+  /** Sets or clears a text or boolean database filter (`-taxids`, `-negative_taxids`, `-no_taxid_expansion`). */
   setDatabaseFilter(flag: string, value: string | boolean): void {
     const { database } = this.state.get();
     const next: Record<string, string | boolean> = { ...database.filterValues };
-    const clearing = value === false || (typeof value === 'string' && value.trim() === '');
-    if (clearing) {
-      delete next[flag];
-    } else {
-      if (flag === DB_SOFT_MASK_FLAG) delete next[DB_HARD_MASK_FLAG];
-      else if (flag === DB_HARD_MASK_FLAG) delete next[DB_SOFT_MASK_FLAG];
-      next[flag] = value;
-    }
+    if (value === false || (typeof value === 'string' && value.trim() === '')) delete next[flag];
+    else next[flag] = value;
     this.set({
       database: Object.freeze({ ...database, filterValues: Object.freeze(next) }),
       message: undefined,

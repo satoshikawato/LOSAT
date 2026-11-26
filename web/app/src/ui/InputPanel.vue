@@ -33,7 +33,6 @@ import {
   dbMaskMissingMessage,
   dbMaskPlaceholder,
   dbMaskState,
-  isWindowMaskerTaxidActive,
   noTaxidExpansionConflicts,
   type DatabaseFilterField,
   type DbMaskMode,
@@ -215,7 +214,7 @@ const dbFilterGroups = computed(() => {
 const noTaxidConflicts = computed(() =>
   noTaxidExpansionConflicts({
     program: props.state.program,
-    windowMaskerTaxidActive: isWindowMaskerTaxidActive(props.state.program, props.state.values[props.state.program]),
+    values: props.state.values[props.state.program],
     filterFiles: props.state.database.filterFiles,
   }),
 );
@@ -258,6 +257,17 @@ watch(
     if (refused) dbFiltersOpen.value = true;
   },
   { immediate: true },
+);
+watch(
+  () => props.state.message,
+  (message) => {
+    if (
+      isDatabase.value &&
+      (message?.text === dbMaskMissingMessage('soft') || message?.text === dbMaskMissingMessage('hard'))
+    ) {
+      dbFiltersOpen.value = true;
+    }
+  },
 );
 function onDbFiltersToggle(event: Event): void {
   dbFiltersOpen.value = (event.target as HTMLDetailsElement).open;

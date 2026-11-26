@@ -245,6 +245,8 @@ describe('blast-db domain discovery & directory assembly', () => {
   it('resolves database masking state, placeholders, and -no_taxid_expansion conflicts (WW4)', () => {
     expect(dbMaskState({})).toEqual({ mode: 'none', value: '' });
     expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: true })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: '' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: ' ' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: ' ' });
     expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: '11' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '11' });
     expect(dbMaskState({ [DB_HARD_MASK_FLAG]: 'seg' })).toEqual({ mode: 'hard', flag: DB_HARD_MASK_FLAG, value: 'seg' });
     // Soft takes precedence if both were somehow present (matching NCBI DbMaskArgs::option).
@@ -264,14 +266,16 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(isWindowMaskerTaxidActive('blastn', { [WINDOW_MASKER_FLAG]: 'counts.obinary' })).toBe(false);
     expect(isWindowMaskerTaxidActive('blastp', { [WINDOW_MASKER_TAXID_FLAG]: '562' })).toBe(false);
 
-    expect(noTaxidExpansionConflicts({ program: 'blastn', windowMaskerTaxidActive: true, filterFiles: {} })).toEqual([
-      WINDOW_MASKER_TAXID_FLAG,
-    ]);
-    expect(noTaxidExpansionConflicts({ program: 'blastp', windowMaskerTaxidActive: true, filterFiles: {} })).toEqual([]);
+    expect(
+      noTaxidExpansionConflicts({ program: 'blastn', values: { [WINDOW_MASKER_TAXID_FLAG]: '562' }, filterFiles: {} }),
+    ).toEqual([WINDOW_MASKER_TAXID_FLAG]);
+    expect(
+      noTaxidExpansionConflicts({ program: 'blastp', values: { [WINDOW_MASKER_TAXID_FLAG]: '562' }, filterFiles: {} }),
+    ).toEqual([]);
     expect(
       noTaxidExpansionConflicts({
         program: 'blastn',
-        windowMaskerTaxidActive: false,
+        values: {},
         filterFiles: { '-seqidlist': diskFile('s.txt', '1'), '-taxidlist': diskFile('t.txt', '9606'), '-ipglist': diskFile('i.txt', '1') },
       }),
     ).toEqual(['-seqidlist']);
@@ -621,25 +625,35 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     // Turning on soft mask without an algorithm blocks run until filled.
     draft.setDatabaseMask('soft');
     await draft.idle();
-    expect(maskPair()).toEqual([true, undefined]);
+    expect(maskPair()).toEqual(['', undefined]);
     expect(draft.readiness()).toBe('Enter a database soft mask algorithm ID or name.');
 
-    draft.setDatabaseMaskAlgorithm('11');
+    // Typing a leading space keeps the raw text in the draft while still blocking run and omitting argv.
+    draft.setDatabaseMaskAlgorithm(' ');
+    await draft.idle();
+    expect(maskPair()).toEqual([' ', undefined]);
+    expect(dbMaskState(draft.state.get().database.filterValues).value).toBe(' ');
+    expect(draft.readiness()).toBe('Enter a database soft mask algorithm ID or name.');
+    expect(draft.parameters().some(([flag]) => flag === DB_SOFT_MASK_FLAG)).toBe(false);
+
+    draft.setDatabaseMaskAlgorithm(' 11 ');
     await draft.idle();
     expectReady(draft);
-    expect(maskPair()).toEqual(['11', undefined]);
+    expect(maskPair()).toEqual([' 11 ', undefined]);
+    expect(draft.parameters()).toContainEqual([DB_SOFT_MASK_FLAG, '11']);
 
     // Switching to hard mask moves the value and removes -db_soft_mask.
     draft.setDatabaseMask('hard');
     await draft.idle();
     expectReady(draft);
-    expect(maskPair()).toEqual([undefined, '11']);
+    expect(maskPair()).toEqual([undefined, ' 11 ']);
 
-    // Submitting passes -db_hard_mask 11 in argv (and never -db_soft_mask).
+    // Submitting passes -db_hard_mask 11 (trimmed) in argv and never -db_soft_mask.
     const runSearch = () => submitAndWait(draft, coordinator);
     await runSearch();
     expect(runCalls[0]!.argv).toContain(DB_HARD_MASK_FLAG);
     expect(runCalls[0]!.argv).toContain('11');
+    expect(runCalls[0]!.argv).not.toContain(' 11 ');
     expect(runCalls[0]!.argv).not.toContain(DB_SOFT_MASK_FLAG);
 
     // Switching to FASTA mode omits DB masking flags from argv while keeping draft values.
@@ -726,5 +740,40 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       expect(submitted.message).toContain("Incompatible with argument:  'no_taxid_expansion'");
     }
     expect(draft.state.get().message?.text).toContain("Incompatible with argument:  'no_taxid_expansion'");
+  });
+
+  it('pins explicit argv order of all database filter text, boolean, and list-file flags in parameters() (WW4)', async () => {
+    const { draft } = setup();
+    draft.setProgram('blastp');
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('protdb/p.pin', 'pin')]);
+    draft.setDatabaseFilter('-taxids', '9606');
+    draft.setDatabaseFilter('-negative_taxids', '10090');
+    draft.setDatabaseMask('soft', '21');
+    draft.setDatabaseFilter(NO_TAXID_EXPANSION_FLAG, true);
+    draft.setDatabaseFilterFile('-negative_ipglist', diskFile('neg_ipg.txt', '1\n'));
+    draft.setDatabaseFilterFile('-ipglist', diskFile('ipg.txt', '2\n'));
+    draft.setDatabaseFilterFile('-negative_gilist', diskFile('neg_gi.txt', '3\n'));
+    draft.setDatabaseFilterFile('-gilist', diskFile('gi.txt', '4\n'));
+    draft.setDatabaseFilterFile('-negative_taxidlist', diskFile('neg_tax.txt', '5\n'));
+    draft.setDatabaseFilterFile('-taxidlist', diskFile('tax.txt', '6\n'));
+    draft.setDatabaseFilterFile('-negative_seqidlist', diskFile('neg_seq.txt', '7\n'));
+    draft.setDatabaseFilterFile('-seqidlist', diskFile('seq.txt', '8\n'));
+    await draft.idle();
+
+    expect(draft.parameters()).toEqual([
+      ['-taxids', '9606'],
+      ['-negative_taxids', '10090'],
+      ['-db_soft_mask', '21'],
+      ['-no_taxid_expansion', true],
+      ['-seqidlist', 'seq.txt'],
+      ['-negative_seqidlist', 'neg_seq.txt'],
+      ['-taxidlist', 'tax.txt'],
+      ['-negative_taxidlist', 'neg_tax.txt'],
+      ['-gilist', 'gi.txt'],
+      ['-negative_gilist', 'neg_gi.txt'],
+      ['-ipglist', 'ipg.txt'],
+      ['-negative_ipglist', 'neg_ipg.txt'],
+    ]);
   });
 });

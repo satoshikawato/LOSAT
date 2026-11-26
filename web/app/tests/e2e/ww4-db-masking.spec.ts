@@ -212,8 +212,18 @@ test.describe('WW4 database masking & WindowMasker -db form controls', () => {
     await expect(maskAlg).toBeVisible();
     await expect(maskAlg).toHaveAttribute('placeholder', '11 or dust');
     await expect(page.getByTestId('db-mask-missing')).toHaveText('Enter a database soft mask algorithm ID or name.');
+    // Closing Database masking and filters and clicking Run auto-opens it to reveal the missing field.
+    await page.getByTestId('subject-db-filters-toggle').click();
+    await expect(maskAlg).toBeHidden();
     await submit(page);
     await expect(page.getByTestId('search-message')).toHaveText('Enter a database soft mask algorithm ID or name.');
+    await expect(page.getByTestId('subject-db-filters')).toHaveAttribute('open', '');
+    await expect(maskAlg).toBeVisible();
+
+    // Typing a leading space does not vanish while editing; blank text still prompts until a value is entered.
+    await maskAlg.fill(' ');
+    await expect(maskAlg).toHaveValue(' ');
+    await expect(page.getByTestId('db-mask-missing')).toHaveText('Enter a database soft mask algorithm ID or name.');
 
     await maskAlg.fill('30');
     await expect(page.getByTestId('db-mask-missing')).toHaveCount(0);

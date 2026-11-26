@@ -60,12 +60,29 @@ export const DB_ID_LIST_FILE_FIELDS: readonly DatabaseFilterField[] = Object.fre
   { flag: '-negative_ipglist', label: 'Exclude IPG list', kind: 'file' },
 ]);
 
-/** Database filter options whose value is a list file mounted by name into the run directory. */
-export const DB_FILE_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
-  ...DB_ID_LIST_FILE_FIELDS.slice(0, 2),
-  ...DB_TAXONOMY_FILE_FIELDS,
-  ...DB_ID_LIST_FILE_FIELDS.slice(2),
-]);
+const DB_FILE_FILTER_BY_FLAG: ReadonlyMap<string, DatabaseFilterField> = new Map(
+  [...DB_TAXONOMY_FILE_FIELDS, ...DB_ID_LIST_FILE_FIELDS].map((field) => [field.flag, field]),
+);
+
+/**
+ * Explicit argv order for database list-file filter options mounted into the run directory,
+ * independent of how fields are grouped in the UI.
+ */
+const DB_FILE_FILTER_ARGV_ORDER = [
+  '-seqidlist',
+  '-negative_seqidlist',
+  '-taxidlist',
+  '-negative_taxidlist',
+  '-gilist',
+  '-negative_gilist',
+  '-ipglist',
+  '-negative_ipglist',
+] as const;
+
+/** Database filter options whose value is a list file mounted by name into the run directory, in argv order. */
+export const DB_FILE_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze(
+  DB_FILE_FILTER_ARGV_ORDER.map((flag) => DB_FILE_FILTER_BY_FLAG.get(flag)!),
+);
 
 /** Database filter options that take text values (comma-separated taxids or masking algorithm IDs/names). */
 export const DB_TEXT_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
@@ -106,11 +123,11 @@ export const NO_TAXID_EXPANSION_WM_CONFLICT =
 /** Active database masking selection (`-db_soft_mask` vs `-db_hard_mask`, mutually exclusive). */
 export function dbMaskState(filterValues: Readonly<Record<string, string | boolean>>): DbMaskState {
   const soft = filterValues[DB_SOFT_MASK_FLAG];
-  if (soft === true || (typeof soft === 'string' && soft.trim() !== '')) {
+  if (soft === true || typeof soft === 'string') {
     return Object.freeze({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: typeof soft === 'string' ? soft : '' });
   }
   const hard = filterValues[DB_HARD_MASK_FLAG];
-  if (hard === true || (typeof hard === 'string' && hard.trim() !== '')) {
+  if (hard === true || typeof hard === 'string') {
     return Object.freeze({ mode: 'hard', flag: DB_HARD_MASK_FLAG, value: typeof hard === 'string' ? hard : '' });
   }
   return Object.freeze({ mode: 'none', value: '' });
@@ -145,11 +162,11 @@ export function isWindowMaskerTaxidActive(
  */
 export function noTaxidExpansionConflicts(input: {
   readonly program: ProgramId;
-  readonly windowMaskerTaxidActive: boolean;
+  readonly values: Readonly<Record<string, string | boolean>>;
   readonly filterFiles: Readonly<Record<string, unknown>>;
 }): readonly string[] {
   const conflicts: string[] = [];
-  if (input.program === 'blastn' && input.windowMaskerTaxidActive) {
+  if (isWindowMaskerTaxidActive(input.program, input.values)) {
     conflicts.push(WINDOW_MASKER_TAXID_FLAG);
   }
   for (const flag of NO_TAXID_EXPANSION_INCOMPATIBLE_LIST_FLAGS) {

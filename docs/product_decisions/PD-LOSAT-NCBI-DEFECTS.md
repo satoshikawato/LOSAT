@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.114
+- Version: 1.115
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -818,15 +818,34 @@
   NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
-  1.114 2026-11-26 (BLASTN query chunks, line RG item X-chunk: unifies BLASTN's split-batch steps on
+  1.114 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
+  not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
+  batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
+  the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
+  1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
+  at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.113 (psiblast line item PS14); first 1.101, then 1.103 at the
+  merge of dev that brought line RG item KC-11d's 1.100, exception 30's 1.101 and psiblast line
+  item PS10e's 1.102, then 1.104 at the merge of dev that brought line RG item K10a's 1.103, then
+  1.106 at the merge of dev that brought line NP item M4b-T3's 1.104 and psiblast line item PS10b's
+  1.105, then 1.107 at the merge of dev that brought line NP item M4b-3c part 2's 1.106, then 1.108
+  at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
+  brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
+  1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
+  1.115 2026-11-26 (BLASTN query chunks, line RG item X-chunk: unifies BLASTN's split-batch steps on
   `SplitBatchSteps` (`without_resplit_stop()`), keeps 64-bit wrapping `size_t` chunk-range
   arithmetic in `query_split.rs` across all three empty-chunk shapes (including exact-overlap
   `L <= overlap` and unwrapped negative pairs reaching or passing L before the last chunk), checks
-  split chunks in duplicate-id batch setup with batch validity and shared chunk masks, and clarifies
-  in approved exception 1 that re-splitting chunks apply only when every chunk holds a query;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.113 at
-  the merge of dev that brought psiblast line item PS14's 1.113; first 1.105, then 1.106, 1.107,
-  1.108 and 1.113)
+  split chunks in duplicate-id batch setup with batch validity, shared chunk registry loads
+  (`WindowMasker::load_posts`) and chunk masks, and clarifies in approved exception 1 that
+  re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.114 at the merge of dev that
+  brought line DBID item pfoff-7's 1.114; first 1.105, then 1.106, 1.107, 1.108, 1.113 and 1.114)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2629,7 +2648,7 @@ file would differ, and NCBI's programs still could not open the database).
   wrapped `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
   variables and so does LOSAT (fixtures `env.negative_pair_*`). Since versions 1.110 (line RG item
-  X-short-bat-2, rows `db.xs.blastn.bat.*`) and 1.114 (line RG item X-chunk, rows `db.xc.*`), in
+  X-short-bat-2, rows `db.xs.blastn.bat.*`) and 1.115 (line RG item X-chunk, rows `db.xc.*`), in
   BLASTN, as in TBLASTN (1.97) and BLASTP (1.98), the gap rejection comes after earlier batches'
   reports and prologs, at the first chunk with a valid context with subjects in hand, after that
   chunk's masking, setup checks (`e_nF`, average subject length) and database sequence-file read
@@ -2648,7 +2667,7 @@ file would differ, and NCBI's programs still could not open the database).
   every thread count before any chunk is masked, set up, or searched, after earlier batches'
   reports and prologs (in `-outfmt` 0, 15, 16 and 20 on batch 1, and all formats on batch 2, with
   `-subject` outfmt 15/16 holding back the previous query). Since versions 1.110 (line RG item
-  X-short-bat-2, rows `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`) and 1.114 (line
+  X-short-bat-2, rows `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`) and 1.115 (line
   RG item X-chunk, rows `db.xc.*` of `blastn.xc.tsv`, `tests/blastn_chunk_stops.rs`; round-3 audit:
   27 oracle cases, plus 461 official 2.17.0 probe runs across all four tasks, `-db` and `-subject`,
   1 and 4 threads), LOSAT rejects "a query chunk without a query" at that exact step in BLASTN,

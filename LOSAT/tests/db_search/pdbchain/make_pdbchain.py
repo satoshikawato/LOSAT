@@ -164,16 +164,39 @@ TAXIDS = [9606, 10090, 9606, 10090, 9606, 10090]
 TWO_LINES = [("1AB1", None), ("1AB2", "t0")]
 
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
-DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False, "pdbtwo": False, "pdbn": False}
+DATABASES = {
+    "pdbchain": True,
+    "pdbonly": False,
+    "pdbnorm": False,
+    "pdbtwo": False,
+    "pdbn": False,
+    "pdbnonly": False,
+}
 
 # One codon per letter: the back-translation of `pdbn` and `q_pdb1ab1.fna`.
 BACK = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGC", "H": "CAC",
         "I": "ATC", "L": "CTG", "K": "AAA", "M": "ATG", "F": "TTC", "P": "CCG", "S": "TCT", "T": "ACC", "W": "TGG",
         "Y": "TAC", "V": "GTG"}
 
+CODON = {
+    a + b + c: aa
+    for (a, b, c), aa in zip(
+        ((a, b, c) for a in "TCAG" for b in "TCAG" for c in "TCAG"),
+        "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG",
+    )
+}
+
 
 def back(protein):
     return "".join(BACK[c] for c in protein)
+
+
+def revcomp(dna):
+    return dna[::-1].translate(str.maketrans("ACGT", "TGCA"))
+
+
+def translate_no_stop(dna):
+    return "".join(CODON[dna[k:k + 3]] for k in range(0, len(dna) - 2, 3)).replace("*", "")
 
 
 def ctx(tag, content):
@@ -225,11 +248,13 @@ def with_first_pdb(record, mol, chain):
     return record[:at] + b"\xae\x80\x30\x80" + new + b"\x00\x00\x00\x00" + record[end:]
 
 
-def patch(base, db):
-    """Rewrites the stored deflines of the version 4 protein database `base` (one record each of CHAINS, or
-    of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`) and the header offsets of its index file."""
-    rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES}.get(db, CHAINS)
-    index = bytearray(open(f"{base}.pin", "rb").read())
+def patch(base, db, nucl=False):
+    """Rewrites the stored deflines of the version 4 database `base` (one record each of CHAINS, or
+    of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`, of CHAINS[:1] for `pdbnonly`) and the
+    header offsets of its index file."""
+    rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES, "pdbnonly": CHAINS[:1]}.get(db, CHAINS)
+    idx_ext, hdr_ext = ("nin", "nhr") if nucl else ("pin", "phr")
+    index = bytearray(open(f"{base}.{idx_ext}", "rb").read())
     version, = struct.unpack(">I", index[0:4])
     assert version == 4, version
     at = 8
@@ -239,7 +264,7 @@ def patch(base, db):
     assert count == len(rows), count
     at += 4 + 8 + 4  # count, total length, longest sequence
     offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
-    headers = open(f"{base}.phr", "rb").read()
+    headers = open(f"{base}.{hdr_ext}", "rb").read()
     records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
     if db == "pdbnorm":
         records = [with_pdb(record, mol, chain, rel, chain_id)
@@ -252,15 +277,17 @@ def patch(base, db):
     for record in records:
         offsets.append(offsets[-1] + len(record))
     index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
-    open(f"{base}.phr", "wb").write(b"".join(records))
-    open(f"{base}.pin", "wb").write(bytes(index))
+    open(f"{base}.{hdr_ext}", "wb").write(b"".join(records))
+    open(f"{base}.{idx_ext}", "wb").write(bytes(index))
 
 
-def patch_keys(base, db):
-    """Rewrites the chain letter that ends the keys of the sequence index `base.psd` (`1ab1 a`, `1ab1|a`,
-    `pdb|1ab1|a`; text lines `key\\x02oid\\n`) to the low byte of the stored chain, for the records without a
-    chain-id (`pdbnorm`'s with one keep the keys of their chain-id, the FASTA letter)."""
-    lines = open(f"{base}.psd", "rb").read().split(b"\n")
+def patch_keys(base, db, nucl=False):
+    """Rewrites the chain letter that ends the keys of the sequence index `base.psd`/`base.nsd`
+    (`1ab1 a`, `1ab1|a`, `pdb|1ab1|a`; text lines `key\\x02oid\\n`) to the low byte of the stored
+    chain, for the records without a chain-id (`pdbnorm`'s with one keep the keys of their
+    chain-id, the FASTA letter)."""
+    sd_ext = "nsd" if nucl else "psd"
+    lines = open(f"{base}.{sd_ext}", "rb").read().split(b"\n")
     assert lines[-1] == b"", lines[-1]
     out = []
     for line in lines[:-1]:
@@ -278,7 +305,7 @@ def patch_keys(base, db):
         if key[-2:] in (b" " + letter, b"|" + letter):
             key = key[:-1] + low
         out.append(key + b"\x02" + oid)
-    open(f"{base}.psd", "wb").write(b"\n".join(out) + b"\n")
+    open(f"{base}.{sd_ext}", "wb").write(b"\n".join(out) + b"\n")
 
 
 def record_letters(seq, k):
@@ -300,6 +327,12 @@ def main(ncbi_bin, names):
         f.write(">pdb|1AB1|A query title\n" + seq + "\n")
     with open(os.path.join(HERE, "q_pdb1ab1.fna"), "w") as f:
         f.write(">pdb|1AB1|A query title\n" + back(seq) + "\n")
+    with open(os.path.join(HERE, "q_pdbn_minus.faa"), "w") as f:
+        f.write(">qminus minus frame of pdbnonly\n" + translate_no_stop(revcomp(back(record_letters(seq, 0)))) + "\n")
+    with open(os.path.join(HERE, "q_pdb1ab1_tail.fna"), "w") as f:
+        f.write(">pdb|1AB1|A short tail query\n" + back(seq)[360:660] + "\n")
+    with open(os.path.join(HERE, "q_pdb1ab1_straddle.fna"), "w") as f:
+        f.write(">pdb|1AB1|A straddle query\n" + back(seq)[150:451] + "\n")
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
         if db == "pdbn":
@@ -309,6 +342,17 @@ def main(ncbi_bin, names):
             subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
                             "-blastdb_version", "4", "-title", db, "-out", os.path.join(HERE, db)],
                            check=True, env=env, stdout=subprocess.DEVNULL)
+            continue
+        if db == "pdbnonly":
+            name, letter, _ = CHAINS[0]
+            with open(fasta, "w") as f:
+                f.write(f">pdb|{name}|{letter}\n" + back(record_letters(seq, 0)) + "\n")
+            base = os.path.join(HERE, db)
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
+                            "-blastdb_version", "4", "-title", db, "-out", base],
+                           check=True, env=env, stdout=subprocess.DEVNULL)
+            patch(base, db, nucl=True)
+            patch_keys(base, db, nucl=True)
             continue
         if db == "pdbtwo":
             lines = [f"pdb|{mol}|B{'' if title is None else ' ' + title}\x01pdb|{mol}|A t1"

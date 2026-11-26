@@ -2696,6 +2696,7 @@ fn check_tabular_lookups(
                     subject_records[s_idx].shown_id(),
                 ),
             },
+            crate::blastinput::app::Program::Blastp,
             application,
         );
         format.refusal.check(checked)?;

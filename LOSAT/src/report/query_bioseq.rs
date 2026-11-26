@@ -321,6 +321,20 @@ pub fn ncbi_frame(plus: bool, start1: i32, bioseq_len: usize) -> i32 {
     }
 }
 
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:288-310
+// NCBI reference (598d8ae6): c++/include/objmgr/seq_vector_ci.hpp:517-525
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:631-644,720-728
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-901
+/// Whether TBLASTX's `qseq` throws `CAlnException::eTranslateFailure` when `GetWholeAlnSeqString`
+/// translates the subject row's alignment slice (`[start0, end)` in 0-based nucleotide coordinates,
+/// strand `plus`) of a found query Bioseq of length `seen_len`: `CSeqVector` clips at `seen_len`
+/// (empty when `start0 >= seen_len` on plus, or when a minus-strand slice passes `seen_len` and
+/// its reversed start wraps below zero), so only a plus-strand HSP straddling `seen_len` with a
+/// clipped length not divisible by 3 throws.
+pub fn tblastx_qseq_throws(plus: bool, start0: usize, end: usize, seen_len: usize) -> bool {
+    plus && start0 < seen_len && seen_len < end && !(seen_len - start0).is_multiple_of(3)
+}
+
 /// The subject index of a row whose subject the scope finds as a query in a check of the rows of
 /// a report (`report::tabular::check_failed_lookups`, [`SeenFrom::row`]): no lookup of the
 /// query's Bioseq fails, so the check's `failure` gives `None` for it.
@@ -338,9 +352,10 @@ pub(crate) const SEEN_ROW: usize = usize::MAX;
 ///   outside BLASTN also `mismatch`, `pident`, `nident`; in BLASTN `qseq` combined with
 ///   `mismatch`, `pident` or `nident`, which enters the sequence block and recomputes identities
 ///   from the found Bioseq; in TBLASTN `qseq`, which translates the protein query Bioseq and
-///   throws) keep LOSAT's refusal. `qseq` alone in BLASTP, BLASTN and (when the query Bioseq
-///   covers the subject alignment range) TBLASTX reads the real query's letters; `sframe` and
-///   `frames` in TBLASTX and TBLASTN compute the frame from `QueryBioseq::length`.
+///   throws) keep LOSAT's refusal. `qseq` alone in BLASTP, BLASTN and (except when a plus-strand
+///   subject HSP straddles the found query Bioseq's length with a clipped length not divisible by
+///   3, [`tblastx_qseq_throws`]) TBLASTX reads the real query's letters; `sframe` and `frames` in
+///   TBLASTX and TBLASTN compute the frame from `QueryBioseq::length`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1085
 pub(crate) fn tabular_shows(

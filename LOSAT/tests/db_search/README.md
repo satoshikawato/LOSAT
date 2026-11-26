@@ -2798,6 +2798,12 @@ item 12, F2; rows `db.pdbchain.seen.n.*` of TBLASTN, BLASTN and TBLASTX) is the 
 two records back-translated, with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb writes them, and
 `pdbchain/q_pdb1ab1.fna` the nucleotide query `pdb|1AB1|A` of the same letters back-translated (also BLASTX's against
 `pdbonly`, rows `db.pdbchain.seen.only.blastx.*`): NCBI's scope finds the query for `1AB1` in each program.
+`pdbchain/pdbnonly` (rows `db.pdbchain.nonly.tblastn.*`) is the one-sequence nucleotide database of `1AB1` with chain 321
+and no `chain-id` (empty Bioseq handle), paired with `q_pdb1ab1.faa` (plus-strand rows: `GetFrame` computes `(start % 3) + 1`
+without touching the handle) and `q_pdbn_minus.faa` (minus-strand row: `GetFrame` throws `CCoreException::eNullPtr`).
+`q_pdb1ab1_tail.fna` (300 bases from offset 360) and `q_pdb1ab1_straddle.fna` (301 bases from offset 150) test TBLASTX `qseq`
+against `pdbn` when a plus-strand HSP starts past the found query Bioseq's length (empty clipped slice, exit 0) vs straddles
+it with a clipped length not divisible by 3 (`eTranslateFailure`, refused).
 `descid/` (line RG-KB item 12, review 2 N2 and review 3 F3; rows `db.pd.n2.*`): the `-subject` sets `lng.fa` (protein) and
 `nlng.fa` (nucleotide) of `gb|AAA00001.1|` and a record whose `gnl` description id is longer than 65 bytes, and the queries
 `q_r0.faa` and `q_r0.fna`: with `-num_descriptions 1` the long id's description line is not printed, so NCBI's output

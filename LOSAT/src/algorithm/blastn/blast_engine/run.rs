@@ -5301,7 +5301,8 @@ fn check_tabular_lookups(
                     report.subjects.records()[s_idx].shown_id(),
                 ),
             },
-            "BLASTN",
+            crate::blastinput::app::Program::Blastn,
+            crate::blastinput::app::Program::Blastn.name(),
         );
         output.refusal.check(checked)?;
     }

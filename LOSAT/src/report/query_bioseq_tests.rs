@@ -287,3 +287,21 @@ fn hides_ordinal_requires_every_reporting_query() {
     assert!(seen.numbered_from(0).hides_ordinal([0], 3));
     assert!(!seen.numbered_from(1).hides_ordinal([0], 3));
 }
+
+#[test]
+fn tblastx_qseq_throws_matches_seqvector_clipping() {
+    // Inside the found query Bioseq (`end <= len`): never throws.
+    assert!(!tblastx_qseq_throws(true, 0, 300, 300));
+    assert!(!tblastx_qseq_throws(false, 0, 300, 300));
+    // Plus-strand HSP starting at or past `len` (`s3` shape): empty slice -> no throw.
+    assert!(!tblastx_qseq_throws(true, 300, 450, 300));
+    assert!(!tblastx_qseq_throws(true, 319, 469, 300));
+    // Minus-strand HSP past or straddling `len` (`s6` shape): wrapped start -> empty -> no throw.
+    assert!(!tblastx_qseq_throws(false, 330, 480, 300));
+    assert!(!tblastx_qseq_throws(false, 292, 478, 300));
+    assert!(!tblastx_qseq_throws(false, 250, 400, 300));
+    // Plus-strand HSP straddling `len`: throws iff `(len - start0) % 3 != 0`.
+    assert!(!tblastx_qseq_throws(true, 249, 399, 300)); // 51 % 3 == 0
+    assert!(tblastx_qseq_throws(true, 250, 400, 300)); // 50 % 3 == 2
+    assert!(tblastx_qseq_throws(true, 251, 401, 300)); // 49 % 3 == 1
+}

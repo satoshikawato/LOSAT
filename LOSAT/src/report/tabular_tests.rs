@@ -1179,6 +1179,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         [vec![0, 1], vec![1, 0]],
         record,
         |s_idx| failed_record_title(s_idx, b"Subject_9"),
+        crate::blastinput::app::Program::Blastn,
         "BLASTN",
     );
     assert!(result
@@ -1190,6 +1191,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         [vec![0, 1], vec![0, 1]],
         record,
         |s_idx| failed_record_title(s_idx, b"x"),
+        crate::blastinput::app::Program::Blastn,
         "BLASTN",
     )
     .is_ok());
@@ -1381,12 +1383,15 @@ fn table_counts_leave_out_the_query_rows_end_gaps() {
     assert_eq!(counts(190, 0, 0, &[]), (190, 0, 0));
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-1028
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-1085
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
 // Without a subject-block field, an empty subject handle is not caught in `SetFields`' subject
-// block; NCBI throws in `CAlnVec::GetWholeAlnSeqString` on the subject row (or `GetBioseqHandle`
-// in `GetFrame` for translated-subject minus-strand HSPs). With a subject-block field (such as
-// `sseqid`), NCBI catches the empty handle and prints its fallback row.
+// block; NCBI throws `CAlnException::eInvalidSeqId` in `CAlnVec::GetWholeAlnSeqString` on the
+// subject row, or `CCoreException::eNullPtr` in `CAlignFormatUtil::GetFrame` for translated-subject
+// minus-strand HSPs (plus-strand HSPs compute `(start % 3) + 1` without touching the handle). With
+// a subject-block field (such as `sseqid`), NCBI catches the empty handle and prints its fallback
+// row.
 #[test]
 fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
     use crate::blastinput::app::Program;
@@ -1408,10 +1413,16 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
     assert!(!spec("sseqid qseq").empty_handle_throws(Program::Blastn));
     assert!(!spec("stitle pident").empty_handle_throws(Program::Blastx));
     assert!(!spec("sseqid sframe qstart").empty_handle_throws(Program::Tblastx));
-    assert!(
-        failed_lookup_stop_for(Some(&spec("sseqid sseq")), empty, true, Program::Blastp).is_none()
-    );
-    // Without a subject-block field, sequence/scoring fields throw on empty handle.
+    assert!(failed_lookup_stop_for(
+        Some(&spec("sseqid sseq")),
+        empty,
+        true,
+        Program::Blastp,
+        false
+    )
+    .is_none());
+    // Without a subject-block field, sequence/scoring fields throw an alignment exception on empty
+    // handle regardless of strand.
     for fields in [
         "qseqid sseq",
         "qseqid qseq",
@@ -1427,22 +1438,21 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
             Program::Tblastx,
         ] {
             assert!(
-                spec(fields).empty_handle_throws(program),
+                spec(fields).empty_handle_reads_letters(program),
                 "{fields} {program:?}"
             );
+            let reason =
+                failed_lookup_stop_for(Some(&spec(fields)), empty, false, program, false).unwrap();
+            assert!(reason.contains("alignment exception"), "{reason}");
             assert!(
-                failed_lookup_stop_for(Some(&spec(fields)), empty, false, program).is_some(),
-                "{fields} {program:?}"
-            );
-            assert!(
-                failed_lookup_stop_for(Some(&spec(fields)), plain, false, program).is_none(),
+                failed_lookup_stop_for(Some(&spec(fields)), plain, false, program, false).is_none(),
                 "{fields} {program:?}"
             );
         }
     }
     // `pident`/`nident`/`mismatch` throw outside BLASTN, and do not throw in BLASTN alone.
     for fields in ["qseqid pident", "qseqid nident", "qseqid mismatch"] {
-        assert!(!spec(fields).empty_handle_throws(Program::Blastn));
+        assert!(!spec(fields).empty_handle_reads_letters(Program::Blastn));
         for program in [
             Program::Blastp,
             Program::Blastx,
@@ -1450,19 +1460,67 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
             Program::Tblastx,
         ] {
             assert!(
-                spec(fields).empty_handle_throws(program),
+                spec(fields).empty_handle_reads_letters(program),
                 "{fields} {program:?}"
             );
         }
     }
-    // `sframe`/`frames` with an `opens_counts` field throw for translated subjects only.
+    // `sframe`/`frames` with an `opens_counts` field throw a null pointer exception for
+    // translated-subject minus-strand HSPs only; plus-strand HSPs do not stop.
     for fields in ["qseqid qstart sframe", "qseqid length frames"] {
-        assert!(spec(fields).empty_handle_throws(Program::Tblastn));
-        assert!(spec(fields).empty_handle_throws(Program::Tblastx));
-        assert!(!spec(fields).empty_handle_throws(Program::Blastp));
-        assert!(!spec(fields).empty_handle_throws(Program::Blastn));
-        assert!(!spec(fields).empty_handle_throws(Program::Blastx));
+        let s = spec(fields);
+        assert!(s.empty_handle_reads_minus_frame(Program::Tblastn));
+        assert!(s.empty_handle_reads_minus_frame(Program::Tblastx));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastp));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastn));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastx));
+        for program in [Program::Tblastn, Program::Tblastx] {
+            assert!(
+                failed_lookup_stop_for(Some(&s), empty, true, program, false).is_none(),
+                "plus-strand row must not stop for {fields} in {program:?}"
+            );
+            let reason = failed_lookup_stop_for(Some(&s), empty, false, program, true).unwrap();
+            assert!(
+                reason.contains("null pointer exception") && reason.contains("minus-strand"),
+                "{reason}"
+            );
+        }
     }
+    // `check_failed_lookups` passes when every empty-handle row is plus-strand and refuses when
+    // any empty-handle row is minus-strand.
+    let frame_spec = spec("qseqid qstart sframe");
+    assert!(check_failed_lookups(
+        Some(&frame_spec),
+        [[CheckedRow {
+            subject: 0,
+            minus_subject_frame: false,
+        }]],
+        |_| Some(empty),
+        |_| "database sequence 0".to_string(),
+        Program::Tblastn,
+        "TBLASTN",
+    )
+    .is_ok());
+    let err = check_failed_lookups(
+        Some(&frame_spec),
+        [[
+            CheckedRow {
+                subject: 0,
+                minus_subject_frame: false,
+            },
+            CheckedRow {
+                subject: 0,
+                minus_subject_frame: true,
+            },
+        ]],
+        |_| Some(empty),
+        |_| "database sequence 0".to_string(),
+        Program::Tblastn,
+        "TBLASTN",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("null pointer exception"), "{err}");
     // Standalone `sframe`/`frames` never open the alignment block.
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastn));

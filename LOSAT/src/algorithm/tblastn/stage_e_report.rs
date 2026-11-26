@@ -542,7 +542,14 @@ pub(super) fn render(
                         .lists()
                         .iter()
                         .filter(|list| !list.hsps.hsps.is_empty())
-                        .map(move |list| row(q_idx, list.oid as usize))
+                        .map(move |list| crate::report::tabular::CheckedRow {
+                            subject: row(q_idx, list.oid as usize),
+                            minus_subject_frame: list
+                                .hsps
+                                .hsps
+                                .iter()
+                                .any(|linked| linked.hsp.frame < 0),
+                        })
                 }),
                 |s_idx| {
                     if s_idx == crate::report::query_bioseq::SEEN_ROW {
@@ -571,7 +578,8 @@ pub(super) fn render(
                         subject_records[s_idx].shown_id(),
                     ),
                 },
-                "TBLASTN",
+                crate::blastinput::app::Program::Tblastn,
+                crate::blastinput::app::Program::Tblastn.name(),
             );
             format.refusal.check(checked)?;
         }

@@ -2357,7 +2357,10 @@ fn write_tblastx_outputs(
                 (0..run.queries.len()).map(|q_idx| {
                     hits.iter()
                         .filter(move |hsp| hsp.hit.q_idx as usize == q_idx)
-                        .map(move |hsp| row(q_idx, hsp.hit.s_idx as usize))
+                        .map(move |hsp| crate::report::tabular::CheckedRow {
+                            subject: row(q_idx, hsp.hit.s_idx as usize),
+                            minus_subject_frame: hsp.subject_frame < 0,
+                        })
                 }),
                 |s_idx| {
                     if s_idx == crate::report::query_bioseq::SEEN_ROW {
@@ -2384,7 +2387,8 @@ fn write_tblastx_outputs(
                         run.subjects[s_idx].shown_id(),
                     ),
                 },
-                "TBLASTX",
+                crate::blastinput::app::Program::Tblastx,
+                crate::blastinput::app::Program::Tblastx.name(),
             );
             output.refusal.check(checked)?;
         }
@@ -3461,14 +3465,17 @@ fn x_pipe_plan(
     plan
 }
 
+// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:288-310
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:631-644,720-728
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-901
 // With `qseq` in TBLASTX, `GetWholeAlnSeqString` on the subject row translates the found query
-// Bioseq at the subject's alignment range and throws `eTranslateFailure` when a clipped slice is
-// not a multiple of 3; refuse when an HSP reaches past the found query Bioseq's length.
+// Bioseq at the subject's alignment range and throws `eTranslateFailure` only for a plus-strand
+// HSP straddling the found query Bioseq's length with a clipped length not divisible by 3
+// (`report::query_bioseq::tblastx_qseq_throws`).
 fn refuse_tblastx_qseq_past_seen_query_len(
     formats: &[report::TblastxOutputFormat],
     reports: &BatchReports<'_>,
-    spans: impl IntoIterator<Item = (usize, u32, usize)>,
+    spans: impl IntoIterator<Item = (usize, u32, bool, usize, usize)>,
     scopes: &crate::blastinput::query_batch::QueryScopes,
     oid: impl Fn(u32) -> crate::seqdb::Oid,
 ) -> Result<()> {
@@ -3485,9 +3492,10 @@ fn refuse_tblastx_qseq_past_seen_query_len(
         return Ok(());
     }
     let titles = reports.titles.borrow();
-    for (query, ordinal, subject_end) in spans {
+    for (query, ordinal, plus, start0, end) in spans {
         if let Some(bioseq) = seen.of(query, ordinal) {
-            if subject_end > bioseq.length() {
+            if crate::report::query_bioseq::tblastx_qseq_throws(plus, start0, end, bioseq.length())
+            {
                 if let Some(crate::algorithm::common::database::ReportedHeader::Parsed(subject)) =
                     titles.get(&ordinal)
                 {
@@ -4061,6 +4069,8 @@ fn run_batch_loop(
                         (
                             start + hsp.hit.q_idx as usize,
                             hsp.hit.s_idx,
+                            hsp.subject_frame > 0,
+                            hsp.hit.s_start.min(hsp.hit.s_end).saturating_sub(1),
                             hsp.hit.s_start.max(hsp.hit.s_end),
                         )
                     }),

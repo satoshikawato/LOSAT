@@ -694,6 +694,7 @@ fn check_failed_lookups(
                     crate::report::tabular::failed_record_title(oid, subjects[oid].shown_id())
                 }
             },
+            crate::blastinput::app::Program::Blastx,
             options.program().upper,
         )?;
     }

@@ -101,9 +101,9 @@ pub(crate) struct Diag<'a> {
     /// When `Some`, `-logfile` names the run's standard output (`ToolLog::Stdout` in a `Receiver`
     /// run): each diagnostic message goes into the run's shared `out` writer as it is posted.
     stdout: Option<&'a dyn Fn(&[u8])>,
-    /// When `Some`, flushes the `NcbiBuffer`-backed shared stdout stream (`SharedStdout`) before a
+    /// When `Some`, flushes the caller's stdout writer (`SharedStdout` or `TiedOut`) before a
     /// `cerr` write (`TextPlace::StandardError`), matching NCBI's `cerr` tie to `cout`.
-    tie_stdout: Option<&'a dyn Fn()>,
+    tie_stdout: Option<&'a dyn Fn() -> std::io::Result<()>>,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -173,10 +173,11 @@ impl Diag<'_> {
         }
         let made = match place {
             TextPlace::StandardError if !self.failed => {
-                if let Some(tie) = self.tie_stdout {
-                    tie();
-                }
-                crate::report::ostream::tie_standard_output()
+                let tied = match self.tie_stdout {
+                    Some(tie) => tie(),
+                    None => Ok(()),
+                };
+                tied.and_then(|()| crate::report::ostream::tie_standard_output())
             }
             TextPlace::LogFile => crate::report::ostream::sync_report(),
             _ => Ok(()),
@@ -665,6 +666,30 @@ impl Write for SharedOut<'_, '_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+/// A caller's standard-output writer wrapped in a `RefCell` so `Diag::before_text` can flush it
+/// before a `cerr` write (`TextPlace::StandardError`) in a library run, matching NCBI's `cerr` tie
+/// to `cout` without flushing on every insertion.
+struct TiedOut<'a, 'b>(&'a RefCell<&'b mut dyn Write>);
+
+impl Write for TiedOut<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.0.borrow_mut().write_all(buf)
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write_vectored(bufs)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
+    }
+}
+
 /// The run of `run`, `run_with` and `run_in` after the application start `start` (whose usage
 /// report's messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the
 /// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
@@ -701,15 +726,30 @@ fn run_app(
         }
         Ok(ToolLog::Target(mut target)) => {
             start.write_log_setup(&mut target, err);
-            run_app_target(
-                tool,
-                words,
-                (input, out, err),
-                body,
-                (start, xml_help),
-                &files,
-                (target, None, None),
-            )
+            if command_line {
+                run_app_target(
+                    tool,
+                    words,
+                    (input, out, err),
+                    body,
+                    (start, xml_help),
+                    &files,
+                    (target, None, None),
+                )
+            } else {
+                let shared = RefCell::new(out);
+                let tie_stdout = || shared.borrow_mut().flush();
+                let mut tied_out = TiedOut(&shared);
+                run_app_target(
+                    tool,
+                    words,
+                    (input, &mut tied_out, err),
+                    body,
+                    (start, xml_help),
+                    &files,
+                    (target, None, Some(&tie_stdout)),
+                )
+            }
         }
         Ok(ToolLog::Stdout) => {
             let files = files.with_tool_log_stdout();
@@ -724,9 +764,7 @@ fn run_app(
             let write_stdout = |text: &[u8]| {
                 shared.borrow_mut().write_log(text);
             };
-            let tie_stdout = || {
-                let _ = shared.borrow_mut().flush_held();
-            };
+            let tie_stdout = || shared.borrow_mut().flush_held();
             if let Ok(text) = start.usage_report() {
                 write_stdout(text.as_bytes());
             }
@@ -755,7 +793,11 @@ fn run_app_target<'a>(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &OpenFiles,
-    (mut target, stdout, tie_stdout): (DiagTarget, Option<&'a dyn Fn(&[u8])>, Option<&'a dyn Fn()>),
+    (mut target, stdout, tie_stdout): (
+        DiagTarget,
+        Option<&'a dyn Fn(&[u8])>,
+        Option<&'a dyn Fn() -> std::io::Result<()>>,
+    ),
 ) -> i32 {
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the

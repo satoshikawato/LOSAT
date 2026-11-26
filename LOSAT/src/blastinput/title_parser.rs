@@ -2,6 +2,8 @@
 //! modifiers (`[name=value]`) of a FASTA title, for the FASTA readers (`HasMods`: whether a title
 //! has any) and the alignment reader (`CTitleParser::Apply`, `aln_reader::mods`).
 
+use crate::utils::byte_search::find_first;
+
 /// `CTitleParser::x_FindBrackets`: from `start`, the first `[` that is not inside brackets
 /// already open (`start` is moved to it), and its closing `]` (`stop`), with the first `=` inside.
 /// `None` where there is no closing bracket, a `]` comes before any `[`, or no `=` comes before
@@ -46,8 +48,11 @@ pub(crate) fn find_brackets(line: &[u8], start: &mut usize) -> Option<(usize, us
 /// call succeeds.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/mod_reader.cpp:793-850
+/// Before the first `[` or `]` of the title `find_brackets` changes nothing (an `=` counts only
+/// inside brackets), so it starts there, found with one search (LOSAT's speed).
 pub(crate) fn has_mods(title: &[u8]) -> bool {
-    find_brackets(title, &mut 0).is_some()
+    find_first(title, |byte| (byte == b'[') | (byte == b']'))
+        .is_some_and(|mut start| find_brackets(title, &mut start).is_some())
 }
 
 #[cfg(test)]

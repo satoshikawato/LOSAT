@@ -1953,7 +1953,7 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
-    /// [`check_reported_titles`] for one subject rank `rank`.
+    /// [`Self::check_reported_titles`] for one subject rank `rank`.
     pub(super) fn check_rank_title(
         &self,
         database: &BlastpDatabase,

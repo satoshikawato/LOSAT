@@ -1,6 +1,6 @@
 //! Unit tests for blastn/alignment modules
 
-use crate::algorithm::blastn::alignment::utilities::gdb3;
+use crate::algorithm::blastn::alignment::utilities::{gcd_i64, gdb3, gdb3_i64};
 
 #[test]
 fn test_gdb3_no_reduction() {
@@ -103,4 +103,30 @@ fn test_gdb3_prime_numbers() {
     assert_eq!(a, 17);
     assert_eq!(b, 19);
     assert_eq!(c, 23);
+}
+
+#[test]
+fn test_gdb3_i64_large_gap_costs() {
+    // Doubled INT32_MAX gap costs with odd reward (1/-2): no 32-bit overflow.
+    let mut op = 6i64;
+    let mut go = 2 * i64::from(i32::MAX);
+    let mut ge = 2 * i64::from(i32::MAX) + 1;
+    let g = gdb3_i64(&mut op, &mut go, &mut ge);
+    assert_eq!(g, 1);
+    assert_eq!((op, go, ge), (6, 4_294_967_294, 4_294_967_295));
+
+    // Scaled nucleotide scoring (reward 1000, penalty -2000, gapopen 40000, gapextend 2000):
+    // op_cost = 3000, gap_open = 40000, gap_extend = 2500 -> gcd = 500.
+    let (mut op, mut go, mut ge) = (3000i64, 40_000i64, 2500i64);
+    let g = gdb3_i64(&mut op, &mut go, &mut ge);
+    assert_eq!(g, 500);
+    assert_eq!((op, go, ge), (6, 80, 5));
+
+    // Zero gap_open with huge gap_extend reduces cleanly.
+    let (mut op, mut go, mut ge) = (6i64, 0i64, 4_000_000_002i64);
+    let g = gdb3_i64(&mut op, &mut go, &mut ge);
+    assert_eq!(g, 6);
+    assert_eq!((op, go, ge), (1, 0, 666_666_667));
+
+    assert_eq!(gcd_i64(4_000_000_000, 6), 2);
 }

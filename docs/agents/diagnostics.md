@@ -4412,8 +4412,9 @@ Scheduling (each value computed by one thread with the original function; order 
   subject's bound test, and a strip list's length and capacity for each push. Now the form is made once per strip
   as a value (`x_ctx_o1::CtxO1::x_view`, the single owner of `CtxO1::get`'s arithmetic) and chosen once per run,
   each form with its own loop, the subject's bound is tested once per word, the context is read with checked
-  indexing (`&contexts[context_idx]`), and a strip's list makes room for the whole run once and writes its length
-  after it (`SeedOut::x_push_run`); a word's presence bit is not tested again (every word in the ring passed it).
+  indexing (`&contexts[context_idx]`), and a strip's list writes directly into spare capacity when room fits the
+  run and falls back to `Vec::push` on growth (`SeedOut::x_push_run`, keeping allocation growth identical to
+  `Vec::push`); a word's presence bit is not tested again (every word in the ring passed it).
   The pairs, the seeds and their order are `seed_of_pair`'s; a piece's cut (`Cut::fit`, `Cut::run_cold`, which
   keeps `seed_of_pair`) is the same. `[TIMING] x_dc_emit_hoist: strips=` counts strips scanned through the hoisted
   CSR emit. The unit test `the_hoisted_emit_gives_the_seeds_of_seed_of_pair` compares `DcPairs::run` with
@@ -4425,7 +4426,23 @@ Scheduling (each value computed by one thread with the original function; order 
   with each piece's stop); `x_ctx_o1`'s tests check the forms' values with `get` at every offset; and
   `LOSAT/tests/blastn_dc_emit_hoist.rs` checks whole reports and `strips=` with `=0`'s on a CSR table at 1 and 4
   threads (seed pieces of the default size and of 2 seeds, and the partitions' lists) and on chains.
-  Evidence (pending R2 node-1 measurement against post-DCFOLDREG dev `f4a7370af`).
+  Evidence (2026-11-26, workstation node 1, 16 cores, memory bound to the node; dev `f4a7370af` including
+  `LOSAT_X_DCFOLDREG`, its merge default ON, and `=0` in one lease, rotated, matched binary/output path lengths,
+  medians; reports byte-identical across all arms and rounds): dc-megablast of 31,168 D. melanogaster cDNAs
+  against 3 Mb of its genome (`-subject`, outfmt 6, sha1 `f129806fc5bfa034`, 8 rounds each) at 1 thread 9.213 s
+  against 9.750 s (x0.945, -5.50 %, range 9.164-9.228 vs 9.722-9.807 s, cycles x0.943, instructions x0.926; 2 ms
+  VmHWM +0.10 %, 94,602 vs 94,506 KiB, RssAnon +0.00 %), at 8 threads 1.693 s against 1.732 s (x0.977, -2.25 %,
+  cycles x0.973, instructions x0.941; VmHWM -0.21 %, 111,502 vs 111,734 KiB, RssAnon -0.06 %), at 16 threads
+  1.022 s against 1.050 s (x0.973, -2.67 %, cycles x0.973, instructions x0.941; VmHWM +0.20 %, 121,488 vs
+  121,244 KiB, RssAnon +0.08 %); 5,000 cDNAs at 16 threads (16 rounds) 0.221 s against 0.224 s (x0.987, -1.34 %,
+  cycles x0.974, instructions x0.942; VmHWM -0.15 %, 113,142 vs 113,312 KiB, RssAnon -0.23 %); MG1655 against
+  AP027131 at 1 thread (16 rounds) 0.290 s against 0.296 s (x0.980, -2.03 %, cycles x0.976, instructions x0.969;
+  VmHWM -0.29 %, 78,930 vs 79,158 KiB, RssAnon +0.01 %) and at 16 threads (24 rounds) 0.140 s against 0.141 s
+  (x0.993, -0.71 %, cycles x0.977, instructions x0.974; VmHWM +0.09 %, 90,890 vs 90,804 KiB, RssAnon -0.01 %,
+  `=0` VmHWM +0.14 %). Contiguous `-task megablast` (`CtxO1::get` consolidated through `x_view()`) on MG1655
+  against AP027131: 1 thread (16 rounds) 0.210 vs 0.210 s (x0.998, cycles x1.000, instructions x1.000; VmHWM
+  +0.19 %, RssAnon +0.01 %); 16 threads (24 rounds) 0.157 vs 0.159 s (x0.987, instructions x0.999; VmHWM +0.10 %,
+  RssAnon +0.00 %). `=0` took x1.000 to x1.014 of dev's time on dc-megablast.
 - `LOSAT_X_DCFOLDREG=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
   `LOSAT_X_DCLATEST`'s maps fold runs; in the strict set from the pull request that added it, 2026-11-26:
   `LOSAT_X_DCFOLDREG=0` turns it off) runs the map fold in `blast_engine/x_dc_fold_reg.rs`

@@ -130,9 +130,9 @@ fn latest_on() -> bool {
 /// unless it is `0`). With it the strips scan of a table laid out as CSR (`scan_strip_disc_csr`,
 /// LOSAT_X_DCCSR) hands each word's run to `DcPairs::run`: the values `seed_of_pair` reads for
 /// every pair read once per strip, the context form chosen once per run, the subject's bound
-/// tested once per word, and a strip's list given room for the run at once. The same pairs give
-/// the same seeds in the same order (the argument at `DcPairs`), so it does not change any value
-/// NCBI computes.
+/// tested once per word, and a strip's list written into spare capacity when room fits the run
+/// (falling back to `Vec::push` on growth). The same pairs give the same seeds in the same order
+/// (the argument at `DcPairs`), so it does not change any value NCBI computes.
 fn emit_hoist_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCEMITHOIST"))

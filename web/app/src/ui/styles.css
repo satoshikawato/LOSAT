@@ -792,7 +792,8 @@ input[type='radio'] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.param-control > input[type='text'] {
+.param-control > input[type='text'],
+.param-control > .control-tip > input[type='text'] {
   width: 16em;
   max-width: 100%;
 }
@@ -802,6 +803,7 @@ input[type='radio'] {
    the focus ring. */
 .select-clip {
   display: block;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   padding: 3px;
@@ -833,7 +835,8 @@ input[type='radio'] {
   padding: 2px 6px;
 }
 
-.parameter-form .param-inline .param-control > input[type='text'] {
+.parameter-form .param-inline .param-control > input[type='text'],
+.parameter-form .param-inline .param-control > .control-tip > input[type='text'] {
   width: 5em;
 }
 
@@ -843,7 +846,21 @@ input[type='radio'] {
   gap: 4px 6px;
 }
 
+.parameter-form .param-check-head {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.parameter-form .param-check-head > input[type='checkbox'] {
+  flex: none;
+}
+
 .parameter-form .param-check .param-label {
+  flex: 0 2 auto;
   min-width: 0;
 }
 
@@ -1283,18 +1300,21 @@ textarea {
   background: var(--bg);
 }
 
-.parameter-form .param-control > input[type='text'] {
+.parameter-form .param-control > input[type='text'],
+.parameter-form .param-control > .control-tip > input[type='text'] {
   width: 8em;
 }
 
-.parameter-form .param-control > input[inputmode='text'] {
+.parameter-form .param-control > input[inputmode='text'],
+.parameter-form .param-control > .control-tip > input[inputmode='text'] {
   width: 12em;
 }
 
 /* "Additional options" holds a command line's options (DW-42), with its "?" beside it on a phone too. */
-.parameter-form .param-control > input.extra-options[type='text'] {
+.parameter-form .param-control > input.extra-options[type='text'],
+.parameter-form .param-control > .control-tip > input.extra-options[type='text'] {
   width: 36em;
-  max-width: calc(100% - 2.5em);
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -1307,24 +1327,68 @@ textarea {
   color: var(--muted);
 }
 
-/* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
-   name, the button with the file's name or the sentence that asks for it, and the hint, which
-   wraps under them where the row is narrow. */
-.parameter-form .param-inline[data-kind='file'] .param-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+/* A sentence and its trailing "?" (and any inline link between them) flow inline together;
+   reserving the "?" width in padding-right with a matching negative margin-right gives the "?"
+   zero extra advance width so it never wraps alone onto the next line at any width.
+   Every `.hint-line` holds a `.help-tip`, so the padding applies unconditionally.
+   At desktop widths (>800 px), the "?" sits 8 px after the text aligned to the top of the line
+   box by (1lh - 20px) / 2, matching the centered 8 px layout of option rows without expanding
+   the line height. */
+.hint-line {
+  box-sizing: border-box;
+  min-width: 0;
+  --hint-tip-space: 28px;
+  padding-right: var(--hint-tip-space);
 }
 
-.parameter-form .param-inline[data-kind='file'] .param-hint-line {
-  flex: 1 0 100%;
+/* Keep each parent's column gap between a sentence and its inline link: 10 px in `.counts-line`,
+   8 px in `.file-pick` (`-conffile`). */
+.hint-line > .hint:has(+ wbr + .link) {
+  margin-right: 10px;
+}
+
+.hint-line > .file-name:has(+ wbr + .link) {
+  margin-right: 8px;
+}
+
+.hint-line > .help-tip {
+  margin-top: calc((1lh - 20px) / 2);
+  margin-left: 8px;
+  margin-right: calc(-1 * var(--hint-tip-space));
+  vertical-align: top;
+}
+
+/* A control and its trailing "?" wrap together so a "?" never starts a line alone. */
+.control-tip {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: inherit;
+  gap: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.control-tip > :not(.help-tip) {
   min-width: 0;
 }
 
-.parameter-form .param-inline[data-kind='file'] .param-hint-line .help-tip {
-  margin-left: 6px;
-  vertical-align: middle;
+.control-tip > input[type='checkbox'] {
+  flex: none;
+}
+
+/* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
+   name stay together on the first line; when checked, the controls wrap after it and the counts
+   file hint takes its own line. */
+.parameter-form .param-inline[data-kind='file'] .param-control {
+  gap: 4px 8px;
+}
+
+.parameter-form .param-inline[data-kind='file'] .param-control:has(.select-clip, .file-pick, input[type='text']) {
+  flex-wrap: wrap;
+}
+
+.parameter-form .param-inline[data-kind='file'] .param-control > span:has(> .param-hint) {
+  flex: 1 0 100%;
 }
 
 .file-pick {
@@ -2365,6 +2429,19 @@ pre.range-text {
     min-height: 0;
   }
 
+  .hint-line {
+    --hint-tip-space: 32px;
+  }
+
+  .hint-line > .help-tip {
+    margin-top: 0;
+    vertical-align: middle;
+  }
+
+  .parameter-form .param-check-head {
+    align-items: flex-start;
+  }
+
   .region-bar {
     height: 36px;
   }
@@ -2616,8 +2693,11 @@ pre.range-text {
   width: 8em;
 }
 
+/* The dialog's border box stays at least 12 px from each viewport edge on narrow screens while
+   keeping its 32 rem content width (plus 40 px horizontal padding and 2 px border) on wide ones. */
 .replace-dialog {
-  max-width: min(32rem, calc(100vw - 24px));
+  box-sizing: border-box;
+  max-width: min(calc(32rem + 42px), calc(100% - 24px));
   padding: 16px 20px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -2649,4 +2729,115 @@ pre.range-text {
 
 .replace-dialog-actions .primary-action {
   width: auto;
+}
+
+/* Local BLAST database picker (-db and BLASTN -filtering_db, WQA D12b + RG-D4 W2). */
+.subject-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subject-source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.subject-db-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.db-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-picker-found {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.db-select-row label {
+  font-weight: 600;
+}
+
+.db-single,
+.db-meta,
+.db-privacy,
+.db-status,
+.db-reload,
+.db-mismatch {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.db-privacy {
+  font-size: 0.88em;
+}
+
+.db-filters {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.db-filters > summary {
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.db-filter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.db-filter-rows .param-row {
+  margin: 0;
+}
+
+.parameter-form .param-row[data-kind='database'] {
+  align-items: start;
+}
+
+.parameter-form .param-row[data-kind='database'] .param-control {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.parameter-form .param-row[data-kind='database'] .db-picker {
+  margin-top: 6px;
 }

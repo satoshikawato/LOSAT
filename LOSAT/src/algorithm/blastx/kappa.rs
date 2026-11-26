@@ -386,7 +386,7 @@ fn sw_redo_context(
 #[cold]
 #[inline(never)]
 pub(crate) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
-    ErrorAfterBatchReports(sw_batch_failed_error("blastx", first_query_holds_match)).into()
+    ErrorAfterBatchReports::new(sw_batch_failed_error("blastx", first_query_holds_match)).into()
 }
 
 /// LOSAT's refusal of a batch with a match whose Smith-Waterman redo does not end in NCBI (a
@@ -403,7 +403,7 @@ pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
     } else {
         "the e-value of a score of 0 passes the threshold, a window of the match has several preliminary HSPs and the window's first query letter scores the subject's first letter above 0"
     };
-    ErrorAfterBatchReports(sw_endless_error("blastx", why)).into()
+    ErrorAfterBatchReports::new(sw_endless_error("blastx", why)).into()
 }
 
 /// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at every query batch
@@ -415,7 +415,7 @@ pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
 #[cold]
 #[inline(never)]
 pub(crate) fn sw_ungapped_refusal() -> anyhow::Error {
-    ErrorAfterBatchReports(
+    ErrorAfterBatchReports::new(
         crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error("blastx"),
     )
     .into()

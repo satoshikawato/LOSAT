@@ -1,0 +1,9 @@
+Seq-entry ::= set {
+  class nuc-prot,
+  descr { source { org { taxname "Homo sapiens", db { { db "taxon", tag id 9606 } } } } },
+  seq-set {
+    seq { id { local str "pf" },
+      inst { repr raw, mol aa, length 4, seq-data iupacaa "MKVL" },
+      annot { { data ftable { { data prot { name { "tyrosine kinase X" } }, location whole local str "pf" } } } } }
+  }
+}

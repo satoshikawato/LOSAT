@@ -1,0 +1,28 @@
+{
+  "version": "1.2",
+  "dbname": "g_tx",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tx v5",
+  "number-of-letters": 979,
+  "number-of-sequences": 8,
+  "last-updated": "2026-11-22T20:11:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 53382,
+  "bytes-to-cache": 1915,
+  "files": [
+    "g.pdb",
+    "g.phr",
+    "g.pin",
+    "g.pnd",
+    "g.pni",
+    "g.pog",
+    "g.pos",
+    "g.pot",
+    "g.psq",
+    "g.ptf",
+    "g.pto",
+    "g_tx.pal"
+  ]
+}

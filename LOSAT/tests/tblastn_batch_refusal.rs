@@ -903,3 +903,127 @@ fn a_masked_pssm_query_is_refused_after_the_prolog() {
         }
     }
 }
+
+/// A search space overflow in batch 3 (`OLD_FSC=1 BATCH_SIZE=1`, `allx_q649.faa` against
+/// `aliaskeys/n_nseq0_l62`: `NSEQ 0` and `LENGTH 2^62`, line RG D1a-6 review A F2) fails that
+/// batch after the reports of the two unsearchable batches before, matching `allx.faa` alone
+/// without the epilog (in every format and at 1 and 4 threads), and in one batch writes the
+/// prologs alone.
+#[test]
+fn a_search_space_overflow_writes_the_reports_of_the_batches_before() {
+    let temp = TempDir::new("searchsp-overflow");
+    let dir = temp.0.as_path();
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let db = tests.join("db_search/aliaskeys/n_nseq0_l62");
+    let allx = tests.join("fasta/rps/allx.faa");
+    let allx_q649 = tests.join("fasta/rps/allx_q649.faa");
+    let q_valid = tests.join("db_search/taxfilter/q.faa");
+    let run = |env: &[(&str, &str)], query: &Path, outfmt: &str, threads: &str| {
+        losat(
+            dir,
+            env,
+            &[
+                "tblastn",
+                "-query",
+                query.to_str().unwrap(),
+                "-db",
+                db.to_str().unwrap(),
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                threads,
+            ],
+        )
+    };
+    let overflow_fragment = "overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's TBLASTN";
+    for outfmt in [
+        "0",
+        "5",
+        "6",
+        "7",
+        "10",
+        "11",
+        "15",
+        "16",
+        "20 qseqid sseqid evalue",
+    ] {
+        for threads in ["1", "4"] {
+            let case = format!("outfmt {outfmt} threads {threads}");
+            let alone = run(
+                &[("OLD_FSC", "1"), ("BATCH_SIZE", "1")],
+                &allx,
+                outfmt,
+                threads,
+            );
+            assert!(
+                alone.status.success(),
+                "{case}: allx alone: {}",
+                String::from_utf8_lossy(&alone.stderr)
+            );
+            let refused = run(
+                &[("OLD_FSC", "1"), ("BATCH_SIZE", "1")],
+                &allx_q649,
+                outfmt,
+                threads,
+            );
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert_eq!(refused.status.code(), Some(1), "{case}: {stderr}");
+            assert!(stderr.contains(overflow_fragment), "{case}: {stderr}");
+
+            let one_batch = run(&[("OLD_FSC", "1")], &q_valid, outfmt, threads);
+            let one_stderr = String::from_utf8_lossy(&one_batch.stderr);
+            assert_eq!(one_batch.status.code(), Some(1), "{case} one: {one_stderr}");
+            assert!(
+                one_stderr.contains(overflow_fragment),
+                "{case} one: {one_stderr}"
+            );
+
+            let text = String::from_utf8_lossy(&alone.stdout);
+            let (written, prolog): (&[u8], &[u8]) = match outfmt {
+                "0" => {
+                    let report = text.find("\n\nQuery= x1").expect("the report of x1");
+                    let epilog =
+                        report + text[report..].find("\n\n  Database:").expect("the epilog");
+                    (&alone.stdout[..epilog], &alone.stdout[..report])
+                }
+                "5" => {
+                    let end = text
+                        .rfind("\n</BlastOutput_iterations>")
+                        .expect("the end of the document");
+                    (&alone.stdout[..end], b"")
+                }
+                "7" => {
+                    let count = text.rfind("# BLAST processed").expect("the count line");
+                    (&alone.stdout[..count], b"")
+                }
+                "15" => {
+                    let start = "{\n\"BlastOutput2\": [\n".len();
+                    let end = text.rfind("]\n}").expect("end of json");
+                    (&alone.stdout[..end], &alone.stdout[..start])
+                }
+                "16" => {
+                    let start = text.find("\n<BlastOutput2>").expect("the first report");
+                    let end = text
+                        .rfind("</BlastXML2>")
+                        .expect("the end of the xml2 document");
+                    (&alone.stdout[..end], &alone.stdout[..start])
+                }
+                "20 qseqid sseqid evalue" => {
+                    let names = text.find('\n').expect("the field names") + 1;
+                    (&alone.stdout, &alone.stdout[..names])
+                }
+                _ => (&alone.stdout, b""),
+            };
+            assert_bytes(
+                &refused.stdout,
+                written,
+                &format!("{case}: the reports of x1 and x2"),
+            );
+            assert_bytes(
+                &one_batch.stdout,
+                prolog,
+                &format!("{case}: one batch, the prologs"),
+            );
+        }
+    }
+}

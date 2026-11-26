@@ -251,5 +251,5 @@ fn the_check_of_an_empty_database_fails_as_ncbis_preliminary_search() {
     let error = error
         .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
         .expect("NCBI's error of the preliminary search");
-    assert_eq!(error.0, "Database memory map file error");
+    assert_eq!(error.as_bytes(), b"Database memory map file error");
 }

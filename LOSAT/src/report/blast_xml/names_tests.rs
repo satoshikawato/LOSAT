@@ -150,3 +150,29 @@ fn titles_ncbi_cannot_decode_are_its_catch_and_the_rest_reaches_the_stream() {
         (&b""[..], &b"lcl|Query_9"[..])
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-719
+/// A result shown with an earlier query's id, title and length (`labelled_query_text`, line RG-KB
+/// item 7c) has its own message and no title: NCBI's XML formatter generates no definition line
+/// of its record, so a title that `query_text` refuses (`Refusal::ReadsPastEnd`) is not refused.
+#[test]
+fn a_labelled_query_has_its_message_and_no_title() {
+    let refused = [&b","[..], b", ,", b" ,", b";", b"a ,"]
+        .into_iter()
+        .find(|title| xml_query_title(title, true).is_err())
+        .expect("a title that NCBI crashes on");
+    let own = query_text(
+        "BLASTP",
+        b"Query_2",
+        b"Query_2",
+        None,
+        refused,
+        true,
+        &[],
+        false,
+    );
+    assert!(own.is_err());
+    let text = labelled_query_text(b"Query_2", refused, &[], false);
+    assert!(text.title.is_empty() && text.id.is_none());
+    assert_eq!(text.message.as_deref(), Some(&b"No hits found"[..]));
+}

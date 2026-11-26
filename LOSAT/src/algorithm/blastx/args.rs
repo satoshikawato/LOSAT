@@ -201,7 +201,7 @@ impl BlastxArgs {
             subject: args.given_option("subject")?,
             subject_loc: args.given_option("subject_loc")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
@@ -345,6 +345,14 @@ impl ResolvedOptions {
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
         ProgramName::of(&self.rpstblastn)
+    }
+
+    /// The program type of the run's results where BLASTX does not name it
+    /// (`report::record::RunRecord::program_type`): RPSTBLASTN's for an RPSTBLASTN run.
+    pub(crate) fn program_type(&self) -> Option<crate::report::record::ProgramType> {
+        self.rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81 (cited at

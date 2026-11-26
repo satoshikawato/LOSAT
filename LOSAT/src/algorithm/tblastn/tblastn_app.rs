@@ -43,8 +43,10 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
 /// subject length); and where LOSAT refuses a step at which NCBI's search of the batch crashes,
 /// does not finish or stops, after it has printed the reports of the batches before
-/// (`ErrorAfterBatchReports`: line RG item X-short-bat, and the setup's statistics count of 0,
-/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG), or the batch's search fails
+/// (`ErrorAfterBatchReports`: line RG item X-short-bat, the setup's statistics count of 0,
+/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG, and a search space that
+/// overflows NCBI's `Int8`, `stage_d_pipeline::search_space_overflow`, line RG D1a-6 review A
+/// F2), or the batch's search fails
 /// after those reports (the failed or endless Smith-Waterman redo of `-use_sw_tback`,
 /// `match_redo`): that error, as the batch's failure. Any other refusal of LOSAT's (and any other
 /// error) is returned as `Err` to stop the run before its first byte.
@@ -53,7 +55,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
-        Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
+        Ok(failure) => return Ok(failure.error),
         Err(error) => error,
     };
     let error = match error.downcast::<XReadError>() {
@@ -61,7 +63,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         Err(error) => return Err(error),
     };
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) => Err(error),
     }
 }
@@ -101,7 +103,7 @@ fn first_database_read<'d>(
     if database.first_oid_read_fails() {
         let error = match pssm_failure {
             Some(failure) => failure.error("TBLASTN"),
-            None => PreliminaryReadError("Database memory map file error").into(),
+            None => PreliminaryReadError::from_static("Database memory map file error").into(),
         };
         return (Err((error, ReadFails::Setup)), before_setup);
     }
@@ -113,7 +115,7 @@ fn first_database_read<'d>(
         )
         .is_none()
     {
-        Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
+        Err(PreliminaryReadError::from_static(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
     } else if let Some(failure) = pssm_failure {
         Err(failure.error("TBLASTN"))
     } else {
@@ -242,7 +244,7 @@ fn refused_batch_setup_error(
 /// `-in_pssm` (`TblastnDatabase::pssm_search_read_failure`); `Err`: LOSAT's refusal.
 fn database_read_failure(error: anyhow::Error) -> Result<anyhow::Error> {
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) if error.is::<crate::cli::NativeError>() => Ok(error),
         Err(error) => Err(error),
     }
@@ -747,6 +749,9 @@ fn open_search_database(
     // `Query is Empty!` (as BLASTN's).
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = super::database::TblastnDatabase::open_restricted(
                 name,
                 settings,
@@ -755,7 +760,8 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -763,6 +769,7 @@ fn open_search_database(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 true,
@@ -2325,8 +2332,11 @@ fn search(
             .first()
             .and_then(crate::api::local_blast::FormatOutput::report_format)
             == Some(crate::blastinput::app::ReportFormat::Xml);
+        // The record that the report shows (`query_batch::xml_shown_of`).
+        let shown_scopes = batches.query_scopes.as_ref().map(|s| s.numbered_from(0));
         let xml_cut = |query: usize| {
-            queries.get(query).is_some_and(|record| {
+            let shown = crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+            queries.get(shown).is_some_and(|record| {
                 crate::report::blast_xml::names::iteration_cut_before_hits(
                     record.local_id.as_bytes(),
                     record.warning_id(),
@@ -2542,6 +2552,7 @@ fn search(
                     {
                         // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
+                            database.reset_scope();
                             continue;
                         }
                         let rows = first_rows;
@@ -2576,11 +2587,13 @@ fn search(
                             }
                             rows_open(shown)?;
                         }
+                        database.reset_scope();
                         continue;
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
                     // A batch without Seq-aligns prefetches no sequence.
                     if seq_aligns == 0 {
+                        database.reset_scope();
                         continue;
                     }
                     let prefetched = |query: usize| {
@@ -2623,6 +2636,9 @@ fn search(
                     if !messages.is_empty() {
                         prefetch_posts.push((span.start, messages));
                     }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                    database.reset_scope();
                 }
             }
         }
@@ -2653,7 +2669,7 @@ fn search(
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );
-            match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+            match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),
             }

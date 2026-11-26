@@ -313,6 +313,10 @@ fn database_check(
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
             format.prefetch_format(),
         ),
+        titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Tblastx,
+            [format.report_format().map_or(-1, |format| format as i32)],
+        ),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();

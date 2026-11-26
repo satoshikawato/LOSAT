@@ -728,20 +728,21 @@ impl ParsedSubject {
     // probe of the ID2a review). LOSAT refuses that subject instead of repeating a defect of
     // NCBI's.
     /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
-    /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
-    /// error message each time it reads the definition line). A definition line without a Seq-id
-    /// (makeblastdb writes none such) beside one with a Seq-id is a subject as any other: NCBI's
-    /// scope loads it, and each format that walks its definition lines meets that line where its
-    /// own code says (`has_lineless_line`). A set without any Seq-id gets no Seq-align
+    /// write as NCBI: a stored Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error
+    /// message each time it reads the definition line; such a title is the reports' refusal,
+    /// `replaced_title_bytes`). A definition line without a Seq-id (makeblastdb writes none such)
+    /// beside one with a Seq-id is a subject as any other: NCBI's scope loads it, and each format
+    /// that walks its definition lines meets that line where its own code says
+    /// (`has_lineless_line`). A set without any Seq-id gets no Seq-align
     /// (`algorithm::common::database::SeqAligned` drops its hits before the reports), so it never
     /// comes here: LOSAT's internal error.
     pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
             .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+            .any(|defline| defline.replaced_id_bytes > 0)
         {
-            return Err("has a stored title or Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
+            return Err("has a stored Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
         let Some(alignment_id) = set.alignment_id().cloned() else {
             return Err(
@@ -1821,6 +1822,15 @@ impl ParsedSubject {
             .first()
             .and_then(|defline| defline.title.as_deref())
             .unwrap_or_default()
+    }
+
+    /// Whether a stored title of its definition lines held a byte outside ' ' ..= '~', read as
+    /// '#' (`algorithm::common::database::check_reported_title`).
+    pub fn replaced_title_bytes(&self) -> bool {
+        self.set
+            .deflines
+            .iter()
+            .any(|defline| defline.replaced_title_bytes > 0)
     }
 
     /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and

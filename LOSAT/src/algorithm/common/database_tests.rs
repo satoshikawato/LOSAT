@@ -898,6 +898,66 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     }
 }
 
+// RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
+// format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
+// subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
+// may set), for the five search programs (not psiblast, rpsblast or rpstblastn);
+// the others read it again (`TitleReads::Reports`, LOSAT's refusal).
+#[test]
+fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
+    use crate::report::archive::options::RequestKind;
+    for app in [
+        RequestKind::Blastn,
+        RequestKind::Blastp,
+        RequestKind::Blastx,
+        RequestKind::Tblastn,
+        RequestKind::Tblastx,
+    ] {
+        let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied());
+        assert_eq!(of(&[11]), TitleReads::SeqAligns, "{app:?}");
+        assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
+        for outfmts in [
+            &[][..],
+            &[0],
+            &[3],
+            &[5],
+            &[6],
+            &[7],
+            &[10],
+            &[13],
+            &[17],
+            &[18],
+            &[11, 6],
+            &[11, 0],
+        ] {
+            assert_eq!(of(outfmts), TitleReads::Reports, "{app:?} {outfmts:?}");
+        }
+        for outfmt in [8, 9, 12] {
+            let expected = if prefetches_subjects(Some(PrefetchFormat::of(outfmt, app))) {
+                TitleReads::Reports
+            } else {
+                TitleReads::SeqAligns
+            };
+            assert_eq!(of(&[outfmt, 11]), expected, "{app:?} {outfmt}");
+        }
+    }
+    // psiblast, rpsblast and rpstblastn always stay `TitleReads::Reports`.
+    for app in [
+        RequestKind::Psiblast,
+        RequestKind::Rpsblast,
+        RequestKind::Rpstblastn,
+    ] {
+        for outfmts in [&[][..], &[8], &[9], &[11], &[12], &[8, 11], &[0], &[6]] {
+            assert_eq!(
+                TitleReads::of_outfmts(app, outfmts.iter().copied()),
+                TitleReads::Reports,
+                "{app:?} {outfmts:?}"
+            );
+        }
+    }
+    assert_eq!(TitleReads::default(), TitleReads::Reports);
+}
+
 // Line RG D1c-1c (review 2 G2 of D1c-1b): under a negative seqid list, a list of a redo's stream
 // whose subject's header cannot be read (lr's sequence 1, `gnl|BL_ORD_ID|xyz` in its second
 // volume, a string tag that NCBI's read of a later volume cannot make an OID of) stays in the
@@ -946,6 +1006,77 @@ fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
         refusal.contains("those of sequence 1 cannot be read") && refusal.contains("string tag"),
         "{refusal}"
     );
+}
+
+// RG-KB 9(b) review 1 (F1): NCBI BLAST+ 2.17.0 (`db.tchar.*.dmg.*`) posts the 803.7 of the
+// title of OID 0 (0xE9), which the batch's Seq-aligns read before OID 1, whose title tag it
+// cannot read, and then fails; a later read of OID 0 finds it in the cache of header records.
+#[test]
+fn a_failed_header_read_keeps_the_posts_of_the_seq_aligns_before_it() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_dmg_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    use crate::blastinput::app::ErrorAfterBatchReports;
+    let failure = |title_reads: Vec<u32>| {
+        anyhow::Error::new(ErrorAfterBatchReports {
+            query: Some(0),
+            error: anyhow::anyhow!("unreadable"),
+            utf8: None,
+            title_reads,
+        })
+    };
+    // The reads of the batch's Seq-aligns before the first read of the failed one, then it.
+    let error = ErrorAfterBatchReports::after_seq_aligns(failure(vec![1]), [2, 0, 1, 2, 1]);
+    let failed = error.downcast_ref::<ErrorAfterBatchReports>().unwrap();
+    assert_eq!(failed.title_reads, [2, 0, 1]);
+    // A failure elsewhere (a fetch, the prefetch) has no such reads.
+    let elsewhere = ErrorAfterBatchReports::after_seq_aligns(failure(Vec::new()), [0, 1]);
+    let elsewhere = elsewhere.downcast_ref::<ErrorAfterBatchReports>().unwrap();
+    assert!(elsewhere.title_reads.is_empty());
+    assert_eq!(
+        elsewhere.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+    assert!(!db.replaced_titles());
+    // With NCBI's warning of a UTF8String header in the batch: LOSAT's refusal.
+    let utf8 = failed
+        .title_posts(&db, true, "BLASTP")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        utf8.contains("database sequence 0 has a stored title"),
+        "{utf8}"
+    );
+    db.restart_header_reads();
+    let mut posted = crate::report::diag_log::Posts::default();
+    posted.post(
+        crate::report::diag_log::ERROR,
+        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at byte \
+          18\nd0 fam\xe9one\n"
+            .to_vec(),
+    );
+    assert_eq!(failed.title_posts(&db, false, "BLASTP").unwrap(), posted);
+    assert!(db.replaced_titles());
+    assert_eq!(
+        failed.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+}
+
+// RG-KB 9(b) review 1 (F3): a call's first UTF8String read posts NCBI's warning in its own
+// batch alone.
+#[test]
+fn the_utf8_read_of_a_call_is_of_its_batch_alone() {
+    let call = CallUtf8::default();
+    assert!(!call.of_batch(0));
+    let read = Utf8Read {
+        query: 1,
+        path: "Blast-def-line-set.E.title".to_string(),
+    };
+    call.note(2, Some(&read));
+    call.note(4, Some(&read));
+    assert!(call.of_batch(2));
+    assert!(!call.of_batch(0) && !call.of_batch(4));
 }
 
 #[test]

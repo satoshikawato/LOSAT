@@ -253,7 +253,7 @@ pub(crate) trait ChunkMergeHsp {
 // subject frames and that either endpoint of `new` lies within the closed rectangle of `old`.
 // Expands `old`'s endpoints, adopts `new`'s gapped start if `new` has strictly higher score, and
 // sets `old`'s score to the larger of its score and the truncated density-scaled query span.
-fn merge_two_chunk_hsps<H: ChunkMergeHsp>(
+pub(crate) fn merge_two_chunk_hsps<H: ChunkMergeHsp>(
     old: &mut H,
     new: &H,
     allow_gap: bool,
@@ -308,21 +308,55 @@ fn merge_two_chunk_hsps<H: ChunkMergeHsp>(
 // incoming HSPs preserving order, and combines the two lists in `ScoreCompareHSPs` order (stable
 // sort when out of order, matching glibc's `qsort` in pinned NCBI BLAST+ 2.17.0).
 /// Merges `incoming` (already offset-adjusted by `Blast_HSPListAdjustOffsets`) into `combined`
-/// across a subject chunk split at `split_offset` with overlap `overlap` (`Blast_HSPListsMerge`).
+/// across a subject chunk split at `split_offset` with overlap `overlap` (`Blast_HSPListsMerge`),
+/// draining `incoming` so callers can reuse its allocation across chunks.
 pub(crate) fn merge_subject_chunk_hsps<H: ChunkMergeHsp>(
     combined: &mut Vec<H>,
-    mut incoming: Vec<H>,
+    incoming: &mut Vec<H>,
     split_offset: i32,
     overlap: i32,
     hsp_num_max: usize,
     allow_gap: bool,
     compare_score: impl Fn(&H, &H) -> std::cmp::Ordering,
 ) -> Result<(), ChunkMergeUndefined> {
+    merge_subject_chunk_hsps_with_sort(
+        combined,
+        incoming,
+        split_offset,
+        overlap,
+        hsp_num_max,
+        allow_gap,
+        &compare_score,
+        |hsps| {
+            if hsps
+                .windows(2)
+                .any(|pair| compare_score(&pair[0], &pair[1]).is_gt())
+            {
+                hsps.sort_by(&compare_score);
+            }
+        },
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2749-2807,2857-3035
+/// [`merge_subject_chunk_hsps`] with a caller-supplied stable score sorter (`sort_by_score`,
+/// used by TBLASTX's in-place index-replay sort).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
+    combined: &mut Vec<H>,
+    incoming: &mut Vec<H>,
+    split_offset: i32,
+    overlap: i32,
+    hsp_num_max: usize,
+    allow_gap: bool,
+    compare_score: impl Fn(&H, &H) -> std::cmp::Ordering,
+    sort_by_score: impl Fn(&mut [H]),
+) -> Result<(), ChunkMergeUndefined> {
     if incoming.is_empty() {
         return Ok(());
     }
     if combined.is_empty() {
-        *combined = incoming;
+        std::mem::swap(combined, incoming);
         return Ok(());
     }
     let split = i64::from(split_offset);
@@ -371,27 +405,19 @@ pub(crate) fn merge_subject_chunk_hsps<H: ChunkMergeHsp>(
         });
     }
 
-    let sort_if_needed = |hsps: &mut Vec<H>| {
-        if hsps
-            .windows(2)
-            .any(|pair| compare_score(&pair[0], &pair[1]).is_gt())
-        {
-            hsps.sort_by(&compare_score);
-        }
-    };
     let retained = combined
         .len()
         .saturating_add(incoming.len())
         .min(hsp_num_max);
     if retained == combined.len() + incoming.len() {
-        combined.extend(incoming);
-        sort_if_needed(combined);
+        combined.append(incoming);
+        sort_by_score(combined);
         return Ok(());
     }
-    sort_if_needed(combined);
-    sort_if_needed(&mut incoming);
+    sort_by_score(combined);
+    sort_by_score(incoming);
     let mut left = combined.drain(..).peekable();
-    let mut right = incoming.into_iter().peekable();
+    let mut right = incoming.drain(..).peekable();
     let mut selected = Vec::with_capacity(retained);
     while selected.len() < retained {
         let take_left = match (left.peek(), right.peek()) {
@@ -407,6 +433,7 @@ pub(crate) fn merge_subject_chunk_hsps<H: ChunkMergeHsp>(
         }
     }
     drop(left);
+    drop(right);
     *combined = selected;
     Ok(())
 }

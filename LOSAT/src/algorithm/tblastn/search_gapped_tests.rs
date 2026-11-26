@@ -1786,27 +1786,34 @@ fn long_chunk_overlap_merge_matches_ncbi_input_score_and_order() {
             .map(&parse_hsp)
             .collect::<Vec<_>>()
     };
-    let first = merge_subject_chunk_hsps(
-        Vec::new(),
-        for_call("MERGE_IN_HSP", 0),
+    let mut first = Vec::new();
+    let mut first_in = for_call("MERGE_IN_HSP", 0);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut first,
+        &mut first_in,
         0,
         0,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     assert_eq!(first, for_call("MERGE_OUT_HSP", 0));
-    let old = for_call("MERGE_OLD_HSP", 1);
+    let mut old = for_call("MERGE_OLD_HSP", 1);
     assert_eq!(first, old);
-    let second = merge_subject_chunk_hsps(
-        old,
-        for_call("MERGE_IN_HSP", 1),
+    let mut second_in = for_call("MERGE_IN_HSP", 1);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut old,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
-    assert_eq!(second, for_call("MERGE_OUT_HSP", 1));
-    assert_eq!(second[0].1.score, 660);
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
+    assert_eq!(old, for_call("MERGE_OUT_HSP", 1));
+    assert_eq!(old[0].1.score, 660);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
@@ -3267,14 +3274,18 @@ fn long_subject_chunk_local_gapped_hsps_match_ncbi() {
     second.s_start += 4_999_900;
     second.s_end += 4_999_900;
     second.s_gapped_start += 4_999_900;
-    let merged = merge_subject_chunk_hsps(
-        vec![(0, actual[0])],
-        vec![(0, second)],
+    let mut merged = vec![(0, actual[0])];
+    let mut second_in = vec![(0, second)];
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut merged,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     let merged_expected: Vec<_> = trace
         .lines()
         .filter(|line| line.starts_with("MERGE_OUT_HSP\t1\t"))

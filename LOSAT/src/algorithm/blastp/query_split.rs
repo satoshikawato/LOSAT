@@ -169,7 +169,10 @@ fn query_hsp_lists_merge(
                 let end_diag = hsp1.q_end as i64 - hsp1.s_end as i64;
                 let start_diag = (hsp2.q_start as i64 - 1) - (hsp2.s_start as i64 - 1);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
-                if (end_diag - start_diag).abs() < 10 && merge_two_hsps(hsp1, hsp2) {
+                if (end_diag - start_diag).abs() < 10
+                    && crate::core::blast_hits::merge_two_chunk_hsps(hsp1, hsp2, true)
+                        .expect("gapped split-query HSPs have positive length")
+                {
                     *slot = None;
                 }
             }
@@ -178,42 +181,6 @@ fn query_hsp_lists_merge(
     }
     combined.hsps.extend(incoming);
     sort_by_score(combined);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1530
-// `CONTAINED_IN_HSP` of `a`, `b`, `c`, `d`, `e`, `f` holds when `a` is at most `c`, `b` at least `c`,
-// `d` at most `f` and `e` at least `f`
-// (blast_hits.h). The gaps are allowed, and `length` follows the merged query span.
-fn merge_two_hsps(hsp1: &mut super::hsp::BlastpHsp, hsp2: &super::hsp::BlastpHsp) -> bool {
-    if hsp1.subject_frame != hsp2.subject_frame {
-        return false;
-    }
-    let (q1_offset, q1_end) = (hsp1.q_start as i64 - 1, hsp1.q_end as i64);
-    let (s1_offset, s1_end) = (hsp1.s_start as i64 - 1, hsp1.s_end as i64);
-    let (q2_offset, q2_end) = (hsp2.q_start as i64 - 1, hsp2.q_end as i64);
-    let (s2_offset, s2_end) = (hsp2.s_start as i64 - 1, hsp2.s_end as i64);
-    let contained = |q: i64, s: i64| q1_offset <= q && q1_end >= q && s1_offset <= s && s1_end >= s;
-    if !contained(q2_offset, s2_offset) && !contained(q2_end, s2_end) {
-        return false;
-    }
-    let score_density = f64::from(hsp1.raw_score + hsp2.raw_score)
-        / ((q1_end - q1_offset) + (q2_end - q2_offset)) as f64;
-    let q_offset = q1_offset.min(q2_offset);
-    let s_offset = s1_offset.min(s2_offset);
-    let q_end = q1_end.max(q2_end);
-    let s_end = s1_end.max(s2_end);
-    hsp1.q_start = (q_offset + 1) as usize;
-    hsp1.s_start = (s_offset + 1) as usize;
-    hsp1.q_end = q_end as usize;
-    hsp1.s_end = s_end as usize;
-    hsp1.length = (q_end - q_offset) as usize;
-    if hsp2.raw_score > hsp1.raw_score {
-        hsp1.gapped_q_start = hsp2.gapped_q_start;
-        hsp1.gapped_s_start = hsp2.gapped_s_start;
-        hsp1.raw_score = hsp2.raw_score;
-    }
-    hsp1.raw_score = ((score_density * (q_end - q_offset) as f64) as i32).max(hsp1.raw_score);
-    true
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766,2819-2829,2849

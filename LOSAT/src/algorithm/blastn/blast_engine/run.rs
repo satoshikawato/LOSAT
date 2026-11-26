@@ -3311,62 +3311,49 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
     kept
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:66-72
-#[inline]
-fn contained_in_hsp<T: PartialOrd>(a: T, b: T, c: T, d: T, e: T, f: T) -> bool {
-    a <= c && b >= c && d <= f && e >= f
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1487-1531
-fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool) -> bool {
-    // NCBI's `Int4` query offsets (`PrelimHit::prelim_qs`, which may lie outside the context).
-    let (q1, q2) = (hsp1.prelim_qs as isize, hsp2.prelim_qs as isize);
-    if !allow_gap && (hsp1.prelim_ss as isize - hsp2.prelim_ss as isize - q1 + q2) != 0 {
-        return false;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// BLASTN subject frame is always +1; subject offsets fit in NCBI's `Int4`.
+impl crate::core::blast_hits::ChunkMergeHsp for PrelimHit {
+    fn merge_context(&self) -> i32 {
+        self.context_idx as i32
     }
-
-    // BLASTN subject frame is always +1, so no frame mismatch handling needed here.
-
-    let (qe1, qe2) = (hsp1.prelim_qe as isize, hsp2.prelim_qe as isize);
-    if contained_in_hsp(
-        q1,
-        qe1,
-        q2,
-        hsp1.prelim_ss as isize,
-        hsp1.prelim_se as isize,
-        hsp2.prelim_ss as isize,
-    ) || contained_in_hsp(
-        q1,
-        qe1,
-        qe2,
-        hsp1.prelim_ss as isize,
-        hsp1.prelim_se as isize,
-        hsp2.prelim_se as isize,
-    ) {
-        let len1 = (qe1 - q1).max(0) as f64;
-        let len2 = (qe2 - q2).max(0) as f64;
-        let score_density = (hsp1.prelim_score as f64 + hsp2.prelim_score as f64) / (len1 + len2);
-
-        hsp1.prelim_qs = hsp1.prelim_qs.min(hsp2.prelim_qs);
-        hsp1.prelim_qe = hsp1.prelim_qe.max(hsp2.prelim_qe);
-        hsp1.prelim_ss = hsp1.prelim_ss.min(hsp2.prelim_ss);
-        hsp1.prelim_se = hsp1.prelim_se.max(hsp2.prelim_se);
-
-        if hsp2.prelim_score > hsp1.prelim_score {
-            hsp1.seed_qs = hsp2.seed_qs;
-            hsp1.seed_ss = hsp2.seed_ss;
-            hsp1.prelim_score = hsp2.prelim_score;
-        }
-
-        let new_len = (hsp1.prelim_qe - hsp1.prelim_qs).max(0) as f64;
-        let score_from_density = (score_density * new_len) as i32;
-        if score_from_density > hsp1.prelim_score {
-            hsp1.prelim_score = score_from_density;
-        }
-        return true;
+    fn merge_subject_frame(&self) -> i32 {
+        1
     }
-
-    false
+    fn merge_q_start(&self) -> i32 {
+        self.prelim_qs
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.prelim_qe
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.prelim_ss as i32
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.prelim_se as i32
+    }
+    fn merge_score(&self) -> i32 {
+        self.prelim_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.seed_qs
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.seed_ss as i32
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.prelim_qs = q_start;
+        self.prelim_qe = q_end;
+        self.prelim_ss = s_start as usize;
+        self.prelim_se = s_end as usize;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.seed_qs = q_gapped_start;
+        self.seed_ss = s_gapped_start as usize;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.prelim_score = score;
+    }
 }
 
 /// NCBI's preliminary subject-best-hit filter (`-subject_besthit`) over the combined HSP
@@ -3477,7 +3464,12 @@ fn merge_prelim_hit_lists(
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2991-2995
                 if (end - start).abs() < OVERLAP_DIAG_CLOSE as i64
-                    && merge_two_prelim_hits(&mut combined[index1], &incoming[index2], allow_gap)
+                    && crate::core::blast_hits::merge_two_chunk_hsps(
+                        &mut combined[index1],
+                        &incoming[index2],
+                        allow_gap,
+                    )
+                    .expect("BLASTN HSPs have positive length")
                 {
                     deleted[index2] = true;
                 }

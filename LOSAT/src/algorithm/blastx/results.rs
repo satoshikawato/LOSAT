@@ -648,7 +648,13 @@ fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]
             } else {
                 (bh.q_end - bh.s_end, ah.q_start - ah.s_start)
             };
-            if (end - start).abs() < 10 && super::split::merge_two(&mut a.hsp, &b.hsp) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531
+            // Split-query searches are always gapped (`split_query_cxx.cpp:60-61`), so every HSP
+            // has positive query length and `merge_two_chunk_hsps` is always defined.
+            if (end - start).abs() < 10
+                && crate::core::blast_hits::merge_two_chunk_hsps(&mut a.hsp, &b.hsp, true)
+                    .expect("gapped split-query HSPs have positive length")
+            {
                 removed[i] = true;
             }
         }

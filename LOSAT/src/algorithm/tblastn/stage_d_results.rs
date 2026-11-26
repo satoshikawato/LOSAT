@@ -584,11 +584,12 @@ fn query_hsp_lists_merge(
                 let start_diag = candidate.hsp.q_start - candidate.hsp.s_start;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
                 if (end_diag - start_diag).abs() < 10
-                    && super::search_gapped::merge_two_chunk_hsps(
+                    && crate::core::blast_hits::merge_two_chunk_hsps(
                         &mut old[index1].hsp,
                         &candidate.hsp,
                         true,
                     )
+                    .expect("gapped split-query HSPs have positive length")
                 {
                     *slot = None;
                 }

@@ -344,6 +344,29 @@ pub(crate) fn short_chunk_merge_refusal(
     .into()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:579-584
+// On a hard-masked sequence's final chunk (`overlap_past_list`), NCBI reads
+// `backup.hard_ranges[num_hard_ranges].left` one slot past its list to choose overlap 0 vs 100.
+// When an HSP from an earlier hard range (such as a short `OneWord` chunk) ends past the final
+// chunk's offset and an HSP of the final chunk starts within `DBSEQ_CHUNK_OVERLAP`, that
+// out-of-bounds read decides whether the two merge across the mask.
+/// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where alignments
+/// from an earlier hard range meet alignments of the final chunk across an overlap that NCBI reads
+/// past its list of ranges (`HardChunk::overlap_past_list`).
+#[cold]
+#[inline(never)]
+pub(crate) fn last_range_overlap_merge_refusal(
+    oid: impl std::fmt::Display,
+    program: &str,
+) -> anyhow::Error {
+    ShortChunkSeedRefusal(format!(
+        "-db_hard_mask: the sequence of OID {oid} has alignments from an earlier range that meet \
+         the final part across an overlap NCBI BLAST+ 2.17.0 reads past its list of ranges; \
+         LOSAT's {program} does not search such a database with -db_hard_mask"
+    ))
+    .into()
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515, 1526
 // Merging two one-hit ungapped HSPs whose query lengths sum to 0 divides by zero (`score_density`)
 // or converts an out-of-range float to `Int4`, which is undefined behavior in NCBI BLAST+.

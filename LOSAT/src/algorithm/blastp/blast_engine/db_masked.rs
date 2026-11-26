@@ -46,7 +46,8 @@ use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectMasks, SubjectPlan};
 use crate::algorithm::common::diag_entry::DiagRing;
 use crate::algorithm::common::hard_chunk_scan::{
-    chunk_merge_undefined_refusal, short_chunk_tree_refusal, OneWord, OneWordSeed, WordContext,
+    chunk_merge_undefined_refusal, last_range_overlap_merge_refusal, short_chunk_tree_refusal,
+    OneWord, OneWordSeed, WordContext,
 };
 use crate::algorithm::common::hard_chunk_walk::{
     ChunkWork, DiagonalWalk, HardStarts, NcbiStart, TableStart,
@@ -55,7 +56,7 @@ use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::blastinput::seq_range::RangedBatch;
 use crate::core::blast_hits::{merge_subject_chunk_hsps, ChunkMergeHsp};
-use crate::core::subject_split::{HardChunk, MAX_DBSEQ_LEN};
+use crate::core::subject_split::{HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 use crate::seqdb::SeqDb;
 
 impl ChunkMergeHsp for BlastpPreliminaryHsp {
@@ -293,6 +294,9 @@ impl<'a> BlastpDbMasking<'a> {
                         ShortChunkRefusal::Tree(length) => {
                             short_chunk_tree_refusal(oid, self.program, length)
                         }
+                        ShortChunkRefusal::LastRangeOverlap => {
+                            last_range_overlap_merge_refusal(oid, self.program)
+                        }
                         ShortChunkRefusal::UndefinedMerge => {
                             chunk_merge_undefined_refusal(oid, self.program)
                         }
@@ -380,11 +384,13 @@ fn plain_apart(
 }
 
 /// Why the search of a hard-masked sequence stops during its chunk loop (the caller's refusal):
-/// NCBI's insertion of one of a short chunk's HSPs into its interval tree never ends, or an
+/// NCBI's insertion of one of a short chunk's HSPs into its interval tree never ends, alignments
+/// from an earlier hard range meet the final chunk across NCBI's out-of-bounds overlap read, or an
 /// ungapped one-hit merge across a chunk overlap divides by zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShortChunkRefusal {
     Tree(i32),
+    LastRangeOverlap,
     UndefinedMerge,
 }
 
@@ -522,8 +528,22 @@ fn hard_chunk_loop(
     values: &BlastpPrelimValues<'_>,
 ) -> Result<(), ShortChunkRefusal> {
     let window = kernel.window;
+    // Maximum `subject_end` of HSPs from earlier hard ranges vs the current hard range, so a
+    // final-chunk merge (`overlap_past_list`) with an earlier range (e.g., from a short `OneWord`
+    // chunk) is refused while merges within a >5M final range keep `DBSEQ_CHUNK_OVERLAP`.
+    let (mut earlier_range_end, mut cur_range_end, mut cur_range): (
+        Option<i32>,
+        Option<i32>,
+        usize,
+    ) = (None, None, 0);
     for index in 0..masked.chunks.len() {
         let chunk = masked.chunks[index];
+        if chunk.range != cur_range {
+            if let Some(end) = cur_range_end.take() {
+                earlier_range_end = Some(earlier_range_end.map_or(end, |prev| prev.max(end)));
+            }
+            cur_range = chunk.range;
+        }
         // The exit of this chunk's word finder clears the table (`finish_chunk`).
         let offset = tables
             .as_deref()
@@ -599,18 +619,37 @@ fn hard_chunk_loop(
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-591
-        // Shift the chunk's HSPs by `chunk.offset`, merge into the sequence's list across
-        // `chunk.overlap` (`Blast_HSPListsMerge`), then apply `-subject_besthit` if enabled.
+        // Shift the chunk's HSPs in place by `chunk.offset`, refuse if an earlier hard range's HSP
+        // meets this final chunk across NCBI's out-of-bounds overlap read (`overlap_past_list`),
+        // merge into `masked.hits` (`Blast_HSPListsMerge`) reusing `scratch.preliminary_hsp_list`,
+        // then apply `-subject_besthit` if enabled.
         let offset = chunk.offset as i32;
-        let mut incoming = std::mem::take(&mut scratch.preliminary_hsp_list);
-        for hsp in &mut incoming {
+        let strip_limit = i64::from(offset) + i64::from(DBSEQ_CHUNK_OVERLAP as i32);
+        let mut incoming_in_strip = false;
+        let mut chunk_max_end: Option<i32> = None;
+        for hsp in &mut scratch.preliminary_hsp_list {
             hsp.subject_start += offset;
             hsp.subject_end += offset;
             hsp.gapped_subject_start += offset;
+            if i64::from(hsp.subject_start) < strip_limit {
+                incoming_in_strip = true;
+            }
+            chunk_max_end = Some(chunk_max_end.map_or(hsp.subject_end, |m| m.max(hsp.subject_end)));
+        }
+        if chunk.overlap_past_list
+            && !masked.hits.is_empty()
+            && earlier_range_end.is_some_and(|end| end > offset)
+            && incoming_in_strip
+        {
+            scratch.preliminary_hsp_list.clear();
+            return Err(ShortChunkRefusal::LastRangeOverlap);
+        }
+        if let Some(end) = chunk_max_end {
+            cur_range_end = Some(cur_range_end.map_or(end, |prev| prev.max(end)));
         }
         let merged = merge_subject_chunk_hsps(
             &mut masked.hits,
-            incoming,
+            &mut scratch.preliminary_hsp_list,
             offset,
             chunk.overlap as i32,
             i32::MAX as usize,
@@ -618,6 +657,7 @@ fn hard_chunk_loop(
             preliminary_score_compare,
         );
         if merged.is_err() {
+            scratch.preliminary_hsp_list.clear();
             return Err(ShortChunkRefusal::UndefinedMerge);
         }
         if kernel.args.subject_besthit {

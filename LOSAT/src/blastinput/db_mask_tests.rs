@@ -994,11 +994,41 @@ fn protein_shapes_of_overlapping_masks() {
     let short = [(50, 100), (102, 200), (60, 101)];
     assert_eq!(of(&short, 300, two_hit), None);
     assert_eq!(of(&short, 300, one_hit), None);
-    // A chunk that can hold alignments before the end of an earlier one: searched and merged
-    // across their overlap (`Blast_HSPListsMerge`, series NP, M4b-3d).
-    assert_eq!(of(&[(250, 280), (100, 130)], 300, two_hit), None);
-    assert_eq!(of(&[(250, 280), (100, 130)], 300, one_hit), None);
+    // Masks out of order whose final range starts before an earlier range's end: NCBI reads the
+    // merge overlap one slot past `hard_ranges` (blast_engine.c:579-580), so LOSAT refuses it
+    // (`LastRangeOverlap`, matching BLASTN's B-d boundary). Out-of-order merges in middle ranges
+    // and merges within a final range longer than `MAX_DBSEQ_LEN` are searched.
+    let last_overlap = Some(HardMaskShape::LastRangeOverlap {
+        before: (250, 280),
+        mask: (100, 130),
+    });
+    assert_eq!(of(&[(250, 280), (100, 130)], 300, two_hit), last_overlap);
+    assert_eq!(of(&[(250, 280), (100, 130)], 300, one_hit), last_overlap);
+    assert!(last_overlap
+        .unwrap()
+        .text()
+        .contains("merges alignments across an overlap read past its list of ranges"));
+    // Middle-range out-of-order merge (final mask at [260, 270) starts past earlier ends): allowed.
+    assert_eq!(
+        of(&[(250, 280), (100, 130), (260, 270)], 300, two_hit),
+        None
+    );
+    assert_eq!(
+        of(&[(250, 280), (100, 130), (260, 270)], 300, one_hit),
+        None
+    );
     assert_eq!(of(&[(50, 60), (0, 0), (100, 300)], 300, two_hit), None);
+    // Final range longer than MAX_DBSEQ_LEN merges within its own range with DBSEQ_CHUNK_OVERLAP.
+    assert_eq!(of(&[(10, 20)], 5_000_300, two_hit), None);
+    assert_eq!(of(&[(10, 20)], 5_000_300, one_hit), None);
+    // Final chunk of a >5M final range that still overlaps an earlier range: refused.
+    assert_eq!(
+        of(&[(5_500_000, 5_500_100), (10, 20)], 6_000_000, two_hit),
+        Some(HardMaskShape::LastRangeOverlap {
+            before: (5_500_000, 5_500_100),
+            mask: (10, 20),
+        })
+    );
     // A mask that ends before it starts.
     let inverted = of(&[(50, 40)], 300, one_hit);
     assert_eq!(

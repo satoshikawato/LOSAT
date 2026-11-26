@@ -460,9 +460,6 @@ fn x_scan_ranges(ranges: &[(i32, i32)], lead: usize) -> Vec<(i32, i32)> {
 // The one copy of the macro (`core::subject_split`).
 use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1533-1539
-const OVERLAP_DIAG_CLOSE: i32 = 10;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:122-143
 struct SubjectSplitState {
     full_right: i32,
@@ -685,18 +682,52 @@ fn advance_tblastx_diag_offset(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:68-69
-// On NCBI's `Int4` offsets and ends.
-#[inline]
-fn contained_in_hsp(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> bool {
-    a <= c && b >= c && d <= f && e >= f
-}
+use crate::core::blast_hits::{
+    merge_subject_chunk_hsps_with_sort, ChunkMergeHsp, ChunkMergeUndefined,
+};
 
-/// A merge of two HSPs from two chunks of a subject frame whose result NCBI leaves undefined
-/// (`merge_two_tblastx_chunk_hsps`): their lengths add up to 0, which only an HSP of the one-hit
-/// word finder of length 0 or less can give (`TWO_HIT_CHUNK_MERGE_IS_DEFINED`).
-#[derive(Debug)]
-struct ChunkMergeUndefined;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+impl ChunkMergeHsp for UngappedHit {
+    fn merge_context(&self) -> i32 {
+        self.ctx_idx as i32
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        i32::from(self.s_frame)
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.q_aa_start as i32
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end_int4()
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.s_start_int4()
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end_int4()
+    }
+    fn merge_score(&self) -> i32 {
+        self.raw_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.q_seed_off as i32
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.s_seed_int4()
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_aa_start = q_start as u32;
+        self.s_aa_start = s_start as u32;
+        self.set_int4_ends(q_end, s_end);
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.q_seed_off = q_gapped_start as u32;
+        self.s_seed_off = s_gapped_start as u32;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.raw_score = score;
+    }
+}
 
 /// Why the chunk merge of a list of the two-hit word finder never returns `ChunkMergeUndefined`.
 /// A merge never shortens an HSP: the merged HSP takes the minimum start and the maximum end, so its
@@ -707,146 +738,30 @@ const TWO_HIT_CHUNK_MERGE_IS_DEFINED: &str = concat!(
     "asserts a positive span), so the lengths of two of them add up to at least 2 in a chunk merge"
 );
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531 (`s_BlastMergeTwoHSPs`)
-// TBLASTX is ungapped (`allow_gap` is FALSE: the diagonal test runs). The offsets and ends are
-// NCBI's `Int4` (`UngappedHit::q_end_int4`): an HSP of the one-hit word finder (`-window_size 0`)
-// may have a length of 0 or less (aa_ungapped.c:1054,1083), and the lengths are NCBI's
-// differences, so such an HSP lowers the density's divisor: an HSP of length 0 contains the HSPs
-// that start or end at its point, one of negative length contains nothing, and a positive HSP
-// that absorbs one of negative length gets a higher density. The diagonal test is computed in
-// `i64`, the value NCBI's `Int4` arithmetic gives where it does not overflow. Lengths that add up
-// to 0 (an HSP of length 0 found by both chunks, or a positive HSP of length 1 or 2 that contains
-// the start or end of one of length -1 or -2) make the density `+inf` (both scores are at least
-// 1), and its product with the merged length `+inf`, or NaN when that length is 0: `(int)` of
-// either is undefined (C11 6.3.1.4; x86-64 gives INT_MIN), `Err`, which the search refuses
-// (PD-LOSAT-NCBI-DEFECTS 1.21, rule 3). Otherwise `(int)` of the finite product truncates toward
-// 0, as `as i32` does for a value in range (the lengths are at least -2, so the product stays
-// near the scores).
-fn merge_two_tblastx_chunk_hsps(
-    hsp1: &mut UngappedHit,
-    hsp2: &UngappedHit,
-) -> Result<bool, ChunkMergeUndefined> {
-    let (q_off1, s_off1) = (hsp1.q_aa_start as i32, hsp1.s_aa_start as i32);
-    let (q_off2, s_off2) = (hsp2.q_aa_start as i32, hsp2.s_aa_start as i32);
-    if i64::from(s_off1) - i64::from(s_off2) - i64::from(q_off1) + i64::from(q_off2) != 0 {
-        return Ok(false);
-    }
-    if hsp1.s_frame != hsp2.s_frame {
-        return Ok(false);
-    }
-    let (q_end1, s_end1) = (hsp1.q_end_int4(), hsp1.s_end_int4());
-    let (q_end2, s_end2) = (hsp2.q_end_int4(), hsp2.s_end_int4());
-    if contained_in_hsp(q_off1, q_end1, q_off2, s_off1, s_end1, s_off2)
-        || contained_in_hsp(q_off1, q_end1, q_end2, s_off1, s_end1, s_end2)
-    {
-        let length_sum = (q_end1 - q_off1) + (q_end2 - q_off2);
-        if length_sum == 0 {
-            return Err(ChunkMergeUndefined);
-        }
-        let score_density = (hsp1.raw_score as f64 + hsp2.raw_score as f64) / f64::from(length_sum);
-
-        hsp1.q_aa_start = hsp1.q_aa_start.min(hsp2.q_aa_start);
-        hsp1.s_aa_start = hsp1.s_aa_start.min(hsp2.s_aa_start);
-        let q_end = q_end1.max(q_end2);
-        hsp1.set_int4_ends(q_end, s_end1.max(s_end2));
-
-        if hsp2.raw_score > hsp1.raw_score {
-            hsp1.q_seed_off = hsp2.q_seed_off;
-            hsp1.s_seed_off = hsp2.s_seed_off;
-            hsp1.raw_score = hsp2.raw_score;
-        }
-
-        let new_length = q_end - hsp1.q_aa_start as i32;
-        hsp1.raw_score = hsp1
-            .raw_score
-            .max((score_density * f64::from(new_length)) as i32);
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2876-2881,2890-2911
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2956-3029
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766 (in
-// `s_BlastHSPListsCombineByScore`; `hsp_num_max` is `kHspNumMax`, which keeps every HSP)
-// The merge of a chunk's list (`incoming`, its offsets adjusted) into the frame's list of the
-// chunks before it (`combined`), for every TBLASTX list. The swaps move the HSPs of each list that
-// reach the overlap strip to its front, in their order, and the HSPs they displace behind later
-// ones ([N1, N2, S] becomes [S, N2, N1]); the lists keep that order in the append, so the stable
-// score sort (`Blast_HSPListSortByScore`, glibc's merge sort) leaves HSPs that tie on all its
-// keys in NCBI's order. The ends are NCBI's `Int4` (the strip test of the earlier chunk's HSPs,
-// `s_HSPEndDiag`, the merge and the sort), as a list of the one-hit word finder needs; on a list of
-// the two-hit word finder every end is 0 or more, where the `Int4` and the `u32` are the same
-// number. A merge NCBI leaves undefined stops the merging (`Err`): the search is refused, and its
-// lists are not reported.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035, 2749-2807
+// Delegates to the shared `core::blast_hits::merge_subject_chunk_hsps_with_sort` using TBLASTX's
+// `Int4` score comparator and in-place stable sort (`sort_ungapped_hits_by_score_int4`), ungapped
+// (`allow_gap = false`), with `hsp_num_max = INT4_MAX` (`BlastHspNumMax`).
 fn merge_tblastx_subject_chunk_hits(
     combined: &mut Vec<UngappedHit>,
     mut incoming: Vec<UngappedHit>,
     split_offset: usize,
     chunk_overlap_size: usize,
 ) -> Result<(), ChunkMergeUndefined> {
-    if incoming.is_empty() {
-        return Ok(());
-    }
-    if combined.is_empty() {
-        combined.append(&mut incoming);
-        return Ok(());
-    }
-    let split = i64::try_from(split_offset)
-        .expect("a subject chunk's offset fits i64 (NCBI's split offset is Int4)");
-    let strip_end = split
-        + i64::try_from(chunk_overlap_size).expect("the chunk overlap fits i64 (NCBI's is Int4)");
-
-    let mut hspcnt1 = 0usize;
-    for index1 in 0..combined.len() {
-        if i64::from(combined[index1].s_end_int4()) > split {
-            combined.swap(hspcnt1, index1);
-            hspcnt1 += 1;
-        }
-    }
-    let mut hspcnt2 = 0usize;
-    for index2 in 0..incoming.len() {
-        if i64::from(incoming[index2].s_aa_start) < strip_end {
-            incoming.swap(hspcnt2, index2);
-            hspcnt2 += 1;
-        }
-    }
-
-    let mut result = Ok(());
-    if hspcnt1 > 0 && hspcnt2 > 0 {
-        let mut deleted = vec![false; hspcnt2];
-        'merge: for index1 in 0..hspcnt1 {
-            for index2 in 0..hspcnt2 {
-                if deleted[index2] || incoming[index2].ctx_idx != combined[index1].ctx_idx {
-                    continue;
-                }
-                let end_diag = i64::from(combined[index1].q_end_int4())
-                    - i64::from(combined[index1].s_end_int4());
-                let start_diag =
-                    i64::from(incoming[index2].q_aa_start) - i64::from(incoming[index2].s_aa_start);
-                if (end_diag - start_diag).abs() < i64::from(OVERLAP_DIAG_CLOSE) {
-                    match merge_two_tblastx_chunk_hsps(&mut combined[index1], &incoming[index2]) {
-                        Ok(true) => deleted[index2] = true,
-                        Ok(false) => {}
-                        Err(undefined) => {
-                            result = Err(undefined);
-                            break 'merge;
-                        }
-                    }
-                }
-            }
-        }
-        let mut index2 = 0usize;
-        incoming.retain(|_| {
-            let keep = index2 >= hspcnt2 || !deleted[index2];
-            index2 += 1;
-            keep
-        });
-    }
-    combined.append(&mut incoming);
-    sort_ungapped_hits_by_score_int4(combined);
-    result
+    let split = i32::try_from(split_offset)
+        .expect("a subject chunk's offset fits i32 (NCBI's split offset is Int4)");
+    let overlap = i32::try_from(chunk_overlap_size)
+        .expect("the chunk overlap fits i32 (NCBI's overlap is Int4)");
+    merge_subject_chunk_hsps_with_sort(
+        combined,
+        &mut incoming,
+        split,
+        overlap,
+        i32::MAX as usize,
+        false,
+        score_compare_ungapped_hits_int4,
+        sort_ungapped_hits_by_score_int4,
+    )
 }
 
 /// `-subject_besthit` on a subject frame's list after the merge of a chunk that had HSPs, in every

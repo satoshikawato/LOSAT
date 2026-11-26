@@ -86,6 +86,85 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::windowmasker::read_files(words)
 }
 
+/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
+/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
+/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
+/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
+/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+pub fn search_database_read_files(
+    program: crate::api::Program,
+    arguments: &[&str],
+    registry: &dyn RegistryFiles,
+    dbs: &[&str],
+    filtering_dbs: &[&str],
+    outfmt: &str,
+    expands_taxids: bool,
+) -> Vec<Vec<u8>> {
+    use crate::algorithm::common::database::{
+        outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
+    };
+    use crate::report::archive::options::RequestKind;
+    let request_kind = match program {
+        crate::api::Program::Blastp => RequestKind::Blastp,
+        crate::api::Program::Blastn => RequestKind::Blastn,
+        crate::api::Program::Blastx => RequestKind::Blastx,
+        crate::api::Program::Tblastn => RequestKind::Tblastn,
+        crate::api::Program::Tblastx => RequestKind::Tblastx,
+        crate::api::Program::Psiblast => RequestKind::Psiblast,
+    };
+    let has_db = !dbs.is_empty();
+    let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
+    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+        return Vec::new();
+    }
+    let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
+        program.name(),
+        arguments,
+        &[],
+        registry,
+    )
+    .settings()
+    .ok()
+    .and_then(|settings| settings.blastdb);
+    let seqtype = match program {
+        crate::api::Program::Blastp
+        | crate::api::Program::Blastx
+        | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
+        crate::api::Program::Blastn
+        | crate::api::Program::Tblastn
+        | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
+    };
+    let mut out = Vec::new();
+    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
+        let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
+        out.extend(crate::seqdb::alias::database_lookup_files(
+            trimmed,
+            db_type,
+            blastdb.as_deref(),
+        ));
+    };
+    for db in dbs {
+        push_db(&mut out, db, seqtype);
+    }
+    let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
+    out.extend(crate::seqdb::taxdb::lookup_files_for_use(
+        blastdb.as_deref(),
+        taxdb_use,
+        prefetches,
+    ));
+    if has_db && expands_taxids {
+        let tax_file = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
+        let search = crate::seqdb::SearchPath::from_environment(blastdb.as_deref());
+        if search.resolve_file(tax_file).is_some() {
+            out.push(tax_file.to_vec());
+        }
+    }
+    for fdb in filtering_dbs {
+        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
+    }
+    out
+}
+
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).

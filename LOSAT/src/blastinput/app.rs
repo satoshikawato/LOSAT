@@ -160,6 +160,11 @@ pub(crate) struct ErrorAfterBatchReports {
     /// (`common::database::HeaderReader::first_utf8`): NCBI posted its warning before the error
     /// (`common::database::Utf8Read::post`).
     pub(crate) utf8: Option<crate::algorithm::common::database::Utf8Read>,
+    /// The ordinal ids of the subjects whose headers the batch's Seq-aligns read up to the
+    /// failed one, which ends them (that one alone until the batch adds the reads before it,
+    /// `after_seq_aligns`), whose titles NCBI posted before the error (`title_posts`); empty for
+    /// a failure elsewhere (a fetch, the prefetch).
+    pub(crate) title_reads: Vec<u32>,
 }
 
 impl ErrorAfterBatchReports {
@@ -170,6 +175,7 @@ impl ErrorAfterBatchReports {
             error,
             query: None,
             utf8: None,
+            title_reads: Vec::new(),
         }
     }
 
@@ -180,7 +186,50 @@ impl ErrorAfterBatchReports {
             error,
             query: Some(query),
             utf8: None,
+            title_reads: Vec::new(),
         }
+    }
+
+    /// `error` of a batch whose Seq-aligns NCBI makes from the reads `reads` (as
+    /// `common::database::batch_title_posts` takes them: the ordinal ids of the subjects of its
+    /// final hit lists that get a Seq-align, query by query in the order of each list), where it
+    /// is an `ErrorAfterBatchReports` of the read of one of them (`title_reads`): with the reads
+    /// before the first of that one, which NCBI made before it failed.
+    pub(crate) fn after_seq_aligns(
+        error: anyhow::Error,
+        reads: impl IntoIterator<Item = u32>,
+    ) -> anyhow::Error {
+        match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(mut failure) => {
+                if let &[failed] = failure.title_reads.as_slice() {
+                    failure.title_reads = reads
+                        .into_iter()
+                        .take_while(|&ordinal| ordinal != failed)
+                        .chain([failed])
+                        .collect();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
+
+    /// NCBI's posts of the titles that the failed batch's Seq-aligns read before the error
+    /// (`title_reads`), delegating to `common::database::failed_batch_title_posts`.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn title_posts(
+        &self,
+        db: &crate::seqdb::SeqDb,
+        utf8_posted: bool,
+        program: &str,
+    ) -> anyhow::Result<crate::report::diag_log::Posts> {
+        crate::algorithm::common::database::failed_batch_title_posts(
+            &self.title_reads,
+            db,
+            utf8_posted,
+            program,
+        )
     }
 
     /// `error` of a batch that fails after NCBI's reads of its Seq-aligns' headers (its

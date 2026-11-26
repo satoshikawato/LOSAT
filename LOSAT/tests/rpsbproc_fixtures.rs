@@ -334,7 +334,7 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 383);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 386);
 }
 
 // The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.67, the Owner's decision
@@ -736,7 +736,7 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 14);
+    assert_eq!(refused, 16);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`

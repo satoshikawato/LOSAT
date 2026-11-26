@@ -620,6 +620,13 @@ impl<R: Read> FormatGuess<ReadSource<R>> {
     pub(crate) fn into_bytes(self) -> Vec<u8> {
         self.stream.source.bytes
     }
+
+    /// The bytes the guess took from its input and the input after them: a reader of the stream
+    /// reads on from the bytes ([`Guessed::stream_pos`] on), as NCBI's reader reads the bytes
+    /// that the guess put back into the stream.
+    pub(crate) fn into_parts(self) -> (Vec<u8>, R) {
+        (self.stream.source.bytes, self.stream.source.reader)
+    }
 }
 
 impl<'a> FormatGuess<&'a [u8]> {

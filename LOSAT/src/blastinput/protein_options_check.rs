@@ -30,6 +30,11 @@ pub struct ProteinOptionsCheck<'a> {
     /// (`-xdrop_ungap` of blastp, tblastn and rpsblast); `None`: the program's default, which is
     /// above 0.
     pub x_dropoff: Option<f64>,
+    /// `-culling_limit`, `-best_hit_overhang` and `-best_hit_score_edge` as the options hold them
+    /// (an imported search strategy's values unchecked: `app::check_hsp_filtering`).
+    pub culling_limit: Option<i32>,
+    pub best_hit_overhang: Option<f64>,
+    pub best_hit_score_edge: Option<f64>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
@@ -162,6 +167,14 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
             "expect value or cutoff score must be greater than zero",
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the hit
+    // saving check of the HSP filtering options, after the culling limit's, which the options'
+    // setter keeps at 0 or above)
+    crate::blastinput::app::check_hsp_filtering(
+        check.culling_limit,
+        check.best_hit_overhang,
+        check.best_hit_score_edge,
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1783-1795
     if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case("IDENTITY") {
         return Err(options_error(

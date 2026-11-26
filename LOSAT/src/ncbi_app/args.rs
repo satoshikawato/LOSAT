@@ -178,6 +178,15 @@ impl Arguments {
         aliases.map(|&(alias, name)| (alias.get(), name.get()))
     }
 
+    /// The keys of `AddDefaultKey` with their defaults, in the order of `m_Args`: the values that
+    /// NCBI's `CArgs` holds for those the command line does not give (the import of a search
+    /// strategy compares them with the strategy's, `report::archive::read::import`).
+    pub(crate) fn defaults(self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        self.descs()
+            .iter()
+            .filter_map(|desc| Some((desc.name(), desc.default()?)))
+    }
+
     /// The entries of `m_Dependencies`: (first name, dependency, second name).
     pub(crate) fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
@@ -1041,9 +1050,9 @@ pub(crate) fn parse_in(
     })
 }
 
-// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT Web
-// scans the argv before parsing so both parsed and unparsed argvs use one reader backed by the
-// program's own argument definitions (`arguments`, `resolve_known_desc`).
+// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT scans
+// the raw argv through the program's own argument definitions (`arguments`, `resolve_known_desc`)
+// so both parsed and unparsed argvs skip option values accurately (line WQA D19/D23).
 /// Scans `words` (the command line after the program's name) using `program`'s argument
 /// definitions (`arguments`), calling `visit(canonical_name, value)` for each recognized option
 /// before `--`: `None` for a flag (`Kind::Flag`, without `=`), `Some(value)` for an option that
@@ -1053,6 +1062,16 @@ pub(crate) fn scan_argv<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
     mut visit: impl FnMut(&'static str, Option<&OsStr>),
+) {
+    scan_argv_kinds(program, words, |name, _kind, value| visit(name, value));
+}
+
+/// Like [`scan_argv`], also passing each recognized option's [`Kind`] so callers can identify
+/// `Kind::InputFile` options across every program without duplicating option lists.
+pub(crate) fn scan_argv_kinds<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    mut visit: impl FnMut(&'static str, Kind, Option<&OsStr>),
 ) {
     let Some(arguments) = arguments(program) else {
         return;
@@ -1077,15 +1096,15 @@ pub(crate) fn scan_argv<S: AsRef<OsStr>>(
             if let Some(desc) = desc {
                 if desc.kind == Kind::Flag {
                     if eq_value.is_none() {
-                        visit(desc.name(), None);
+                        visit(desc.name(), desc.kind, None);
                     }
                 } else if let Some(val_bytes) = eq_value {
                     // SAFETY: `val_bytes` follows an ASCII `=` in `word`, so it starts on a
                     // valid encoded boundary and ends at the end of `word`.
                     let val = unsafe { OsStr::from_encoded_bytes_unchecked(val_bytes) };
-                    visit(desc.name(), Some(val));
+                    visit(desc.name(), desc.kind, Some(val));
                 } else if let Some(next) = words.get(at + 1) {
-                    visit(desc.name(), Some(next.as_ref()));
+                    visit(desc.name(), desc.kind, Some(next.as_ref()));
                     at += 2;
                     continue;
                 }

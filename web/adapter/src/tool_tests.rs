@@ -560,8 +560,8 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
     // Case 2: existing file of the run's directory (`Cargo.toml` in `web/adapter`) is refused by
     // both `run` (status 1, stream 3) and `validate`.
     let expected_refusal = "Error: a -logfile file 'Cargo.toml' that is a file of the run's \
-         directory (the command line appends its messages to it; LOSAT Web reads the run's files \
-         and writes none of them) is not supported by LOSAT's WINDOWMASKER";
+         directory (LOSAT Web reads the run's files and writes none of them) is not supported by \
+         LOSAT's WINDOWMASKER";
     assert_eq!(
         validate(&[
             "windowmasker",
@@ -669,9 +669,9 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
     // refused by both `validate` and `run` (status 1, same sentence, no file).
     let log_refusal = |name: &str| {
         format!(
-            "Error: a -logfile file '{name}' that is a file of the run's directory (the command \
-             line appends its messages to it; LOSAT Web reads the run's files and writes none of \
-             them) is not supported by LOSAT's WINDOWMASKER"
+            "Error: a -logfile file '{name}' that is a file of the run's directory (LOSAT Web \
+             reads the run's files and writes none of them) is not supported by LOSAT's \
+             WINDOWMASKER"
         )
     };
     let out_refusal = |name: &str| {

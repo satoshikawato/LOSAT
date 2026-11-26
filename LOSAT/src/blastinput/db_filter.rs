@@ -241,6 +241,7 @@ impl DbFilterArgs {
         gis: &[i64],
         taxids: &[i32],
     ) -> Vec<crate::report::archive::options::Param> {
+        use crate::report::archive::fields;
         use crate::report::archive::options::{Param, ParamValue};
         let Some(selected) = self.selected() else {
             return Vec::new();
@@ -253,19 +254,23 @@ impl DbFilterArgs {
         };
         let mut params = Vec::with_capacity(2);
         if is_gi && !gis.is_empty() {
-            params.push(Param {
-                name: if negative { "NegativeGiList" } else { "GiList" },
-                value: ParamValue::BigIntegerList(gis.to_vec()),
-            });
+            params.push(Param::new(
+                if negative {
+                    fields::NEGATIVE_GI_LIST_INT8
+                } else {
+                    fields::GI_LIST_INT8
+                },
+                ParamValue::BigIntegerList(gis.to_vec()),
+            ));
         }
-        params.push(Param {
-            name: if negative {
-                "NegativeTaxidList"
+        params.push(Param::new(
+            if negative {
+                fields::NEGATIVE_TAXID_LIST
             } else {
-                "TaxidList"
+                fields::TAXID_LIST
             },
-            value: ParamValue::IntegerList(taxids.to_vec()),
-        });
+            ParamValue::IntegerList(taxids.to_vec()),
+        ));
         params
     }
 

@@ -1,0 +1,55 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	annot_title_na.asn
+#Output data file:	(stdout)
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	12	
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_2	Nucleotide	12	dna#gene
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_3	Nucleotide	12	
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_4	Nucleotide	12	rna gene
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_5	Nucleotide	12	na gene
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_6	Nucleotide	12	notset prot
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+QUERY	Query_7	Nucleotide	12	other prot
+DOMAINS
+ENDDOMAINS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

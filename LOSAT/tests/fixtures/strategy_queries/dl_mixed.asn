@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "x" }, inst { repr delta, mol aa, length 6, ext delta { literal { length 2, seq-data iupacaa "MK" }, literal { length 2, seq-data gap { type unknown } }, literal { length 2, seq-data ncbistdaa '0102'H } } } }
+      }
+    }

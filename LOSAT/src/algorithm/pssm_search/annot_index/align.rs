@@ -6,7 +6,7 @@ use super::range::{
     interval_parts, point_parts, Handle, HandleRangeMap, LiveHandles, Range, Strand, UNKNOWN,
 };
 use super::view::V;
-use super::{Indexer, Refusal, Stop};
+use super::{Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 
 /// Std-seg's `dim` above which NCBI's rows depend on the machine's memory (`hrmaps.resize`

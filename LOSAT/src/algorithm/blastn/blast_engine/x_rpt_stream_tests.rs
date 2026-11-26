@@ -112,7 +112,7 @@ fn checked_as(
         packed: Vec::new(),
     };
     let batching = QueryBatching {
-        fixed_batch_size: batch_size as i32,
+        fixed: Some(batch_size),
         batch_size,
         split,
     };

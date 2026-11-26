@@ -346,6 +346,7 @@ fn the_search_is_blastxs_with_the_rps_search() {
             line_length: Some(70),
             sort_hits: Some(1),
             sort_hsps: None,
+            hitlist_start: None,
         }
     );
     let resolved = args.resolve().unwrap();

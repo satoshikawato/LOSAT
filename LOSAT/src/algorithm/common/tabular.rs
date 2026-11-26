@@ -748,6 +748,7 @@ pub(crate) fn write_tax_report(
     protein: bool,
     names: Option<&TabularNames>,
     program: &str,
+    app: &str,
     queries: &[crate::report::tax_report::TaxQuery<'_>],
     writer: &mut crate::cli::NcbiOstream<'_>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
@@ -763,6 +764,7 @@ pub(crate) fn write_tax_report(
         subjects.loads(),
         names,
         program,
+        app,
         html,
         Some(&seen),
     )?;

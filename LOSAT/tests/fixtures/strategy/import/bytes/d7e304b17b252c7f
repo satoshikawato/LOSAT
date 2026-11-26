@@ -1,0 +1,20 @@
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+BLAST engine error: Error: Gap existence and extension values 0 and -1 are not supported for substitution scores 1 and -2
+2 and 2 are supported existence and extension values
+1 and 2 are supported existence and extension values
+0 and 2 are supported existence and extension values
+3 and 1 are supported existence and extension values
+2 and 1 are supported existence and extension values
+1 and 1 are supported existence and extension values
+2 and 2 are supported existence and extension values
+Any values more stringent than 2 and 2 are supported
+ Error: Gap existence and extension values 0 and -1 are not supported for substitution scores 1 and -2
+2 and 2 are supported existence and extension values
+1 and 2 are supported existence and extension values
+0 and 2 are supported existence and extension values
+3 and 1 are supported existence and extension values
+2 and 1 are supported existence and extension values
+1 and 1 are supported existence and extension values
+2 and 2 are supported existence and extension values
+Any values more stringent than 2 and 2 are supported
+ 

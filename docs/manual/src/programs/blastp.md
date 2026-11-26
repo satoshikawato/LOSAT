@@ -94,7 +94,7 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-remote`, `-entrez_query` and `-import_search_strategy`.
+- `-remote` and `-entrez_query`.
 - `-db_hard_mask` on a database with a sequence whose overlapping or out-of-order masks LOSAT cannot search as NCBI BLAST+ does. One such sequence refuses the whole database. Other databases whose masks overlap, nest or are stored out of order are searched as NCBI BLAST+ searches them, among them the A. thaliana TAIR10 and UniRef50 databases masked by `segmasker`; where NCBI's rows for a sequence depend on the sequences next to it, LOSAT searches it on its own (see [Differences](../differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)). See [What LOSAT refuses](../refusals.md#blastp).
 
 ## Examples

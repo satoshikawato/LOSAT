@@ -1091,13 +1091,13 @@ pub(super) fn collect_alias_list_files(
         if value.is_empty() {
             continue;
         }
-        if key == "OIDLIST" {
+        if key == "OIDLIST" || !value.contains(&b' ') {
             out.insert(combine_path(&node.db_path, value));
+        }
+        if key == "OIDLIST" {
             if let Some(first) = node.vol_names.first() {
                 out.insert(combine_path(dir_name(first), value));
             }
-        } else if !value.contains(&b' ') {
-            out.insert(combine_path(&node.db_path, value));
         }
     }
     for subnode in &node.subnodes {

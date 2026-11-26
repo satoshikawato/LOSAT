@@ -70,35 +70,32 @@ pub(super) fn read_paths(
     out: &mut std::collections::BTreeSet<Vec<u8>>,
 ) {
     let file_name = |extension: &str| [name, b".", extension.as_bytes()].concat();
+    let vol_data_file =
+        |vol: u32| file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
+    let mut push_or_raw = |file: Vec<u8>| {
+        out.insert(search.resolve_file(&file).unwrap_or(file));
+    };
     let index_file = file_name(EXTENSIONS[0]);
     let index_resolved = search.resolve_file(&index_file);
     out.insert(index_resolved.clone().unwrap_or(index_file));
-
-    let offset_file = file_name(EXTENSIONS[1]);
-    out.insert(search.resolve_file(&offset_file).unwrap_or(offset_file));
+    push_or_raw(file_name(EXTENSIONS[1]));
 
     let num_vols = index_resolved
         .as_deref()
         .and_then(|path| read_num_vols(&path_of_bytes(path)));
     match num_vols {
-        Some(1) => {
-            let data_file = file_name(EXTENSIONS[2]);
-            out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
-        }
         Some(n) if n > 1 => {
-            let cap = n.min(10_000);
-            for vol in 0..cap {
-                let data_file = file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
-                out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
+            for vol in 0..n.min(10_000) as u32 {
+                push_or_raw(vol_data_file(vol));
             }
         }
-        _ => {
-            let data_file = file_name(EXTENSIONS[2]);
-            out.insert(search.resolve_file(&data_file).unwrap_or(data_file));
-            for vol in 0..100u32 {
-                let data_file = file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
-                if let Some(resolved) = search.resolve_file(&data_file) {
-                    out.insert(resolved);
+        other => {
+            push_or_raw(file_name(EXTENSIONS[2]));
+            if other != Some(1) {
+                for vol in 0..100u32 {
+                    if let Some(resolved) = search.resolve_file(&vol_data_file(vol)) {
+                        out.insert(resolved);
+                    }
                 }
             }
         }

@@ -493,8 +493,7 @@ fn matches_database(
         return false;
     };
     for file in &read_paths.files {
-        let path = crate::utils::os_bytes::path_of_bytes(file);
-        if matches_candidate(candidates, &path) {
+        if matches_bytes_path(candidates, file) {
             return true;
         }
     }
@@ -520,15 +519,12 @@ fn matches_volume_mb_indexes(
         let vol_count = SuperHeader::load(&shd_path).map_or(100u32, |h| h.num_vol.min(10_000));
         for vol in 0..vol_count {
             let idx = mb_index_volume_name(volume, vol);
-            let idx_path = crate::utils::os_bytes::path_of_bytes(&idx);
-            if matches_candidate(candidates, &idx_path) {
+            if matches_bytes_path(candidates, &idx)
+                || search_path
+                    .resolve_file(&idx)
+                    .is_some_and(|resolved| matches_bytes_path(candidates, &resolved))
+            {
                 return true;
-            }
-            if let Some(resolved) = search_path.resolve_file(&idx) {
-                let resolved_path = crate::utils::os_bytes::path_of_bytes(&resolved);
-                if matches_candidate(candidates, &resolved_path) {
-                    return true;
-                }
             }
         }
     }
@@ -547,13 +543,17 @@ fn matches_mb_index(candidates: &[PathBuf], index_name: &OsStr, search_path: &Se
         for vol in 0..100u32 {
             let file = mb_index_volume_name(base, vol);
             let target = search_path.resolve_file(&file).unwrap_or(file);
-            let idx_path = crate::utils::os_bytes::path_of_bytes(&target);
-            if matches_candidate(candidates, &idx_path) {
+            if matches_bytes_path(candidates, &target) {
                 return true;
             }
         }
     }
     false
+}
+
+fn matches_bytes_path(candidates: &[PathBuf], path: &[u8]) -> bool {
+    let path = crate::utils::os_bytes::path_of_bytes(path);
+    matches_candidate(candidates, &path)
 }
 
 fn matches_candidate(candidates: &[PathBuf], target: &Path) -> bool {

@@ -619,9 +619,9 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
     assert_eq!(
         String::from_utf8(err).unwrap(),
         format!(
-            "Error: a -logfile file '{fasta}' that is a file of the run's directory (the command \
-             line appends its messages to it; LOSAT Web reads the run's files and writes none of \
-             them) is not supported by LOSAT's WINDOWMASKER\n"
+            "Error: a -logfile file '{fasta}' that is a file of the run's directory (LOSAT Web \
+             reads the run's files and writes none of them) is not supported by LOSAT's \
+             WINDOWMASKER\n"
         )
     );
     // Case 3: `-logfile /dev/stdout` writes messages into `out` in chronological order before counts.

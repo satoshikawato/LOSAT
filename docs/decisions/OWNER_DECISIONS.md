@@ -425,6 +425,12 @@ entry's number in that log. 137 entries: 22 Owner, 3 Owner in part,
 | --- | --- | --- | --- | --- | --- | --- |
 | 7 | 2026-11-04 | Owner-delegated |  | The web audit work is split into five sessions (W1-W5) by touched files; user-visible "verification/certified" wording is removed from screens, titles, notices and READMEs, internal names and past records stay unchanged. | LOSAT Web wording, session split | `docs/web/ncbi_ui_mapping.md:228` |
 
+### `web-qa-20261119`: line WQA
+
+| Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
+| --- | --- | --- | --- | --- | --- | --- |
+| 49 | 2026-11-24 | Owner | 「Q-D23=A」 | Refuse `-logfile` pointing to any input file read by the run on the command line and library API under the same rule as LOSAT Web D19, preventing input corruption and NCBI's endless read-back loop. | CLI and library `-logfile` self-reference refusal (D23) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:859`, `LOSAT/src/report/log_inputs.rs:1` |
+
 ### `web-sx-blastx-20261102`: line SX
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |

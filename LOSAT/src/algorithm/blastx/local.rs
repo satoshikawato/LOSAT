@@ -818,7 +818,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
-                &mut *diagnostics,
+                (&mut *diagnostics, archive),
             )?,
             None => None,
         };
@@ -1187,7 +1187,7 @@ fn search_database(
         outputs.formats.first().map(|format| format.outfmt),
     );
     let database = BlastxDatabase::open_restricted(
-        name,
+        &name,
         &settings,
         list.as_ref(),
         args.db_mask.option().as_ref(),
@@ -1375,7 +1375,8 @@ fn search_database(
 /// (`OutputSink::Files`, which LOSAT Web gives them): a run without one gives NCBI's error after the
 /// records are read (`ReportOutputs::xinclude_check`).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts)?;
+    let outfmt_bytes: Vec<&[u8]> = outfmts.iter().map(|s| s.as_bytes()).collect();
+    let (choices, resolutions) = read_options(args, &outfmt_bytes)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1416,7 +1417,7 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
 /// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
 /// subjects are read (`native::run_inner`).
-fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with
@@ -1425,7 +1426,7 @@ fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
 }
 
 /// The `-outfmt` value of each output of `outputs`.
-fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
+fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o [u8]> {
     outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
@@ -1437,7 +1438,7 @@ type ReadOptions = (Vec<app::EarlyFormat>, Vec<Result<ResolvedOptions>>);
 /// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
 /// and 14 whose side files have no file name to go by get NCBI's error later, where the command
 /// line gives it (`ReportOutputs::xinclude_check`).
-fn read_format_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_format_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`);
     // where the argv names a search strategy file a value that does not parse is left to the
     // formatting handler (`app::early_format_choice`, `check_resolutions`).
@@ -1489,8 +1490,9 @@ fn check_resolutions(
     diagnostics: &mut dyn Write,
 ) -> Result<(Vec<app::FormatChoice>, Vec<ResolvedOptions>)> {
     let mut choices = Vec::with_capacity(early.len());
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     for choice in early {
-        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        let choice = choice.at_formatting_handler(&outfmt_bytes)?;
         app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
         choices.push(choice);
     }
@@ -1499,7 +1501,7 @@ fn check_resolutions(
         args.html,
         args.app_request_kind(),
         args.request_kind(),
-        args.database_name(),
+        args.database_name().as_deref(),
         &outfmts,
     )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(

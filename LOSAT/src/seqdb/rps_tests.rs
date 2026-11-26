@@ -215,7 +215,7 @@ fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
     );
     // A database of one volume: its `-db` value as given (`RpsVolumeSetup::with_database`).
     assert_eq!(
-        files.open_freq(&base, "RPSTBLASTN", Some("./cdd")).err(),
+        files.open_freq(&base, "RPSTBLASTN", Some(b"./cdd".as_slice())).err(),
         Some(RpsOpenError::Ncbi(
             "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".into()
         ))

@@ -43,7 +43,7 @@ use crate::utils::seg::SegParams;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for TblastnArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -73,7 +73,10 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.xdrop_gap = args.xdrop_gap;
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.word_size = args.word_size;
@@ -93,10 +96,9 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = args.soft_masking;
-    inputs.seg = args
-        .seg
-        .as_deref()
-        .and_then(crate::report::archive::options::seg_filter);
+    inputs.seg = args.seg.as_deref().and_then(|v| {
+        crate::report::archive::options::seg_filter(crate::utils::os_bytes::os_str_bytes(v))
+    });
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
@@ -105,9 +107,11 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
         .max_target_seqs
         .or(args.num_alignments)
         .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
-    if let Ok((mode, _)) =
-        crate::blastinput::app::parse_comp_based_stats(&args.comp_based_stats, false, false)
-    {
+    if let Ok((mode, _)) = crate::blastinput::app::parse_comp_based_stats(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+        false,
+        false,
+    ) {
         inputs.comp_based_stats = mode as i32;
     }
     inputs
@@ -127,7 +131,7 @@ pub(crate) fn handle_for(
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }
@@ -546,7 +550,7 @@ impl import::StrategyArgs for TblastnArgs {
             Setter::WordSize(n) => self.word_size = Some(*n),
             Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
             Setter::WindowSize(n) => self.window_size = Some(*n),
-            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
             Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
             Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
             Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
@@ -578,10 +582,10 @@ impl import::StrategyArgs for TblastnArgs {
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;
         if let Some(value) = collected.seg.value() {
-            self.seg = Some(value);
+            self.seg = Some(value.into());
         }
         if let Some(value) = collected.composition_value(false, program)? {
-            self.comp_based_stats = value;
+            self.comp_based_stats = value.into();
         }
         Ok(())
     }

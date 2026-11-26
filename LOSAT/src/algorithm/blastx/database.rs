@@ -59,7 +59,7 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 /// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct BlastxDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
     /// of the run.
@@ -111,9 +111,9 @@ impl BlastxDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
-    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
+    pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(
-            name,
+            name.as_ref(),
             settings,
             None,
             None,
@@ -129,7 +129,7 @@ impl BlastxDatabase {
     /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
     /// run's posts, which is not `program`'s where the run is another program's strategy).
     pub(crate) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
@@ -151,7 +151,7 @@ impl BlastxDatabase {
         )?;
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             taxdb: shared::TaxdbRun::running(app),
             parsed_seqids,
             program,
@@ -198,7 +198,7 @@ impl BlastxDatabase {
     }
 
     /// The `-db` value as NCBI keeps it.
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -608,14 +608,15 @@ impl ReportedSubjects {
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
     /// batch (`ErrorAfterBatchReports`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
-    /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
-    /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
+    /// (`check_reported_title`, after the batch's reads, whose error comes first: NCBI's Seq-aligns
+    /// end there, before any report; with `pairwise`, `StoredTitle::check_shown_source`). The rest
+    /// of the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
     /// reported sequences one by one (`shared::HeaderReader::new`).
     pub(crate) fn read_titles(
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        pairwise: bool,
+        (pairwise, title_reads): (bool, shared::TitleReads),
         (earlier, one_by_one): (shared::EarlierUtf8, bool),
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
@@ -626,6 +627,10 @@ impl ReportedSubjects {
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db, one_by_one);
         headers.note_earlier(earlier);
+        // The first title or shown-source refusal that the reports refuse (`check_reported_title`,
+        // `StoredTitle::check_shown_source`), held until the batch's header reads finish so an
+        // earlier refusal does not get overtaken by a later one or overtake a later header error.
+        let mut refused = None;
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -647,16 +652,21 @@ impl ReportedSubjects {
                         database.program,
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
-                            shared::check_reported_title(
+                            if let Err(refusal) = shared::check_reported_title(
+                                &database.db,
+                                ordinal,
                                 stored.replaced_bytes,
-                                || database.db.oid(ordinal),
+                                title_reads,
                                 database.program,
-                            )?;
-                            if pairwise {
-                                stored.check_shown_source(
+                            ) {
+                                refused.get_or_insert(refusal);
+                            } else if pairwise {
+                                if let Err(refusal) = stored.check_shown_source(
                                     || database.db.oid(ordinal),
                                     database.program,
-                                )?;
+                                ) {
+                                    refused.get_or_insert(refusal);
+                                }
                             }
                             if stored.source != crate::report::defline::SourceTaxname::Unnamed {
                                 sources.insert(list.oid, stored.source);
@@ -664,12 +674,24 @@ impl ReportedSubjects {
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
                         shared::ReportedHeader::Parsed(subject) => {
+                            if let Err(refusal) = shared::check_reported_title(
+                                &database.db,
+                                ordinal,
+                                subject.replaced_title_bytes(),
+                                title_reads,
+                                database.program,
+                            ) {
+                                refused.get_or_insert(refusal);
+                            }
                             listed.insert(list.oid, Some(Arc::from(subject.first_title())));
                             parsed.insert(list.oid, subject);
                         }
                     }
                 }
             }
+        }
+        if let Some(refusal) = refused {
+            return Err(refusal);
         }
         Ok(BatchTitles {
             listed,

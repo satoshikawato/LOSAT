@@ -79,6 +79,7 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
     pub(super) psiblast_prefetched: &'a Option<Vec<Vec<usize>>>,
+    pub(super) pre_prune_replaced_titles: &'a [Option<usize>],
     pub(super) batch_ranges: &'a [Range<usize>],
     pub(super) batch_prefetch: &'a BatchPrefetch,
     pub(super) pssm_made: bool,
@@ -240,6 +241,7 @@ pub(super) fn prefetch_reported_subjects(
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched,
+        pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
         pssm_made,
@@ -356,7 +358,26 @@ pub(super) fn prefetch_reported_subjects(
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
-        titles.check_reported_titles(reported_lists)?;
+        let db = database.expect("listed titles are a database's");
+        let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
+            args.app.request_kind(),
+            outputs
+                .formats
+                .iter()
+                .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+        );
+        titles.check_reported_titles(db, reported_lists, title_reads)?;
+        // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read subjects beyond
+        // `-max_target_seqs` before `PruneSeqalign`: refuse any replaced title read before the cut
+        // in the batches before `prefetch_stop` too, so no round silently reads a bad title into
+        // NCBI's header cache.
+        for &rank in pre_prune_replaced_titles
+            .iter()
+            .take(reported_lists.len())
+            .flatten()
+        {
+            titles.check_rank_title(db, rank, title_reads)?;
+        }
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
@@ -814,9 +835,23 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
         }
     }
+    // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'
+    // (`query_warnings::query_posts` sorts them by the batch's first query, stably).
+    let posts = match (listed_titles.as_ref(), database) {
+        (Some(titles), Some(database)) => titles
+            .title_posts(
+                database,
+                hit_lists,
+                query_batches.iter().map(|batch| &batch.searched),
+            )?
+            .into_iter()
+            .chain(prefetch_posts)
+            .collect(),
+        _ => prefetch_posts,
+    };
     Ok(ReportedPrefetch {
         subject_reads,
-        posts: prefetch_posts,
+        posts,
         hit_loads,
     })
 }
@@ -1123,9 +1158,9 @@ pub(super) fn refuse_unreportable(
 // rows of the reports. `hit_list_to_seqalign_order` is `blast_engine`'s import (from `hsp`),
 // which only this module reads.
 use super::{
-    blastp_subject_tag, hit_list_to_seqalign_order, path_label, psiblast_pssms,
-    recount_shown_identities, write_pairwise_prologs, write_request_posts, BlastpSubjectSource,
-    ShownLetters, ShownQueries, ShownSubjects,
+    blastp_subject_tag, hit_list_to_seqalign_order, psiblast_pssms, recount_shown_identities,
+    write_pairwise_prologs, write_request_posts, BlastpSubjectSource, ShownLetters, ShownQueries,
+    ShownSubjects,
 };
 use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -1347,6 +1382,7 @@ pub(super) struct ReportValues {
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
     pub(super) psiblast_prefetched: Option<Vec<Vec<usize>>>,
+    pub(super) pre_prune_replaced_titles: Vec<Option<usize>>,
     pub(super) batch_ranges: Vec<Range<usize>>,
     pub(super) batch_prefetch: BatchPrefetch,
     pub(super) pssm_reads: database::PssmReads,
@@ -1447,6 +1483,22 @@ pub(super) fn report_values(
         && requested_formats
             .first()
             .is_some_and(|outfmt| !outfmt.reads_subjects());
+    // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read every subject of the
+    // traceback hit lists before `PruneSeqalign` cuts them to `-max_target_seqs`: note the first
+    // subject rank with a replaced title byte per query before the cut (empty when no reader met
+    // such a title, zero work on clean databases).
+    let pre_prune_replaced_titles: Vec<Option<usize>> = match (listed_titles.as_ref(), database) {
+        (Some(titles), Some(database)) if prunes_lists && database.seqdb().replaced_titles() => {
+            hit_lists
+                .iter()
+                .map(|hit_list| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list))
+                        .find(|&rank| titles.has_replaced_title_bytes(rank))
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
     // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
     // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
@@ -1643,6 +1695,7 @@ pub(super) fn report_values(
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched,
+        pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
         pssm_reads,
@@ -1662,7 +1715,7 @@ pub(super) fn report_values(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:138-139
 pub(super) struct ReportLabels {
-    pub(super) subject_input_label: String,
+    pub(super) subject_input_label: Vec<u8>,
     pub(super) shown_num_sequences: i64,
     pub(super) shown_total_letters: i64,
     pub(super) shown_database: Option<crate::report::pairwise::PairwiseDatabase>,
@@ -1685,10 +1738,10 @@ pub(super) fn report_labels(
         total_db_len,
         ..
     } = *setup;
-    let subject_name_label = if subject_label.is_empty() {
-        path_label(&args.subject)
+    let subject_name_label: Vec<u8> = if subject_label.is_empty() {
+        crate::utils::os_bytes::os_str_bytes(args.subject.as_os_str()).into_owned()
     } else {
-        subject_label.to_string()
+        subject_label.as_bytes().to_vec()
     };
     let subject_input_label = blastp_subject_tag(args, subject_label);
     // The number of sequences that the `Database:` lines show: the sums over the names of the
@@ -1705,12 +1758,17 @@ pub(super) fn report_labels(
         None => total_db_len,
     };
     let context = ReportContext {
-        subject_name: Some(subject_name_label.clone()),
+        subject_name: Some(subject_name_label),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
         // The `# Database:` line of outfmt 7 shows the `-db` value as NCBI keeps it.
         database_name: Some(match database {
-            Some(database) => database.name().to_string(),
-            None => format!("User specified sequence set (Input: {subject_input_label})"),
+            Some(database) => database.name().to_vec(),
+            None => [
+                b"User specified sequence set (Input: ".as_slice(),
+                &subject_input_label,
+                b")",
+            ]
+            .concat(),
         }),
         program: args.app.ncbi_name().to_string(),
     };

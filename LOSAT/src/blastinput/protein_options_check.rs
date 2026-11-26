@@ -13,7 +13,7 @@ pub struct ProteinOptionsCheck<'a> {
     pub gap_open: i32,
     pub gap_extend: i32,
     /// The matrix name as typed.
-    pub matrix_name: &'a str,
+    pub matrix_name: &'a [u8],
     pub threshold: f64,
     pub word_size: i32,
     /// Whether the compressed-alphabet lookup table is used (`eCompressedAaLookupTable`).
@@ -176,7 +176,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
         check.best_hit_score_edge,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1783-1795
-    if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case("IDENTITY") {
+    if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case(b"IDENTITY") {
         return Err(options_error(
             "Word size larger than 5 is not supported for the identity scoring matrix",
         ));
@@ -196,15 +196,17 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
 /// the programs check this where they search their first batch; the options-only check of the Web
 /// (`check_options`) checks it without the inputs.
 pub fn check_identity_compressed_lookup(
-    matrix_name: &str,
+    matrix_name: impl AsRef<[u8]>,
     compressed_lookup: bool,
     word_size: i32,
     ncbi_program: &str,
     program: &str,
 ) -> anyhow::Result<()> {
-    if compressed_lookup && matrix_name.eq_ignore_ascii_case("IDENTITY") {
+    let matrix_name = matrix_name.as_ref();
+    if compressed_lookup && matrix_name.eq_ignore_ascii_case(b"IDENTITY") {
         anyhow::bail!(
-            "-matrix {matrix_name} with the compressed lookup table (-word_size {word_size}), with which NCBI BLAST+'s {ncbi_program} crashes, is not supported by LOSAT's {program}"
+            "-matrix {} with the compressed lookup table (-word_size {word_size}), with which NCBI BLAST+'s {ncbi_program} crashes, is not supported by LOSAT's {program}",
+            String::from_utf8_lossy(matrix_name)
         );
     }
     Ok(())

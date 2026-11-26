@@ -470,23 +470,6 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
     }
 }
 
-/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
-/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
-///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:903-911
-/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
-/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
-/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
-pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -> Result<()> {
-    if path.to_str().is_none() {
-        anyhow::bail!(
-            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's {program}",
-            path.to_string_lossy()
-        );
-    }
-    Ok(())
-}
-
 /// NCBI's warning for a subject without residues, which it skips when it sets up the
 /// subjects for the search (`CBlastFormat` is made after `Query is Empty!` and before the
 /// outfmt 0 prolog; `AUTHORITY.md` §B row 7, BI-43, BI-49). The ID of a subject is

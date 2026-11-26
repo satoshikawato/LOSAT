@@ -113,6 +113,9 @@ pub(super) mod x_subject_meta;
 mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
+// `-comp_based_stats 0 -use_sw_tback` (item X4-c0): the OID-ordered Smith-Waterman redo without
+// composition adjustment (one-thread loop and windowed parallel path).
+mod sw_c0;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
@@ -2075,26 +2078,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
-    // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
-    // statistics 1 to 3 (`kappa::smith_waterman`). Without them (`-comp_based_stats 0`, and
-    // IDENTITY's reset, `identity_cbs_reset`) NCBI runs the redo too,
-    // without an adjustment, on the preliminary lists in subject order (the stream is not sorted
-    // by score), which LOSAT's redo loop does not read yet (the next item, X4-c0). psiblast's redo
-    // of a PSSM keeps its refusal (the position-based Smith-Waterman redo).
-    if args.use_sw_tback {
-        if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
-            bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
-        }
-        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
-        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
-        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
-        // batches before, which have no valid context. A run without such a batch ends as NCBI's
-        // does.
-        if !args.ungapped && !args.comp_based_stats.is_enabled() {
-            bail!(
-                "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
-            );
-        }
+    // `-use_sw_tback` (items X4 and X4-c0): BLASTP runs NCBI's Smith-Waterman redo in modes 1 to 3
+    // (`kappa::smith_waterman`) and in mode 0 (`sw_c0`, including `-matrix IDENTITY`'s reset,
+    // `identity_cbs_reset`). With `-ungapped` (allowed only in mode 0), NCBI crashes at the redo's
+    // set-up of every searched batch, and LOSAT refuses there (`redo_run::sw_ungapped_check`).
+    // psiblast keeps its refusal (the position-based Smith-Waterman redo).
+    if args.use_sw_tback && (args.app != BlastpApp::Blastp || args.psi_search.is_some()) {
+        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // The compressed lookup table runs at each of its word sizes, 5 to 7
@@ -10414,14 +10404,21 @@ fn run_call(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
-    // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`, mode 0 or the
-    // position-based redo) takes the place of both, and reads them as they are too.
-    let ordinary_traceback = args.comp_based_stats.mode
+    // `-comp_based_stats 0` without `-use_sw_tback`: the ordinary traceback below reads the
+    // compact lists as they are. With `-use_sw_tback` (item X4-c0), NCBI runs the Smith-Waterman
+    // redo without composition adjustment in batch OID order (`sw_c0`). psiblast `-in_pssm` and
+    // rpsblast take their own paths and leave the redo unused.
+    let sw_c0_redo = !args.ungapped
+        && args.use_sw_tback
+        && args.psi_search.is_none()
+        && args.rps_search.is_none()
+        && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    let ordinary_traceback = (args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
+        && !sw_c0_redo)
         || args.psi_search.is_some()
         || args.rps_search.is_some();
-    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback && !sw_c0_redo {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -10435,7 +10432,7 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
-    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -10498,6 +10495,9 @@ fn run_call(
             blastp_parallel_pool,
         )?)
     } else {
+        if sw_c0_redo {
+            redo_run::sw_matrix_check(args.scoring.matrix, &query_batches, &query_batch_skipped)?;
+        }
         None
     };
     // The parameters of each query's redo (`redo_run::RedoParamsBuilder`), which the redo's paths
@@ -10540,8 +10540,12 @@ fn run_call(
             .as_ref()
             .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
         fetch_notes: &fetch_notes,
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
         x_win_expand,
         ordinary_traceback,
+        sw_c0_redo,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10553,54 +10557,15 @@ fn run_call(
         ))]
         timing_enabled,
     };
-    // The plan chooses the redo's path (`redo_run::RedoPath`) and expands the compact lists that
-    // the path reads expanded; the path redoes the matches.
-    match redo_run::plan_redo_and_expand_lists(
+    // The plan chooses the redo's path (`redo_run::RedoPath`), expands the compact lists that
+    // the path reads expanded, and redoes the matches (`redo_run::run_redo`).
+    redo_run::run_redo(
         &redo,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
-    ) {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::Windows => redo_run::x_windows_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::MatchParallel(q_idx) => redo_run::match_parallel_redo(
-            &redo,
-            q_idx,
-            &preliminary_hit_lists,
-            &mut redone_matches,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::QueryParallel(kappa_parallel_query_indices) => {
-            redo_run::query_parallel_redo(
-                &redo,
-                &kappa_parallel_query_indices,
-                &preliminary_hit_lists,
-                &mut redone_matches,
-            )?
-        }
-        redo_run::RedoPath::OneThread => redo_run::one_thread_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-    }
+        &mut redone_matches,
+        &mut x_prelim_freed,
+    )?;
 
     if timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");

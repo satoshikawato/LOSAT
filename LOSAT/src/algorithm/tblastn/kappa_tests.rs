@@ -2101,3 +2101,38 @@ fn report_counts_compare_an_ambiguous_codon_as_the_rows_show_it() {
         assert_eq!(shown, (3, 2), "frame {frame}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+// A one-hit alignment that starts on the frame's trailing NULLB with a single `Sub(1)`
+// leaves `s_end == s_start - 1` (`found_end` false); `report_converted_stats` must not fail
+// on the negative `s_end - s_start` span.
+#[test]
+fn report_converted_stats_handles_single_column_nullb_start() {
+    use crate::utils::matrix::aa_char_to_ncbistdaa;
+    let code = GeneticCode::try_from_id(1).unwrap();
+    let query: Vec<u8> = b"MKT".iter().map(|&aa| aa_char_to_ncbistdaa(aa)).collect();
+    let subject = b"ATGAAAACG"; // 9 nt -> 3 aa, trailing NULLB at offset 3
+    let converted = ConvertedKappaHsp {
+        context: 0,
+        hsp: GappedHsp {
+            frame: 1,
+            score: 50,
+            q_start: 1,
+            q_end: 0,
+            q_gapped_start: 1,
+            s_start: 3,
+            s_end: 2,
+            s_gapped_start: 3,
+        },
+        edit_script: vec![GapEditOp::Sub(1)],
+        matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+    };
+    let mut target = TargetTranslation::new(subject, &code);
+    let ((ident, positives, length, mismatches, gap_opens, gap_letters), shown) =
+        report_converted_stats(&converted, &query, &mut target, ScoringMatrix::Blosum62).unwrap();
+    assert_eq!(
+        (ident, positives, length, mismatches, gap_opens, gap_letters),
+        (0, 0, 1, 1, 0, 0)
+    );
+    assert_eq!(shown, (0, 1));
+}

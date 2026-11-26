@@ -154,7 +154,11 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   stops where the crash cuts it, which its heap and the environment move (the same official 2.17.0 binary
   wrote 349 bytes of db.x2g.bx.of.p0127.nd0.1 when it was frozen and 17 in later runs): no expectation.
   `freeze` stops on such a run before it writes a file (`refuse_signal`); the row takes its stdout from a near
-  row, or has empty stdout cells where LOSAT writes nothing before it refuses.
+  row, or has empty stdout cells where LOSAT writes nothing before it refuses. A rejection row whose `covers` cell
+  has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the refusal) must be
+  NCBI's stderr of the row's own command up to its exception report (`Error: NCBI C++ Exception:`), which
+  `freeze` runs and writes as <row_id>.err with `stderr_sha256` (`ncbi_stderr`; a run without that report
+  stops it).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -720,6 +724,16 @@ def near_cut(row: dict[str, str]) -> int | None:
     return near[1] if near else None
 
 
+# What starts NCBI's report of the exception at which it stops (`ncbi_stderr`).
+EXCEPTION_REPORT = b"Error: NCBI C++ Exception:"
+
+
+def ncbi_stderr(row: dict[str, str]) -> bool:
+    """Whether a `losat-rejection` row's stderr before its refusal is NCBI's up to its exception report (a
+    ` | ncbi-stderr` part of its covers cell), frozen as <row_id>.err."""
+    return any(part.strip() == "ncbi-stderr" for part in row["covers"].split(" | ")[1:])
+
+
 def under_valgrind(row: dict[str, str]) -> bool:
     """Whether the frozen bytes of `row` are NCBI's run under valgrind (a ` | ncbi-valgrind` part of its covers
     cell): rows where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3)."""
@@ -1225,8 +1239,10 @@ def freeze(args: argparse.Namespace) -> int:
         if not selected(row, args):
             continue
         command = [str(ncbi_bin / row["program"]), *search_argv(row), "-num_threads", "1"]
-        if row["kind"] == "losat-rejection" and row["stdout_bytes"] and not near_row_id(row):
-            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
+        own_stdout = bool(row["stdout_bytes"]) and not near_row_id(row)
+        if row["kind"] == "losat-rejection" and (own_stdout or ncbi_stderr(row)):
+            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too, or its stderr up
+            # to its exception report (`ncbi_stderr`).
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
@@ -1243,10 +1259,22 @@ def freeze(args: argparse.Namespace) -> int:
                 run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
             refuse_signal(row, run.returncode)
-            out = frozen_stdout(row, run.stdout)
-            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
-            row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
-            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
+            if ncbi_stderr(row):
+                cut = run.stderr.find(EXCEPTION_REPORT)
+                if cut < 0:
+                    raise SystemExit(f"{row['row_id']}: ncbi-stderr, but NCBI wrote no exception report")
+                err, err_path = run.stderr[:cut], FROZEN / f"{row['row_id']}.err"
+                if err:
+                    err_path.write_bytes(err)
+                else:
+                    err_path.unlink(missing_ok=True)
+                row.update(stderr_sha256=sha256(err) if err else "")
+                print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstderr before the exception={len(err)}")
+            if own_stdout:
+                out = frozen_stdout(row, run.stdout)
+                (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+                row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
+                print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
             continue
         if row["kind"] != "ncbi" or near_row_id(row):
             continue
@@ -1477,10 +1505,20 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != in_losat_words(out):
-                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
+            expected_out, observed_out = in_losat_words(out), run.stdout
+            if is_sam_outfmt(row["outfmt"]):
+                expected_out, observed_out = strip_sam_cl(expected_out), strip_sam_cl(observed_out)
+            if observed_out != expected_out:
+                problems.append("stdout " + first_difference(expected_out, observed_out))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
+        if ncbi_stderr(row):
+            err = (FROZEN / f"{row['row_id']}.err").read_bytes() if row["stderr_sha256"] else b""
+            if (sha256(err) if err else "") != row["stderr_sha256"]:
+                problems.append("frozen .err does not match the manifest")
+            before = b"".join(run.stderr.splitlines(keepends=True)[:-1])
+            if before != in_losat_words(err):
+                problems.append("stderr before the refusal " + first_difference(in_losat_words(err), before))
         expected = expected_text(row, library)
         if expected.encode() not in run.stderr:
             problems.append(f"stderr lacks {expected!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

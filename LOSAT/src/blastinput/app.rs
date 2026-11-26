@@ -39,9 +39,9 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
 }
 
 /// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
-/// split batch whose chunks found nothing (`blastp::protein_query_split::UnmetChecks`), a failed
-/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTP's, psiblast's
-/// and TBLASTN's error there.
+/// split batch whose chunks found nothing (`blastn::query_split::UnmetChecks`), a failed
+/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTN's, BLASTP's,
+/// psiblast's and TBLASTN's error there.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
 pub const TRACEBACK_FAILED: &str = "Traceback failed";
@@ -95,7 +95,17 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// and database search errors, `context_statistics::setup_failure` and `database_search_error`),
 /// and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which searches all
 /// batches together and then the batches before the failing one again alone, so it needs
-/// `query`). Any other refusal of a batch's search comes before the run's first byte.
+/// `query`). Any other refusal of a batch's search comes before the run's first byte. A
+/// tabular row at which NCBI stops in a batch's report (`report::tabular::FailedLookupRefusal`)
+/// comes after the reports of the batches before too, then what NCBI writes to stderr of the
+/// failing batch before that row (its reader messages, its search strategy posts, its UTF8String
+/// warning, its prefetch texts, and for each of its queries up to the row's the query's own
+/// warnings, its formatter's taxdb warning and its subject reads up to the row:
+/// `FailedLookupRefusal::posts_before_stop`): TBLASTN, TBLASTX and BLASTN off its report stream,
+/// which check every batch's rows at once, write those reports first
+/// (`FailedLookupRefusal::batch_start`), then those posts; BLASTP and PSIBLAST fail that query's
+/// batch (`ErrorAfterBatchReports`, whose `common::database::ErrorAfterPosts` holds the posts after
+/// the batch's own); BLASTX and BLASTN on its stream check each batch's rows when they write them.
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports {
     pub(crate) error: anyhow::Error,

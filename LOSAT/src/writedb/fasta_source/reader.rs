@@ -487,7 +487,7 @@ const PROTEIN_ACTIONS: [u8; 256] = char_actions(true, false);
 /// The residues of a data line, following the protein, nucleotide-with-gaps, and
 /// nucleotide-without-gaps cases of `CFastaReader::ParseDataLine`'s character switch.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-826
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Alphabet {
     Protein,
@@ -498,7 +498,7 @@ enum Alphabet {
 /// Whether `byte` is a letter accepted by protein input in either case, following the letter
 /// cases of `CFastaReader::ParseDataLine`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-918
 const fn is_protein_letter(byte: u8) -> bool {
     (byte & 0xdf).wrapping_sub(b'A') < 26
 }
@@ -508,7 +508,7 @@ const fn is_protein_letter(byte: u8) -> bool {
 /// A–D, G–H, K, M–N, R–W and Y. Clearing bit 5 folds lower case to upper case without mapping
 /// any non-letter into `A`–`Z`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874,900-907
 const fn is_nucleotide_letter(byte: u8) -> bool {
     let offset = (byte & 0xdf).wrapping_sub(b'A');
     (offset <= 3)
@@ -533,7 +533,7 @@ impl Alphabet {
     /// (`actions()[byte] >= RESIDUE_MIN`), computed by arithmetic so `find_first` can test a
     /// block of bytes at once (`tests::residue_tests_match_the_tables` checks every byte).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-925
     const fn is_residue(self, byte: u8) -> bool {
         match self {
             Alphabet::Protein => is_protein_letter(byte) | (byte == b'*') | (byte == b'-'),
@@ -547,7 +547,7 @@ impl Alphabet {
     /// directly so spaced or digit-broken lines exit without extra arithmetic per byte; longer
     /// runs use [`find_first`].
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:841-936
     fn residue_run(self, s: &[u8]) -> usize {
         let actions = self.actions();
         if s.len() < 28 {
@@ -582,7 +582,7 @@ const UPPER_BLOCK: usize = 32;
 /// blocks of `UPPER_BLOCK`, with the final block overlapping the previous one (converting a byte
 /// twice leaves it upper case).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:939-950
 fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
     let len = run.len();
     if len < UPPER_BLOCK {
@@ -889,7 +889,7 @@ fn is_ambig_nuc(c: u8) -> bool {
 /// nucleotide byte or a non-residue protein byte, following `CFastaReader::CheckDataLine`'s
 /// classification loop and `;` comment stop.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:710-771
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:730-750
 #[cold]
 #[inline(never)]
 fn data_line_counts_slow(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
@@ -939,7 +939,7 @@ fn data_line_counts_slow(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) 
 /// one [`find_first`] scan; any other line uses [`data_line_counts_slow`]
 /// (`tests::data_line_counts_match_the_loop` compares against the byte-by-byte loop).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:710-771
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:719-750
 fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
     debug_assert!(checked.len() <= 70);
     if is_nuc {

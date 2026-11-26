@@ -2225,6 +2225,7 @@ impl ListedTitles<'_> {
         ranks: &[usize],
         taxids: bool,
         reads: bool,
+        scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ) -> Result<Vec<usize>> {
         let mut kept = Vec::with_capacity(ranks.len());
         for &rank in ranks {
@@ -2236,11 +2237,14 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             }
+            let seen_by_scope =
+                subject.load_throws() && scope().has_key(&subject.query_scope_keys().own);
             match shared::prefetch_reads(
                 &database.db,
                 self.listed.ordinals[rank],
                 subject,
                 taxids,
+                seen_by_scope,
                 self.program,
             )? {
                 Ok(Some(_)) => kept.push(rank),
@@ -2707,14 +2711,30 @@ impl ListedTitles<'_> {
     pub(super) fn check_prefetched(
         &self,
         database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
+        batch_start: usize,
+        lists: &[Option<BlastpHitList>],
     ) -> Result<()> {
-        for rank in ranks {
+        let seen = self.seen();
+        for rank in Self::reported_ranks(lists) {
             if let Some(subject) = self.parsed_subject(rank) {
+                let ordinal = self.listed.ordinals[rank];
+                let seen_by_scope = seen.any()
+                    && seen.hides_ordinal(
+                        lists.iter().enumerate().filter_map(|(offset, hit_list)| {
+                            let hit_list = hit_list.as_ref()?;
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            hit_list.hsplist_array[..count]
+                                .iter()
+                                .any(|hsp_list| hsp_list.oid as usize == rank)
+                                .then_some(batch_start + offset)
+                        }),
+                        ordinal,
+                    );
                 shared::check_prefetched_parsed(
                     &database.db,
                     subject,
-                    self.listed.ordinals[rank],
+                    ordinal,
+                    seen_by_scope,
                     self.program,
                 )?;
             }
@@ -2962,16 +2982,35 @@ impl ListedTitles<'_> {
         }
         if fetched {
             let reads = Self::batch_reads(hit_lists, prefetch);
+            let seen = self.seen();
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
+                    let ordinal = self.listed.ordinals[rank];
+                    let seen_by_scope = seen.any()
+                        && seen.hides_ordinal(
+                            hit_lists
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(query, hit_list)| {
+                                    let hit_list = hit_list.as_ref()?;
+                                    let count =
+                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                    hit_list.hsplist_array[..count]
+                                        .iter()
+                                        .any(|hsp_list| hsp_list.oid as usize == rank)
+                                        .then_some(query)
+                                }),
+                            ordinal,
+                        );
                     subject
-                        .fetched(taxonomy, reads.one_by_one(rank as u32), loads.load(rank))
+                        .fetched_with_scope(
+                            taxonomy,
+                            reads.one_by_one(rank as u32),
+                            loads.load(rank),
+                            seen_by_scope,
+                        )
                         .map_err(|reason| {
-                            shared::parsed_refusal(
-                                self.oids.oid(self.listed.ordinals[rank]),
-                                &reason,
-                                self.program,
-                            )
+                            shared::parsed_refusal(self.oids.oid(ordinal), &reason, self.program)
                         })?;
                     subject.check_printed_word(true, words).map_err(|problem| {
                         shared::parsed_refusal(

@@ -5254,6 +5254,7 @@ fn check_tabular_lookups(
             subject_ids,
             report.database_parsed,
             report.database_loads,
+            crate::blastinput::app::Program::Blastn,
         ) {
             continue;
         }
@@ -9979,6 +9980,7 @@ fn write_reports_untimed(
                 results.batches,
                 written.queries,
                 !args.ungapped,
+                subjects.seen.numbered_from(written.queries),
                 x_pool,
             )?)
         }

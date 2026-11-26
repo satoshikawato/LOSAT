@@ -222,9 +222,6 @@ pub(crate) fn refuse_pairwise_reports(
         oid_of,
         "TBLASTX",
     )?;
-    if view == crate::report::pairwise::PairwiseView::Pairwise {
-        return Ok(());
-    }
     let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::new(
         run.queries,
         run.archive_spans.to_vec(),
@@ -237,6 +234,7 @@ pub(crate) fn refuse_pairwise_reports(
         oid_of,
         |q_idx| scopes.of_query(q_idx),
         scopes.generated(),
+        view != crate::report::pairwise::PairwiseView::Pairwise,
         "TBLASTX",
     )
 }

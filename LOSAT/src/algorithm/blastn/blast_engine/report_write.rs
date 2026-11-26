@@ -67,9 +67,11 @@ pub(super) fn refuse_anchored_reports(
             },
         ))
     };
-    // The description lines of outfmt 0 to 4 (line RG-KB item 12 review 1).
+    // The description lines of outfmt 0 to 4 (line RG-KB item 12 review 1) and the display id
+    // lookup of outfmt 0 (`refuse_query_ids_of_anchored_reports` with `anchored = false`).
     if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
         let oids = reader.oid_map();
+        let mut pairwise_batches = None;
         for format in output_formats {
             if let BlastnOutputFormat::Pairwise(view) = format {
                 crate::algorithm::common::database::refuse_described_lines(
@@ -79,6 +81,27 @@ pub(super) fn refuse_anchored_reports(
                     report.database_parsed,
                     |rank| report.database_loads.load(rank as usize),
                     |rank| oids.oid(ordinals[rank as usize]),
+                    "BLASTN",
+                )?;
+                let batches = pairwise_batches.get_or_insert_with(|| {
+                    crate::blastinput::query_batch::AnchoredBatchScopes::new(
+                        report.queries,
+                        if report.batch_spans.is_empty() {
+                            vec![0..report.queries.len()]
+                        } else {
+                            report.batch_spans.to_vec()
+                        },
+                    )
+                });
+                crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                    hit_lists.len(),
+                    reported_ranks,
+                    |q_idx| described(*view, q_idx),
+                    report.database_parsed,
+                    |rank| oids.oid(ordinals[rank as usize]),
+                    |q_idx| batches.of_query(q_idx),
+                    batches.generated(),
+                    *view != crate::report::pairwise::PairwiseView::Pairwise,
                     "BLASTN",
                 )?;
             }
@@ -131,27 +154,6 @@ pub(super) fn refuse_anchored_reports(
                     ));
                 }
             }
-        }
-        if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
-            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::new(
-                report.queries,
-                if report.batch_spans.is_empty() {
-                    vec![0..report.queries.len()]
-                } else {
-                    report.batch_spans.to_vec()
-                },
-            );
-            let oids = reader.oid_map();
-            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
-                hit_lists.len(),
-                reported_ranks,
-                |q_idx| described(view, q_idx),
-                report.database_parsed,
-                |rank| oids.oid(ordinals[rank as usize]),
-                |q_idx| batches.of_query(q_idx),
-                batches.generated(),
-                "BLASTN",
-            )?;
         }
     }
     Ok(())

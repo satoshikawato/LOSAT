@@ -177,6 +177,10 @@ fn tables_that_read_letters_keep_the_refusal() {
         Program::Blastp
     ));
     assert!(tabular_shows(Some(&spec("18")), Program::Blastp));
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid qseq qlen")),
+        Program::Blastp
+    ));
     assert!(!tabular_shows(
         Some(&spec("6 qseqid sseqid sseq")),
         Program::Blastp
@@ -189,11 +193,97 @@ fn tables_that_read_letters_keep_the_refusal() {
         Some(&spec("6 qseqid pident")),
         Program::Blastn
     ));
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid qseq qlen")),
+        Program::Blastn
+    ));
+    // BLASTN `qseq` + `pident`/`nident`/`mismatch` enters the sequence block and recomputes
+    // identities from the found query Bioseq.
     assert!(!tabular_shows(
-        Some(&spec("6 qseqid sframe")),
+        Some(&spec("6 qseqid qseq pident")),
+        Program::Blastn
+    ));
+    // TBLASTX allows `qseq` (length-checked per HSP) and `sframe`/`frames`.
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid qseq qlen")),
         Program::Tblastx
     ));
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid sframe frames sstrand qframe")),
+        Program::Tblastx
+    ));
+    // TBLASTN allows `sframe`/`frames` (using query Bioseq length) and refuses `qseq`.
+    assert!(tabular_shows(
+        Some(&spec("6 qseqid sseqid sframe frames sstrand")),
+        Program::Tblastn
+    ));
+    assert!(!tabular_shows(
+        Some(&spec("6 qseqid qseq")),
+        Program::Tblastn
+    ));
+    // BLASTX refuses every field that enters the alignment block (`CreateTranslatedDensegFromNADenseg`
+    // throws `Widths already exist`) and allows score/id/coverage fields and standalone `sframe`/`frames`.
+    for field in [
+        "qstart", "qend", "sstart", "send", "length", "gapopen", "gaps", "qframe", "sstrand",
+        "qseq", "sseq", "pident", "nident", "mismatch", "positive", "ppos", "btop",
+    ] {
+        assert!(
+            !tabular_shows(Some(&spec(&format!("6 qseqid {field}"))), Program::Blastx),
+            "BLASTX should refuse {field}"
+        );
+    }
+    for field in [
+        "sseqid", "stitle", "slen", "evalue", "bitscore", "score", "qcovs", "qcovhsp", "qcovus",
+        "sframe", "frames",
+    ] {
+        assert!(
+            tabular_shows(Some(&spec(&format!("6 qseqid {field}"))), Program::Blastx),
+            "BLASTX should show {field}"
+        );
+    }
     // The default fields: `pident` and `mismatch` read letters outside BLASTN.
     assert!(!tabular_shows(None, Program::Blastp));
     assert!(tabular_shows(None, Program::Blastn));
+    assert!(!tabular_shows(None, Program::Blastx));
+}
+
+#[test]
+fn ncbi_frame_matches_get_frame_formula() {
+    // Plus strand: `(start0 % 3) + 1` regardless of Bioseq length.
+    assert_eq!(ncbi_frame(true, 301, 50), 1);
+    assert_eq!(ncbi_frame(true, 302, 50), 2);
+    assert_eq!(ncbi_frame(true, 303, 50), 3);
+    // Minus strand: `-(((len - start0 - 1) % 3) + 1)` with C++ signed remainder.
+    assert_eq!(ncbi_frame(false, 659, 660), -2);
+    assert_eq!(ncbi_frame(false, 659, 661), -3);
+    assert_eq!(ncbi_frame(false, 659, 662), -1);
+    assert_eq!(ncbi_frame(false, 659, 50), -1);
+    assert_eq!(ncbi_frame(false, 659, 51), 1);
+    assert_eq!(ncbi_frame(false, 659, 52), 0);
+    assert_eq!(ncbi_frame(false, 360, 220), 1);
+    assert_eq!(ncbi_frame(false, 360, 221), 0);
+    assert_eq!(ncbi_frame(false, 360, 222), -1);
+    assert_eq!(ncbi_frame(false, 194, 220), -3);
+}
+
+#[test]
+fn hides_ordinal_requires_every_reporting_query() {
+    let queries = [(believed("pdb|1AB1|A"), &b"q"[..], 46)];
+    let mut seen = QueryBioseqs::default();
+    assert!(!seen.hides_ordinal([0], 3));
+    seen.note(
+        0,
+        3,
+        &keys("pdb|1AB1|A"),
+        0..1,
+        0..1,
+        records(&queries),
+        true,
+    )
+    .unwrap();
+    assert!(seen.hides_ordinal([0], 3));
+    assert!(!seen.hides_ordinal([0, 1], 3));
+    assert!(!seen.hides_ordinal(std::iter::empty(), 3));
+    assert!(seen.numbered_from(0).hides_ordinal([0], 3));
+    assert!(!seen.numbered_from(1).hides_ordinal([0], 3));
 }

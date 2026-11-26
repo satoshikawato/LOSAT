@@ -647,7 +647,10 @@ fn check_failed_lookups(
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> Result<()> {
-    if !crate::report::tabular::may_stop_at_failed_lookup(options.tabular) {
+    if !crate::report::tabular::may_stop_at_failed_lookup_for(
+        options.tabular,
+        crate::blastinput::app::Program::Blastx,
+    ) {
         return Ok(());
     }
     for batch in batches {
@@ -1071,39 +1074,38 @@ fn write_pairwise(
             |rank| reported.oid(rank as usize),
             options.program().upper,
         )?;
-        if view != crate::report::pairwise::PairwiseView::Pairwise {
-            let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
-            for hit in hits {
-                let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
-                if !ranks.contains(&hit.hit.s_idx) {
-                    ranks.push(hit.hit.s_idx);
-                }
+        let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
+        for hit in hits {
+            let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
+            if !ranks.contains(&hit.hit.s_idx) {
+                ranks.push(hit.hit.s_idx);
             }
-            let ids: Vec<(
-                &str,
-                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
-            )> = queries
-                .iter()
-                .map(|query| (query.internal_id.as_str(), query.believed()))
-                .collect();
-            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
-                &ids,
-                batches
-                    .iter()
-                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
-                    .collect(),
-            );
-            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
-                queries.len(),
-                |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
-                described,
-                parsed,
-                |rank| reported.oid(rank as usize),
-                |q_idx| scopes.of_query(q_idx),
-                scopes.generated(),
-                options.program().upper,
-            )?;
         }
+        let ids: Vec<(
+            &str,
+            Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+        )> = queries
+            .iter()
+            .map(|query| (query.internal_id.as_str(), query.believed()))
+            .collect();
+        let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+            &ids,
+            batches
+                .iter()
+                .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+                .collect(),
+        );
+        crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+            queries.len(),
+            |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
+            described,
+            parsed,
+            |rank| reported.oid(rank as usize),
+            |q_idx| scopes.of_query(q_idx),
+            scopes.generated(),
+            view != crate::report::pairwise::PairwiseView::Pairwise,
+            options.program().upper,
+        )?;
     }
     let config = PairwiseConfig {
         program: "blastx".into(),

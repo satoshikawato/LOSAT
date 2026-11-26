@@ -1005,11 +1005,18 @@ impl ParsedSubject {
         self.scope_finds_none && self.show_gis
     }
 
+    /// Whether the data loader's build of the Bioseq throws (`load_throws`): another id of the
+    /// sequence holds the Seq-id of the Seq-align id's handle, while no definition line holds it
+    /// as NCBI's load reads the ids.
+    pub fn load_throws(&self) -> bool {
+        self.load_throws
+    }
+
     /// LOSAT's refusal of a read of the subject's Bioseq where NCBI's load of it throws
     /// (`load_throws`): the formats that read the Bioseq (`fetched`), the prefetch
     /// (`prefetched`) and psiblast's PSSM (`pssm_read`); the Seq-annots and the archive (outfmt 8,
     /// 9, 11, 12) read nothing of it.
-    fn handle_load_refusal(&self) -> Option<String> {
+    pub(crate) fn handle_load_refusal(&self) -> Option<String> {
         self.load_throws.then(|| {
             format!(
                 "has the Seq-align id {}, whose Seq-id NCBI BLAST+'s data loader looks up with another chain that another of its ids matches, while no definition line holds it as NCBI BLAST+ 2.17.0's load reads the ids (its load throws: {} Error: oid headers do not contain target gi/seq_id.)",
@@ -1139,13 +1146,30 @@ impl ParsedSubject {
     /// `HitLoad::Refused`) is refused as above, a lookup that fails on a file among them (outfmt
     /// 17 here, before any byte is written; the reason of a run whose formats refuse it,
     /// `HitLoad::Refused`).
+    #[cfg(test)]
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool, load: HitLoad) -> Result<(), String> {
+        self.fetched_with_scope(taxonomy, one_by_one, load, false)
+    }
+
+    /// `fetched` with `seen_by_scope`: whether every reporting query's scope resolves this subject
+    /// to a noted query Bioseq (`report::query_bioseq::QueryBioseqs::hides_ordinal`), in which
+    /// case NCBI's scope returns the query Bioseq before calling the BLAST database data loader
+    /// (`handle_load_refusal` does not apply).
+    pub fn fetched_with_scope(
+        &self,
+        taxonomy: bool,
+        one_by_one: bool,
+        load: HitLoad,
+        seen_by_scope: bool,
+    ) -> Result<(), String> {
         match load {
             HitLoad::Unread => return Ok(()),
             HitLoad::Held(holder) => return Err(self.held_reason(holder)),
             HitLoad::Throws => {}
-            HitLoad::Loaded => self.found_fetched(taxonomy, None)?,
-            HitLoad::Refused(refused) => self.found_fetched(taxonomy, Some(refused))?,
+            HitLoad::Loaded => self.found_fetched(taxonomy, None, seen_by_scope)?,
+            HitLoad::Refused(refused) => {
+                self.found_fetched(taxonomy, Some(refused), seen_by_scope)?
+            }
         }
         self.weakly_fetched(one_by_one)
     }
@@ -1258,9 +1282,16 @@ impl ParsedSubject {
 
     /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
     /// (`found_instead`), whatever the batch's prefetch.
-    fn found_fetched(&self, taxonomy: bool, refused: Option<ThrowRefusal>) -> Result<(), String> {
-        if let Some(reason) = self.handle_load_refusal() {
-            return Err(reason);
+    fn found_fetched(
+        &self,
+        taxonomy: bool,
+        refused: Option<ThrowRefusal>,
+        seen_by_scope: bool,
+    ) -> Result<(), String> {
+        if !seen_by_scope {
+            if let Some(reason) = self.handle_load_refusal() {
+                return Err(reason);
+            }
         }
         if self.unfetchable {
             return Err(format!(
@@ -1336,7 +1367,18 @@ impl ParsedSubject {
     // `bad_magic`), another sequence's where it gives that one first (review 2 of line DBID
     // pssmread, H3: `gi|777|gb|YYY00001.1|` of taxid 99990 before `lcl|777 ^A gi|777`).
     /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
+    #[cfg(test)]
     pub fn prefetched(&self) -> Prefetched {
+        self.prefetched_with_scope(false)
+    }
+
+    /// `prefetched` with `seen_by_scope`: where every reporting query's scope finds a noted query
+    /// Bioseq for this subject, NCBI's prefetch finds the query in scope and loads nothing from
+    /// the BLAST database data loader (`Prefetched::Nothing`).
+    pub fn prefetched_with_scope(&self, seen_by_scope: bool) -> Prefetched {
+        if seen_by_scope {
+            return Prefetched::Nothing;
+        }
         if let Some(reason) = self.handle_load_refusal() {
             return Prefetched::Failed(reason);
         }

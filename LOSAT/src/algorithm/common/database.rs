@@ -3751,16 +3751,17 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
     oid_of: impl Fn(u32) -> crate::seqdb::Oid,
     scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
     generated: bool,
+    anchored: bool,
     program: &str,
 ) -> Result<()> {
-    if parsed.is_empty() {
+    if parsed.is_empty() || (!anchored && generated) {
         return Ok(());
     }
     let parsed_of = |rank: u32| parsed.get(rank as usize).and_then(Option::as_deref);
     for query in 0..num_queries {
         let scope = scope_of(query);
         let ranks = reported(query);
-        if generated {
+        if anchored && generated {
             for &rank in &ranks {
                 if let Some(subject) = parsed_of(rank) {
                     refuse_generated_query_id(
@@ -4287,14 +4288,15 @@ pub(crate) fn check_reported_parsed(
     protein: bool,
     taxdb_found: bool,
     ordinal: u32,
+    seen_by_scope: bool,
     program: &str,
 ) -> Result<()> {
     if shown.reads_bioseq() {
         subject
-            .fetched(shown.taxonomy, shown.one_by_one, load)
+            .fetched_with_scope(shown.taxonomy, shown.one_by_one, load, seen_by_scope)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {
-        check_prefetched_parsed(db, subject, ordinal, program)?;
+        check_prefetched_parsed(db, subject, ordinal, seen_by_scope, program)?;
     }
     if shown.pairwise {
         check_pairwise_parsed(
@@ -4581,6 +4583,7 @@ pub(crate) fn reports_may_refuse(
                     protein,
                     shown.pairwise && taxdb_found,
                     ordinal,
+                    false,
                     program,
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
@@ -4609,6 +4612,9 @@ pub(crate) fn reports_may_refuse(
                 if let Some(queries) = queries.filter(|_| shown.resolves_subject()) {
                     refuse_id_of_a_query(&subject, || db.oid(ordinal), queries, program)
                         .map_err(|_| ReportRefusal::Headers)?;
+                    if shown.pairwise && queries.has_key(&subject.query_scope_keys().display) {
+                        return Err(ReportRefusal::Headers);
+                    }
                 }
                 if shown.joined {
                     let mut keys = Vec::new();
@@ -4616,7 +4622,7 @@ pub(crate) fn reports_may_refuse(
                     kept.keys.extend(keys.into_iter().map(|key| (key, ordinal)));
                 }
                 if prefetch {
-                    match prefetch_reads(db, ordinal, &subject, true, program) {
+                    match prefetch_reads(db, ordinal, &subject, true, false, program) {
                         Ok(Ok(Some(blob))) if blob == ordinal => {
                             kept.taxids.extend(subject.volume_taxids())
                         }
@@ -7955,7 +7961,7 @@ fn load_read_texts<'s>(
         // such a subject can be refused here first); psiblast's kept beyond its cut are itself
         // (`prefetched_ranks`). One without them is read by its ordinal id, its own blob.
         let blob = match parsed {
-            Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
+            Some(subject) => match prefetch_reads(db, ordinal, subject, true, false, program)? {
                 Ok(Some(blob)) => Some(blob),
                 Ok(None) => None,
                 Err(reason) => return Err(parsed_refusal(db.oid(ordinal), &reason, program)),
@@ -8641,6 +8647,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     let mut uncertain: Option<(u32, String)> = None;
     let mut asked: std::collections::HashSet<u32> = Default::default();
     let mut loaded = Vec::new();
+    let mut query_scope: Option<crate::blastinput::query_batch::QueryScope> = None;
     for prefetched @ PrefetchSubject {
         ordinal,
         parsed,
@@ -8648,6 +8655,16 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     } in subjects
     {
         if let Some(subject) = parsed {
+            // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
+            // A query Bioseq in the batch's scope resolves the Seq-align id before the BLAST
+            // database data loader is called, so a subject whose loader would throw on its
+            // normalized PDB handle is never loaded by the prefetch (line RG-KB item 12).
+            if subject.load_throws() {
+                let scope = query_scope.get_or_insert_with(|| (queries.scope)());
+                if scope.has_key(&subject.query_scope_keys().own) {
+                    continue;
+                }
+            }
             if subject.prefetch_fails() {
                 failed_lookup.get_or_insert_with(|| {
                     (
@@ -8873,7 +8890,7 @@ fn prefetch_slot_plan(
             continue;
         }
         let blob = match parsed {
-            Some(subject) => match prefetch_reads(db, ordinal, subject, true, program)? {
+            Some(subject) => match prefetch_reads(db, ordinal, subject, true, false, program)? {
                 Ok(Some(blob)) => blob,
                 Ok(None) => continue,
                 Err(reason) => return Err(parsed_refusal(db.oid(ordinal), &reason, program)),
@@ -10101,10 +10118,11 @@ pub(crate) fn prefetch_reads(
     ordinal: u32,
     subject: &crate::report::db_subject::ParsedSubject,
     texts: bool,
+    seen_by_scope: bool,
     program: &str,
 ) -> Result<std::result::Result<Option<u32>, String>> {
     use crate::report::db_subject::Prefetched;
-    let (other, or_itself, or_none, reason) = match subject.prefetched() {
+    let (other, or_itself, or_none, reason) = match subject.prefetched_with_scope(seen_by_scope) {
         Prefetched::Itself => return Ok(Ok(Some(ordinal))),
         Prefetched::Nothing => return Ok(Ok(None)),
         Prefetched::Failed(reason) => return Ok(Err(reason)),
@@ -10179,6 +10197,7 @@ pub(crate) fn check_prefetched_parsed(
     db: &SeqDb,
     subject: &crate::report::db_subject::ParsedSubject,
     ordinal: u32,
+    seen_by_scope: bool,
     program: &str,
 ) -> Result<()> {
     // A lookup that throws on the id is the prefetch's warning, one that fails on a file with
@@ -10186,7 +10205,7 @@ pub(crate) fn check_prefetched_parsed(
     if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
         return Ok(());
     }
-    match prefetch_reads(db, ordinal, subject, false, program)? {
+    match prefetch_reads(db, ordinal, subject, false, seen_by_scope, program)? {
         Ok(_) => Ok(()),
         Err(reason) => Err(parsed_refusal(
             db.oid(ordinal),

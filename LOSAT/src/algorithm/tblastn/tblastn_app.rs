@@ -2200,7 +2200,11 @@ fn search(
                     && !database.loads_write_texts();
                 let run = crate::report::query_bioseq::SeenRun {
                     shows,
-                    known: range.start..usize::MAX,
+                    known: range.start..if scopes.span_of(range.start).end == usize::MAX {
+                        usize::MAX
+                    } else {
+                        range.end
+                    },
                     record: &record,
                     protein: true,
                 };
@@ -2447,6 +2451,7 @@ fn search(
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
+                    query_bioseqs.numbered_from(0),
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.

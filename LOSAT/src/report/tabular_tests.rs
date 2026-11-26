@@ -1380,3 +1380,98 @@ fn table_counts_leave_out_the_query_rows_end_gaps() {
     assert_eq!(counts(21, 2, 3, &xdrop), (21, 3, 2));
     assert_eq!(counts(190, 0, 0, &[]), (190, 0, 0));
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-1028
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+// Without a subject-block field, an empty subject handle is not caught in `SetFields`' subject
+// block; NCBI throws in `CAlnVec::GetWholeAlnSeqString` on the subject row (or `GetBioseqHandle`
+// in `GetFrame` for translated-subject minus-strand HSPs). With a subject-block field (such as
+// `sseqid`), NCBI catches the empty handle and prints its fallback row.
+#[test]
+fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
+    use crate::blastinput::app::Program;
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap()
+    };
+    let empty = LookupFailure::empty_handle();
+    let plain = LookupFailure::of_plain(true);
+    // Subject-block field catches the empty handle before the alignment block runs.
+    assert!(!spec("sseqid sseq").empty_handle_throws(Program::Blastp));
+    assert!(!spec("sseqid qseq").empty_handle_throws(Program::Blastn));
+    assert!(!spec("stitle pident").empty_handle_throws(Program::Blastx));
+    assert!(!spec("sseqid sframe qstart").empty_handle_throws(Program::Tblastx));
+    assert!(
+        failed_lookup_stop_for(Some(&spec("sseqid sseq")), empty, true, Program::Blastp).is_none()
+    );
+    // Without a subject-block field, sequence/scoring fields throw on empty handle.
+    for fields in [
+        "qseqid sseq",
+        "qseqid qseq",
+        "qseqid positive",
+        "qseqid ppos",
+        "qseqid btop",
+    ] {
+        for program in [
+            Program::Blastp,
+            Program::Blastn,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ] {
+            assert!(
+                spec(fields).empty_handle_throws(program),
+                "{fields} {program:?}"
+            );
+            assert!(
+                failed_lookup_stop_for(Some(&spec(fields)), empty, false, program).is_some(),
+                "{fields} {program:?}"
+            );
+            assert!(
+                failed_lookup_stop_for(Some(&spec(fields)), plain, false, program).is_none(),
+                "{fields} {program:?}"
+            );
+        }
+    }
+    // `pident`/`nident`/`mismatch` throw outside BLASTN, and do not throw in BLASTN alone.
+    for fields in ["qseqid pident", "qseqid nident", "qseqid mismatch"] {
+        assert!(!spec(fields).empty_handle_throws(Program::Blastn));
+        for program in [
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ] {
+            assert!(
+                spec(fields).empty_handle_throws(program),
+                "{fields} {program:?}"
+            );
+        }
+    }
+    // `sframe`/`frames` with an `opens_counts` field throw for translated subjects only.
+    for fields in ["qseqid qstart sframe", "qseqid length frames"] {
+        assert!(spec(fields).empty_handle_throws(Program::Tblastn));
+        assert!(spec(fields).empty_handle_throws(Program::Tblastx));
+        assert!(!spec(fields).empty_handle_throws(Program::Blastp));
+        assert!(!spec(fields).empty_handle_throws(Program::Blastn));
+        assert!(!spec(fields).empty_handle_throws(Program::Blastx));
+    }
+    // Standalone `sframe`/`frames` never open the alignment block.
+    assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));
+    assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastn));
+    assert!(may_stop_at_failed_lookup_for(
+        Some(&spec("qseqid sseq")),
+        Program::Blastp
+    ));
+    assert!(!may_stop_at_failed_lookup_for(
+        Some(&spec("qseqid evalue")),
+        Program::Blastp
+    ));
+}

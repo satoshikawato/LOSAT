@@ -1139,7 +1139,10 @@ pub(crate) fn parsed_shown(
         tabular: formats.iter().any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: formats.iter().any(|format| {
             format.is_tabular()
-                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+                && crate::report::tabular::may_stop_at_failed_lookup_for(
+                    format.tabular_spec(),
+                    crate::blastinput::app::Program::Tblastx,
+                )
         }),
         pairwise,
         structured: formats.iter().any(|format| format.is_structured_xml()),
@@ -1190,6 +1193,7 @@ pub(crate) fn reported_subjects(
     identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,
     spans: &[std::ops::Range<usize>],
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
@@ -1207,6 +1211,23 @@ pub(crate) fn reported_subjects(
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
     let after = (after, pairwise, database.taxdb.calls_before());
     let loads = hit_loads(ordered, &prefetch, after, titles, identities);
+    let seen_all: std::collections::HashSet<u32> = if seen.any() {
+        ordinals
+            .iter()
+            .copied()
+            .filter(|&ordinal| {
+                seen.hides_ordinal(
+                    ordered
+                        .iter()
+                        .filter(|hsp| hsp.hit.s_idx == ordinal)
+                        .map(|hsp| hsp.hit.q_idx as usize),
+                    ordinal,
+                )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     for hsp in ordered.iter_mut() {
         let rank = ordinals
             .binary_search(&hsp.hit.s_idx)
@@ -1250,6 +1271,7 @@ pub(crate) fn reported_subjects(
                     false,
                     taxdb,
                     ordinal,
+                    seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {

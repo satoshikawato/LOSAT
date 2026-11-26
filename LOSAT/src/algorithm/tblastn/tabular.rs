@@ -406,7 +406,14 @@ pub(super) fn write_tblastn_tabular(
                 -1
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
-            let subject = values.nucleotide_subject(names, qcovs, -1);
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:917,1061-1067
+            // When NCBI's scope resolves the subject to a protein query Bioseq, `subject_is_na` is
+            // false, so `sstrand` prints `N/A`.
+            let seen_bioseq = subjects.seen_at(q_idx, oid);
+            let mut subject = values.nucleotide_subject(names, qcovs, -1);
+            if seen_bioseq.is_some() {
+                subject.nucleotide = false;
+            }
             // A subject whose lookups fail shows what the last found subject set
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
@@ -518,12 +525,17 @@ pub(super) fn write_tblastn_tabular(
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1244
                 // The protein query has no strand (frame 0); the subject's frame is read in its
                 // whole record, as the XML's `Hit_frame` (`translation_frame`).
-                let s_frame = translation_frame(
-                    frame > 0,
-                    s_start.min(s_end),
-                    s_start.max(s_end),
-                    whole_length,
-                );
+                let s_frame = match seen_bioseq {
+                    Some(bioseq) => {
+                        crate::report::query_bioseq::ncbi_frame(frame > 0, s_start, bioseq.length())
+                    }
+                    None => translation_frame(
+                        frame > 0,
+                        s_start.min(s_end),
+                        s_start.max(s_end),
+                        whole_length,
+                    ),
+                };
                 let row = TabularHsp {
                     q_start: i64::from(q_start),
                     q_end: i64::from(q_end),

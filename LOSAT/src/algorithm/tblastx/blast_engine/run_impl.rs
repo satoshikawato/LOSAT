@@ -2341,6 +2341,7 @@ fn write_tblastx_outputs(
             &subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Tblastx,
         ) {
             // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
             let row = |q_idx: usize, s_idx: usize| match &run.database {
@@ -3460,6 +3461,49 @@ fn x_pipe_plan(
     plan
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-901
+// With `qseq` in TBLASTX, `GetWholeAlnSeqString` on the subject row translates the found query
+// Bioseq at the subject's alignment range and throws `eTranslateFailure` when a clipped slice is
+// not a multiple of 3; refuse when an HSP reaches past the found query Bioseq's length.
+fn refuse_tblastx_qseq_past_seen_query_len(
+    formats: &[report::TblastxOutputFormat],
+    reports: &BatchReports<'_>,
+    spans: impl IntoIterator<Item = (usize, u32, usize)>,
+    scopes: &crate::blastinput::query_batch::QueryScopes,
+    oid: impl Fn(u32) -> crate::seqdb::Oid,
+) -> Result<()> {
+    let asks_qseq = formats.iter().any(|format| {
+        format
+            .tabular_spec()
+            .is_some_and(|spec| spec.has(crate::report::tabular::TabularField::QuerySeq))
+    });
+    if !asks_qseq {
+        return Ok(());
+    }
+    let seen = reports.seen.borrow();
+    if seen.is_empty() {
+        return Ok(());
+    }
+    let titles = reports.titles.borrow();
+    for (query, ordinal, subject_end) in spans {
+        if let Some(bioseq) = seen.of(query, ordinal) {
+            if subject_end > bioseq.length() {
+                if let Some(crate::algorithm::common::database::ReportedHeader::Parsed(subject)) =
+                    titles.get(&ordinal)
+                {
+                    crate::algorithm::common::database::refuse_id_of_a_query(
+                        subject,
+                        || oid(ordinal),
+                        scopes.of_query(query),
+                        "TBLASTX",
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
 /// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
 /// (`report_stream`), else all of them after the loop.
@@ -3990,7 +4034,11 @@ fn run_batch_loop(
                     shows: formats.iter().all(|format| format.shows_query_bioseqs())
                         && !input.placements.ranged()
                         && !database.loads_write_texts(),
-                    known: start..usize::MAX,
+                    known: start..if scopes.span_of(start).end == usize::MAX {
+                        usize::MAX
+                    } else {
+                        end
+                    },
                     record: &record,
                     protein: false,
                 };
@@ -4005,6 +4053,19 @@ fn run_batch_loop(
                     &mut reports.seen.borrow_mut(),
                     &run,
                     "TBLASTX",
+                )?;
+                refuse_tblastx_qseq_past_seen_query_len(
+                    &formats,
+                    reports,
+                    ordered.iter().map(|hsp| {
+                        (
+                            start + hsp.hit.q_idx as usize,
+                            hsp.hit.s_idx,
+                            hsp.hit.s_start.max(hsp.hit.s_end),
+                        )
+                    }),
+                    scopes,
+                    |ordinal| database.oid_map().oid(ordinal),
                 )?;
             }
             // The sequences that the batch reports, read once each where NCBI fetches them before
@@ -4592,6 +4653,7 @@ impl BatchReports<'_> {
                     },
                     done.searched.len(),
                     &done.spans,
+                    seen.numbered_from(first),
                 )?;
                 // The texts of the reads, made before the hits named the subjects by rank, by
                 // rank as the writers name them.

@@ -1821,7 +1821,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: output_formats.iter().any(|format| {
             format.is_tabular()
-                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+                && crate::report::tabular::may_stop_at_failed_lookup_for(
+                    format.tabular_spec(),
+                    crate::blastinput::app::Program::Blastn,
+                )
         }),
         pairwise,
         structured: output_formats
@@ -2329,6 +2332,7 @@ pub(super) fn reported_subjects(
     batches: &[std::ops::Range<usize>],
     first_query: usize,
     gapped: bool,
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
@@ -2373,6 +2377,32 @@ pub(super) fn reported_subjects(
         recorded.with_calls_before(database.taxdb.unrecorded_calls()),
         |ordinal| titled_parsed(titles, ordinal),
     );
+    let seen_all: std::collections::HashSet<u32> = if seen.any() {
+        ordinals
+            .iter()
+            .copied()
+            .filter(|&ordinal| {
+                seen.hides_ordinal(
+                    hit_lists
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(query, hit_list)| {
+                            hit_list
+                                .as_ref()?
+                                .hsplist_array
+                                .iter()
+                                .any(|hsp_list| {
+                                    !hsp_list.hsps.is_empty() && hsp_list.oid == ordinal
+                                })
+                                .then_some(query)
+                        }),
+                    ordinal,
+                )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -2416,6 +2446,7 @@ pub(super) fn reported_subjects(
                     false,
                     taxdb,
                     ordinal,
+                    seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 (

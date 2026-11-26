@@ -165,6 +165,23 @@ impl QueryBioseqs {
         }
     }
 
+    /// Whether every reporting query in `queries` resolves `ordinal` to a noted query Bioseq:
+    /// NCBI's scope then finds the query before calling the BLAST database data loader in every
+    /// batch that reports `ordinal`.
+    pub fn hides_ordinal(&self, queries: impl IntoIterator<Item = usize>, ordinal: u32) -> bool {
+        if self.seen.is_empty() {
+            return false;
+        }
+        let mut any = false;
+        for query in queries {
+            any = true;
+            if self.of(query, ordinal).is_none() {
+                return false;
+            }
+        }
+        any
+    }
+
     /// Notes that the scope of the run's searched query `query` (whose span of searched queries
     /// is `span`, `QueryScopes::span_of`) finds a query for the database sequence `ordinal`,
     /// whose Seq-align id has the scope keys `keys` (`QueryScopeKeys::own`, which the scope
@@ -277,6 +294,31 @@ impl<'a> SeenFrom<'a> {
             _ => index,
         }
     }
+
+    /// Whether every reporting query (in the call's numbering) in `queries` resolves `ordinal` to
+    /// a noted query Bioseq (`QueryBioseqs::hides_ordinal`).
+    pub fn hides_ordinal(&self, queries: impl IntoIterator<Item = usize>, ordinal: u32) -> bool {
+        let Some(seen) = self.seen else {
+            return false;
+        };
+        seen.hides_ordinal(queries.into_iter().map(|query| self.first + query), ordinal)
+    }
+}
+
+/// The frame that NCBI's tabular formatter computes for a translated subject whose Bioseq handle
+/// has length `bioseq_len`, from its 1-based alignment start `start1` (`s_start` in `tabular.cpp`,
+/// which is the higher end on a minus strand) and strand `plus`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1079-1083
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+pub fn ncbi_frame(plus: bool, start1: i32, bioseq_len: usize) -> i32 {
+    let start0 = start1.wrapping_sub(1);
+    if plus {
+        (start0 % 3) + 1
+    } else {
+        let diff = (bioseq_len as i32).wrapping_sub(start0).wrapping_sub(1);
+        -((diff % 3) + 1)
+    }
 }
 
 /// The subject index of a row whose subject the scope finds as a query in a check of the rows of
@@ -285,14 +327,22 @@ impl<'a> SeenFrom<'a> {
 pub(crate) const SEEN_ROW: usize = usize::MAX;
 
 /// Whether `program`'s tabular report of `spec` (`None`: the default fields; the organism report
-/// too) shows NCBI's bytes for a database sequence that the scope finds as a query: none of its
-/// fields reads the letters of the found Bioseq. NCBI's alignment block reads them at the
-/// subject's coordinates (`qseq`, `sseq`, `btop`, `positive`, `ppos`; outside BLASTN, whose
-/// formatter fetches no sequence, also `mismatch`, `pident` and `nident`; in BLASTX, TBLASTN and
-/// TBLASTX the subject's frame of `sframe` and `frames`), which reach past the query's letters
-/// where the subject's alignment does: LOSAT keeps its refusal there.
+/// too) shows NCBI's bytes for a database sequence that the scope finds as a query:
+/// - In BLASTX, every field that enters the alignment block (`TabularSpec::opens_counts`:
+///   `qstart`, `qend`, `sstart`, `send`, `length`, `gapopen`, `gaps`, `qframe`, `sstrand`, and
+///   the letter-reading fields) converts the alignment with `CreateTranslatedDensegFromNADenseg`,
+///   which throws because the nucleotide query Bioseq makes `subject_is_na` true on a Dense-seg
+///   that already has widths: LOSAT refuses those fields. `sframe` and `frames` alone stay
+///   outside the block (`0`, `0/0`).
+/// - Elsewhere, fields that read the found Bioseq's letters (`sseq`, `btop`, `positive`, `ppos`;
+///   outside BLASTN also `mismatch`, `pident`, `nident`; in BLASTN `qseq` combined with
+///   `mismatch`, `pident` or `nident`, which enters the sequence block and recomputes identities
+///   from the found Bioseq; in TBLASTN `qseq`, which translates the protein query Bioseq and
+///   throws) keep LOSAT's refusal. `qseq` alone in BLASTP, BLASTN and (when the query Bioseq
+///   covers the subject alignment range) TBLASTX reads the real query's letters; `sframe` and
+///   `frames` in TBLASTX and TBLASTN compute the frame from `QueryBioseq::length`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-924
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1085
 pub(crate) fn tabular_shows(
     spec: Option<&crate::report::tabular::TabularSpec>,
     program: crate::blastinput::app::Program,
@@ -306,14 +356,17 @@ pub(crate) fn tabular_shows(
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
         return true;
     }
-    let translated = matches!(
-        program,
-        Program::Blastx | Program::Tblastn | Program::Tblastx
-    );
-    !(spec.has_any(&[QuerySeq, SubjectSeq, Positives, PercentPositives, Btop])
+    if program == Program::Blastx {
+        return !spec.opens_counts(&1);
+    }
+    let reads_subject_letters = spec.has_any(&[SubjectSeq, Positives, PercentPositives, Btop])
         || (program != Program::Blastn
             && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
-        || (translated && spec.has_any(&[SubjectFrame, Frames])))
+        || (program == Program::Blastn
+            && spec.has(QuerySeq)
+            && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
+        || (program == Program::Tblastn && spec.has(QuerySeq));
+    !reads_subject_letters
 }
 
 /// What `note_or_refuse` reads of a run besides the sequence: whether its reports show NCBI's

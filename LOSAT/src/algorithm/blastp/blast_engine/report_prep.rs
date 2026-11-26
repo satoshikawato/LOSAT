@@ -839,6 +839,7 @@ pub(super) fn prefetch_reported_subjects(
                             &ranks[batch.searched.clone()].concat(),
                             prefetch_taxids,
                             !prefetch_only,
+                            &scope,
                         )?;
                         titles.batch_prefetch(
                             database,
@@ -849,10 +850,7 @@ pub(super) fn prefetch_reported_subjects(
                     }
                     None => {
                         if !prefetch_taxids && prefetch_only {
-                            titles.check_prefetched(
-                                database,
-                                database::ListedTitles::reported_ranks(lists),
-                            )?;
+                            titles.check_prefetched(database, batch.searched.start, lists)?;
                         }
                         titles.batch_prefetch(
                             database,

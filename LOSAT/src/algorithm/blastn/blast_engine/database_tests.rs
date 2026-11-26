@@ -1035,6 +1035,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1093,6 +1094,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1134,6 +1136,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1151,6 +1154,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .err()

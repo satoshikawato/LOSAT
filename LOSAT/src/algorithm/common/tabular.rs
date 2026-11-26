@@ -360,6 +360,7 @@ pub(crate) fn checks_failed_lookups(
     ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
     loads: &crate::report::db_subject::HitLoads,
+    program: crate::blastinput::app::Program,
 ) -> bool {
     (ids.iter().any(Option::is_none)
         || loads.any_throws()
@@ -370,7 +371,7 @@ pub(crate) fn checks_failed_lookups(
             .iter()
             .flatten()
             .any(|subject| subject.scope_finds_none()))
-        && crate::report::tabular::may_stop_at_failed_lookup(spec)
+        && crate::report::tabular::may_stop_at_failed_lookup_for(spec, program)
 }
 
 impl<'a> TabularSubjects<'a> {

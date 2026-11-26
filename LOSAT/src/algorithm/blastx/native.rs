@@ -1471,6 +1471,7 @@ pub(super) fn reported_batch(
         };
         reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
     }
+    reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database

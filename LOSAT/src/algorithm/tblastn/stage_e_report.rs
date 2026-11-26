@@ -526,6 +526,7 @@ pub(super) fn render(
             &subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Tblastn,
         ) {
             // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
             let row = |q_idx: usize, s_idx: usize| match shown {
@@ -705,6 +706,7 @@ pub(super) fn render(
                 .oid(rank as usize)
                 .expect("a database search names its sequences by OID")
         };
+        let mut batches = None;
         for &view in &pairwise_views {
             crate::algorithm::common::database::refuse_described_lines(
                 query_records.len(),
@@ -715,16 +717,12 @@ pub(super) fn render(
                 oid_of,
                 program,
             )?;
-        }
-        let anchored_view = pairwise_views
-            .iter()
-            .copied()
-            .find(|view| *view != crate::report::pairwise::PairwiseView::Pairwise);
-        if let Some(view) = anchored_view {
-            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
-                query_records,
-                batch_starts,
-            );
+            let batches = batches.get_or_insert_with(|| {
+                crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
+                    query_records,
+                    batch_starts,
+                )
+            });
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 query_records.len(),
                 reported_ranks,
@@ -733,6 +731,7 @@ pub(super) fn render(
                 oid_of,
                 |q_idx| batches.of_query(q_idx),
                 batches.generated(),
+                view != crate::report::pairwise::PairwiseView::Pairwise,
                 program,
             )?;
         }

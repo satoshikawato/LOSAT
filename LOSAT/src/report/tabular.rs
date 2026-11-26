@@ -963,6 +963,37 @@ impl TabularSpec {
             && self.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-878,900-908,973-986,1071-1085
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:93-103
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+    /// Whether a row whose subject has an empty Bioseq handle (`LookupFailure::empty_handle`)
+    /// throws an alignment or object-manager exception in `program`: when no field of the subject
+    /// block (`reads_subject_bioseq`) is requested, `SetFields` skips the `try` at
+    /// `tabular.cpp:833` and enters the alignment block, where `CAlnVec::GetWholeAlnSeqString` on
+    /// the subject row throws `CAlnException::eInvalidSeqId` on the sequence-reading fields (and
+    /// `GetFrame` throws `CObjMgrException::eInvalidHandle` on a minus-strand subject HSP in
+    /// TBLASTN and TBLASTX).
+    pub fn empty_handle_throws(&self, program: crate::blastinput::app::Program) -> bool {
+        use crate::blastinput::app::Program;
+        if !self.writes_rows() || self.reads_subject_bioseq() {
+            return false;
+        }
+        let reads_letters =
+            self.has_any(&[QuerySeq, SubjectSeq, Positives, PercentPositives, Btop])
+                || (program != Program::Blastn
+                    && self.has_any(&[Mismatches, PercentIdentical, NumIdentical]));
+        let reads_frame = matches!(program, Program::Tblastn | Program::Tblastx)
+            && self.opens_counts(&1)
+            && self.has_any(&[SubjectFrame, Frames]);
+        reads_letters || reads_frame
+    }
+
+    /// `may_stop_at_failed_lookup` for `program`, including rows whose empty Bioseq handle throws
+    /// in the alignment block (`empty_handle_throws`).
+    pub fn may_stop_at_failed_lookup_for(&self, program: crate::blastinput::app::Program) -> bool {
+        self.may_stop_at_failed_lookup() || self.empty_handle_throws(program)
+    }
+
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
     /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
     /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
@@ -1000,10 +1031,31 @@ pub fn failed_lookup_stop(
     failure: LookupFailure,
     first: bool,
 ) -> Option<&'static str> {
+    failed_lookup_stop_for(
+        spec,
+        failure,
+        first,
+        crate::blastinput::app::Program::Blastp,
+    )
+}
+
+/// `failed_lookup_stop` for `program`: also stops where a row with an empty Bioseq handle
+/// (`failure.length`, `LookupFailure::empty_handle`) skips the subject block and throws in
+/// `CAlnVec::GetBioseqHandle` or `CAlignFormatUtil::GetFrame`
+/// (`TabularSpec::empty_handle_throws`).
+pub fn failed_lookup_stop_for(
+    spec: Option<&TabularSpec>,
+    failure: LookupFailure,
+    first: bool,
+    program: crate::blastinput::app::Program,
+) -> Option<&'static str> {
     let Some(spec) = spec else {
         return (failure.subject_id || (failure.bioseq && first))
             .then_some(FAILED_LOOKUP_NULL_POINTER);
     };
+    if failure.length && spec.empty_handle_throws(program) {
+        return Some(FAILED_LOOKUP_EMPTY_HANDLE);
+    }
     let stage = spec.failure_stage(failure)?;
     // A load that throws leaves `m_SubjectId` as the last row that found its subject set it: empty
     // only before such a row (the result set's first row; every row before a later one that
@@ -1024,6 +1076,20 @@ pub fn failed_lookup_stop(
 
 const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver)";
 
+const FAILED_LOOKUP_EMPTY_HANDLE: &str = "NCBI BLAST+ stops with an alignment exception (exit 255) when reading the subject's sequence or frame in its row";
+
+/// Maps a program name passed to `check_failed_lookups` to `Program`.
+fn program_of_name(program: &str) -> crate::blastinput::app::Program {
+    use crate::blastinput::app::Program;
+    match program {
+        "BLASTN" => Program::Blastn,
+        "TBLASTN" => Program::Tblastn,
+        "TBLASTX" => Program::Tblastx,
+        "BLASTX" | "RPSTBLASTN" => Program::Blastx,
+        _ => Program::Blastp,
+    }
+}
+
 /// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
 /// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
 /// `LookupFailure::thrown`: the null pointer of `sacc` or `saccver`, exit 255), for
@@ -1035,8 +1101,17 @@ pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
 /// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
 /// result (`TabularSpec::may_stop_at_failed_lookup`), so that its rows are checked
 /// (`check_failed_lookups`) before it is written.
+#[cfg(test)]
 pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
+}
+
+/// `may_stop_at_failed_lookup` for `program` (`TabularSpec::may_stop_at_failed_lookup_for`).
+pub fn may_stop_at_failed_lookup_for(
+    spec: Option<&TabularSpec>,
+    program: crate::blastinput::app::Program,
+) -> bool {
+    spec.is_none_or(|spec| spec.may_stop_at_failed_lookup_for(program))
 }
 
 /// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
@@ -1054,7 +1129,8 @@ pub fn check_failed_lookups<S>(
 where
     S: IntoIterator<Item = usize>,
 {
-    if !may_stop_at_failed_lookup(spec) {
+    let prog = program_of_name(program);
+    if !may_stop_at_failed_lookup_for(spec, prog) {
         return Ok(());
     }
     for set in result_sets {
@@ -1062,7 +1138,7 @@ where
             let Some(failure) = failure(s_idx) else {
                 continue;
             };
-            if let Some(reason) = failed_lookup_stop(spec, failure, row == 0) {
+            if let Some(reason) = failed_lookup_stop_for(spec, failure, row == 0, prog) {
                 return Err(FailedLookupRefusal(format!(
                     "{}; {reason}, which is not supported by LOSAT's {program}",
                     describe(s_idx)

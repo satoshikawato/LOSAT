@@ -785,10 +785,12 @@
   1.111 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
   chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
   every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
-  in the class of 1.37, of its printed `-show_gis` description line, whose GI NCBI never sets,
-  and of NCBI's throw where another id of the sequence holds the handle's id but no definition
-  line does as NCBI's load reads the ids (where another definition line holds it, the reports
-  show that line's title as NCBI's, review 2); line RG-KB item 12, Owner-delegated, standing
+  in the class of 1.37, of its tabular sequence-reading or translated-frame rows without a
+  subject-block field (where NCBI stops with `CAlnException::eInvalidSeqId` or
+  `CObjMgrException::eInvalidHandle`, exit 255), of its printed `-show_gis` description line,
+  whose GI NCBI never sets, and of NCBI's throw where another id of the sequence holds the
+  handle's id but no definition line does as NCBI's load reads the ids (where another definition
+  line holds it, the reports show that line's title as NCBI's, review 2); line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that
   brought line NP item O4b2-4's 1.92, then 1.94 at the merge of dev that brought line RG item
   D1c-1c's 1.93, then 1.95 for line NP item M4c-2's 1.94, which dev took after that merge, then
@@ -3314,7 +3316,12 @@ file would differ, and NCBI's programs still could not open the database).
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
   prints what the last loaded row set. Since version 1.111 (line RG-KB item 12) also the rows of a
   subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
-  status 255 after the row's earlier fields, LOSAT's refusal before the batch's report.
+  status 255 after the row's earlier fields for `sacc`/`saccver`, and also exit status 255 in
+  `CAlnVec::GetBioseqHandle` (`CAlnException::eInvalidSeqId`) or `CAlignFormatUtil::GetFrame`
+  (`CObjMgrException::eInvalidHandle`) when no field of the subject block (`reads_subject_bioseq`)
+  is requested alongside a sequence-reading field (`qseq`, `sseq`, `btop`, `positive`, `ppos`;
+  outside BLASTN also `pident`, `nident`, `mismatch`) or, in TBLASTN and TBLASTX, `sframe`/`frames`
+  with an alignment-block field; LOSAT's refusal before the batch's report.
 - `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
   serves no sequence for (version 1.111, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle

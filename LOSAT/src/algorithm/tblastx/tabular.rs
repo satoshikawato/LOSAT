@@ -435,12 +435,19 @@ pub(super) fn write_tblastx_tabular(
                     i32::try_from(q_high)?,
                     i32::try_from(query_record_length)?,
                 );
-                let s_frame = translation_frame(
-                    hsp.subject_frame > 0,
-                    i32::try_from(s_low)?,
-                    i32::try_from(s_high)?,
-                    subject_record_length,
-                );
+                let s_frame = match subjects.seen_at(q_idx, hit.s_idx as usize) {
+                    Some(bioseq) => crate::report::query_bioseq::ncbi_frame(
+                        hsp.subject_frame > 0,
+                        i32::try_from(hit.s_start)?,
+                        bioseq.length(),
+                    ),
+                    None => translation_frame(
+                        hsp.subject_frame > 0,
+                        i32::try_from(s_low)?,
+                        i32::try_from(s_high)?,
+                        subject_record_length,
+                    ),
+                };
                 let row = TabularHsp {
                     // The record coordinates of the default row (`shift_to_records`).
                     q_start: i64::try_from(hit.q_start)?,

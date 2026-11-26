@@ -2650,6 +2650,7 @@ fn check_tabular_lookups(
             subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Blastp,
         ) {
             continue;
         }

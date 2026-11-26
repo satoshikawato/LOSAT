@@ -1175,9 +1175,9 @@ fn greedy_gapped_alignment_internal_matches_sparse_across_large_costs() {
             for &gap_extend in &gap_extends {
                 // Keep dense table allocation modest when unreduced gap_extend is near 32767.
                 let pair_len = if gap_extend >= 20_000 { 64 } else { 180 };
-                let x_drop = if reward >= 20_000 {
-                    base_xdrop
-                } else if reward >= 1_000 && gap_open <= 20_000 && gap_extend <= 1_000 {
+                let x_drop = if reward >= 20_000
+                    || (reward >= 1_000 && gap_open <= 20_000 && gap_extend <= 1_000)
+                {
                     base_xdrop
                 } else {
                     base_xdrop.min(reward * 40)

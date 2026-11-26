@@ -17,6 +17,7 @@ import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserCountsChanges } from './infra/browser/counts-changes';
 import { browserCountsLocks } from './infra/browser/counts-locks';
 import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
+import { browserDatabaseMemory } from './infra/browser/db-memory';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
 import { browserPage } from './infra/browser/page';
@@ -93,6 +94,7 @@ export function createApp(options: AppOptions = {}): App {
     data,
     enqueueAll: (requests) => coordinator.enqueueAll(requests),
     fetcher: new BrowserAccessionFetcher(),
+    databaseMemory: browserDatabaseMemory(),
     now: () => performance.now(),
   });
   const counts = new CountsLoader({

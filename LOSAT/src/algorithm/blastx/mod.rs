@@ -3,6 +3,7 @@
 pub mod args;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-326
 pub mod input;
+pub(crate) mod input_source;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:577-587
 pub mod query_setup;
 pub(crate) mod reader_batch;
@@ -78,8 +79,8 @@ mod archive;
 pub(crate) use blast_xml::HeldFormatWriter;
 mod blast_xml;
 // The reports of the ungapped HSPs of length 0 that `-window_size 0` finds (NCBI's formatters'
-// exceptions, the Seq-loc mapper's rows of `-subject`).
-mod empty_rows;
+// exceptions, the Seq-loc mapper's rows of `-subject`), whose exceptions TBLASTN's reports share.
+pub(crate) mod empty_rows;
 mod seqalign;
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
 // field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
@@ -103,3 +104,6 @@ pub(crate) mod web;
 pub(crate) mod subjects;
 // The database path (`-db`): opening, the stored sequences, titles and ranks per batch.
 pub(crate) mod database;
+
+#[cfg(test)]
+pub(crate) mod mapped_row_range_tests;

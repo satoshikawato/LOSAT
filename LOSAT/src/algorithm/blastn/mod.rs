@@ -11,6 +11,7 @@ pub mod disc_lookup;
 pub mod extension;
 pub mod filtering;
 pub mod interval_tree;
+pub(crate) mod left_of_query;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub(crate) mod pairwise;

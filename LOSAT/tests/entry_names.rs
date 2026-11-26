@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 19] = [
+const PROGRAMS: [&str; 20] = [
     "blastn",
     "blastp",
     "blastx",
@@ -66,6 +66,7 @@ const PROGRAMS: [&str; 19] = [
     "rpsbproc",
     "blastdb_aliastool",
     "blastdbcheck",
+    "cleanup-blastdb-volumes.py",
 ];
 
 /// The program names that `losat --install-shims` listed on standard output (one path per
@@ -103,7 +104,11 @@ fn a_shim_prints_what_the_subcommand_prints() {
         // `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
-        let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
+        let first_line = if name == "cleanup-blastdb-volumes.py" {
+            format!("{name} LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        } else {
+            format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        };
         assert!(
             version.stdout.starts_with(first_line.as_bytes()),
             "{name}: {version:?}"
@@ -296,6 +301,7 @@ fn top_level_help_names_every_program() {
             "makeprofiledb",
             "blastdb_aliastool",
             "blastdbcheck",
+            "cleanup-blastdb-volumes.py",
         ] {
             let line = text
                 .lines()
@@ -453,10 +459,18 @@ fn refusals_by_name_have_one_form() {
             format!("Error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
         assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
-    // blastx's other refusals by name (`-gilist`, `-ipglist`) have the same form
-    // (`-use_sw_tback` runs since line RG item X4b-2).
-    for option in ["-gilist", "-ipglist"] {
-        let output = run(losat(), &["blastx", "-query", "q.fa", option, "x"]);
+    // blastx's remaining refusals by name (`-import_search_strategy`, `-entrez_query` with
+    // `-remote`) have the same form (`-gilist` and `-ipglist` run now).
+    for (option, extra) in [
+        (
+            "-import_search_strategy",
+            &["-import_search_strategy", "x"][..],
+        ),
+        ("-entrez_query", &["-entrez_query", "x", "-remote"][..]),
+    ] {
+        let mut argv = vec!["blastx", "-query", "q.fa", "-db", "d"];
+        argv.extend_from_slice(extra);
+        let output = run(losat(), &argv);
         assert_eq!(output.status.code(), Some(1), "{option} {output:?}");
         assert_eq!(
             String::from_utf8(output.stderr).unwrap(),

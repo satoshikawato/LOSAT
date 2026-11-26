@@ -21,6 +21,7 @@ export interface HspSummary {
   readonly s_end: number;
   readonly query_frame: number | null;
   readonly subject_frame: number | null;
+  readonly subject_length?: number | null;
   readonly out6: readonly [number, number] | null;
   readonly out0: readonly [number, number] | null;
   readonly out0_subject: readonly [number, number] | null;
@@ -46,6 +47,8 @@ export interface HspTable {
   readonly sEnd: Float64Array;
   readonly queryFrame: Int8Array;
   readonly subjectFrame: Int8Array;
+  /** Subject sequence length reported by the engine (used for `-db` runs that have no FASTA subject records). */
+  readonly subjectLength: Float64Array;
   readonly out6Start: Float64Array;
   readonly out6End: Float64Array;
   readonly out0Start: Float64Array;
@@ -71,6 +74,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     sEnd: new Float64Array(count),
     queryFrame: new Int8Array(count),
     subjectFrame: new Int8Array(count),
+    subjectLength: new Float64Array(count),
     out6Start: new Float64Array(count),
     out6End: new Float64Array(count),
     out0Start: new Float64Array(count),
@@ -92,6 +96,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     table.sEnd[i] = record.s_end;
     table.queryFrame[i] = record.query_frame ?? 0;
     table.subjectFrame[i] = record.subject_frame ?? 0;
+    table.subjectLength[i] = record.subject_length ?? 0;
     table.out6Start[i] = record.out6?.[0] ?? -1;
     table.out6End[i] = record.out6?.[1] ?? -1;
     table.out0Start[i] = record.out0?.[0] ?? -1;

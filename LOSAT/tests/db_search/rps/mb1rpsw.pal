@@ -1,0 +1,5 @@
+TITLE rps_mini memb_bit 1 counts
+DBLIST rps_mini
+NSEQ 3
+LENGTH 560
+MEMB_BIT 1

@@ -1,0 +1,20 @@
+Seq-entry ::= seq {
+  id { local str "newid" },
+  descr {
+    user {
+      type str "CFastaReader",
+      data { { label str "DefLine", data str ">gb|U12345.1| hist defline" } }
+    }
+  },
+  inst {
+    repr raw,
+    mol dna,
+    length 4,
+    seq-data iupacna "ACGT",
+    hist {
+      replaces {
+        ids { genbank { accession "U12345", version 1 } }
+      }
+    }
+  }
+}

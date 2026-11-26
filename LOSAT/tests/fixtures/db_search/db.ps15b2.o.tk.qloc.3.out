@@ -1,0 +1,144 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          100     2e-28
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       23.1    1.2  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.7    1.9  
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       21.6    2.5  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       22.3    2.6  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.9    3.1  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       21.2    5.8  
+
+
+
+Query_1  52    ETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNR  109
+52       46    DN....ELTET...S.QT.RD.VAT.V---.SY.DTSNY.Y.F..-.....S..GATCKD  101
+58       1808     ..VKLLA..EMM.HEFAS.L.SDMRMNMYNGVGS...ILS..N.EERYSII-ISI.K  1863
+
+Query_1  110   LADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFT  164
+52       102   W.I....VTV.....NYE..L.PSVI..I.ICDK.E..SAV....NKNEASLTK.YL.YN  161
+58       1864  FIL.NIKD.L                                                    1873
+
+Query_1  165   VRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----A  219
+52       162   NTGDD.HHKYDM....T.T.C.V.IG.                                   188
+2        374               .P.LSDV.GQEFKNL.E.YE.---E..VRI---------.IE-----.  404
+25       484                                       .F.VN..PD..Q..N.GEYESMT.  507
+
+Query_1  220   KLLLTNKNSPLY--GGEYMCFPD----RSSHTGKLINDYLTKKIELDDHAAHLLFSANRW  273
+2        405   RK..H.LA.AKLET.TPFI..K.TINY..N.                               435
+68       273          H.KF.--P..WIY..P----SL.NLS..                           294
+74       82                                                   NFGGYI.L.G.SG  94
+25       508   H.F..                                                         512
+31       291                                                     .YMM..RH.V  300
+
+Query_1  274   EVCSKIKQL--LDDGIHVVMDRYYYSG  298
+74       95    .II.GLGEPRDI..EL..LSN.       116
+31       301   QSGDC...F--.----YTIFV.FI..A  321
+
+
+Lambda      K        H        a         alpha
+   0.320    0.138    0.410    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 11605734
+Results from round 2
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          225     6e-77
+
+Sequences not found previously or not previously below threshold:
+
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       25.0    0.32 
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       21.9    2.9  
+BDT63498.1 wsv343-like protein [Pasiphaea japonica whispovirus]       20.0    6.0  
+
+
+
+Query_1  93    ILIDEGQF-FTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV-KLASK  150
+52       46             DNRYGCELTETVTHSGQT.RDCVA..V---L.YVDTSNYDYIF.D-EGQFF  92
+58       1801   .F.RK.L----YGVKLLAIVEMMGHEF.SCLTSDMRMNMYNGVGSVVDIL..DNEEERY  1855
+3        103   ..LN.NR.VTNLKGCETLQNTSLSYHD.IDSVYD.V---..HN.ERIYDLTKYK-QSKTF  158
+
+Query_1  151   CMI-CKIDTKEAPFTVRFGNDNDNNV----ICVGGAEMYAAACRDCYKKINKKKN--KGK  203
+52       93    SDLGATCKDWAIKGKRVTVAAL.G.Y----EQQLFPSVIKLIPICDKIEKLSAVC--MIC  146
+58       1856  SI.-IS.NKFILK                                                 1867
+3        159   NNQ-V-.NECDLMYVFVAIVSLVSSSREPGDKHVSTMKEKLLSFIIKSLKMLPI---IFC  213
+3        379                                              YNDKLEKLIAEC--MV-  392
+0        46                                               YENAVEKI.NITNN.VC  62
+
+Query_1  204   -----LVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+52       147   NKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTETYCAV.IGC  188
+3        214   -----E-EWKSWPFSSTGGSD                       228
+3        393   ------IDTMY                                 397
+0        63    -----KIK..ELKMYVLGRRLHFWDDFCTG              87
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.423    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 11605734
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -12,8 +12,8 @@
 //! batches. The same holds with `-out` files, with `-query_loc`, `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`,
 //! `-max_hsps` and `-subject_besthit`, with the warnings of the reader and of invalid queries,
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
-//! queries without letters, a header file that cannot be read), and with `-db`. Where the switch
-//! must not act (a search space that could overflow; scoring options without Karlin-Altschul
+//! queries without letters, a header file that cannot be read, a search space overflow), and with
+//! `-db`. Where the switch must not act (scoring options without Karlin-Altschul
 //! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a sequence that a later batch reports (a stored title,
@@ -813,7 +813,7 @@ fn no_hits(dir: &TempDir) -> PathBuf {
 
 /// A database whose header file is missing (`tests/fixtures/outfmt17/db/snucl_nophr`), hit from the
 /// third batch on (eight queries without hits first): NCBI's error of the batch that first reads a
-/// definition line (`HeaderReadError`, exit status 2) after the reports of the batches before, the
+/// definition line (`ErrorAfterBatchReports`, exit status 2) after the reports of the batches before, the
 /// off bytes in every kind of format (until 2026-11-03 the check before the search kept such a
 /// database's reports after the loop).
 #[test]
@@ -1224,11 +1224,13 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
     reports_before(&what, &off, &on, &reference.report, &reference.stderr, None);
 }
 
-/// Where the switch must not act, it does not, and the bytes are the off path's: a search space
-/// that could overflow (a `-dbsize` near 2^63); scoring options without Karlin-Altschul values; a
-/// negative `CHUNK_SIZE` (whose refusal comes where a batch is split); and the debug output
-/// (`LOSAT_DEBUG_COORDS`). A subject whose tabular id LOSAT refuses streams, its refusal after
-/// the rows of the batches before.
+/// Where the switch must not act, it does not, and the bytes are the off path's: scoring options
+/// without Karlin-Altschul values; and the debug output (`LOSAT_DEBUG_COORDS`). A large `-dbsize`
+/// now streams (`off=none`) and matches the off path both when the search succeeds and when a batch
+/// overflows 64-bit search space (including after an earlier valid batch with hits). A subject
+/// whose tabular id LOSAT refuses streams, its refusal after the rows of the batches before, and so
+/// does a negative `CHUNK_SIZE`, whose refusal comes where a batch is split, after the reports of
+/// the batches before in both paths (line RG item X-short-bat-2).
 #[test]
 fn where_the_switch_must_not_act_the_counters_name_why() {
     let dir = TempDir::new("off");
@@ -1245,10 +1247,57 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
         "-outfmt",
         "6",
     ];
+    // Large `-dbsize` whose upper bound passes 2^63 still streams (`off=none`): succeeding run,
+    // batch-0 overflow, and batch-2 overflow after a valid batch 1 with hits.
+    let mut big_ok = plain.to_vec();
+    big_ok.extend_from_slice(&["-dbsize", "1200000000000000"]);
+    let (off, (batches, reason)) = same_two("-dbsize ok", &big_ok, 1, &[], None);
+    assert_eq!(off.status, Some(0), "-dbsize ok: {off:?}");
+    assert!(!off.report.is_empty());
+    assert!(batches >= 6 && reason == "none", "{batches} {reason}");
     let mut huge = plain.to_vec();
     huge.extend_from_slice(&["-dbsize", "9000000000000000000"]);
-    let (_, (batches, reason)) = same_two("-dbsize", &huge, 1, &[], None);
-    assert_eq!((batches, reason.as_str()), (0, "search_space"));
+    let (off, (batches, reason)) = same_two("-dbsize overflow", &huge, 1, &[], None);
+    assert_eq!(off.status, Some(1), "-dbsize overflow: {off:?}");
+    assert_eq!((batches, reason.as_str()), (0, "none"));
+    let subj_seq = letters("LC738868.fasta");
+    let mut hit_then_ovf_bytes = Vec::new();
+    record(&mut hit_then_ovf_bytes, b"q_short", &subj_seq[..200]);
+    record(&mut hit_then_ovf_bytes, b"q_long", &subj_seq[..4000]);
+    let hit_then_ovf_q = dir.path("hit_then_ovf.fa");
+    std::fs::write(&hit_then_ovf_q, &hit_then_ovf_bytes).expect("write hit_then_ovf");
+    let hit_then_ovf = [
+        "-task",
+        "megablast",
+        "-query",
+        hit_then_ovf_q.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-outfmt",
+        "6",
+        "-dbsize",
+        "5000000000000000",
+    ];
+    let (off, (batches, reason)) = same_two(
+        "hit then overflow",
+        &hit_then_ovf,
+        1,
+        &[("BATCH_SIZE", "200")],
+        None,
+    );
+    assert_eq!(off.status, Some(1), "hit then overflow: {off:?}");
+    assert!(
+        off.report.starts_with(b"q_short\t"),
+        "expected batch 1 hit rows before batch 2 overflow: {:?}",
+        String::from_utf8_lossy(&off.report)
+    );
+    assert!(
+        String::from_utf8_lossy(&off.stderr)
+            .contains("overflows NCBI BLAST+'s 64-bit effective search space"),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    assert_eq!((batches, reason.as_str()), (1, "none"));
     let mut scoring = plain.to_vec();
     scoring[1] = "blastn";
     scoring.extend_from_slice(&[
@@ -1265,9 +1314,9 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
     assert_eq!(off.status, Some(3), "NCBI's Karlin-Altschul error");
     assert_eq!((batches, reason.as_str()), (0, "scoring"));
     let chunks = [("CHUNK_SIZE", "-5"), ("OVERLAP_CHUNK_SIZE", "-10")];
-    let (off, (batches, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
+    let (off, (_, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
     assert_ne!(off.status, Some(0), "LOSAT's refusal");
-    assert_eq!((batches, reason.as_str()), (0, "chunk_size"));
+    assert_eq!(reason, "none", "a negative CHUNK_SIZE streams");
     let (off, (batches, reason)) =
         same_two("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
     assert!(!off.report.is_empty());

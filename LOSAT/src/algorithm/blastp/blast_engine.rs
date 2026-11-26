@@ -3799,7 +3799,7 @@ fn build_pairwise_hits(
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
             seqalign_num_ident,
-            query_left_of_record: false,
+            edge: crate::report::pairwise::PairwiseEdge::Normal,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the

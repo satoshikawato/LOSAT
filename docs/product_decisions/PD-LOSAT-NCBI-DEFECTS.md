@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.115
+- Version: 1.116
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -837,7 +837,17 @@
   at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
   brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
   1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
-  1.115 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
+  1.115 2026-11-26 (approved exception 32, megablast greedy gap costs above 32767 and up to
+  `Int4` maximum, line RG item G1: the rule-3 explicit rejection of megablast gap costs above
+  32767 is removed; affine greedy gap-cost and distance arithmetic are widened to 64 bits over
+  non-empty distances so every gap cost accepted by the nucleotide Karlin-Altschul tables runs
+  without NCBI's signed 32-bit overflow or dense-table memory exhaustion; approved by the Owner
+  on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A to accept megablast gap costs above
+  32767 as an approved exception under the Owner's rules of 2026-10-10 「NCBI のバグを再現する
+  必要はない」 and 2026-10-22 「広い型になおしましょう」); numbered after 1.114 at the merge of
+  dev 42678f399 that brought line DBID item pfoff-7's 1.114; first 1.105, then 1.106, 1.107,
+  1.108, 1.113 and 1.114; exception 31 until the 1.113 merge);
+  1.116 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
   outside `' '` to `'~'`, of 1.10, narrowed to the cases that read the definition line outside
   a query batch's Seq-aligns: formats other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
   `PRE_FETCH_SEQS_LIMIT=2147483647`; `psiblast`, `rpsblast` and `rpstblastn`; searches restricted
@@ -846,8 +856,8 @@
   Seq-id with such a byte. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write NCBI's
   output and `Error: (803.7)` messages, rule 2, also for a query batch that ends at a header
   NCBI cannot read in any format; line RG-KB item 9(b), Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.114 at the merge of dev da5eb92e2; first 1.107,
-  then 1.113, then 1.114)
+  2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev 9758dbd59; first 1.107,
+  then 1.113, then 1.114, then 1.115)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2621,7 +2631,6 @@ file would differ, and NCBI's programs still could not open the database).
   32768 or more, which NCBI's 16-bit field wraps to 0 or below (NCBI: every query invalid,
   no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
-- megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
 - Reward 0 and penalty 0 (matrix-only scoring, the scores of `-task rmblastn`) with the greedy
   extension of `-task megablast` (line RG X6, 2026-11-20, Owner-delegated): with gap costs 0
   and 0 (megablast's own) NCBI divides by zero in the greedy set-up (`blast_gapalign.c:209`,
@@ -4786,6 +4795,44 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
     hit; LOSAT's keep NCBI's cutoff of the words (the gap trigger) and spend no time there.
     `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
     Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
+
+## Approved exception 32 (megablast greedy gap costs past `Int4`, line RG item G1, version 1.115)
+
+Version 1.115, decided by the Owner on 2026-11-26 at 15:41 JST (「承認 A」, choosing option A:
+accept megablast gap costs above 32767 up to 2147483647 as an approved exception, following the
+Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22
+「広い型になおしましょう」; not taken: option C, refusing values above NCBI's
+input-length-dependent 32-bit overflow boundary). Its version is in the list at the top;
+elsewhere it is cited by its number and name, "approved exception 32 (megablast greedy gap costs
+past `Int4`)". Line RG item G1.
+
+32. **Megablast affine greedy alignment with gap costs whose 32-bit setup or distance arithmetic
+    overflows or exhausts dense-table memory.** `s_BlastGreedyAlignMemAlloc`
+    (`core/blast_gapalign.c:171-267`) and `BLAST_AffineGreedyAlign`
+    (`core/greedy_align.c:755-1249`) compute doubled gap costs (for an odd reward),
+    `GE_cost = gap_extend + reward / 2`, `max_d * GE_cost`, `gap_open + GE_cost`,
+    `2 * (max_d + 1 + max_cost)`, and `d * score_common_factor` in signed `Int4`, and allocate
+    dense arrays sized by unreduced `max_d` and `max_cost`. When those products overflow `Int4`
+    (undefined behaviour in C) or exceed available memory, NCBI BLAST+ 2.17.0 fails in setup
+    with `BLAST engine error: Unknown error code -1` (exit status 3, from a sign-extended
+    negative `calloc` count or host-RAM exhaustion: for example `-gapopen 1000000 -gapextend
+    1000000` on `taxfilter/tfn`, where `max_d_1 = 560` overflows `2 * (max_d + 1 + max_cost)` at
+    955286, while 955285 needs 73 GB and exits 0 at 128 GB; or 535799 on a 4 kb subject where
+    535798 exits 0 at 128 GB), crashes mid-search with `free(): invalid pointer` or SIGSEGV (for
+    example `40000/2` at 8 GB, `2000000000/2`, `1073741824/2`, `2147483647/2147483647`), or wraps
+    `2 * gap_open` to a negative penalty (`2147483647/2` with odd reward wraps to -2 and alters
+    hits). LOSAT widens the affine greedy gap-cost, GCD, X-drop offset and distance arithmetic
+    to 64 bits (`algorithm::blastn::alignment::greedy`) and steps only over non-empty distances
+    without dense tables, so every `-gapopen` and `-gapextend` accepted by the nucleotide
+    Karlin-Altschul tables (including values above 32767 up to 2147483647) completes in low
+    memory. Wherever NCBI completes without `Int4` overflow or memory exhaustion (such as
+    `32768/32768`, `40000/40000`, `100000/100000`, `40000/2` at 64 GB, `2/40000`, high-GCD
+    `-reward 1000 -penalty -2000 -gapopen 40000 -gapextend 2000`, `955285/955285` on `tfn` at
+    128 GB, `1000000/1000000` on a 600 bp pair at 64 GB), LOSAT gives NCBI's exact bytes (with
+    LOSAT wording). Where NCBI overflows `Int4`, LOSAT writes the alignments of NCBI's nearby
+    non-overflowing run (the `ncbi-near` rows `db.g1.*` of `LOSAT/tests/db_search_manifest/blastn.g1.tsv`
+    and the `g1.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`). Before version 1.115
+    LOSAT refused megablast gap costs above 32767 (rule 3).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -741,7 +741,7 @@ const TWO_HIT_CHUNK_MERGE_IS_DEFINED: &str = concat!(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035, 2749-2807
 // Delegates to the shared `core::blast_hits::merge_subject_chunk_hsps_with_sort` using TBLASTX's
 // `Int4` score comparator and in-place stable sort (`sort_ungapped_hits_by_score_int4`), ungapped
-// (`allow_gap = false`), with `hsp_num_max = INT4_MAX` (`BlastHspNumMax`).
+// (no gapped merges), with no HSP count cap (`BlastHspNumMax` returns `INT4_MAX`).
 fn merge_tblastx_subject_chunk_hits(
     combined: &mut Vec<UngappedHit>,
     mut incoming: Vec<UngappedHit>,
@@ -759,7 +759,7 @@ fn merge_tblastx_subject_chunk_hits(
         overlap,
         i32::MAX as usize,
         false,
-        score_compare_ungapped_hits_int4,
+        crate::algorithm::tblastx::blast_gapalign::score_compare_ungapped_hits_int4,
         sort_ungapped_hits_by_score_int4,
     )
 }

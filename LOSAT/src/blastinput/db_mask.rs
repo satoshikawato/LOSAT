@@ -968,7 +968,7 @@ impl HardMaskShape {
                 zero_words,
             } => {
                 let walk = DiagonalWalk::new(word, window, length, zero_words);
-                return Self::of_protein_chunks(masks, length, walk, ncbi, split);
+                return Self::of_protein_chunks(masks, length, word, walk, ncbi, split);
             }
             HardScan::Translated { .. } => (0, false),
         };
@@ -1025,12 +1025,12 @@ impl HardMaskShape {
     fn of_protein_chunks(
         masks: &[(u32, u32)],
         length: usize,
+        word: i32,
         mut walk: crate::algorithm::common::hard_chunk_walk::DiagonalWalk,
         ncbi: Option<NcbiStart>,
         split: &mut HardSplitState,
     ) -> Option<HardMaskShape> {
         use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
-        let word = walk.word();
         if let Some(start) = ncbi {
             walk.start_on_ncbi_table(start);
         }

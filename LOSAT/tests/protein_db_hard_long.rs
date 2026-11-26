@@ -279,3 +279,195 @@ fn protein_hard_masked_long_ranges_and_out_of_order_chunks_match_ncbi() {
     }
     assert!(failed.is_empty(), "mismatches:\n{}", failed.join("\n"));
 }
+
+/// Verifies decision B-d on `overlap_past_list` (`blast_engine.c:579-580`):
+/// - `po_last`: out-of-order masks into the final range are refused before the search
+///   (`HardMaskShape::LastRangeOverlap`).
+/// - `po_ow_last`: a short `OneWord` chunk whose HSP meets the final chunk across NCBI's
+///   out-of-bounds overlap read is refused during the search (`last_range_overlap_merge_refusal`).
+/// - `lr_last`: a final hard range longer than `MAX_DBSEQ_LEN` (5,000,000 residues) merges
+///   within its own range with `DBSEQ_CHUNK_OVERLAP = 100` (not refused).
+#[test]
+fn protein_hard_masked_last_range_overlap_refusal_and_long_last_range() {
+    let run_dir = RunDir {
+        path: std::env::temp_dir().join(format!(
+            "losat-protein-db-hard-last-overlap-{}",
+            std::process::id()
+        )),
+        keep: false,
+    };
+    let dir = run_dir.path.as_path();
+    std::fs::create_dir_all(dir).unwrap();
+
+    let make_asnt = |ranges: &[(usize, usize)]| -> String {
+        let items: Vec<String> = ranges
+            .iter()
+            .map(|(from, to)| {
+                format!("        {{\n          from {from},\n          to {to},\n          id local id 1\n        }}")
+            })
+            .collect();
+        format!(
+            "Blast-db-mask-info ::= {{\n  algo-id 2,\n  algo-program seg,\n  algo-options \"m4b3d \
+             last\",\n  masks {{\n    masks {{\n      packed-int {{\n{}\n      }}\n    }},\n    \
+             more FALSE\n  }}\n}}\n",
+            items.join(",\n")
+        )
+    };
+    let build_db = |name: &str, seq: &[u8], ranges: &[(usize, usize)]| -> String {
+        let faa = dir.join(format!("{name}.faa"));
+        let asnt = dir.join(format!("{name}.asnt"));
+        let db = dir.join(name).to_str().unwrap().to_string();
+        write_fasta(&faa, &[(name, seq)]);
+        std::fs::write(&asnt, make_asnt(ranges)).unwrap();
+        let made = losat()
+            .arg("makeblastdb")
+            .arg("-in")
+            .arg(&faa)
+            .args(["-dbtype", "prot", "-out", &db, "-mask_data"])
+            .arg(&asnt)
+            .output()
+            .expect("run losat makeblastdb");
+        assert!(
+            made.status.success(),
+            "makeblastdb {name}: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        db
+    };
+
+    // 1. po_last: static pre-search refusal (`HardMaskShape::LastRangeOverlap`).
+    let m_po = make_motif(101, 200);
+    let mut po_seq = vec![b'A'; 400];
+    po_seq[80..280].copy_from_slice(&m_po);
+    let po_last_db = build_db("po_last", &po_seq, &[(250, 279), (100, 129)]);
+    let q_po_faa = dir.join("q_po.faa");
+    let q_po_fna = dir.join("q_po.fna");
+    write_fasta(&q_po_faa, &[("q_po", &m_po[30..180])]);
+    let q_po_dna = prot_to_dna(&m_po[30..180]).into_bytes();
+    write_fasta(&q_po_fna, &[("q_po", &q_po_dna)]);
+    for (prog, qpath) in [("blastp", &q_po_faa), ("blastx", &q_po_fna)] {
+        for extra in [&[][..], &["-ungapped", "-comp_based_stats", "0"][..]] {
+            let out = losat()
+                .arg(prog)
+                .arg("-query")
+                .arg(qpath)
+                .args(["-db", &po_last_db, "-db_hard_mask", "21", "-outfmt", "6"])
+                .args(extra)
+                .output()
+                .expect("run po_last");
+            assert_eq!(out.status.code(), Some(1), "po_last {prog} {extra:?}");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                err.contains("merges alignments across an overlap read past its list of ranges"),
+                "po_last {prog} {extra:?}: {err}"
+            );
+        }
+    }
+
+    // 2. po_ow_last: dynamic search-time refusal (`last_range_overlap_merge_refusal`).
+    let mut m_ow = make_motif(202, 100);
+    m_ow[50..53].copy_from_slice(b"WWW");
+    let mut ow_seq = vec![b'A'; 240];
+    ow_seq[20..120].copy_from_slice(&m_ow);
+    let po_ow_last_db = build_db(
+        "po_ow_last",
+        &ow_seq,
+        &[(40, 59), (55, 69), (72, 89), (50, 67)],
+    );
+    let q_ow_faa = dir.join("q_ow.faa");
+    let q_ow_fna = dir.join("q_ow.fna");
+    write_fasta(&q_ow_faa, &[("q_ow", &m_ow)]);
+    let q_ow_dna = prot_to_dna(&m_ow).into_bytes();
+    write_fasta(&q_ow_fna, &[("q_ow", &q_ow_dna)]);
+    for (prog, qpath) in [("blastp", &q_ow_faa), ("blastx", &q_ow_fna)] {
+        let out = losat()
+            .arg(prog)
+            .arg("-query")
+            .arg(qpath)
+            .args([
+                "-db",
+                &po_ow_last_db,
+                "-db_hard_mask",
+                "21",
+                "-evalue",
+                "1000",
+                "-outfmt",
+                "6",
+            ])
+            .output()
+            .expect("run po_ow_last");
+        assert_eq!(out.status.code(), Some(1), "po_ow_last {prog}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains(
+                "has alignments from an earlier range that meet the final part across an overlap \
+                 NCBI BLAST+ 2.17.0 reads past its list of ranges"
+            ),
+            "po_ow_last {prog}: {err}"
+        );
+    }
+
+    // 3. lr_last: final hard range > MAX_DBSEQ_LEN merges within its own range using overlap 100.
+    let m_bridge = make_motif(302, 220);
+    let mut lr_seq = vec![b'A'; 5_000_300];
+    lr_seq[4_999_840..5_000_060].copy_from_slice(&m_bridge);
+    let lr_last_db = build_db("lr_last", &lr_seq, &[(10, 19)]);
+    let q_br_faa = dir.join("q_br.faa");
+    let q_br_fna = dir.join("q_br.fna");
+    write_fasta(&q_br_faa, &[("q_bridge", &m_bridge)]);
+    let q_br_dna = prot_to_dna(&m_bridge).into_bytes();
+    write_fasta(&q_br_fna, &[("q_bridge", &q_br_dna)]);
+    for (prog, qpath) in [("blastp", &q_br_faa), ("blastx", &q_br_fna)] {
+        for extra in [&[][..], &["-ungapped", "-comp_based_stats", "0"][..]] {
+            let out1 = losat()
+                .arg(prog)
+                .arg("-query")
+                .arg(qpath)
+                .args([
+                    "-db",
+                    &lr_last_db,
+                    "-db_hard_mask",
+                    "21",
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    "1",
+                ])
+                .args(extra)
+                .output()
+                .expect("run lr_last t1");
+            assert!(
+                out1.status.success() && out1.stderr.is_empty(),
+                "lr_last {prog} {extra:?}: status={:?} err={}",
+                out1.status.code(),
+                String::from_utf8_lossy(&out1.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&out1.stdout);
+            assert!(
+                stdout.contains("4999841\t5000060"),
+                "lr_last {prog} {extra:?} did not merge across 5M boundary:\n{stdout}"
+            );
+            let out4 = losat()
+                .arg(prog)
+                .arg("-query")
+                .arg(qpath)
+                .args([
+                    "-db",
+                    &lr_last_db,
+                    "-db_hard_mask",
+                    "21",
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    "4",
+                ])
+                .args(extra)
+                .output()
+                .expect("run lr_last t4");
+            assert_eq!(
+                out1.stdout, out4.stdout,
+                "lr_last t1 vs t4 {prog} {extra:?}"
+            );
+        }
+    }
+}

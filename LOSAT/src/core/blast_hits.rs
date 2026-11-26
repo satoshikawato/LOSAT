@@ -377,9 +377,10 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
         }
     }
 
+    let mut result = Ok(());
     if hspcnt1 > 0 && hspcnt2 > 0 {
         let mut deleted = vec![false; hspcnt2];
-        for index1 in 0..hspcnt1 {
+        'merge: for index1 in 0..hspcnt1 {
             for index2 in 0..hspcnt2 {
                 if deleted[index2]
                     || incoming[index2].merge_context() != combined[index1].merge_context()
@@ -390,10 +391,16 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
                     - i64::from(combined[index1].merge_s_end());
                 let start_diag = i64::from(incoming[index2].merge_q_start())
                     - i64::from(incoming[index2].merge_s_start());
-                if (end_diag - start_diag).abs() < OVERLAP_DIAG_CLOSE
-                    && merge_two_chunk_hsps(&mut combined[index1], &incoming[index2], allow_gap)?
-                {
-                    deleted[index2] = true;
+                if (end_diag - start_diag).abs() < OVERLAP_DIAG_CLOSE {
+                    match merge_two_chunk_hsps(&mut combined[index1], &incoming[index2], allow_gap)
+                    {
+                        Ok(true) => deleted[index2] = true,
+                        Ok(false) => {}
+                        Err(undefined) => {
+                            result = Err(undefined);
+                            break 'merge;
+                        }
+                    }
                 }
             }
         }
@@ -412,7 +419,7 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
     if retained == combined.len() + incoming.len() {
         combined.append(incoming);
         sort_by_score(combined);
-        return Ok(());
+        return result;
     }
     sort_by_score(combined);
     sort_by_score(incoming);
@@ -435,7 +442,7 @@ pub(crate) fn merge_subject_chunk_hsps_with_sort<H: ChunkMergeHsp>(
     drop(left);
     drop(right);
     *combined = selected;
-    Ok(())
+    result
 }
 
 #[cfg(test)]

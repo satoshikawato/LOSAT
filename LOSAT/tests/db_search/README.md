@@ -2503,7 +2503,7 @@ with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`
 is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). The near
 inputs store the letter that the shorter mask frees as `X` (`prot_p4x.faa`, `prot_p5x.faa`), so that it stays masked in
 the alignments and the composition-based statistics, as LOSAT reads the masked letters. `ph5`, `ph4` and
-`phmv` are the other hard-mask databases; `pe_unsorted` (masks out of order) is searched and merged across its overlapping parts.
+`phmv` are the other hard-mask databases; `pe_unsorted` (masks `[250, 280)` then `[100, 130)` on `p5`) is refused because its final range `[130, 400)` overlaps the earlier range `[0, 250)` across NCBI's out-of-bounds overlap read (`LastRangeOverlap`), while `pe_unsorted_mid` (`edge_unsorted_mid.asnt`, adding trailing mask `[320, 340)` on `p5`) is searched and merged across its overlapping middle parts.
 
 `pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
 `ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for

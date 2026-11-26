@@ -2891,3 +2891,11 @@ record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12
 including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` against `rps_mini` with
 `rps/rps_mini_tchar_dmg.phr.gz`, where OID 2's title holds `0xE9` and OID 0's title tag is rewritten to `0x1B`;
 `rps/rps_mini_tchar.phr.gz` holds OID 2's `0xE9` alone for the `rpsblast` and `rpstblastn` `losat-rejection` rows).
+
+- `LOSAT/tests/fasta/xchunk/` (rows `db.xc.*` of `tests/db_search_manifest/blastn.xc.tsv`, line RG
+  item X-chunk): slices of `HBA1` (`ENST00000320868.9`) from `taxfilter/tfn.fna` exercising
+  BLASTN query-chunk stops and step order (`CHUNK_SIZE` / `OVERLAP_CHUNK_SIZE`), including empty
+  chunks (`q_under*`, `q_l100`, `q_neg_empty*`, `q_neg201`), Exception 1 boundary (`q_l101`),
+  negative-pair gaps (`q_neg_gap*`, `q_first`), valid letters only in a gap (`q_gapvalid`),
+  unsearchable batch (`q_alln310`), and split duplicate-id batches (`q_dup300`, `q_dup_lc_both`,
+  `q_dup_lc_first`, `q_dup_alln`).

@@ -2,10 +2,13 @@
 // run-directory path normalization, duplicate checks and run-directory assembly
 // (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db),
 // BLASTN "Repeats database" (-filtering_db), and WindowMasker (-infmt blastdb).
-import type { DirectoryFile, SequenceKind } from 'losat/domain';
+import { WINDOW_MASKER_TAXID_FLAG, type DirectoryFile, type ProgramId, type SequenceKind } from 'losat/domain';
 
 export const DB_FLAG = '-db';
 export const FILTERING_DB_FLAG = '-filtering_db';
+export const DB_SOFT_MASK_FLAG = '-db_soft_mask';
+export const DB_HARD_MASK_FLAG = '-db_hard_mask';
+export const NO_TAXID_EXPANSION_FLAG = '-no_taxid_expansion';
 export const TAXDB_INDEX_FILE = 'taxdb.bti';
 export const TAXDB_DATA_FILE = 'taxdb.btd';
 export const TAXONOMY_SQLITE_FILE = 'taxonomy4blast.sqlite3';
@@ -14,6 +17,14 @@ const AUX_TAXONOMY_FILES = [TAXDB_INDEX_FILE, TAXDB_DATA_FILE, TAXONOMY_SQLITE_F
 /** Safety cap for reading small `.nal`/`.pal` alias text files during folder discovery. */
 const MAX_ALIAS_BYTES = 256 * 1024;
 
+export type DbMaskMode = 'none' | 'soft' | 'hard';
+
+export interface DbMaskState {
+  readonly mode: DbMaskMode;
+  readonly flag?: typeof DB_SOFT_MASK_FLAG | typeof DB_HARD_MASK_FLAG;
+  readonly value: string;
+}
+
 export interface DatabaseFilterField {
   readonly flag: string;
   readonly label: string;
@@ -21,29 +32,67 @@ export interface DatabaseFilterField {
   readonly placeholder?: string;
 }
 
-/** Database filter options whose value is a list file mounted by name into the run directory. */
-export const DB_FILE_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
-  { flag: '-seqidlist', label: 'Include SeqIDs list', kind: 'file' },
-  { flag: '-negative_seqidlist', label: 'Exclude SeqIDs list', kind: 'file' },
+/** Database masking options (`-db_soft_mask`, `-db_hard_mask`); mutually exclusive in NCBI BLAST+ 2.17.0. */
+export const DB_MASK_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
+  { flag: DB_SOFT_MASK_FLAG, label: 'Database soft mask', kind: 'text', placeholder: '11 or dust' },
+  { flag: DB_HARD_MASK_FLAG, label: 'Database hard mask', kind: 'text', placeholder: '11 or dust' },
+]);
+
+/** Database taxonomy filter options that take comma-separated taxids. */
+export const DB_TAXONOMY_TEXT_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
+  { flag: '-taxids', label: 'Include taxonomy IDs', kind: 'text', placeholder: '9606,10090' },
+  { flag: '-negative_taxids', label: 'Exclude taxonomy IDs', kind: 'text', placeholder: '9606' },
+]);
+
+/** Database taxonomy list file options mounted by name into the run directory. */
+export const DB_TAXONOMY_FILE_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
   { flag: '-taxidlist', label: 'Include taxonomy IDs list', kind: 'file' },
   { flag: '-negative_taxidlist', label: 'Exclude taxonomy IDs list', kind: 'file' },
+]);
+
+/** Database sequence/GI/IPG list file options mounted by name into the run directory. */
+export const DB_ID_LIST_FILE_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
+  { flag: '-seqidlist', label: 'Include SeqIDs list', kind: 'file' },
+  { flag: '-negative_seqidlist', label: 'Exclude SeqIDs list', kind: 'file' },
   { flag: '-gilist', label: 'Include GI list', kind: 'file' },
   { flag: '-negative_gilist', label: 'Exclude GI list', kind: 'file' },
   { flag: '-ipglist', label: 'Include IPG list', kind: 'file' },
   { flag: '-negative_ipglist', label: 'Exclude IPG list', kind: 'file' },
 ]);
 
-/** Database filter options that take text values (comma-separated taxids or masking algorithm IDs). */
+const DB_FILE_FILTER_BY_FLAG: ReadonlyMap<string, DatabaseFilterField> = new Map(
+  [...DB_TAXONOMY_FILE_FIELDS, ...DB_ID_LIST_FILE_FIELDS].map((field) => [field.flag, field]),
+);
+
+/**
+ * Explicit argv order for database list-file filter options mounted into the run directory,
+ * independent of how fields are grouped in the UI.
+ */
+const DB_FILE_FILTER_ARGV_ORDER = [
+  '-seqidlist',
+  '-negative_seqidlist',
+  '-taxidlist',
+  '-negative_taxidlist',
+  '-gilist',
+  '-negative_gilist',
+  '-ipglist',
+  '-negative_ipglist',
+] as const;
+
+/** Database filter options whose value is a list file mounted by name into the run directory, in argv order. */
+export const DB_FILE_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze(
+  DB_FILE_FILTER_ARGV_ORDER.map((flag) => DB_FILE_FILTER_BY_FLAG.get(flag)!),
+);
+
+/** Database filter options that take text values (comma-separated taxids or masking algorithm IDs/names). */
 export const DB_TEXT_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
-  { flag: '-taxids', label: 'Include taxonomy IDs', kind: 'text', placeholder: '9606,10090' },
-  { flag: '-negative_taxids', label: 'Exclude taxonomy IDs', kind: 'text', placeholder: '9606' },
-  { flag: '-db_soft_mask', label: 'Database soft mask ID', kind: 'text', placeholder: '11' },
-  { flag: '-db_hard_mask', label: 'Database hard mask ID', kind: 'text', placeholder: '11' },
+  ...DB_TAXONOMY_TEXT_FIELDS,
+  ...DB_MASK_FIELDS,
 ]);
 
 /** Bare boolean flags for database filtering. */
 export const DB_BOOL_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
-  { flag: '-no_taxid_expansion', label: 'Do not expand taxonomy IDs to descendants', kind: 'flag' },
+  { flag: NO_TAXID_EXPANSION_FLAG, label: 'Do not expand taxonomy IDs to descendants', kind: 'flag' },
 ]);
 
 export const ALL_DB_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freeze([
@@ -54,6 +103,77 @@ export const ALL_DB_FILTER_FIELDS: readonly DatabaseFilterField[] = Object.freez
 
 export const ALL_DB_FILTER_FLAGS: ReadonlySet<string> = new Set(ALL_DB_FILTER_FIELDS.map((field) => field.flag));
 export const DB_FILE_FILTER_FLAGS: ReadonlySet<string> = new Set(DB_FILE_FILTER_FIELDS.map((field) => field.flag));
+export const DB_MASK_FLAGS: ReadonlySet<string> = new Set([DB_SOFT_MASK_FLAG, DB_HARD_MASK_FLAG]);
+
+/**
+ * Non-taxonomy ID list flags that NCBI declares incompatible with `-no_taxid_expansion`
+ * (`blast_args.cpp:2284-2288`). `-ipglist`/`-negative_ipglist` are not in NCBI's exclusion list.
+ */
+export const NO_TAXID_EXPANSION_INCOMPATIBLE_LIST_FLAGS: readonly string[] = Object.freeze([
+  '-gilist',
+  '-negative_gilist',
+  '-seqidlist',
+  '-negative_seqidlist',
+]);
+
+/** User-facing incompatibility message when both `-window_masker_taxid` and `-no_taxid_expansion` are active. */
+export const NO_TAXID_EXPANSION_WM_CONFLICT =
+  '-window_masker_taxid is incompatible with -no_taxid_expansion. Switch WindowMasker to Counts file (-window_masker_db) or clear -no_taxid_expansion.';
+
+/** Active database masking selection (`-db_soft_mask` vs `-db_hard_mask`, mutually exclusive). */
+export function dbMaskState(filterValues: Readonly<Record<string, string | boolean>>): DbMaskState {
+  const soft = filterValues[DB_SOFT_MASK_FLAG];
+  if (soft === true || typeof soft === 'string') {
+    return Object.freeze({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: typeof soft === 'string' ? soft : '' });
+  }
+  const hard = filterValues[DB_HARD_MASK_FLAG];
+  if (hard === true || typeof hard === 'string') {
+    return Object.freeze({ mode: 'hard', flag: DB_HARD_MASK_FLAG, value: typeof hard === 'string' ? hard : '' });
+  }
+  return Object.freeze({ mode: 'none', value: '' });
+}
+
+/** Placeholder hint for a database masking algorithm ID or name, matching the subject molecule type. */
+export function dbMaskPlaceholder(kind: SequenceKind): string {
+  return kind === 'nucleotide' ? '11 or dust' : '21 or seg';
+}
+
+/** Prompt shown when Soft or Hard database masking is selected without an algorithm ID or name. */
+export function dbMaskMissingMessage(mode: 'soft' | 'hard'): string {
+  return mode === 'soft'
+    ? 'Enter a database soft mask algorithm ID or name.'
+    : 'Enter a database hard mask algorithm ID or name.';
+}
+
+/** Whether BLASTN's `-window_masker_taxid` mode is currently active in the search form (checked or filled). */
+export function isWindowMaskerTaxidActive(
+  program: ProgramId,
+  values: Readonly<Record<string, string | boolean>>,
+): boolean {
+  if (program !== 'blastn') return false;
+  const val = values[WINDOW_MASKER_TAXID_FLAG];
+  return val === true || (typeof val === 'string' && val.trim() !== '');
+}
+
+/**
+ * Form options currently set that NCBI BLAST+ 2.17.0 declares incompatible with `-no_taxid_expansion`:
+ * BLASTN `-window_masker_taxid` and non-taxonomy ID list files (`-gilist`, `-negative_gilist`,
+ * `-seqidlist`, `-negative_seqidlist`).
+ */
+export function noTaxidExpansionConflicts(input: {
+  readonly program: ProgramId;
+  readonly values: Readonly<Record<string, string | boolean>>;
+  readonly filterFiles: Readonly<Record<string, unknown>>;
+}): readonly string[] {
+  const conflicts: string[] = [];
+  if (isWindowMaskerTaxidActive(input.program, input.values)) {
+    conflicts.push(WINDOW_MASKER_TAXID_FLAG);
+  }
+  for (const flag of NO_TAXID_EXPANSION_INCOMPATIBLE_LIST_FLAGS) {
+    if (input.filterFiles[flag] !== undefined) conflicts.push(flag);
+  }
+  return Object.freeze(conflicts);
+}
 
 export interface BlastDbCandidate {
   /** Exact relative database path passed to `-db` or `-filtering_db` (without `.nal`/`.pal`/`.nin`/`.pin`). */

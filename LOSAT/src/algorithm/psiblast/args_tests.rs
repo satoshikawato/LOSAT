@@ -339,11 +339,9 @@ fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
 
 #[test]
 fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-    let error = parse(&["-html"]).unwrap_err();
-    assert!(
-        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
-        "-html: {error}"
-    );
+    // `-html` (line RG item T4c2) is accepted and forwarded to blastp's search.
+    assert!(!parse(&[]).unwrap().into_blastp_args().unwrap().html);
+    assert!(parse(&["-html"]).unwrap().into_blastp_args().unwrap().html);
     // `-in_pssm` (PS4a) is an argument: with `-query` it is NCBI's reader's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();

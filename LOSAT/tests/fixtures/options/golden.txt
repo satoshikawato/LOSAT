@@ -1293,6 +1293,7 @@ db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 dbsize = None
 show_gis = false
+html = false
 parse_deflines = false
 searchsp = None
 sum_stats = None
@@ -1485,6 +1486,9 @@ pssm_check = Call
 [psiblast -line_length 2]
 - formatting.line_length = None
 + formatting.line_length = 2
+[psiblast -html]
+- html = false
++ html = true
 [psiblast -sorthits 2]
 - formatting.sort_hits = None
 + formatting.sort_hits = 2

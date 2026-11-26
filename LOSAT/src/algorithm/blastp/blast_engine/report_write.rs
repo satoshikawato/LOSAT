@@ -112,8 +112,6 @@ pub(super) struct ReportView<'a> {
     /// What the XML2 and JSON reports do at each subject's `Hit`, by rank
     /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
     pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
-    /// The XML2 and JSON reports' loads by batch (`report_prep::ReportedPrefetch::xml2_loads`).
-    pub(super) xml2_loads: &'a Option<Vec<crate::algorithm::common::database::XmlBatchLoads>>,
     pub(super) engine_counts: &'a EngineCounts,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
@@ -550,7 +548,7 @@ pub(super) fn write_xml(
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, listed_titles.as_ref(), database) {
         (Some(_), Some(titles), Some(database)) => {
-            titles.read_taxids(database, hit_lists, hit_loads, view.xml2_loads)?
+            titles.read_taxids(database, hit_lists, hit_loads)?
         }
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
@@ -1246,12 +1244,14 @@ pub(super) fn write_pairwise(
         // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
         .map_err(crate::cli::NativeError::of_writer)?;
     }
-    // PHI-BLAST: psiblast's epilog after the last query (`PrintEpilog`).
+    // PHI-BLAST: psiblast's epilog after the last query (`PrintEpilog`; `-phi_pattern` refuses
+    // `-html` in `phi_hooks::phi_limits`, so the epilog is plain).
     if phi.is_some() && reports.epilog && !prolog_only {
         crate::report::pairwise::psiblast_round::write_psiblast_epilog(
             &mut writer,
             &pairwise_report,
             pairwise_database.as_ref(),
+            false,
         )
         .map_err(crate::cli::NativeError::of_writer)?;
     }

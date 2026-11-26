@@ -21,7 +21,7 @@ use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::report::query_warnings::ReportPlace;
-use crate::report::x_pairwise_par::QueryGroup;
+use crate::report::x_pairwise_par::{QueryGroup, QuerySections};
 use std::io::{self, Write};
 use std::sync::Arc;
 
@@ -81,7 +81,7 @@ pub(crate) fn write_phi_prolog(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain prolog.
+    // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the plain prolog.
     write_prolog(
         writer,
         blastp_family_program(&config.program),
@@ -211,7 +211,7 @@ pub(crate) fn write_phi_round_report(
                 None,
                 |s_idx| sections.label(group, s_idx),
                 &mut place,
-                // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain table.
+                // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the plain table.
                 None,
                 None,
             )?,
@@ -244,7 +244,7 @@ pub(crate) fn write_phi_round_report(
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 place(ReportPlace::Load(s_idx), &mut *writer)?;
                 display.enter(writer)?;
-                sections.subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
+                sections.phi_subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
             }
             if let Some((_, exception)) = end {
                 if let Some(warnings) = warnings.as_deref_mut() {

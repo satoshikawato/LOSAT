@@ -154,7 +154,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-phi_pattern` PS8a's (`algorithm::phi_search`). The search strategy file is written, of a
     // FASTA query and of `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at

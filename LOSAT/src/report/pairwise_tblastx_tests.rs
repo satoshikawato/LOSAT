@@ -1707,3 +1707,205 @@ fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
     assert_eq!(tokens(&row("neg_new")), vec!["neg_new", "0.0", "0.0"]);
     assert_eq!(tokens(&row("pos_new")), vec!["pos_new", "42.5", "1e-09"]);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:578-602
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:678-681, 697-720
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2281-2292
+// Line RG T4c2: psiblast's -html two-part description table reads ./.ncbirc once per part (also
+// when a part has no rows), restarts blast_rank from 1 in the new part, and write_psiblast_epilog
+// ends with D9 (</PRE>\n</BODY>\n</HTML>\n) only when html is set.
+#[test]
+fn psiblast_html_two_part_table_restarts_rank_reads_empty_part_and_epilog_ends_html() {
+    use crate::report::db_subject::{HitLoads, ParsedSubject};
+    use crate::report::formatter_registry::{FormatterNcbirc, InitConfig};
+    use crate::report::html_ids::{HtmlLinks, HtmlReport};
+    use crate::report::query_warnings::QueryWarnings;
+
+    let karlin = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        ..KarlinParams::default()
+    };
+    let queries = [BlastpPairwiseQuery {
+        query_name: Vec::new(),
+        query_length: 61,
+        ungapped_karlin: karlin,
+        effective_search_space: 1_000_000,
+        valid: true,
+        batch_skipped: false,
+    }];
+    let query_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"q"[..])];
+    let subject = |acc: &[u8]| {
+        Some(Arc::new(
+            ParsedSubject::new(crate::seqid::DeflineSet {
+                deflines: vec![crate::seqid::BlastDefline {
+                    title: Some(b"protein".to_vec()),
+                    ids: vec![crate::seqid::ParsedSeqId::Other(
+                        crate::seqid::model::TextseqId {
+                            accession: Some(acc.to_vec()),
+                            version: Some(1),
+                            ..Default::default()
+                        },
+                    )],
+                    ..Default::default()
+                }],
+                utf8: false,
+            })
+            .unwrap(),
+        ))
+    };
+    let parsed = vec![
+        subject(b"XP_000001"),
+        subject(b"XP_000002"),
+        subject(b"XP_000003"),
+        subject(b"XP_000004"),
+    ];
+    let subject_titles: Vec<Arc<[u8]>> = (0..4)
+        .map(|i| Arc::from(format!("s{i}").into_bytes()))
+        .collect();
+    let hit = |s_idx: u32, bit_score: f64| {
+        let mut pairwise = PairwiseHit::from(Hit {
+            identity: 100.0,
+            length: 10,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 10,
+            s_start: 1,
+            s_end: 10,
+            e_value: 1e-5,
+            bit_score,
+            num_ident: 10,
+            query_frame: 0,
+            query_length: 61,
+            q_idx: 0,
+            s_idx,
+            raw_score: 50,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 10,
+        });
+        pairwise.query_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_length = Some(100);
+        pairwise
+    };
+    let hits = [hit(0, 120.0), hit(1, 110.0), hit(2, 100.0), hit(3, 90.0)];
+    let report = BlastpPairwiseReport {
+        version: "PSIBLAST (test)".to_string(),
+        database_name: b"db".to_vec(),
+        database_num_sequences: 4,
+        database_total_letters: 400,
+        matrix_name: Some("BLOSUM62".to_string()),
+        gap_open: 11,
+        gap_extend: 1,
+        word_threshold: 0.0,
+        window_size: 40,
+        gapped_karlin: karlin,
+        gumbel: None,
+        gapped: true,
+        show_linked_set_size: false,
+        num_descriptions: 500,
+        num_alignments: 0,
+    };
+    let repeated = b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n";
+    let run_round = |found_before: &[bool]| -> (String, usize) {
+        let links = Arc::new(HtmlLinks {
+            registry: InitConfig::of(
+                "psiblast",
+                Some((".ncbirc".into(), repeated.to_vec())),
+                false,
+            )
+            .unwrap(),
+            db_name: b"db".to_vec(),
+            nucleotide: false,
+            ncbirc: FormatterNcbirc::of("psiblast", Some(repeated.to_vec())).unwrap(),
+        });
+        let config = PairwiseConfig {
+            program: "psiblast".to_string(),
+            html: Some(HtmlReport::new(&links, [])),
+            ..PairwiseConfig::default()
+        };
+        let mut out = Vec::new();
+        let mut diag = Vec::new();
+        let mut warnings = QueryWarnings::of_posts(&[], None, &mut diag);
+        psiblast_round::write_psiblast_round_report(
+            &hits,
+            0..1,
+            &mut out,
+            &config,
+            &queries,
+            &query_titles,
+            &subject_titles,
+            &parsed,
+            &[],
+            &HitLoads::default(),
+            &report,
+            None,
+            None,
+            Some(&mut warnings),
+            false,
+            psiblast_round::ReportRound {
+                number: 2,
+                found_before: Some(found_before),
+            },
+            None,
+        )
+        .unwrap();
+        drop(warnings);
+        let posts = String::from_utf8(diag)
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("[psiblast] Found multiple [BLASTFMTUTIL] PROTOCOL"))
+            .count();
+        (String::from_utf8(out).unwrap(), posts)
+    };
+
+    // 2 repeat rows + 2 new rows: ranks restart at 1 in the new part; 2 part reads + 1 InitConfig.
+    let (both_parts, both_posts) = run_round(&[true, true, false, false]);
+    assert_eq!(both_posts, 3, "{both_parts}");
+    let (repeat_part, new_part) = both_parts
+        .split_once("Sequences not found previously or not previously below threshold:")
+        .expect("two-part table");
+    assert!(
+        repeat_part.contains("XP_000001.1?report=genbank&log$=prottop&blast_rank=1&RID="),
+        "{repeat_part}"
+    );
+    assert!(
+        repeat_part.contains("XP_000002.1?report=genbank&log$=prottop&blast_rank=2&RID="),
+        "{repeat_part}"
+    );
+    assert!(
+        new_part.contains("XP_000003.1?report=genbank&log$=prottop&blast_rank=1&RID="),
+        "{new_part}"
+    );
+    assert!(
+        new_part.contains("XP_000004.1?report=genbank&log$=prottop&blast_rank=2&RID="),
+        "{new_part}"
+    );
+
+    // 4 repeat rows + 0 new rows: the empty new part still makes its own ./.ncbirc read.
+    let (_, empty_new_posts) = run_round(&[true, true, true, true]);
+    assert_eq!(empty_new_posts, 3);
+
+    // Epilog ends with HTML_SUFFIX (D9) only when html is true.
+    let mut html_epilog = Vec::new();
+    psiblast_round::write_psiblast_epilog(&mut html_epilog, &report, None, true).unwrap();
+    assert!(
+        html_epilog.ends_with(HTML_SUFFIX),
+        "{}",
+        String::from_utf8_lossy(&html_epilog)
+    );
+    let mut plain_epilog = Vec::new();
+    psiblast_round::write_psiblast_epilog(&mut plain_epilog, &report, None, false).unwrap();
+    assert!(
+        !plain_epilog.ends_with(HTML_SUFFIX),
+        "{}",
+        String::from_utf8_lossy(&plain_epilog)
+    );
+}

@@ -335,7 +335,8 @@ pub(super) fn phi_call<'p>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
 /// LOSAT's limits of PHI-BLAST (item PS8a; their order after NCBI's errors is `phi_call`'s):
-/// outfmt 5 and 11 of the round (a later item, PS8b), whatever is searched. Then only where the
+/// outfmt 5 and 11 of the round (a later item, PS8b) and `-html` (NCBI's HTML PHI report is not
+/// ported yet), whatever is searched. Then only where the
 /// round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
 /// without it round 1 is the run's last whatever `-num_iterations` and `-sum_stats` say, probes
 /// `k.pam.it3.0`, `k.pam.ss3.0`): the rounds after it (PS8b), `-sum_stats true` (NCBI links the
@@ -358,6 +359,11 @@ fn phi_limits(
     }) {
         return Some(anyhow::anyhow!(
             "-phi_pattern with output format {number} is not supported by LOSAT's {program} yet"
+        ));
+    }
+    if args.html.is_some() {
+        return Some(anyhow::anyhow!(
+            "-phi_pattern with -html is not supported by LOSAT's {program} yet"
         ));
     }
     if !searched {

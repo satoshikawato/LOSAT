@@ -1076,11 +1076,13 @@ fn write_subject_part<'h, W: Write>(
     }
 }
 
-/// One subject's alignments in a BLASTP or PSIBLAST pairwise report (`BlastpSections::subject`
-/// and `psiblast_round::RoundSections::subject`): an unreadable query's skipped lines, or the
-/// subject's heading (`group_heading`) and HSPs (`write_hsp_info` + `write_alignment`).
+/// One subject's alignments in a BLASTP, PSIBLAST, or PHI-BLAST pairwise report
+/// (`BlastpSections::subject`, `psiblast_round::RoundSections::subject`, and
+/// `psiblast_round::RoundSections::phi_subject`): an unreadable query's skipped lines, or the
+/// subject's heading (`group_heading`) and HSPs (`write_hsp_info` + `write_decorated_alignment`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1557,2142-2189
 #[allow(clippy::too_many_arguments)]
-fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
+fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite, D: RowDecoration>(
     writer: &mut W,
     probe: Option<&mut FormatProbe<'_>>,
     config: &PairwiseConfig,
@@ -1093,6 +1095,7 @@ fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
     part: std::ops::Range<usize>,
     row_masks: HtmlRowMasks<'_>,
     place: super::query_warnings::ReportHook<'_, W>,
+    decoration: &D,
 ) -> io::Result<()> {
     if let Some(id) = config.unreadable_query_id(parsed_subjects, s_idx) {
         return write_database_subject_alignments_part(
@@ -1135,7 +1138,7 @@ fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite>(
         place,
         |writer, hit, hsp_index| {
             write_hsp_info(writer, hit, config)?;
-            write_alignment(writer, hit, row_masks.of(hsp_index), config)
+            write_decorated_alignment(writer, hit, row_masks.of(hsp_index), config, decoration)
         },
     )
 }
@@ -1850,11 +1853,31 @@ pub fn write_alignment<W: Write>(
     masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
+    write_decorated_alignment(writer, hit, masks, config, &PlainRows)
+}
+
+/// `write_alignment` with the query feature of `decoration` (`write_hsp_rows`).
+pub(crate) fn write_decorated_alignment<W: Write, D: RowDecoration>(
+    writer: &mut W,
+    hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
+    config: &PairwiseConfig,
+    decoration: &D,
+) -> io::Result<()> {
     let h = &hit.hit;
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(writer, h, qseq, sseq, hit.query_case, masks, config)?;
+        write_alignment_with_sequences(
+            writer,
+            h,
+            qseq,
+            sseq,
+            hit.query_case,
+            masks,
+            config,
+            decoration,
+        )?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -1879,8 +1902,10 @@ pub fn write_alignment<W: Write>(
 /// minus-strand HSP's Dense-seg is reversed, `query_anchored::HspAlnVec`, so its subject row runs
 /// from high to low), rows of letters (`write_hsp_rows`), the columns of `hit`'s edit script.
 /// `query_case` is how the query row's letters compare (`PairwiseHit::query_case`), `masks` the
-/// rows' masks under `-html` (`write_hsp_rows`).
-fn write_alignment_with_sequences<W: Write>(
+/// rows' masks under `-html` (`write_hsp_rows`), `decoration` the query's feature
+/// (`RowDecoration`).
+#[allow(clippy::too_many_arguments)]
+fn write_alignment_with_sequences<W: Write, D: RowDecoration>(
     writer: &mut W,
     hit: &Hit,
     query_seq: &str,
@@ -1888,6 +1913,7 @@ fn write_alignment_with_sequences<W: Write>(
     query_case: super::row_letters::QueryCase,
     masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
+    decoration: &D,
 ) -> io::Result<()> {
     let line_len = config.line_length;
     let q_chars: Vec<char> = query_seq.chars().collect();
@@ -1961,6 +1987,7 @@ fn write_alignment_with_sequences<W: Write>(
         masks,
         max_start_len,
         write_middle,
+        decoration,
     )
 }
 
@@ -2028,8 +2055,14 @@ const ROW_LABELS: [&str; 2] = ["Query", "Sbjct"];
 /// The lines are those of the HSP's Dense-seg (`GetAlnStop`), whose columns the rows' letters
 /// are: a difference is an internal error. An HSP of length 0 (BLASTX's empty rows) has none
 /// (`aln_stop` cast to `int` is -1). `prev_stop` starts at 0 (`vector<int>`).
+///
+/// `decoration` adds the query's feature (`RowDecoration`; `PlainRows`: none): its row above the
+/// query row of each line that meets it, and the labels' width (`maxIdLen`) of its id.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1365-1373
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1518-1521
 #[allow(clippy::too_many_arguments)]
-fn write_hsp_rows<W: Write>(
+fn write_hsp_rows<W: Write, D: RowDecoration>(
     writer: &mut W,
     segments_of: impl FnOnce(
         &mut super::serial::seqalign::Segments,
@@ -2040,6 +2073,7 @@ fn write_hsp_rows<W: Write>(
     masks: Option<&super::query_anchored::HspMasks>,
     width: usize,
     mut write_middle: impl FnMut(&mut W, std::ops::Range<usize>) -> io::Result<()>,
+    decoration: &D,
 ) -> io::Result<()> {
     let columns = letters[0].len();
     HSP_ROWS.with_borrow_mut(|(segments, rows, buffer)| {
@@ -2059,14 +2093,37 @@ fn write_hsp_rows<W: Write>(
                  have different lengths",
             ));
         }
+        // The query's feature where it meets the HSP (`x_GetQueryFeatureList`), whose id widens
+        // the labels.
+        let feature = decoration.feature(rows);
+        let padded: [String; 2];
+        let labels: [&str; 2] = match feature {
+            None => ROW_LABELS,
+            Some(_) => {
+                padded = ROW_LABELS.map(|label| format!("{label:<0$}", D::FEATURE_ID.len()));
+                [&padded[0], &padded[1]]
+            }
+        };
         let mut prev_stop = [0i32; 2];
         for (index, aln_start) in (0..aln_len).step_by(line_length).enumerate() {
             let line = aln_start..(aln_start + line_length).min(aln_len);
             let cur_range = (aln_start as i64, line.end as i64 - 1);
-            for (row, label) in ROW_LABELS.into_iter().enumerate() {
+            for (row, label) in labels.into_iter().enumerate() {
                 let Some((left, right)) = rows.line(row, index, cur_range.0, cur_range.1)? else {
                     continue;
                 };
+                if let Some(columns) =
+                    feature.filter(|&(from, to)| from < line.end && line.start <= to)
+                {
+                    if row == 0 {
+                        write_feature_row::<W, D>(
+                            writer,
+                            label.len() + 2 + width + 2,
+                            line.clone(),
+                            columns,
+                        )?;
+                    }
+                }
                 let (start, end) = (left.wrapping_add(1) as i32, right.wrapping_add(1) as i32);
                 write_sequence_row(
                     writer,
@@ -2099,6 +2156,61 @@ fn write_hsp_rows<W: Write>(
         }
         Ok(())
     })
+}
+
+/// What an HSP's rows show besides them in outfmt 0 (`write_hsp_rows`): a feature of the query
+/// (`CDisplaySeqalign`'s `m_QueryFeature`), which only PHI-BLAST's report gives (the pattern
+/// occurrence, `phi_round::PatternRow`). `PlainRows` shows none.
+pub(crate) trait RowDecoration {
+    /// The feature's id, the label of its row (`feature_id`).
+    const FEATURE_ID: &'static str;
+    /// The letter over the feature's columns (`feature_char`).
+    const FEATURE_CHAR: u8;
+    /// The first and last alignment columns of the feature on the HSP of rows `rows`, `None`
+    /// where it has none there.
+    fn feature(&self, rows: &super::query_anchored::HspAlnVec) -> Option<(usize, usize)>;
+}
+
+/// The rows of every report but PHI-BLAST's: no feature.
+pub(crate) struct PlainRows;
+
+impl RowDecoration for PlainRows {
+    const FEATURE_ID: &'static str = "";
+    const FEATURE_CHAR: u8 = b' ';
+
+    #[inline(always)]
+    fn feature(&self, _rows: &super::query_anchored::HspAlnVec) -> Option<(usize, usize)> {
+        None
+    }
+}
+
+/// Writes the feature row of a line of columns `line` (`x_PrintFeatures` of row 0): the id, the
+/// spaces up to the letters' column `margin` (no start is shown), the line's columns of the
+/// feature string (its letter over `columns`, spaces elsewhere) and a line feed.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:900-916
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2955-2962
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:857-877
+#[cold]
+fn write_feature_row<W: Write, D: RowDecoration>(
+    writer: &mut W,
+    margin: usize,
+    line: std::ops::Range<usize>,
+    (from, to): (usize, usize),
+) -> io::Result<()> {
+    writer.write_all(D::FEATURE_ID.as_bytes())?;
+    write_spaces(writer, margin.saturating_sub(D::FEATURE_ID.len()))?;
+    let letters: Vec<u8> = line
+        .map(|column| {
+            if (from..=to).contains(&column) {
+                D::FEATURE_CHAR
+            } else {
+                b' '
+            }
+        })
+        .collect();
+    writer.write_all(&letters)?;
+    writer.write_all(b"\n")
 }
 
 /// Writes one row of one line of an HSP (`write_hsp_rows`): its label, its first and last
@@ -2617,11 +2729,14 @@ const HTML_PREFIX: &[u8] = b"<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292
 const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
 
-/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, or `blastp` for
-/// any other name (its tasks).
+/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, `phiblastp`
+/// (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), or `blastp` for any
+/// other name (its tasks).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
 pub(crate) fn blastp_family_program(program: &str) -> &str {
     match program {
-        "psiblast" | "rpsblast" => program,
+        "psiblast" | "rpsblast" | "phiblastp" => program,
         _ => "blastp",
     }
 }
@@ -3906,6 +4021,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             part,
             self.row_masks,
             place,
+            &PlainRows,
         )
     }
 
@@ -5384,6 +5500,7 @@ fn write_tblastx_alignment<W: Write>(
                 hit.query_case,
             )
         },
+        &PlainRows,
     )
 }
 
@@ -6264,6 +6381,7 @@ fn write_tblastn_alignment<W: Write>(
                 hit.query_case,
             )
         },
+        &PlainRows,
     )
 }
 
@@ -6852,6 +6970,7 @@ fn write_blastx_alignment(
                 hit.query_case,
             )
         },
+        &PlainRows,
     )
 }
 

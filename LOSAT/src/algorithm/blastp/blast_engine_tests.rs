@@ -3019,6 +3019,36 @@ fn the_rows_read_each_residue_by_the_operations() {
     );
 }
 
+// psiblast `-phi_pattern` (PS8a fix round 1): the rows of a batch whose first query has no letters
+// show a gap character at each position of the searched query, read as a Bioseq's letters
+// (`ShownQueries::phi_shown`; NCBI BLAST+ 2.17.0 `PS/tmp/rev8a/ncbi3/er.first.0`).
+#[test]
+fn phi_shown_letters_replace_the_record_s() {
+    let records = vec![
+        FastaRecord::new("e1".to_string(), b"", b""),
+        FastaRecord::new("p".to_string(), b"", b"MKV"),
+        FastaRecord::new("q".to_string(), b"", b"MKV"),
+    ];
+    let phi_shown = vec![None, Some(b"---".to_vec().into_boxed_slice()), None];
+    let queries = ShownQueries {
+        records: &records,
+        bioseq: None,
+        phi_shown: &phi_shown,
+    };
+    assert_eq!(queries.record(1), b"---");
+    assert_eq!(queries.record(2), b"MKV");
+    assert!(matches!(
+        queries.letters(1),
+        Some(ShownLetters::Bioseq(b"---"))
+    ));
+    assert!(matches!(
+        queries.letters(2),
+        Some(ShownLetters::Ascii(b"MKV"))
+    ));
+    assert!(queries.shown(1).recounted());
+    assert!(matches!(queries.shown(3), ShownLetters::Ascii(b"")));
+}
+
 /// BLASTP's table as the `-db_hard_mask` search moves it between sequences (`db_masked.rs`:
 /// `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread offset (entries 0, or
 /// the window less than 0 after a clear), the clear (offset the window) before the move, and the

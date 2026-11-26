@@ -2853,7 +2853,7 @@ impl BatchSplit {
             Some(records) => records.iter().map(|&(length, _)| length).collect(),
             None => queries.iter().map(Vec::len).collect(),
         };
-        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false)
+        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false, false)
             .then(|| split_protein_batch(&lengths, sizes))
             .flatten();
         Ok(Self { sizes, chunks })

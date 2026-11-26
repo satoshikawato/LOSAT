@@ -663,6 +663,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
             Default::default(),
             None,
             &config,
+            &PlainRows,
         )
         .unwrap();
         String::from_utf8(output).unwrap()
@@ -712,6 +713,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
         Default::default(),
         None,
         &config,
+        &PlainRows,
     )
     .unwrap();
     assert_eq!(
@@ -867,6 +869,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                     program: "blastp".into(),
                     ..config(line_length)
                 },
+                &PlainRows,
             )
         })
     };
@@ -918,6 +921,7 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
                 program: "blastp".into(),
                 ..PairwiseConfig::default()
             },
+            &PlainRows,
         )
         .unwrap();
         let estimate = crate::report::x_pairwise_par::hit_estimate(300, line_length);
@@ -1554,6 +1558,7 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
             Default::default(),
             masks,
             &config,
+            &PlainRows,
         )
         .unwrap();
         String::from_utf8(output).unwrap()

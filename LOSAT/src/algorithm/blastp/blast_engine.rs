@@ -11261,73 +11261,14 @@ fn run_call(
                 None => warnings,
             }
         });
-        let format_result: Result<()> = match outfmt {
-            _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
-                &report_view,
-                outfmt,
-                format,
-                &mut warnings,
-                &mut probe,
-                &pairwise_shown,
-                &rows_of,
-            ),
-            // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
-            _ if phi_reports.is_some() => report_write::write_phi_report(
-                &report_view,
-                outfmt,
-                phi_reports.expect("a PHI-BLAST call"),
-                format,
-                &mut warnings,
-                &mut probe,
-                &pairwise_shown,
-                &rows_of,
-            ),
-            BlastpReport::Seqalign(serial) => {
-                report_write::write_seqalign(&report_view, serial, format, &mut warnings)
-            }
-            BlastpReport::Archive => report_write::write_archive(
-                &report_view,
-                format,
-                &mut warnings,
-                &first_context,
-                &batch_spans,
-            ),
-            BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
-                &report_view,
-                outfmt,
-                format,
-                &mut warnings,
-                &side_sink,
-                &query_stats,
-                &rows_of,
-            ),
-            BlastpReport::Pairwise(view) => report_write::write_pairwise(
-                &report_view,
-                view,
-                format,
-                &mut warnings,
-                &mut probe,
-                &pairwise_shown,
-                &rows_of,
-                None,
-            ),
-            BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
-                &report_view,
-                spec,
-                format,
-                &mut warnings,
-                &mut probe,
-                &rows_of,
-                None,
-            ),
-            BlastpReport::Text(
-                outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
-            ) => report_write::write_text(&report_view, outfmt, format, &mut warnings, &mut probe),
-            // Outfmt 0 is `BlastpReport::Pairwise` (`requested_formats`).
-            BlastpReport::Text(OutputFormat::Pairwise) => Err(anyhow::anyhow!(
-                "LOSAT internal error: outfmt 0 as a BLASTP tabular report"
-            )),
-        };
+        let format_result = write_format_report(
+            &report_view,
+            outfmt,
+            phi_reports,
+            format,
+            (&mut warnings, &mut probe, &pairwise_shown, &side_sink),
+            (&first_context, &batch_spans, &query_stats, &rows_of),
+        );
         // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
         // the formats after it are written then.
         if let Err(error) = format.refusal.check(format_result) {
@@ -11425,6 +11366,93 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
         crate::core::subject_split::MAX_DBSEQ_LEN
     )
+}
+
+/// Dispatches a single requested BLASTP/PSIBLAST/RPSBLAST report format (`run_call`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-874
+#[allow(clippy::type_complexity)]
+fn write_format_report(
+    report_view: &report_write::ReportView<'_>,
+    outfmt: BlastpReport,
+    phi_reports: Option<report_write::PhiPairwise<'_>>,
+    format: &mut crate::api::local_blast::FormatOutput<'_>,
+    (warnings, probe, pairwise_shown, side_sink): (
+        &mut Option<crate::report::query_warnings::QueryWarnings<'_>>,
+        &mut Option<crate::api::local_blast::FormatProbe<'_>>,
+        &Option<std::collections::BTreeSet<usize>>,
+        &Option<crate::report::blast_xml2::SideFileSink>,
+    ),
+    (first_context, batch_spans, query_stats, rows_of): (
+        &impl Fn(usize) -> super::archive::FirstContext,
+        &impl Fn() -> Vec<std::ops::Range<usize>>,
+        &impl Fn() -> Vec<crate::report::blast_xml::XmlStats>,
+        &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+    ),
+) -> Result<()> {
+    match outfmt {
+        _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
+            report_view,
+            outfmt,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+        ),
+        // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
+        _ if phi_reports.is_some() => report_write::write_phi_report(
+            report_view,
+            outfmt,
+            phi_reports.expect("a PHI-BLAST call"),
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+        ),
+        BlastpReport::Seqalign(serial) => {
+            report_write::write_seqalign(report_view, serial, format, warnings)
+        }
+        BlastpReport::Archive => {
+            report_write::write_archive(report_view, format, warnings, first_context, batch_spans)
+        }
+        BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
+            report_view,
+            outfmt,
+            format,
+            warnings,
+            side_sink,
+            query_stats,
+            rows_of,
+        ),
+        BlastpReport::Pairwise(view) => report_write::write_pairwise(
+            report_view,
+            view,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+            None,
+        ),
+        BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
+            report_view,
+            spec,
+            format,
+            warnings,
+            probe,
+            rows_of,
+            None,
+        ),
+        BlastpReport::Text(
+            outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
+        ) => report_write::write_text(report_view, outfmt, format, warnings, probe),
+        // Outfmt 0 is `BlastpReport::Pairwise` (`requested_formats`).
+        BlastpReport::Text(OutputFormat::Pairwise) => Err(anyhow::anyhow!(
+            "LOSAT internal error: outfmt 0 as a BLASTP tabular report"
+        )),
+    }
 }
 
 /// Starts PHI-BLAST's call (`phi_hooks::phi_call`), routing any setup error through

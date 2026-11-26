@@ -300,15 +300,16 @@ fn run_inner(
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
     // The `-out` file, where NCBI opens it (`cli::create_out_file`, one owner with the library).
-    let create = |path: &Path| crate::cli::create_out_file(path, None);
+    let create = |path: &Path| crate::cli::create_out_file(path);
     let mut held = None;
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     let device = crate::cli::ReportStream::of_cli(
         out_file.map(create).transpose()?,
         program.lower,
-        &args.outfmt,
+        &outfmt_bytes,
         strategy.as_ref(),
     );
     let stream = match structured_xml {
@@ -358,13 +359,13 @@ fn run_inner(
         )?,
     };
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
-    let choice = choice.at_formatting_handler(&args.outfmt)?;
+    let choice = choice.at_formatting_handler(&outfmt_bytes)?;
     app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
     let html = app::html_links(
         args.html,
         args.app_request_kind(),
         args.request_kind(),
-        args.database_name(),
+        args.database_name().as_deref(),
         &[choice.number],
     )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
@@ -385,9 +386,9 @@ fn run_inner(
     let database = match args.database_name() {
         Some(name) => {
             let (keeps_scope, separate_xml2) =
-                crate::report::db_subject::FormatThrow::scope_flags(Some(&args.outfmt));
+                crate::report::db_subject::FormatThrow::scope_flags(Some(outfmt_bytes.as_ref()));
             let database = BlastxDatabase::open_restricted(
-                name,
+                &name,
                 &settings,
                 list.as_ref(),
                 args.db_mask.option().as_ref(),
@@ -418,7 +419,7 @@ fn run_inner(
                 || database.pairwise_database(),
                 // The command line's one format fails the call.
                 [(
-                    args.outfmt.as_str(),
+                    outfmt_bytes.as_ref(),
                     &mut crate::api::local_blast::FormatRefusal::FailsCall,
                 )],
                 program.upper,
@@ -2454,14 +2455,18 @@ fn write_run_error_archive(
         return;
     };
     let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-        Some(path) => match crate::cli::create_out_file(path, None) {
+        Some(path) => match crate::cli::create_out_file(path) {
             Ok(file) => Some(file),
             Err(_) => return,
         },
         None => None,
     };
-    let mut report =
-        crate::cli::ReportStream::of_cli(out_file, args.program().lower, &args.outfmt, None);
+    let mut report = crate::cli::ReportStream::of_cli(
+        out_file,
+        args.program().lower,
+        crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+        None,
+    );
     let _ =
         crate::report::archive::write_error_archive_after_post(handle, error, &lines, &mut report);
     let _ = report.finish(Ok(()));

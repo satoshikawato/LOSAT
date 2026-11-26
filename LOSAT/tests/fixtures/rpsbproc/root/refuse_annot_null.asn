@@ -1,0 +1,42 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              NULL
+            }
+          }
+        }
+      },
+      subject database "Cdd",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -2 }
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    }
+  }
+}

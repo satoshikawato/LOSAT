@@ -41,7 +41,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt: format,
+                outfmt: format.as_bytes(),
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
@@ -140,7 +140,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: format,
+                    outfmt: format.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -327,7 +327,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: format,
+                    outfmt: format.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Files(&mut master, SideFileSink::new("r", received.clone())),
                 }],

@@ -16,7 +16,6 @@ use std::io::{BufWriter, Seek, SeekFrom, Write};
 
 use crate::blastinput::input_files::{temporary_directory, unnamed_temporary_file};
 use crate::core::blast_util::BLASTAA_SIZE;
-use crate::ncbi_app::Diag;
 use crate::report::serial::asn_types::Post;
 use crate::report::serial::pssm::Pssm;
 use crate::seqdb::rps::RPS_MAGIC_NUM_28;
@@ -476,24 +475,23 @@ impl DeltaVolume {
     /// ASN.1 posts, raises any deferred Pass-3 error, then creates `<name>.wcounts` and
     /// `<name>.obsr` (in NCBI's order) and writes their headers, offset tables, and records.
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1572-1575,1709-1712,1822-1863
-    pub(super) fn finish(
+    pub(super) fn finish<E: From<DeltaError>>(
         mut self,
-        diag: &mut Diag,
-        post_fn: impl Fn(&mut Diag, &[Post]),
-    ) -> Result<(), DeltaError> {
+        mut post_fn: impl FnMut(&[Post]) -> Result<(), E>,
+    ) -> Result<(), E> {
         if let Some(error) = self.tmp_open_error.take() {
-            return Err(error);
+            return Err(error.into());
         }
         if let Some((fail_index, error)) = self.deferred_error.take() {
             for (idx, posts) in &self.deferred_posts {
                 if *idx <= fail_index {
-                    post_fn(diag, posts);
+                    post_fn(posts)?;
                 }
             }
-            return Err(error);
+            return Err(error.into());
         }
         for (_, posts) in &self.deferred_posts {
-            post_fn(diag, posts);
+            post_fn(posts)?;
         }
         self.push_current_offsets();
 
@@ -514,12 +512,14 @@ impl DeltaVolume {
             &mut wcounts,
             &self.freq_offsets,
             self.tmp_freq.as_mut().expect("tmp_freq open"),
-        )?;
+        )
+        .map_err(DeltaError::from)?;
         write_delta_file(
             &mut obsr,
             &self.obsr_offsets,
             self.tmp_obsr.as_mut().expect("tmp_obsr open"),
-        )?;
+        )
+        .map_err(DeltaError::from)?;
         Ok(())
     }
 }

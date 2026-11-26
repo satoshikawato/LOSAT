@@ -873,8 +873,9 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         "TBLASTX",
     )?;
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let choice =
-        crate::blastinput::app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        crate::blastinput::app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
     let format = choice.report_format(
         crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
@@ -888,7 +889,7 @@ pub fn run(
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
     )
-    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
     // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file.map(|file| {
         crate::report::archive::strategy::StrategyExport::for_args(
@@ -900,7 +901,6 @@ pub fn run(
     });
     let archive = args.archive.clone();
     crate::utils::threading::validate_threads(args.num_threads)?;
-    use crate::blastinput::input_files;
     // The diagnostics stream: with the archive it also saves what it writes as the messages of
     // the next archive.
     let mut stderr = crate::cli::CliStderr::process();
@@ -956,7 +956,6 @@ pub fn run(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // The query is opened, then the output file is created (`-` is standard output); the
     // query is read after both, so an output file that is the query file reads empty.
-    input_files::check_utf8_file_name(&args.query, "query", "TBLASTX")?;
     // NCBI opens the query file inside `Run` too: its error is saved and an error archive
     // follows.
     let query_file = match crate::report::archive::read::import::ImportRun::open_query(
@@ -975,12 +974,16 @@ pub fn run(
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
     // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers (`search_cli`).
-    let outfmt = match choice.parsed() {
+    let outfmt: Vec<u8> = match choice.parsed() {
         Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
-        _ => args.outfmt.clone(),
+        _ => outfmt_bytes.clone(),
     };
-    let mut stream =
-        crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, args.strategy.as_ref());
+    let mut stream = crate::cli::ReportStream::of_cli(
+        out_file,
+        "tblastx",
+        &outfmt_bytes,
+        args.strategy.as_ref(),
+    );
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -1053,7 +1056,12 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, None);
+        let mut report = crate::cli::ReportStream::of_cli(
+            out_file,
+            "tblastx",
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+            None,
+        );
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -1069,7 +1077,7 @@ fn open_out_file(args: &TblastxArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -1096,10 +1104,7 @@ fn read_subject_set(
         (Some(text), _) => {
             crate::report::archive::read::import::ImportRun::input_of("subject", text)?
         }
-        (None, Some(subject_path)) => {
-            input_files::check_utf8_file_name(subject_path, "subject", "TBLASTX")?;
-            input_files::open_input(subject_path, "subject", "TBLASTX")?
-        }
+        (None, Some(subject_path)) => input_files::open_input(subject_path, "subject", "TBLASTX")?,
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
@@ -1214,8 +1219,9 @@ fn check_ncbi_options(
     };
     // Each requested format's (the library's `-outfmt` values are its outputs', not `args.outfmt`).
     let mut outfmts = Vec::with_capacity(choices.len());
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     for choice in choices {
-        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        let choice = choice.at_formatting_handler(&outfmt_bytes)?;
         formatting_handler_check_of_run(&choice, args.app(), Program::Tblastx)?;
         outfmts.push(choice.number);
     }
@@ -1225,7 +1231,7 @@ fn check_ncbi_options(
         args.html,
         crate::report::archive::options::RequestKind::from(args.app()),
         crate::report::archive::options::RequestKind::Tblastx,
-        args.database_name(),
+        args.database_name().as_deref(),
         &outfmts,
     )?;
     let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -1295,7 +1301,7 @@ fn check_ncbi_options(
 /// file then; the checks of the options alone, `check_options`, read the argv as that run).
 fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::EarlyFormat; 1]> {
     Ok([crate::blastinput::app::early_format_choice(
-        &args.outfmt,
+        crate::utils::os_bytes::os_str_bytes(&args.outfmt),
         args.export_search_strategy.is_some(),
     )?])
 }
@@ -1348,7 +1354,7 @@ fn open_search_database(
                 outputs.formats.first().map(|format| format.outfmt),
             );
             let database = super::super::database::TblastxDatabase::open_restricted(
-                name,
+                &name,
                 settings,
                 list,
                 args.db_mask.option().as_ref(),
@@ -2024,7 +2030,7 @@ pub(crate) struct TblastxReportRun<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct ReportDatabase<'a> {
     /// The `-db` value (outfmt 7's `# Database:` line).
-    pub name: &'a str,
+    pub name: &'a [u8],
     /// The `Database:` lines of outfmt 0.
     pub pairwise: &'a crate::report::pairwise::PairwiseDatabase,
     /// The reported sequences by rank (their tabular ids).
@@ -2037,17 +2043,27 @@ pub(crate) struct ReportDatabase<'a> {
 /// for the subjects of an imported strategy, which name no input (an empty label).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799
-fn tblastx_database_name(args: &TblastxArgs) -> String {
-    format!(
-        "User specified sequence set (Input: {})",
-        args.subject_label()
-    )
+fn tblastx_database_name(args: &TblastxArgs) -> Vec<u8> {
+    let mut out = b"User specified sequence set (Input: ".to_vec();
+    match &args.subject {
+        Some(path) => {
+            out.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(path.as_os_str()))
+        }
+        None => out.extend_from_slice(args.subject_label().to_string().as_bytes()),
+    }
+    out.push(b')');
+    out
 }
 
 /// The `Database:` text of the pairwise reports of a local `-subject` search: the subjects of an
-/// imported strategy name no input (`report::pairwise::scan_mode_definition`).
-fn tblastx_pairwise_database_name(args: &TblastxArgs) -> String {
-    crate::report::pairwise::scan_mode_definition(&args.subject_label().to_string())
+/// imported strategy name no input (`report::pairwise::scan_mode_definition_bytes`).
+fn tblastx_pairwise_database_name(args: &TblastxArgs) -> Vec<u8> {
+    match &args.subject {
+        Some(path) => crate::report::pairwise::subject_set_definition(path),
+        None => crate::report::pairwise::scan_mode_definition_bytes(
+            args.subject_label().to_string().as_bytes(),
+        ),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-140
@@ -2085,7 +2101,7 @@ pub(crate) fn library_batch_sizes(
     }
     let total_length = match args.database_name() {
         Some(name) => super::super::database::TblastxDatabase::open_restricted(
-            name,
+            &name,
             settings,
             None,
             None,
@@ -2164,7 +2180,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::wording::REPORT_VERSION,
-                        tblastx_pairwise_database_name(args).as_bytes(),
+                        &tblastx_pairwise_database_name(args),
                         records.len() as i64,
                         // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181: `m_iTotalLength` grows by
                         // the `length` of each element, cast to `Int8`).
@@ -2558,8 +2574,8 @@ fn write_tblastx_outputs(
             query_code: report::DisplayCode::new(&query_code),
             db_code: report::DisplayCode::new(&db_code),
         });
-    let database = match &run.database {
-        Some(database) => database.name.to_string(),
+    let database: Vec<u8> = match &run.database {
+        Some(database) => database.name.to_vec(),
         None => tblastx_database_name(args),
     };
     // The `Query=` and `# Query:` text of each query: its title bytes.
@@ -2684,8 +2700,7 @@ fn write_tblastx_outputs(
                         database_name: match &run.database {
                             Some(_) => database.clone(),
                             None => tblastx_pairwise_database_name(args),
-                        }
-                        .into(),
+                        },
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.
@@ -3318,7 +3333,7 @@ fn run_in_pool(
     if !no_batch && args.scoring_matrix() == TblastxMatrix::Aborts {
         return Err(
             crate::algorithm::tblastx::args::identity_named_matrix_refusal(
-                args.matrix_name(),
+                args.matrix_name().as_bytes(),
                 "TBLASTX",
             ),
         );
@@ -3329,7 +3344,7 @@ fn run_in_pool(
         anyhow::bail!(
             "{}",
             crate::blastinput::ncbi_environment::matrix_file_refusal(
-                args.matrix_name(),
+                &args.matrix_name(),
                 file,
                 "TBLASTX"
             )
@@ -4916,7 +4931,7 @@ impl BatchReports<'_> {
     ) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
         crate::report::blast_xml::matrix::xml_formatting_failure(
             outputs.formats.iter().map(|format| format.outfmt),
-            self.args.matrix_name(),
+            self.args.matrix_name().as_bytes(),
             matches!(self.subjects, ShownSubjects::Fasta { .. }),
             false,
         )

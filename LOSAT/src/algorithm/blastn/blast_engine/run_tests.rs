@@ -1224,7 +1224,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         custom("7 qaccver").fields,
         [crate::report::tabular::TabularField::QueryAccessionVersion]
     );
-    assert_eq!(custom("6 delim=, std").delimiter, ",");
+    assert_eq!(custom("6 delim=, std").delimiter, b",");
     assert_eq!(
         custom("20").kind,
         crate::report::tabular::TabularKind::CsvWithHeader
@@ -1239,7 +1239,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         cli_output_formats("7 delim=\t std", None, false).unwrap(),
         [BlastnOutputFormat::TabularWithComments]
     );
-    assert_eq!(custom(r"7 delim=\t").delimiter, r"\t");
+    assert_eq!(custom(r"7 delim=\t").delimiter, br"\t");
     assert_eq!(
         native(cli_output_formats("22", None, false).unwrap_err()),
         (

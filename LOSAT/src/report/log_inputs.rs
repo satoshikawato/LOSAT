@@ -378,7 +378,7 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                         .and_then(|s| s.window_masker_registry.ok())
                         .and_then(|r| r.path)
                         .filter(|p| !p.is_empty())
-                        .map(PathBuf::from)
+                        .map(crate::utils::os_bytes::path_from_bytes)
                         .unwrap_or_else(|| PathBuf::from("."));
                     push_file(
                         &mut inputs.files,

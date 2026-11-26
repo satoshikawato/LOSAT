@@ -338,7 +338,6 @@ pub(crate) fn merge_subject_chunk_hsps<H: ChunkMergeHsp>(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2749-2807,2857-3035
 /// [`merge_subject_chunk_hsps`] with a caller-supplied stable score sorter (`sort_by_score`,
 /// used by TBLASTX's in-place index-replay sort).
 #[allow(clippy::too_many_arguments)]

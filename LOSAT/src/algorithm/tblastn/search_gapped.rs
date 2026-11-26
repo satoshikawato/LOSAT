@@ -83,47 +83,6 @@ impl crate::core::blast_hits::ChunkMergeHsp for GappedHsp {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035
-impl crate::core::blast_hits::ChunkMergeHsp for (usize, GappedHsp) {
-    fn merge_context(&self) -> i32 {
-        self.0 as i32
-    }
-    fn merge_subject_frame(&self) -> i32 {
-        self.1.merge_subject_frame()
-    }
-    fn merge_q_start(&self) -> i32 {
-        self.1.merge_q_start()
-    }
-    fn merge_q_end(&self) -> i32 {
-        self.1.merge_q_end()
-    }
-    fn merge_s_start(&self) -> i32 {
-        self.1.merge_s_start()
-    }
-    fn merge_s_end(&self) -> i32 {
-        self.1.merge_s_end()
-    }
-    fn merge_score(&self) -> i32 {
-        self.1.merge_score()
-    }
-    fn merge_q_gapped_start(&self) -> i32 {
-        self.1.merge_q_gapped_start()
-    }
-    fn merge_s_gapped_start(&self) -> i32 {
-        self.1.merge_s_gapped_start()
-    }
-    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
-        self.1.set_merge_bounds(q_start, q_end, s_start, s_end);
-    }
-    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
-        self.1
-            .set_merge_gapped_start(q_gapped_start, s_gapped_start);
-    }
-    fn set_merge_score(&mut self, score: i32) {
-        self.1.set_merge_score(score);
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-536,583-605;
 // c++/include/algo/blast/core/blast_hits.h:126-143:
 // Keep the transferred script on the same Rust HSP through purge and pruning.
@@ -2422,6 +2381,47 @@ fn append_preliminary_hsps(
         }
     }
     selected
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035
+impl crate::core::blast_hits::ChunkMergeHsp for (usize, GappedHsp) {
+    fn merge_context(&self) -> i32 {
+        self.0 as i32
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.1.merge_subject_frame()
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.1.merge_q_start()
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.1.merge_q_end()
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.1.merge_s_start()
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.1.merge_s_end()
+    }
+    fn merge_score(&self) -> i32 {
+        self.1.merge_score()
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.1.merge_q_gapped_start()
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.1.merge_s_gapped_start()
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.1.set_merge_bounds(q_start, q_end, s_start, s_end);
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.1
+            .set_merge_gapped_start(q_gapped_start, s_gapped_start);
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.1.set_merge_score(score);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:

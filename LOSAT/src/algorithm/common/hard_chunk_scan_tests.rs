@@ -203,28 +203,25 @@ fn short_chunk_refusals_name_the_oid_and_pass_as_is() {
         text.contains("which LOSAT's BLASTP does not do yet"),
         "{text}"
     );
-    let error = chunk_merge_undefined_refusal(17, "BLASTX");
-    assert!(error.is::<ShortChunkSeedRefusal>());
-    let text = error.to_string();
-    assert!(
-        text.starts_with(
+    for (error, prefix, suffix) in [
+        (
+            chunk_merge_undefined_refusal(17, "BLASTX"),
             "-db_hard_mask: the sequence of OID 17 has alignments across a chunk overlap whose \
-             merged score calculation is undefined in NCBI BLAST+"
+             merged score calculation is undefined in NCBI BLAST+",
+            "LOSAT's BLASTX does not search such a database with -db_hard_mask",
         ),
-        "{text}"
-    );
-    assert!(text.ends_with("LOSAT's BLASTX does not search such a database with -db_hard_mask"));
-    let error = last_range_overlap_merge_refusal(17, "BLASTP");
-    assert!(error.is::<ShortChunkSeedRefusal>());
-    let text = error.to_string();
-    assert!(
-        text.starts_with(
+        (
+            last_range_overlap_merge_refusal(17, "BLASTP"),
             "-db_hard_mask: the sequence of OID 17 has alignments from an earlier range that meet \
-             the final part across an overlap NCBI BLAST+ 2.17.0 reads past its list of ranges"
+             the final part across an overlap NCBI BLAST+ 2.17.0 reads past its list of ranges",
+            "LOSAT's BLASTP does not search such a database with -db_hard_mask",
         ),
-        "{text}"
-    );
-    assert!(text.ends_with("LOSAT's BLASTP does not search such a database with -db_hard_mask"));
+    ] {
+        assert!(error.is::<ShortChunkSeedRefusal>());
+        let text = error.to_string();
+        assert!(text.starts_with(prefix), "{text}");
+        assert!(text.ends_with(suffix), "{text}");
+    }
 }
 
 /// NCBI's merge after a chunk runs its joins where an HSP of the joined list ends past the

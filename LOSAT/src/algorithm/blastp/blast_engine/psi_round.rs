@@ -608,7 +608,11 @@ fn round_call_error(
     }) {
         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
     }
-    Ok(failure.error)
+    crate::algorithm::common::database::ErrorAfterPosts::written(
+        failure.error,
+        &mut *outputs.diagnostics,
+        args.archive.as_ref(),
+    )
 }
 
 /// Round 1 of a query of a deltablast batch (`search_delta_batch`), for the query's later rounds

@@ -6,7 +6,7 @@ You can run LOSAT searches from your own program instead of the command line. Fr
 
 | Interface | What it runs | Page |
 |:---|:---|:---|
-| Python package `pylosat` | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, and the tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` | [Python (`pylosat`)](libraries/python.md) |
+| Python package `pylosat` | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, and the tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `blast_formatter` | [Python (`pylosat`)](libraries/python.md) |
 | Rust crate `losat`, module `losat::api` | The same searches and tools | [Rust (`losat`)](libraries/rust.md) |
 | npm package `losat`, for web pages | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` on FASTA sequences held by the page | [WebAssembly and Browser](libraries/webassembly.md) |
 

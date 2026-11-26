@@ -742,6 +742,16 @@ impl Args {
         self.value(name).ok_or_else(|| no_value(name))
     }
 
+    /// `args[name].AsString()` inside `Run`, as raw bytes (for free-form string keys like `-rid`
+    /// whose value is not constrained to ASCII): returns `eExcludedValue` if excluded, or
+    /// `eNoValue` if missing.
+    pub(crate) fn as_bytes(&self, name: &str) -> Result<std::borrow::Cow<'_, [u8]>, ArgException> {
+        if self.excluded.contains(&name) {
+            return Err(excluded_value(name));
+        }
+        self.bytes(name).ok_or_else(|| no_value(name))
+    }
+
     /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.
     pub(crate) fn boolean(&self, name: &str) -> Option<bool> {
         match self.numbers.get(name) {

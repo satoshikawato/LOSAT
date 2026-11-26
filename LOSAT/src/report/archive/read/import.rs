@@ -26,7 +26,8 @@ use anyhow::Result;
 
 use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
 use super::queries::{render_queries, RenderError, Rendered, Text};
-use super::request::{Queries, Request, Stop as RequestStop, Subject};
+use super::request::{Queries, Request, Subject};
+use super::Stop as RequestStop;
 use crate::blastinput::app::Program;
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
@@ -273,6 +274,7 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
                 "a search strategy with an element stated as NULL in a list",
                 program,
             ),
+            other => unreachable!("not a stop of the strategy's import: {other:?}"),
         };
         fail(&warnings, error)
     })?;
@@ -369,7 +371,7 @@ fn import_queries(
     to_files: bool,
 ) -> Result<Rendered> {
     match queries {
-        Queries::Pssm => {
+        Queries::Pssm(_) => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
                 Err(crate::blastinput::app::engine_error(format!(
                     "PSSM found in saved strategy, but not supported for {}",
@@ -379,7 +381,7 @@ fn import_queries(
                 Err(unported("a search strategy whose query is a PSSM", program))
             }
         }
-        Queries::SeqLocList => Err(unported(
+        Queries::SeqLocList(_) => Err(unported(
             "a search strategy whose queries are a list of sequence locations",
             program,
         )),

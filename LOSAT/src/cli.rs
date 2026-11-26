@@ -138,9 +138,11 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
 /// What a program that `main_entry` runs before `cli::reader` reads the command line (the
 /// programs of `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's
 /// argument reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION
-/// line of the program (its first line; `convert2blastmask`'s continues in NCBI's text).
-fn entry_program_description(name: &str) -> &'static str {
-    match name {
+/// line of the program (its first line; `convert2blastmask`'s continues in NCBI's text), in LOSAT's
+/// words (`blast_formatter`'s names its version, `wording::losat_text`).
+fn entry_program_description(name: &str) -> std::borrow::Cow<'static, str> {
+    std::borrow::Cow::Borrowed(match name {
+        "blast_formatter" => return crate::wording::losat_text(crate::blast_formatter::description()),
         "blastdbcmd" => "BLAST database client",
         "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
         "segmasker" => "Low complexity region masker based on the SEG algorithm",
@@ -154,7 +156,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "blastdbcheck" => "BLAST database integrity and validity checking application",
         "cleanup-blastdb-volumes.py" => "Remove needless BLAST database volumes.",
         _ => "",
-    }
+    })
 }
 
 /// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not
@@ -716,14 +718,17 @@ impl NativeError {
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
-    /// BLAST program: `Error: `, the exception's `what()` as a C string (ending at the first NUL
-    /// byte, dropping any bytes and trailing line feed after it; without a NUL, `what()` ends
-    /// with a line feed) and the post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a
-    /// `CSeqDBException`, which `CATCH_ALL` catches before (its branch comes first),
-    /// `BLAST Database error: ` and its message, exit status 2 (`BLAST_DATABASE_ERROR`). Every
-    /// place of a `CSeqDBException` that LOSAT raises reports the code `eInvalid`
-    /// (`seqdb::throw_site`), so the texts of that branch for `eTooManyOpenFiles` and
-    /// `eMemoryMappingFailure` do not arise here (the reader's errors of those codes are
+    /// BLAST program: a `CBlastException` (`CRemoteBlastException` too) is LOSAT's options error
+    /// of `eInvalidOptions` (exit status 1), `BLAST ran out of memory: ` of a message that names
+    /// memory (`Out of memory`, `Failed to allocate`; exit status 4) and LOSAT's engine error
+    /// otherwise (exit status 3); a `CSeqDBException`, which `CATCH_ALL` catches before (its
+    /// branch comes first), is LOSAT's database error and its message, exit status 2
+    /// (`BLAST_DATABASE_ERROR`); any other is `Error: `, the exception's `what()` as a C string
+    /// (ending at the first NUL byte, dropping any bytes and trailing line feed after it; without
+    /// a NUL, `what()` ends with a line feed) and the post's line feed, exit status 255
+    /// (`BLAST_UNKNOWN_ERROR`). Every place of a `CSeqDBException` that LOSAT raises reports the
+    /// code `eInvalid` (`seqdb::throw_site`), so the texts of that branch for `eTooManyOpenFiles`
+    /// and `eMemoryMappingFailure` do not arise here (the reader's errors of those codes are
     /// `common::database::database_error`'s). The one producer of these reports: an exception of
     /// NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
@@ -792,6 +797,34 @@ impl NativeError {
         NativeError {
             exit: 255,
             message: format!("Error: {what}\n").into(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// `CATCH_ALL`'s report of an `ios::failure` (a stream that throws on `badbit`, as the
+    /// formatters set theirs, blast_format.cpp:118-119): "BLAST failed to write output", exit
+    /// status 6. The one producer of the text.
+    pub(crate) fn write_failure() -> NativeError {
+        NativeError {
+            exit: 6,
+            message: b"BLAST failed to write output\n".to_vec(),
+        }
+    }
+
+    /// The end of NCBI's program where its stream's `ios::failure` leaves a destructor or is
+    /// thrown while another unwinds: `std::terminate`, whose C++ runtime writes this report on the
+    /// standard error and aborts (SIGABRT, exit status 134 in a shell; observed with NCBI BLAST+
+    /// 2.17.0, the official Linux x64 release: blastx's tabular formats, blast_formatter's
+    /// standard output on a full device or a closed pipe). `exit_on_native_error` aborts.
+    pub(crate) fn ios_failure_abort() -> NativeError {
+        NativeError {
+            exit: -6,
+            message: format!(
+                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
+                 {}\n",
+                crate::writedb::ofstream::IOS_FAILURE_WHAT
+            )
+            .into_bytes(),
         }
     }
 
@@ -874,16 +907,27 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, cited in
     // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
     // `-subject` and `-out` of a name that is not UTF-8).
-    let mut message =
-        format!("Command line argument error: Argument \"{name}\". File is not accessible")
-            .into_bytes();
+    let mut message = format!("Argument \"{name}\". File is not accessible").into_bytes();
     if !path.as_os_str().is_empty() {
         message.extend_from_slice(b":  `");
         message.extend_from_slice(&crate::utils::os_bytes::path_bytes(path));
         message.push(b'\'');
     }
-    message.push(b'\n');
-    NativeError { exit: 1, message }.into()
+    command_line_argument_error(message)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+/// `CATCH_ALL`'s report of a `CArgException` whose message (`GetMsg()`) is the bytes `message`,
+/// thrown by a program's `Run`: the message after `Command line argument error: `, exit status 1.
+pub(crate) fn command_line_argument_error(message: impl AsRef<[u8]>) -> anyhow::Error {
+    let mut bytes = b"Command line argument error: ".to_vec();
+    bytes.extend_from_slice(message.as_ref());
+    bytes.push(b'\n');
+    NativeError {
+        exit: 1,
+        message: bytes,
+    }
+    .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480

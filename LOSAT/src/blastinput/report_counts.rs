@@ -159,13 +159,13 @@ pub fn report_counts(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
 /// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
-/// the formatting handler reads the command line (an imported search strategy's `HitlistSize`),
-/// when NCBI keeps it: output format `outfmt` up to 4 and neither `-num_descriptions` nor
-/// `-num_alignments` given: the numbers of descriptions and alignments become the size and half
-/// of it. The handler then returns at once: `-max_target_seqs`, `-line_length`, `-sorthits` and
-/// `-sorthsps` are not read and no warning is written (probes `Y.*.imp.*`). `None` otherwise
-/// ([`report_counts_from`] goes on). The one rule of that return: the counts here, the
-/// formatting options in the import (`import::formatting_early_return`).
+/// the formatting handler reads the command line (an imported search strategy's `HitlistSize`, or
+/// an archive's in blast_formatter), when NCBI keeps it: output format `outfmt` up to 4 and neither
+/// `-num_descriptions` nor `-num_alignments` given: the numbers of descriptions and alignments
+/// become the size and half of it. The handler then returns at once: `-max_target_seqs`,
+/// `-line_length`, `-sorthits` and `-sorthsps` are not read and no warning is written (probes
+/// `Y.*.imp.*`). `None` otherwise ([`report_counts_from`] goes on). The one rule of that return:
+/// the counts here, the formatting options in the import (`import::formatting_early_return`).
 pub fn kept_hitlist_counts(
     hitlist_size: usize,
     outfmt: i32,
@@ -184,7 +184,7 @@ pub fn kept_hitlist_counts(
 }
 
 /// [`report_counts`] from the hit list size `start` of the options (an imported search
-/// strategy's `HitlistSize`), which the handler may keep ([`kept_hitlist_counts`]).
+/// strategy's or an archive's `HitlistSize`), which the handler may keep ([`kept_hitlist_counts`]).
 pub fn report_counts_from(
     start: usize,
     outfmt: i32,
@@ -260,31 +260,45 @@ impl ReportCounts {
         num_descriptions_given: bool,
         formatting: &FormattingArgs,
     ) -> Vec<u8> {
+        self.posted_warnings(Some(program), outfmt, num_descriptions_given, formatting)
+    }
+
+    /// `warnings_with` of an application whose posts have the prefix `prefix` (the search
+    /// programs' `[blastn] `; blast_formatter sets none, `blast_formatter::formatting`).
+    pub fn posted_warnings(
+        &self,
+        prefix: Option<&str>,
+        outfmt: i32,
+        num_descriptions_given: bool,
+        formatting: &FormattingArgs,
+    ) -> Vec<u8> {
+        use crate::report::query_warnings::{few_matches_warning, formatting_warning};
         let mut text = Vec::new();
-        let mut warn = |message: &str| {
-            text.extend_from_slice(format!("Warning: [{program}] {message}\n").as_bytes());
-        };
         if outfmt > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
             if num_descriptions_given {
-                warn("The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output");
+                text.extend(formatting_warning(prefix, "The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output"));
             }
             if formatting.line_length.is_some() {
-                warn("The parameter -line_length is not applicable for output formats > 4 .");
+                text.extend(formatting_warning(
+                    prefix,
+                    "The parameter -line_length is not applicable for output formats > 4 .",
+                ));
             }
             if formatting.sort_hits.is_some() {
-                warn("The parameter -sorthits is ignored for output formats > 4.");
+                text.extend(formatting_warning(
+                    prefix,
+                    "The parameter -sorthits is ignored for output formats > 4.",
+                ));
             }
         }
         if self.hitlist_size < 5 {
-            text.extend_from_slice(&crate::report::query_warnings::few_matches_warning(program));
+            text.extend(few_matches_warning(prefix));
         }
         if formatting.sort_hsps.is_some() && outfmt != output_format::PAIRWISE {
-            text.extend_from_slice(
-                format!(
-                    "Warning: [{program}] The parameter -sorthsps is ignored for output formats != 0.\n"
-                )
-                .as_bytes(),
-            );
+            text.extend(formatting_warning(
+                prefix,
+                "The parameter -sorthsps is ignored for output formats != 0.",
+            ));
         }
         text
     }

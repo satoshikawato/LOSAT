@@ -49,6 +49,10 @@ const PROGRAMS: &[(&str, &str)] = &[
         "blastdbcheck",
         include_str!("ncbi_xmlhelp/blastdbcheck.xml"),
     ),
+    (
+        "blast_formatter",
+        include_str!("ncbi_xmlhelp/blast_formatter.xml"),
+    ),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.

@@ -14,7 +14,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseHeadersFile, pathHeaders } from './check_web_dist.mjs';
+import { parseHeadersFile, pathHeaders } from '../app/build/headers.ts';
 
 const REVALIDATION_REQUIRED_HEADERS = [
   'Cross-Origin-Opener-Policy',
@@ -57,49 +57,70 @@ function firstHttpsUrl(value) {
 }
 
 /**
- * Extracts the deployed base URL from `cf previews deploy` or `cf deploy` JSON stdout.
- * When `target === 'production'` and `domains` lists custom domain(s), uses `https://<first domain>`.
+ * Extracts the deployed preview base URL from parsed `cf previews deploy` JSON stdout.
  */
-export function extractCfDeployUrl(payload, options = {}) {
-  const target = options.target ?? 'preview';
-  const domains = (options.domains ?? '')
-    .split(',')
-    .map((d) => d.trim())
-    .filter((d) => d.length > 0);
-
-  if (target === 'production' && domains.length > 0) {
-    const first = domains[0].replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    return `https://${first}`;
-  }
-
+export function extractCfPreviewUrl(payload) {
   const root = payload && typeof payload === 'object' ? payload : {};
-  const candidates =
-    target === 'preview'
-      ? [
-          root.preview_urls,
-          root.deployment_urls,
-          root.result?.preview_urls,
-          root.result?.deployment_urls,
-          root.url,
-          root.urls,
-          root,
-        ]
-      : [
-          root.urls,
-          root.url,
-          root.deployment_urls,
-          root.worker_url,
-          root.result?.urls,
-          root.result?.url,
-          root.result?.deployment_urls,
-          root,
-        ];
+  const candidates = [
+    root.preview_urls,
+    root.deployment_urls,
+    root.result?.preview_urls,
+    root.result?.deployment_urls,
+    root.url,
+    root.urls,
+    root,
+  ];
 
   for (const candidate of candidates) {
     const found = firstHttpsUrl(candidate);
     if (found) return found.replace(/\/+$/, '');
   }
-  throw new Error(`could not extract deployed URL from cf JSON output for target=${target}`);
+  throw new Error('could not extract preview URL from cf previews deploy JSON output');
+}
+
+/**
+ * Parses `cf previews deploy` stdout JSON and extracts the preview base URL.
+ * Reports a clear error if stdout was empty (for example, `cf deploy` writes no JSON to stdout).
+ */
+export function parseCfPreviewJson(rawText) {
+  const trimmed = String(rawText ?? '').trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      'cf JSON output is empty: cf did not write JSON to stdout (`--cf-json` is only for `cf previews deploy`; pass `--url` for production `cf deploy`)',
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(`cf JSON output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return extractCfPreviewUrl(parsed);
+}
+
+/**
+ * Resolves the production base URL without reading `cf deploy` stdout (which emits no JSON).
+ * Uses `https://<first domain>` when `domains` is set; otherwise uses `workersDevUrl`.
+ */
+export function resolveProductionUrl(options = {}) {
+  const domains = String(options.domains ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0);
+  if (domains.length > 0) {
+    const first = domains[0].replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return `https://${first}`;
+  }
+  const workersDevUrl = String(options.workersDevUrl ?? '').trim().replace(/\/+$/, '');
+  if (workersDevUrl.length > 0) {
+    if (!/^https?:\/\/\S+$/.test(workersDevUrl)) {
+      throw new Error(`invalid workers.dev URL: ${JSON.stringify(workersDevUrl)}`);
+    }
+    return workersDevUrl;
+  }
+  throw new Error(
+    'cannot determine production URL: pass --url, or set LOSAT_WEB_DOMAINS or LOSAT_WEB_WORKERS_DEV_URL',
+  );
 }
 
 function assertHeadersMatch(sitePath, actualHeaders, expectedMap, errors, label = sitePath) {
@@ -201,7 +222,7 @@ export async function checkDeployedSite(baseUrl, options = {}) {
   const headersPath = options.headersPath ?? resolve('web/app/public/_headers');
   const distDir = options.distDir;
 
-  const { rules } = parseHeadersFile(readFileSync(headersPath, 'utf8'));
+  const rules = parseHeadersFile(readFileSync(headersPath, 'utf8'));
   const errors = [];
   const checkedPaths = [];
 
@@ -327,6 +348,7 @@ function parseCliArgs(argv) {
     cfJson: undefined,
     target: 'preview',
     domains: '',
+    workersDevUrl: '',
     dist: undefined,
     headers: 'web/app/public/_headers',
     expectNoindex: false,
@@ -340,6 +362,7 @@ function parseCliArgs(argv) {
     else if (flag === '--cf-json') args.cfJson = argv[++i];
     else if (flag === '--target') args.target = argv[++i];
     else if (flag === '--domains') args.domains = argv[++i];
+    else if (flag === '--workers-dev-url') args.workersDevUrl = argv[++i];
     else if (flag === '--dist') args.dist = argv[++i];
     else if (flag === '--headers') args.headers = argv[++i];
     else if (flag === '--expect-noindex') args.expectNoindex = true;
@@ -348,7 +371,7 @@ function parseCliArgs(argv) {
     else if (flag === '--write-url-file') args.writeUrlFile = argv[++i];
     else if (flag === '--help' || flag === '-h') {
       console.log(
-        'Usage: node web/tools/check_deploy_headers.mjs (--url <url> | --cf-json <path>) [--target preview|production] [--domains <csv>] [--dist <dir>] [--headers <path>] [--expect-noindex] [--write-url-file <path>]',
+        'Usage: node web/tools/check_deploy_headers.mjs (--url <url> | --cf-json <preview-json-path> | --target production [--domains <csv>] [--workers-dev-url <url>]) [--dist <dir>] [--headers <path>] [--expect-noindex] [--write-url-file <path>]',
       );
       process.exit(0);
     } else {
@@ -358,16 +381,37 @@ function parseCliArgs(argv) {
   return args;
 }
 
+/** Resolves the target URL from CLI flags without ever parsing `cf deploy` stdout for production. */
+export function resolveTargetUrlFromCli(cli) {
+  if (cli.url) {
+    const trimmed = String(cli.url).trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/\S+$/.test(trimmed)) {
+      throw new Error(`invalid --url value: ${JSON.stringify(cli.url)}`);
+    }
+    return trimmed;
+  }
+  if (cli.cfJson) {
+    if (cli.target === 'production') {
+      throw new Error(
+        '--cf-json is only supported for preview deployments (`cf deploy` does not write JSON to stdout); pass --url for production',
+      );
+    }
+    const raw = readFileSync(resolve(cli.cfJson), 'utf8');
+    return parseCfPreviewJson(raw);
+  }
+  if (cli.target === 'production' || cli.domains || cli.workersDevUrl) {
+    return resolveProductionUrl({ domains: cli.domains, workersDevUrl: cli.workersDevUrl });
+  }
+  throw new Error('provide --url <url>, --cf-json <preview-json-path>, or --target production with --domains / --workers-dev-url');
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const cli = parseCliArgs(process.argv.slice(2));
-  let targetUrl = cli.url;
-  if (!targetUrl && cli.cfJson) {
-    const raw = readFileSync(resolve(cli.cfJson), 'utf8');
-    const parsed = JSON.parse(raw);
-    targetUrl = extractCfDeployUrl(parsed, { target: cli.target, domains: cli.domains });
-  }
-  if (!targetUrl) {
-    console.error('ERROR: provide --url <url> or --cf-json <path>');
+  let targetUrl;
+  try {
+    targetUrl = resolveTargetUrlFromCli(cli);
+  } catch (error) {
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
   if (cli.writeUrlFile) {

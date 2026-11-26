@@ -23,6 +23,8 @@ name: Web deploy
 #   - `LOSAT_WEB_WORKER_NAME` (defaults to `losat-web`)
 #   - `LOSAT_WEB_DOMAINS` (comma-separated production custom domains, e.g. `losat.app`)
 #   - `LOSAT_WEB_WORKERS_DEV` (`true` to keep `workers.dev` active alongside custom domains)
+#   - `LOSAT_WEB_WORKERS_DEV_URL` (production `https://<worker>.<subdomain>.workers.dev` URL
+#     used for post-deploy checks when `LOSAT_WEB_DOMAINS` is unset; `cf deploy` writes no JSON)
 
 on:
   pull_request:
@@ -32,6 +34,7 @@ on:
       - "web/tools/check_web_dist.mjs"
       - "web/tools/check_deploy_headers.mjs"
       - "web/tools/test_web_deploy_tools.js"
+      - "web/app/build/headers.ts"
       - "web/app/public/_headers"
   push:
     branches: [dev, main]
@@ -41,6 +44,7 @@ on:
       - "web/tools/check_web_dist.mjs"
       - "web/tools/check_deploy_headers.mjs"
       - "web/tools/test_web_deploy_tools.js"
+      - "web/app/build/headers.ts"
       - "web/app/public/_headers"
   workflow_dispatch:
     inputs:
@@ -182,6 +186,8 @@ jobs:
           PREVIEW_NAME: ${{ inputs.preview_name }}
           HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
           HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          LOSAT_WEB_DOMAINS: ${{ vars.LOSAT_WEB_DOMAINS }}
+          LOSAT_WEB_WORKERS_DEV_URL: ${{ vars.LOSAT_WEB_WORKERS_DEV_URL }}
         run: |
           set -euo pipefail
           if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_ACCOUNT" != "true" ]; then
@@ -191,6 +197,13 @@ jobs:
           if [ "$DEPLOY_TARGET" = "preview" ]; then
             if ! [[ "$PREVIEW_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
               echo "::error::preview_name must match ^[a-z0-9][a-z0-9-]{0,62}$ (got: $PREVIEW_NAME)"
+              exit 1
+            fi
+          elif [ "$DEPLOY_TARGET" = "production" ]; then
+            FIRST_DOMAIN=$(printf '%s' "$LOSAT_WEB_DOMAINS" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF { print; exit }')
+            WORKERS_DEV_URL=$(printf '%s' "$LOSAT_WEB_WORKERS_DEV_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            if [ -z "$FIRST_DOMAIN" ] && [ -z "$WORKERS_DEV_URL" ]; then
+              echo "::error::Set repository variable LOSAT_WEB_DOMAINS (e.g. losat.app) or LOSAT_WEB_WORKERS_DEV_URL (e.g. https://losat-web.<subdomain>.workers.dev) for production post-deploy checks."
               exit 1
             fi
           fi
@@ -215,27 +228,41 @@ jobs:
           set -euo pipefail
           CF_BIN="$RUNNER_TEMP/cf-cli/node_modules/.bin/cf"
           if [ "$DEPLOY_TARGET" = "preview" ]; then
-            "$CF_BIN" previews deploy ../app/dist --preview-name "$PREVIEW_NAME" > "$RUNNER_TEMP/cf-deploy.json"
+            "$CF_BIN" previews deploy ../app/dist --preview-name "$PREVIEW_NAME" > "$RUNNER_TEMP/cf-preview.json"
           else
-            "$CF_BIN" deploy ../app/dist > "$RUNNER_TEMP/cf-deploy.json"
+            # `cf deploy` writes progress to stderr and emits no JSON on stdout.
+            "$CF_BIN" deploy ../app/dist
           fi
 
       - name: Check live headers, 304 revalidation, and Wasm assets
         env:
           DEPLOY_TARGET: ${{ inputs.target }}
           LOSAT_WEB_DOMAINS: ${{ vars.LOSAT_WEB_DOMAINS }}
+          LOSAT_WEB_WORKERS_DEV_URL: ${{ vars.LOSAT_WEB_WORKERS_DEV_URL }}
         run: |
           set -euo pipefail
           args=(
-            --cf-json "$RUNNER_TEMP/cf-deploy.json"
-            --target "$DEPLOY_TARGET"
-            --domains "$LOSAT_WEB_DOMAINS"
             --dist web/app/dist
             --headers web/app/public/_headers
             --write-url-file "$RUNNER_TEMP/deploy-url.txt"
           )
           if [ "$DEPLOY_TARGET" = "preview" ]; then
-            args+=(--expect-noindex)
+            args+=(
+              --cf-json "$RUNNER_TEMP/cf-preview.json"
+              --expect-noindex
+            )
+          else
+            FIRST_DOMAIN=$(printf '%s' "$LOSAT_WEB_DOMAINS" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF { print; exit }')
+            if [ -n "$FIRST_DOMAIN" ]; then
+              FIRST_DOMAIN="${FIRST_DOMAIN#https://}"
+              FIRST_DOMAIN="${FIRST_DOMAIN#http://}"
+              FIRST_DOMAIN="${FIRST_DOMAIN%/}"
+              PROD_URL="https://${FIRST_DOMAIN}"
+            else
+              PROD_URL=$(printf '%s' "$LOSAT_WEB_WORKERS_DEV_URL" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              PROD_URL="${PROD_URL%/}"
+            fi
+            args+=(--url "$PROD_URL")
           fi
           node web/tools/check_deploy_headers.mjs "${args[@]}"
           DEPLOY_URL=$(cat "$RUNNER_TEMP/deploy-url.txt")

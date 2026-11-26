@@ -8,18 +8,24 @@
 // Run with: node --test web/tools/test_web_deploy_tools.js
 
 const assert = require('node:assert/strict');
+const { execFile, spawnSync } = require('node:child_process');
 const { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { createServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const test = require('node:test');
+const { promisify } = require('node:util');
+
+const execFileAsync = promisify(execFile);
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const SOURCE_HEADERS = join(REPO_ROOT, 'web', 'app', 'public', '_headers');
 const WORKFLOW_PATH = join(REPO_ROOT, '.github', 'workflows', 'web-deploy.yml');
+const DEPLOY_CHECK_SCRIPT = join(__dirname, 'check_deploy_headers.mjs');
 const SERIAL_WASM = 'losat-web-serial-0123456789abcdef.wasm';
 const THREADS_WASM = 'losat-web-threads-fedcba9876543210.wasm';
 
+const headersToolPromise = import('../app/build/headers.ts');
 const distToolPromise = import('./check_web_dist.mjs');
 const deployToolPromise = import('./check_deploy_headers.mjs');
 
@@ -181,31 +187,112 @@ test('checkWebDist catches _headers drift and leaked build-machine paths in JS a
   });
 });
 
-test('extractCfDeployUrl resolves preview URLs and production custom domains', async () => {
-  const { extractCfDeployUrl } = await deployToolPromise;
+test('checkWebDist allows RefSeq URL paths while rejecting leaked host paths', async () => {
+  const { checkWebDist, REQUIRED_DIST_FILES } = await distToolPromise;
+  withTempDir((dir) => {
+    const distDir = makeValidDist(dir, REQUIRED_DIST_FILES);
+    const refseqSentence = 'NCBI places no restrictions on the use of RefSeq (ncbi.nlm.nih.gov/home/about/policies).';
+    writeFileSync(
+      join(distDir, 'assets', 'index-abc.js'),
+      `export const note = ${JSON.stringify(refseqSentence)}; export const ENGINE_ASSETS = { serial: "/engine/${SERIAL_WASM}", threads: "/engine/${THREADS_WASM}" };\n`,
+    );
+    const clean = checkWebDist(distDir, { headersPath: SOURCE_HEADERS });
+    assert.equal(clean.ok, true, clean.errors.join('\n'));
+
+    for (const leakedPath of [
+      '/home/runner/work/x/',
+      'file:///Users/alice/repo/',
+      '/__w/LOSAT/LOSAT/',
+      '/github/workspace/web/',
+      'C:\\Users\\alice\\repo\\',
+    ]) {
+      writeFileSync(
+        join(distDir, 'assets', 'index-abc.js'),
+        `export const leaked = ${JSON.stringify(leakedPath)}; export const ENGINE_ASSETS = { serial: "/engine/${SERIAL_WASM}", threads: "/engine/${THREADS_WASM}" };\n`,
+      );
+      const leaked = checkWebDist(distDir, { headersPath: SOURCE_HEADERS });
+      assert.equal(leaked.ok, false, `expected leak detection for ${leakedPath}`);
+      assert.ok(
+        leaked.errors.some((e) => e.includes('host path pattern leaked into assets/index-abc.js')),
+        `missing leak error for ${leakedPath}: ${leaked.errors.join('\n')}`,
+      );
+    }
+  });
+});
+
+test('checkWebDist reuses app/build/headers.ts and rejects duplicate _headers patterns', async () => {
+  const { parseHeadersFile: appParse, pathHeaders: appPathHeaders } = await headersToolPromise;
+  const { checkWebDist, parseHeadersFile, pathHeaders, REQUIRED_DIST_FILES } = await distToolPromise;
+  assert.equal(parseHeadersFile, appParse);
+  assert.equal(pathHeaders, appPathHeaders);
+
+  withTempDir((dir) => {
+    const distDir = makeValidDist(dir, REQUIRED_DIST_FILES);
+    writeFileSync(join(distDir, '_headers'), `${readFileSync(SOURCE_HEADERS, 'utf8')}\n/*\n  X-Dup: 1\n`);
+    const result = checkWebDist(distDir);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((e) => e.includes('duplicate _headers path rule')));
+  });
+});
+
+test('preview JSON parsing and production URL resolution handle domain, workers.dev, and empty stdout', async () => {
+  const { extractCfPreviewUrl, parseCfPreviewJson, resolveProductionUrl, resolveTargetUrlFromCli } = await deployToolPromise;
+
   assert.equal(
-    extractCfDeployUrl(
-      {
-        preview_urls: ['https://preview-losat-web.example.workers.dev/'],
-        deployment_urls: ['https://abc123-losat-web.example.workers.dev'],
-      },
-      { target: 'preview' },
-    ),
+    extractCfPreviewUrl({
+      preview_urls: ['https://preview-losat-web.example.workers.dev/'],
+      deployment_urls: ['https://abc123-losat-web.example.workers.dev'],
+    }),
     'https://preview-losat-web.example.workers.dev',
   );
   assert.equal(
-    extractCfDeployUrl({ urls: ['https://losat-web.example.workers.dev'] }, { target: 'production', domains: 'losat.app' }),
-    'https://losat.app',
+    parseCfPreviewJson(JSON.stringify({ preview_urls: ['https://preview-losat-web.example.workers.dev/'] })),
+    'https://preview-losat-web.example.workers.dev',
   );
+  assert.throws(() => parseCfPreviewJson(''), /cf JSON output is empty/);
+  assert.throws(() => parseCfPreviewJson('   \n'), /cf JSON output is empty/);
+  assert.throws(() => parseCfPreviewJson('{bad json'), /not valid JSON/);
+
+  assert.equal(resolveProductionUrl({ domains: 'losat.app' }), 'https://losat.app');
+  assert.equal(resolveProductionUrl({ domains: ' https://losat.app/ , www.losat.app ' }), 'https://losat.app');
   assert.equal(
-    extractCfDeployUrl({ urls: ['https://losat-web.example.workers.dev/'] }, { target: 'production', domains: '' }),
+    resolveProductionUrl({ domains: '', workersDevUrl: 'https://losat-web.example.workers.dev/' }),
     'https://losat-web.example.workers.dev',
   );
+  assert.throws(() => resolveProductionUrl({ domains: '', workersDevUrl: '' }), /cannot determine production URL/);
+
+  withTempDir((dir) => {
+    const emptyJson = join(dir, 'empty.json');
+    writeFileSync(emptyJson, '');
+    assert.throws(
+      () => resolveTargetUrlFromCli({ cfJson: emptyJson, target: 'preview' }),
+      /cf JSON output is empty/,
+    );
+    assert.throws(
+      () => resolveTargetUrlFromCli({ cfJson: emptyJson, target: 'production' }),
+      /--cf-json is only supported for preview/,
+    );
+
+    const cliEmpty = spawnSync(process.execPath, [DEPLOY_CHECK_SCRIPT, '--cf-json', emptyJson], {
+      encoding: 'utf8',
+    });
+    assert.equal(cliEmpty.status, 1);
+    assert.match(cliEmpty.stderr, /cf JSON output is empty/);
+    assert.doesNotMatch(cliEmpty.stderr, /SyntaxError/);
+
+    const cliProdCfJson = spawnSync(
+      process.execPath,
+      [DEPLOY_CHECK_SCRIPT, '--cf-json', emptyJson, '--target', 'production', '--domains', 'losat.app'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(cliProdCfJson.status, 1);
+    assert.match(cliProdCfJson.stderr, /--cf-json is only supported for preview/);
+  });
 });
 
 async function withMockSite(options, fn) {
-  const { parseHeadersFile, pathHeaders } = await distToolPromise;
-  const { rules } = parseHeadersFile(readFileSync(SOURCE_HEADERS, 'utf8'));
+  const { parseHeadersFile, pathHeaders } = await headersToolPromise;
+  const rules = parseHeadersFile(readFileSync(SOURCE_HEADERS, 'utf8'));
   const routes = new Map([
     [
       '/',
@@ -309,6 +396,33 @@ test('checkDeployedSite catches missing COEP on 304, missing noindex, missing im
   });
 });
 
+test('checkDeployedSite CLI passes in production --url mode without --cf-json', async () => {
+  await withMockSite({ sendNoindex: false }, async (url) => {
+    const dir = mkdtempSync(join(tmpdir(), 'losat-web-deploy-cli-'));
+    try {
+      const urlFile = join(dir, 'deploy-url.txt');
+      await execFileAsync(
+        process.execPath,
+        [
+          DEPLOY_CHECK_SCRIPT,
+          '--url',
+          url,
+          '--headers',
+          SOURCE_HEADERS,
+          '--retries',
+          '1',
+          '--write-url-file',
+          urlFile,
+        ],
+        { encoding: 'utf8' },
+      );
+      assert.equal(readFileSync(urlFile, 'utf8').trim(), url);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 test('web-deploy.yml follows workflow security and pinning invariants', () => {
   const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
   assert.doesNotMatch(workflow, /^\s*ref:\s*\$\{\{\s*inputs\./m, 'must never check out an input ref');
@@ -319,4 +433,10 @@ test('web-deploy.yml follows workflow security and pinning invariants', () => {
     assert.match(ref, /@[0-9a-f]{40}$/, `action must be pinned by full 40-char commit SHA: ${ref}`);
   }
   assert.doesNotMatch(workflow, /\brun:[^\n]*\$\{\{\s*inputs\./, 'inputs must pass via env:, not inline in run:');
+  assert.doesNotMatch(
+    workflow,
+    /deploy\s+\.\.\/app\/dist\s*>/,
+    'production cf deploy writes no JSON to stdout and must not be redirected to a JSON file',
+  );
+  assert.match(workflow, /--url\s+"\$PROD_URL"/, 'production post-deploy check must pass --url directly');
 });

@@ -14,6 +14,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, posix, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseHeadersFile, pathHeaders } from '../app/build/headers.ts';
+
+export { parseHeadersFile, pathHeaders };
 
 /** Cloudflare Workers Static Assets per-file size limit (25 MiB). */
 export const CLOUDFLARE_ASSET_MAX_BYTES = 25 * 1024 * 1024;
@@ -46,44 +49,12 @@ const SERIAL_RE = /^losat-web-serial-[0-9a-f]{16}\.wasm$/;
 const THREADS_RE = /^losat-web-threads-[0-9a-f]{16}\.wasm$/;
 const PRIVACY_SCAN_EXTS = new Set(['.js', '.mjs', '.css', '.html', '.wasm', '.webmanifest']);
 const GENERIC_HOST_PATH_PATTERNS = [
-  /\/home\/[A-Za-z0-9._-]+\//,
-  /\/Users\/[A-Za-z0-9._-]+\//,
-  /\/__w\/[A-Za-z0-9._-]+\//,
-  /\/github\/workspace\//,
-  /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\/,
+  /(?<![A-Za-z0-9._~%-])\/home\/[A-Za-z0-9._-]+\//,
+  /(?<![A-Za-z0-9._~%-])\/Users\/[A-Za-z0-9._-]+\//,
+  /(?<![A-Za-z0-9._~%-])\/__w\/[A-Za-z0-9._-]+\//,
+  /(?<![A-Za-z0-9._~%-])\/github\/workspace\//,
+  /(?<![A-Za-z0-9._~%-])[A-Za-z]:\\{1,2}Users\\{1,2}[A-Za-z0-9._-]+\\{1,2}/,
 ];
-
-/** Parses a Cloudflare `_headers` file into `path pattern -> headers`. */
-export function parseHeadersFile(text) {
-  const rules = new Map();
-  let current;
-  let ruleCount = 0;
-  for (const line of text.split(/\r?\n/)) {
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-    if (!/^\s/.test(line)) {
-      current = {};
-      rules.set(line.trim(), current);
-      ruleCount += 1;
-      continue;
-    }
-    const separator = line.indexOf(':');
-    if (current === undefined || separator < 0) {
-      throw new Error(`malformed _headers line: ${line}`);
-    }
-    current[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
-  }
-  return { rules, ruleCount };
-}
-
-/** Resolves all matching `_headers` rules for a site path in file order. */
-export function pathHeaders(sitePath, rules) {
-  const headers = {};
-  for (const [pattern, values] of rules) {
-    const matches = pattern.endsWith('*') ? sitePath.startsWith(pattern.slice(0, -1)) : sitePath === pattern;
-    if (matches) Object.assign(headers, values);
-  }
-  return headers;
-}
 
 function walkFiles(rootDir, currentDir = rootDir, out = []) {
   const entries = readdirSync(currentDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
@@ -237,9 +208,9 @@ export function checkWebDist(distDir, options = {}) {
     }
 
     try {
-      const { rules, ruleCount } = parseHeadersFile(distHeadersText);
-      if (ruleCount > CLOUDFLARE_HEADERS_MAX_RULES) {
-        errors.push(`dist/_headers has ${ruleCount} rules, exceeding Cloudflare's ${CLOUDFLARE_HEADERS_MAX_RULES}-rule limit`);
+      const rules = parseHeadersFile(distHeadersText);
+      if (rules.size > CLOUDFLARE_HEADERS_MAX_RULES) {
+        errors.push(`dist/_headers has ${rules.size} rules, exceeding Cloudflare's ${CLOUDFLARE_HEADERS_MAX_RULES}-rule limit`);
       }
       const rootHeaders = pathHeaders('/', rules);
       if (rootHeaders['Cross-Origin-Opener-Policy'] !== 'same-origin') {

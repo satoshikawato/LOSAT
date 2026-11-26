@@ -548,7 +548,7 @@ const records: StepBody = async (walker, draws) => {
   const record = Number(/-record-(\d+)$/.exec((await box.getAttribute('data-testid')) ?? '')?.[1]);
   const wasIncluded = await box.isChecked();
   await box.click();
-  walker.model = withIncluded(walker.model, role, alphabetOf(walker.program, role), index, record, !wasIncluded);
+  walker.model = withIncluded(walker.model, role, index, record, !wasIncluded);
   await settle(page);
   return `${role} input ${index} record ${record} ${wasIncluded ? 'left out' : 'included'}`;
 };
@@ -653,7 +653,7 @@ async function submitted(walker: Walker): Promise<Submitted> {
   for (const role of ROLES) {
     const cards = await sourceCards(page, role);
     const ready = cards.flatMap((card, index) => (card.status === 'ready' ? [index] : []));
-    inputs[role] = expectedInputs(walker.model[role], alphabetOf(walker.program, role), ready);
+    inputs[role] = expectedInputs(walker.model[role], ready);
   }
   const expectedRuns = ROLES.reduce((product, role) => product * Math.max(1, inputs[role].length), 1);
   return { inputs, changed, extraFlags, values, expectedRuns };
@@ -737,8 +737,7 @@ function judgeRefusal(walker: Walker, message: string): void {
       throw new StepFailure('refusal-wrong', `Run LOSAT asked for the ${role} ("${message}"), but the walk gave it ${sources.length} inputs`);
     }
     if (message === `Every ${title} record is excluded.`) {
-      const reading = alphabetOf(walker.program, role);
-      const left = sources.filter((source) => (source.excluded[reading]?.size ?? 0) === 0);
+      const left = sources.filter((source) => source.excluded.size === 0);
       if (left.length > 0) {
         throw new StepFailure('refusal-wrong', `Run LOSAT said every ${role} record is excluded, but the walk left out none of ${left.map((source) => source.name).join(', ')}`);
       }

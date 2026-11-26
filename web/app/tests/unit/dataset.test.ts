@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { recordMismatch } from 'losat/domain';
-import { includedRecords, normalizeExclusion, recordName, type DatasetRecord, type DatasetRevision } from '../../src/domain/dataset';
+import {
+  excludedIndicesFor,
+  includedRecords,
+  normalizeExclusion,
+  recordExclusionKey,
+  recordName,
+  type DatasetRecord,
+  type DatasetRevision,
+} from '../../src/domain/dataset';
 
 const record = (index: number, id: string): DatasetRecord => ({
   index,
@@ -31,6 +39,26 @@ describe('dataset revisions', () => {
     expect(() => normalizeExclusion([3], 3)).toThrow(RangeError);
     expect(() => normalizeExclusion([-1], 3)).toThrow(RangeError);
     expect(() => normalizeExclusion([0.5], 3)).toThrow(RangeError);
+  });
+
+  // Line WQA's D16 (Owner Q2=B): exclusions match by byte offset and ID so duplicate IDs,
+  // untitled records, and newly parsed records under another reader are handled accurately.
+  it('maps excluded keys to indices across reader tables without leaking onto duplicate or new records', () => {
+    const dup1 = { index: 0, id: 'dup', header_offset: 0 };
+    const dup2 = { index: 1, id: 'dup', header_offset: 20 };
+    const untitled1 = { index: 2, id: '', header_offset: 40 };
+    const untitled2 = { index: 3, id: '', header_offset: 55 };
+    const excludedKeys = new Set([recordExclusionKey(dup1), recordExclusionKey(untitled2)]);
+    expect(excludedIndicesFor([dup1, dup2, untitled1, untitled2], excludedKeys)).toEqual([0, 3]);
+    // A new record parsed between dup1 and dup2 enters as included while dup1 and untitled2 stay excluded.
+    const nextReader = [
+      { index: 0, id: 'dup', header_offset: 0 },
+      { index: 1, id: 'newly-parsed', header_offset: 10 },
+      { index: 2, id: 'dup', header_offset: 20 },
+      { index: 3, id: '', header_offset: 40 },
+      { index: 4, id: '', header_offset: 55 },
+    ];
+    expect(excludedIndicesFor(nextReader, excludedKeys)).toEqual([0, 4]);
   });
 });
 

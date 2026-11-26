@@ -1321,12 +1321,13 @@ fn greedy_gapped_alignment_handover_from_doubling_loop_persists_max_dist() {
         65_536, x_drop, reward, -penalty, gap_open, gap_extend
     ));
 
-    // Every 4th base mismatches so score climbs +60_000 per 4 bp and distance reaches > 98_304
-    // (24_576 mismatches => ~98_304 bp) without x-dropping.
-    let len = 102_000usize;
+    // Every 2nd base mismatches so score oscillates without x-dropping (drop <= 30_000 < x_drop)
+    // and distance reaches > 98_304 (24_576 mismatches => ~49_152 bp) while keeping
+    // `curr_extent * match_score_half` (~1.5e9) safely within `i32::MAX`.
+    let len = 50_000usize;
     let q: Vec<u8> = (0..len).map(|i| (i & 3) as u8).collect();
     let mut s = q.clone();
-    for i in (3..len).step_by(4) {
+    for i in (1..len).step_by(2) {
         s[i] = (s[i] + 1) & 3;
     }
 

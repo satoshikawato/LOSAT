@@ -766,10 +766,10 @@ export class Coordinator {
       let revisionIds: readonly string[];
       if ('dataset' in input) {
         revisionIds = Object.freeze([...input.dataset.revisionIds]);
-        const key = JSON.stringify([revisionIds, reader.program, reader.role, reader.dataLoaders]);
+        const key = JSON.stringify(revisionIds);
         const cached = this.runInputs.get(key);
         if (cached === undefined) {
-          runInput = this.deps.data.buildRunInput(revisionIds, reader);
+          runInput = this.deps.data.buildRunInput(revisionIds);
           this.runInputs.set(key, runInput);
           made.runInputs.push(key);
           runInput.catch(() => this.runInputs.delete(key));
@@ -782,12 +782,20 @@ export class Coordinator {
         made.sources.push(source.sourceId);
         const revision = await this.deps.data.indexSource(source.sourceId, reader);
         revisionIds = Object.freeze([revision.revisionId]);
-        runInput = this.deps.data.buildRunInput(revisionIds, reader);
+        runInput = this.deps.data.buildRunInput(revisionIds);
       }
-      const { bytes, sha256, records } = await runInput;
+      const { bytes, sha256, records, assembled } = await runInput;
       // Pasted text is a file that LOSAT made, named by the run (`inputName`): the page offers it with the run (line WQA's D22, DECISIONS 44).
       const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [], leftOutCount: 0 }] : undefined;
-      return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
+      return Object.freeze({
+        name,
+        bytes,
+        sha256,
+        revisionIds,
+        records,
+        ...(assembled === true ? { assembled: true as const } : {}),
+        ...(from === undefined ? {} : { from: Object.freeze(from) }),
+      });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
       if (isUnavailable(error)) throw error;
@@ -928,6 +936,7 @@ export class Coordinator {
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
           ...(runFiles === undefined ? {} : { runFiles }),
           ...(runtime.printed === undefined ? {} : { printed: runtime.printed }),
+          ...(runtime.readRecords === undefined ? {} : { readRecords: runtime.readRecords }),
         },
       });
     } catch (error) {
@@ -1171,7 +1180,13 @@ function inputName(input: SequenceInput, role: 'query' | 'subject', run: Paramet
 }
 
 function engineInput(input: InputSnapshot): EngineInput {
-  return { bytes: input.bytes, sha256: input.sha256, revisionIds: input.revisionIds, records: input.records };
+  return {
+    bytes: input.bytes,
+    sha256: input.sha256,
+    revisionIds: input.revisionIds,
+    records: input.records,
+    ...(input.assembled === true ? { assembled: true } : {}),
+  };
 }
 
 function errorMessage(error: unknown): string {

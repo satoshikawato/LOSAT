@@ -171,13 +171,13 @@ test('D16: exclusions survive mode switches, newly parsed records enter as inclu
 
   // Clear and re-paste, and remove/re-add a file: zero stale exclusions leak.
   await page.getByTestId('query-input').fill('');
-  await expect(page.locator('[data-testid^="query-source-"]')).toHaveCount(0);
+  await expect(page.getByTestId('query-source-0')).toHaveCount(0);
   await paste(page, 'query', `${queryText}`);
   await expectSelection(page, 'query', [true, true, true]);
 
   const subjectFile = { name: 's.fa', text: subjectText };
   await clearSources(page, 'subject', 1);
-  await expect(page.locator('[data-testid^="subject-source-"]')).toHaveCount(0);
+  await expect(page.getByTestId('subject-source-0')).toHaveCount(0);
   await openFiles(page, 'subject', [subjectFile]);
   await toggleRecord(page, 'subject', 0, false);
   await expectSelection(page, 'subject', [false, true], ['(1 included)']);
@@ -205,33 +205,50 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
     readonly checkOffered?: (offered: Held) => Promise<void> | void;
   }
 
+  const crFinalFile = { name: 'eol_cr.q.nuc.fa', text: crFinal };
+
+  const expectQueryDetails = async (recordLabel: string, readDiff?: string, fromLine?: string) => {
+    const resultsDiff = page.getByTestId('results-query-read-diff');
+    if (readDiff === undefined) await expect(resultsDiff).toHaveCount(0);
+    else await expect(resultsDiff).toHaveText(readDiff);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-input-query')).toContainText(recordLabel);
+    if (fromLine !== undefined) await expect(page.getByTestId('run-input-query-from')).toHaveText(fromLine);
+    const detailsDiff = page.getByTestId('run-input-query-read-diff');
+    if (readDiff === undefined) await expect(detailsDiff).toHaveCount(0);
+    else await expect(detailsDiff).toHaveText(readDiff);
+  };
+
   const cases: readonly MixedCase[] = [
     // Case 1: pure-CR without trailing CR + pure-CR combined input.
     {
       run: 1,
       removeBefore: 0,
       setup: async () => {
-        await openFiles(page, 'query', [
-          { name: 'eol_cr_nofinal.q.nuc.fa', text: crNoFinal },
-          { name: 'eol_cr.q.nuc.fa', text: crFinal },
-        ]);
+        await openFiles(page, 'query', [{ name: 'eol_cr_nofinal.q.nuc.fa', text: crNoFinal }, crFinalFile]);
       },
       checkOffered: async (offered) => {
-        await page.getByTestId('results-view-details').click();
-        // All 6 records stay intact (180 nt each) because pure-CR stays in CR mode.
-        await expect(page.getByTestId('run-input-query')).toContainText('6 records');
+        // All 6 records stay intact (180 nt each) because pure-CR stays in CR mode: no diff notice.
+        await expectQueryDetails('6 records');
         expect(offered.bytes.equals(Buffer.concat([crNoFinal, Buffer.from('\r'), crFinal]))).toBe(true);
       },
     },
-    // Case 2: mixed CRLF/CR file + LF file combined input (previously failed with InputMismatchError).
+    // Case 2: combined files whose record count differs when read as one file (table=5, run=6).
     {
       run: 2,
       removeBefore: 2,
       setup: async () => {
         await openFiles(page, 'query', [
-          { name: 'eol_mixed_crlf_cr.q.nuc.fa', text: fixture('eol_mixed_crlf_cr.q.nuc.fa') },
-          { name: 'base.q.nuc.fa', text: lf },
+          crFinalFile,
+          { name: 'eol_mixed_lf_crlf_cr.q.nuc.fa', text: fixture('eol_mixed_lf_crlf_cr.q.nuc.fa') },
         ]);
+      },
+      checkOffered: async () => {
+        await expectQueryDetails(
+          '6 records',
+          'Read as one file, as the command line reads it, these give 6 records (5 when each file is read alone).',
+          'From eol_cr.q.nuc.fa (3 records) and eol_mixed_lf_crlf_cr.q.nuc.fa (2 records)',
+        );
       },
     },
     // Case 3: pasted LF snippet + uploaded CRLF file combined input.
@@ -243,16 +260,22 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
         await openFiles(page, 'query', [{ name: 'eol_crlf.q.nuc.fa', text: fixture('eol_crlf.q.nuc.fa') }]);
       },
     },
-    // Case 4: record selection on a file whose line-reader state changes when record #1 is excluded
-    // (eol_lfcr_defline.q.nuc.fa without #1 previously failed with InputMismatchError: q2 120 vs 180).
+    // Case 4: record selection whose line-reader state changes a record's length when record #2 is excluded
+    // (eol_lfcr_defline.q.nuc.fa without #2: table q3=180, engine reads q3=120).
     {
       run: 4,
       removeBefore: 2,
       setup: async () => {
         await openFiles(page, 'query', [{ name: 'eol_lfcr_defline.q.nuc.fa', text: fixture('eol_lfcr_defline.q.nuc.fa') }]);
         await showRecords(page, 'query');
-        await page.getByTestId('query-source-0-record-0').uncheck();
-        await expectSelection(page, 'query', [false, true, true], ['(2 included)']);
+        await page.getByTestId('query-source-0-record-1').uncheck();
+        await expectSelection(page, 'query', [true, false, true], ['(2 included)']);
+      },
+      checkOffered: async () => {
+        await expectQueryDetails(
+          '2 records',
+          'Read as one file, as the command line reads it, 1 record differs from the record table (record 2 (q3): length 120 instead of 180).',
+        );
       },
     },
   ];

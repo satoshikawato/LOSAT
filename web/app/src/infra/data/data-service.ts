@@ -155,7 +155,6 @@ const TOOL_FILE_KEY = /^file:(\d+)$/;
 export class DataService implements DataGateway {
   private readonly sources = new Map<string, File>();
   private readonly revisions = new Map<string, DatasetRevision>();
-  private readonly revisionReaders = new Map<string, FastaReader>();
   private readonly runs = new Map<string, StagedRun | CommittedRun>();
   private readonly toolRuns = new Map<string, StagedToolRun | CommittedToolRun>();
   private readonly sessionFiles = new Map<string, { readonly prefix: string; readonly path: string }>();
@@ -193,7 +192,6 @@ export class DataService implements DataGateway {
       excluded: Object.freeze([]),
       ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
-    this.revisionReaders.set(revision.revisionId, reader);
     return revision;
   }
 
@@ -204,35 +202,17 @@ export class DataService implements DataGateway {
       revisionId: this.deps.newToken(),
       excluded: normalizeExclusion(excluded, base.records.length),
     });
-    const reader = this.revisionReaders.get(revisionId);
-    if (reader !== undefined) this.revisionReaders.set(revision.revisionId, reader);
     return revision;
   }
 
-  async buildRunInput(revisionIds: readonly string[], reader?: FastaReader): Promise<RunInput> {
-    const { bytes, singleUnmodified } = await this.assembleRunInput(revisionIds);
-    let records: readonly RecordKey[];
-    if (bytes.length === 0) {
-      records = Object.freeze([]);
-    } else {
-      const storedReader = this.revisionReaders.get(revisionIds[0]!);
-      const effectiveReader = reader ?? storedReader;
-      if (
-        singleUnmodified !== undefined &&
-        (reader === undefined || (storedReader !== undefined && sameScannerReader(storedReader, reader)))
-      ) {
-        records = Object.freeze(singleUnmodified.records.map(recordKey));
-      } else if (effectiveReader !== undefined) {
-        // Combined or sliced inputs can alter NCBI's stateful line reader (CStreamLineReader)
-        // EOL/pushback state across parts: scan the assembled bytes through the engine scanner
-        // so the record table agrees with what `register` and the CLI read (line WQA's D17).
-        const scanned = await this.deps.scanner.scan(effectiveReader, readByteChunks(bytes, this.chunkBytes));
-        records = Object.freeze(scanned.records.map(recordKey));
-      } else {
-        records = Object.freeze([]);
-      }
-    }
-    return { bytes, sha256: await this.deps.digest(bytes), records };
+  async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
+    const { bytes, records, assembled } = await this.assembleRunInput(revisionIds);
+    return {
+      bytes,
+      sha256: await this.deps.digest(bytes),
+      records,
+      ...(assembled ? { assembled: true } : {}),
+    };
   }
 
   /**
@@ -245,10 +225,11 @@ export class DataService implements DataGateway {
    */
   private async assembleRunInput(
     revisionIds: readonly string[],
-  ): Promise<{ readonly bytes: Uint8Array; readonly singleUnmodified?: DatasetRevision }> {
+  ): Promise<{ readonly bytes: Uint8Array; readonly records: readonly RecordKey[]; readonly assembled: boolean }> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
-    let singleUnmodified: DatasetRevision | undefined;
+    const records: RecordKey[] = [];
+    let assembled = revisionIds.length > 1;
     let hasLf = false;
     let hasCr = false;
     for (const revisionId of revisionIds) {
@@ -256,6 +237,7 @@ export class DataService implements DataGateway {
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
       const stop = revision.readerError?.offset;
+      if (revision.excluded.length > 0) assembled = true;
       const bytes =
         revision.excluded.length === 0
           ? await readRange(file, 0, file.size)
@@ -280,10 +262,10 @@ export class DataService implements DataGateway {
         if (!hasLf && bytes.includes(LF)) hasLf = true;
         if (!hasCr && bytes.includes(CR)) hasCr = true;
       }
-      if (revisionIds.length === 1 && revision.excluded.length === 0) singleUnmodified = revision;
+      for (const record of included) records.push(recordKey(record));
       if (stop !== undefined) break;
     }
-    return { bytes: concatBytes(parts), ...(singleUnmodified === undefined ? {} : { singleUnmodified }) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records), assembled };
   }
 
   async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
@@ -296,7 +278,6 @@ export class DataService implements DataGateway {
     for (const [revisionId, revision] of this.revisions) {
       if (revision.sourceId === sourceId) {
         this.revisions.delete(revisionId);
-        this.revisionReaders.delete(revisionId);
       }
     }
   }
@@ -896,19 +877,6 @@ async function* readChunks(file: Blob, chunkBytes: number): AsyncGenerator<Uint8
   for (let offset = 0; offset < file.size; offset += chunkBytes) {
     yield readRange(file, offset, Math.min(file.size, offset + chunkBytes));
   }
-}
-
-async function* readByteChunks(bytes: Uint8Array, chunkBytes: number): AsyncGenerator<Uint8Array> {
-  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
-    yield bytes.subarray(offset, Math.min(bytes.length, offset + chunkBytes));
-  }
-}
-
-function sameScannerReader(a: FastaReader, b: FastaReader): boolean {
-  return (
-    a.dataLoaders === b.dataLoaders &&
-    fastaParser(programById(a.program), a.role) === fastaParser(programById(b.program), b.role)
-  );
 }
 
 async function readRange(file: Blob, start: number, end: number): Promise<Uint8Array> {

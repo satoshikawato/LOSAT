@@ -1131,18 +1131,24 @@ export class SearchDraft {
   setIncluded(role: InputRole, key: string, indices: readonly number[], included: boolean): void {
     this.updateSource(role, key, (source) => {
       if (source.base === undefined) return source;
+      const excluded = new Set(source.excluded);
       const excludedKeys = new Set(source.excludedKeys);
       for (const index of indices) {
         const record = source.base.records[index];
         if (record === undefined) continue;
         const recordKey = recordExclusionKey(record);
-        if (included) excludedKeys.delete(recordKey);
-        else excludedKeys.add(recordKey);
+        if (included) {
+          excluded.delete(index);
+          excludedKeys.delete(recordKey);
+        } else {
+          excluded.add(index);
+          excludedKeys.add(recordKey);
+        }
       }
       return {
         ...source,
+        excluded: [...excluded].sort((a, b) => a - b),
         excludedKeys,
-        excluded: excludedIndicesFor(source.base.records, excludedKeys),
         check: { state: 'pending' },
       };
     });
@@ -2039,7 +2045,7 @@ export class SearchDraft {
   /**
    * The sources that a Combined run of the query reads before `source`: every source of the run's
    * input before it, whose bytes the run passes as they are, those without records too
-   * (`DataService.runInputBytes`; review L-a, 2026-11-20). None otherwise, and none when a source
+   * (`DataService.assembleRunInput`; review L-a, 2026-11-20). None otherwise, and none when a source
    * before ends the input with its reader's error, or `source` cannot follow them: a run then does
    * not read `source` after them, and its own check stands.
    */
@@ -2365,7 +2371,7 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
 /**
  * The sources whose records a Combined run reads, in order: those with included records or the
  * reader's error, up to the first with the error, which ends the run's input
- * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
+ * (`DataService.assembleRunInput`, line WQA's D10, 2026-11-19).
  */
 function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
   return readSources(sources.filter((source) => source.status === 'ready')).filter(
@@ -2375,11 +2381,11 @@ function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[
 
 /**
  * The sources that a run's input reads, in order: up to and with the first whose reading ends with the reader's error, which
- * ends the input, the engine reading no record after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one
+ * ends the input, the engine reading no record after it (`DataService.assembleRunInput`, line WQA's D10, 2026-11-19). The one
  * place in the draft that cuts a list of sources there: the readiness of a source after it (combinedSources), the name of the
  * input (inputName) and the words that say what it is made of (fromOf, line WQA's D22) take their sources from it, so that the name
  * and the words name what the bytes hold. `sourcesBefore` and `queryEndBefore` ask the same question of one source, with
- * `endsInput`, the one test of it (domain/dataset.ts). `DataService.runInputBytes` is the data layer's own reading of the same
+ * `endsInput`, the one test of it (domain/dataset.ts). `DataService.assembleRunInput` is the data layer's own reading of the same
  * revisions: it needs the error's offset to keep the bytes after the records, and it is outside the draft (a layer, and held by
  * D17), so it tests the same field there.
  */
@@ -2412,7 +2418,7 @@ export function cannotFollowText(source: DraftSource): string {
 
 /**
  * The source before `source` whose reader's error ends a Combined query input, after which the run
- * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20). A
+ * reads nothing (`DataService.assembleRunInput`): `source` is not searched (review L2, 2026-11-20). A
  * source that cannot follow another input ends no run: no run starts (review L-c, 2026-11-20).
  */
 export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {

@@ -31,7 +31,7 @@ export interface DatasetRevision {
 
 /**
  * Whether the reading of the revision ends with the reader's error (`DatasetRevision.readerError`): a run reads no record after
- * it, and a Combined input reads no source after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one test of
+ * it, and a Combined input reads no source after it (`DataService.assembleRunInput`, line WQA's D10, 2026-11-19). The one test of
  * that: the draft's `readSources`, `sourcesBefore` and `queryEndBefore` use it.
  */
 export function endsInput(revision: DatasetRevision | undefined): boolean {

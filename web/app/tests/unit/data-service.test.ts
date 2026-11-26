@@ -207,19 +207,34 @@ describe('DataService sources and record tables', () => {
   });
 
   // Line WQA's D17: mixed line endings in combined and selected inputs keep CR mode for pure-CR
-  // joins and scan assembled bytes through the engine scanner so the record table agrees with what
-  // the engine and CLI read from the exact bytes.
-  it('handles CR, CRLF and LF combinations without corrupting CR mode and rescans assembled bytes (D17)', async () => {
-    const { data } = service();
+  // joins, mark assembled inputs so the engine's register can report its own reading without a
+  // second scan in buildRunInput, and leave single unmodified sources unflagged.
+  it('handles CR, CRLF and LF combinations without corrupting CR mode and avoids rescanning (D17)', async () => {
+    let scans = 0;
+    const baseScanner = new FakeScanner();
+    const countingScanner: RecordScanner = {
+      async scan(reader, chunks) {
+        scans++;
+        return baseScanner.scan(reader, chunks);
+      },
+    };
+    const { data } = service({ scanner: countingScanner });
     const crNoFinal = await data.indexSource((await data.addSource(new File(['>a\rACGT\r>b\rGGCC'], 'cr_nf.fa'))).sourceId, NUCLEOTIDE);
     const crFinal = await data.indexSource((await data.addSource(new File(['>c\rTTTT\r'], 'cr.fa'))).sourceId, NUCLEOTIDE);
     const lf = await data.indexSource((await data.addSource(new File(['>d\nAAAA\n'], 'lf.fa'))).sourceId, NUCLEOTIDE);
     const crlf = await data.indexSource((await data.addSource(new File(['>e\r\nCCCC\r\n'], 'crlf.fa'))).sourceId, NUCLEOTIDE);
     const lfStrayCr = await data.indexSource((await data.addSource(new File(['>f\nACGT\r'], 'stray.fa'))).sourceId, NUCLEOTIDE);
+    expect(scans).toBe(5);
 
-    // Pure-CR without trailing CR + pure-CR gets a CR separator (not LF).
-    const crJoined = await data.buildRunInput([crNoFinal.revisionId, crFinal.revisionId], NUCLEOTIDE);
+    // Single unmodified source: not assembled, no rescan.
+    const single = await data.buildRunInput([crFinal.revisionId]);
+    expect(single.assembled).toBeUndefined();
+    expect(single.records).toEqual([{ id: 'c', length: 4 }]);
+
+    // Pure-CR without trailing CR + pure-CR gets a CR separator (not LF) and is marked assembled.
+    const crJoined = await data.buildRunInput([crNoFinal.revisionId, crFinal.revisionId]);
     expect(decoder.decode(crJoined.bytes)).toBe('>a\rACGT\r>b\rGGCC\r>c\rTTTT\r');
+    expect(crJoined.assembled).toBe(true);
     expect(crJoined.records.map((r) => [r.id, r.length])).toEqual([
       ['a', 4],
       ['b', 4],
@@ -227,56 +242,26 @@ describe('DataService sources and record tables', () => {
     ]);
 
     // Pure-CR already ending in CR + LF adds no extra newline.
-    const crThenLf = await data.buildRunInput([crFinal.revisionId, lf.revisionId], NUCLEOTIDE);
+    const crThenLf = await data.buildRunInput([crFinal.revisionId, lf.revisionId]);
     expect(decoder.decode(crThenLf.bytes)).toBe('>c\rTTTT\r>d\nAAAA\n');
+    expect(crThenLf.assembled).toBe(true);
 
-    // CRLF + LF and LF + CRLF keep original bytes unchanged.
-    const crlfThenLf = await data.buildRunInput([crlf.revisionId, lf.revisionId], NUCLEOTIDE);
+    // CRLF + LF keeps original bytes unchanged.
+    const crlfThenLf = await data.buildRunInput([crlf.revisionId, lf.revisionId]);
     expect(decoder.decode(crlfThenLf.bytes)).toBe('>e\r\nCCCC\r\n>d\nAAAA\n');
 
     // LF stream ending in a stray CR gets an LF separator so CRLF completes the line.
-    const strayJoined = await data.buildRunInput([lfStrayCr.revisionId, lf.revisionId], NUCLEOTIDE);
+    const strayJoined = await data.buildRunInput([lfStrayCr.revisionId, lf.revisionId]);
     expect(decoder.decode(strayJoined.bytes)).toBe('>f\nACGT\r\n>d\nAAAA\n');
 
-    // When a stateful scanner reads different record lengths from the assembled bytes than from
-    // each file alone, buildRunInput reports what the scanner reads from the assembled bytes,
-    // while a single unmodified revision reuses its existing table without scanning again.
-    let scans = 0;
-    const baseScanner = new FakeScanner();
-    const statefulScanner: RecordScanner = {
-      async scan(reader, chunks) {
-        scans++;
-        const parts: Uint8Array[] = [];
-        for await (const chunk of chunks) parts.push(chunk.slice());
-        const whole = new Uint8Array(parts.reduce((sum, p) => sum + p.length, 0));
-        let at = 0;
-        for (const p of parts) {
-          whole.set(p, at);
-          at += p.length;
-        }
-        const result = await baseScanner.scan(reader, (async function* () { yield whole; })());
-        // Simulate NCBI's CStreamLineReader changing record 2's length when combined with another part.
-        if (result.records.length === 2) {
-          return { records: [result.records[0]!, { ...result.records[1]!, length: 99 }] };
-        }
-        return result;
-      },
-    };
-    const { data: stateful } = service({ scanner: statefulScanner });
-    const s1 = await stateful.indexSource((await stateful.addSource(new File(['>p1\nACGT\n'], 'p1.fa'))).sourceId, NUCLEOTIDE);
-    const s2 = await stateful.indexSource((await stateful.addSource(new File(['>p2\nGGCC\n'], 'p2.fa'))).sourceId, NUCLEOTIDE);
-    expect(scans).toBe(2);
-    // Single unmodified file: no extra scan.
-    const single = await stateful.buildRunInput([s1.revisionId], NUCLEOTIDE);
-    expect(scans).toBe(2);
-    expect(single.records).toEqual([{ id: 'p1', length: 4 }]);
-    // Combined input: rescans assembled bytes and returns the scanner's records.
-    const combined = await stateful.buildRunInput([s1.revisionId, s2.revisionId], NUCLEOTIDE);
-    expect(scans).toBe(3);
-    expect(combined.records).toEqual([
-      { id: 'p1', length: 4 },
-      { id: 'p2', length: 99 },
-    ]);
+    // Selection (one source with a record left out) is marked assembled without rescanning.
+    const selected = await data.reviseDataset(crNoFinal.revisionId, [0]);
+    const selectedInput = await data.buildRunInput([selected.revisionId]);
+    expect(selectedInput.assembled).toBe(true);
+    expect(selectedInput.records).toEqual([{ id: 'b', length: 4 }]);
+
+    // buildRunInput never calls the scanner again.
+    expect(scans).toBe(5);
   });
 });
 
@@ -304,13 +289,13 @@ describe('DataService dropSource (SURVEY #15)', () => {
 
   it('gives a dropped source back its memory in the tables it holds', async () => {
     const { data } = service();
-    const tables = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown>; revisionReaders: Map<string, unknown> };
+    const tables = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const source = await data.addSource(new File([THREE], 'three.fa'));
     const base = await data.indexSource(source.sourceId, NUCLEOTIDE);
     await data.reviseDataset(base.revisionId, [0]);
-    expect([tables.sources.size, tables.revisions.size, tables.revisionReaders.size]).toEqual([1, 2, 2]);
+    expect([tables.sources.size, tables.revisions.size]).toEqual([1, 2]);
     await data.dropSource(source.sourceId);
-    expect([tables.sources.size, tables.revisions.size, tables.revisionReaders.size]).toEqual([0, 0, 0]);
+    expect([tables.sources.size, tables.revisions.size]).toEqual([0, 0]);
   });
 });
 

@@ -40,6 +40,7 @@ export interface InputModel {
 export const PASTED_NAMES: Readonly<Record<Role, string>> = Object.freeze({ query: 'query.fa', subject: 'subject.fa' });
 
 const LF = 0x0a;
+const CR = 0x0d;
 const GT = 0x3e;
 
 export function emptyModel(): InputModel {
@@ -101,14 +102,30 @@ export function includedBytes(source: ModelSource): Uint8Array {
   return concat(parts);
 }
 
-/** The bytes of inputs searched together: joined with a line end where one has none. */
+/** The bytes of inputs searched together: joined with a line end where one has none (preserving pure-CR streams, as data-service.ts does). */
 export function joinedBytes(sources: readonly ModelSource[]): Uint8Array {
   const parts: Uint8Array[] = [];
+  let hasLf = false;
+  let hasCr = false;
   for (const source of sources) {
     const bytes = includedBytes(source);
     const previous = parts[parts.length - 1];
-    if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) parts.push(new Uint8Array([LF]));
-    if (bytes.length > 0) parts.push(bytes);
+    if (bytes.length > 0 && previous !== undefined) {
+      const last = previous[previous.length - 1];
+      if (last !== LF) {
+        if (!hasLf && hasCr) {
+          if (last !== CR) parts.push(new Uint8Array([CR]));
+        } else {
+          parts.push(new Uint8Array([LF]));
+          hasLf = true;
+        }
+      }
+    }
+    if (bytes.length > 0) {
+      parts.push(bytes);
+      if (!hasLf && bytes.includes(LF)) hasLf = true;
+      if (!hasCr && bytes.includes(CR)) hasCr = true;
+    }
   }
   return concat(parts);
 }

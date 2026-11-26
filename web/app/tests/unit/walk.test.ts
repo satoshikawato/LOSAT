@@ -137,6 +137,10 @@ describe('walk model', () => {
     const source = (value: string, excluded: number[] = []): ModelSource => ({ origin: 'file', name: 'f', bytes: text(value), excluded: new Set(excluded) });
     expect(decode(includedBytes(source('>a\nAC\n>b\nGT\n>c\nTT\n', [1])))).toBe('>a\nAC\n>c\nTT\n');
     expect(decode(joinedBytes([source('>a\nAC'), source('>b\nGT\n'), source('>c\nTT\n', [0]), source('>d\nCC\n')]))).toBe('>a\nAC\n>b\nGT\n>d\nCC\n');
+    // Pure-CR streams keep CR separators (matching data-service.ts assembleRunInput, D17).
+    expect(decode(joinedBytes([source('>a\rAC'), source('>b\rGT\r')]))).toBe('>a\rAC\r>b\rGT\r');
+    expect(decode(joinedBytes([source('>a\rAC\r'), source('>b\nGT\n')]))).toBe('>a\rAC\r>b\nGT\n');
+    expect(decode(joinedBytes([source('>a\nAC\r'), source('>b\nGT\n')]))).toBe('>a\nAC\r\n>b\nGT\n');
   });
 
   it('names the inputs that the user gave, and leaves the made ones (pasted text, several together) to the run\'s own name', () => {

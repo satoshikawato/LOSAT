@@ -95,6 +95,8 @@ mod makembindex_fixtures;
 mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
+#[path = "../memb_bit.rs"]
+mod memb_bit;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
 #[path = "../ncbi_toolkit_dryrun.rs"]

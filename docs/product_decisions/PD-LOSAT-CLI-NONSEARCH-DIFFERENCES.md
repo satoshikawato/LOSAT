@@ -379,8 +379,8 @@ BLAST+.
    and LOSAT. For `-dbtype delta`, exclusion lines are written without `endl` to `m_LogFile`
    (`cout` by default or with `-logfile -`, 4,096-byte pipe buffer; `OfStream` with
    `-logfile /dev/stdout`, 8,191-byte put area, `makeprofiledb.cpp:1804-1816`): exclusion text
-   within the stream buffer stays buffered while every volume is built (all 14 files; NCBI hits
-   SIGPIPE on the exit flush, LOSAT exits with status 0), whereas exclusion text that overflows
+   within the stream buffer stays buffered while every volume is built (all 14 files, exit status
+   0 in both NCBI and LOSAT), whereas exclusion text that overflows
    the buffer hits the closed pipe before any volume is created (0 files; NCBI SIGPIPE 141,
    LOSAT exit status 0). Overwriting an existing database of the same name deletes the old
    database (`s_DeleteMakeprofileDb`) and then writes `Deleted existing BLAST database with

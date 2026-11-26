@@ -1,9 +1,11 @@
 //! Command-line arguments for PSIBLAST
 
 use anyhow::{bail, Result};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:58-116
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
@@ -28,7 +30,7 @@ pub struct PsiblastArgs {
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // NCBI's argument reader reports the exclusion (`cli::reader`).
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`,
     /// `-negative_seqidlist` and `-no_taxid_expansion`: blastp's (line DI-8), which hold in every
     /// round (NCBI's `CLocalDbAdapter` of the first round searches every later one too).
@@ -101,14 +103,14 @@ pub struct PsiblastArgs {
     // (`ResolvedBlastpArgs::gap_trigger_bits`).
     pub gap_trigger: f64,
     pub window_size: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     pub gap_open: Option<i32>,
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     // NCBI's filtering handler (`blastinput/app.rs` `parse_seg_option`); no filtering when
     // omitted (`CPSIBlastOptionsHandle::SetQueryOptionDefaults`).
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
     pub soft_masking: Option<bool>,
@@ -117,12 +119,12 @@ pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    pub outfmt: String,
+    pub outfmt: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     pub num_iterations: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1086-1090
@@ -137,11 +139,11 @@ pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1160
     // The file is opened when a PSSM is written (`pssm.rs` `AsnPssmWriter`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_pssm: Option<String>,
+    pub out_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
     // The file is opened when a PSSM is written (`pssm.rs` `write_ascii_pssm_files`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_ascii_pssm: Option<String>,
+    pub out_ascii_pssm: Option<PathBuf>,
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1231-1247
@@ -258,7 +260,7 @@ impl PsiblastArgs {
         // the later rounds search the range with the PSSM of the whole record
         // (`PsiSearch::from_engine`, series Q, Q4a).
         Self::check_outfmt(
-            &self.outfmt,
+            os_str_bytes(&self.outfmt),
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
         )?;
@@ -382,7 +384,10 @@ impl PsiblastArgs {
         inputs.evalue = self.evalue;
         inputs.gapopen = self.gap_open;
         inputs.gapextend = self.gap_extend;
-        inputs.matrix = self.matrix.clone();
+        inputs.matrix = self
+            .matrix
+            .as_deref()
+            .map(|name| os_str_bytes(name).into_owned());
         // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
         inputs.xdrop_gap = self.xdrop_gap;
         inputs.xdrop_gap_final = self.xdrop_gap_final;
@@ -399,10 +404,15 @@ impl PsiblastArgs {
             .map(crate::core::blast_util::ncbi_int4_from_double);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self.seg.as_deref().and_then(seg_filter);
-        if let Ok((mode, unified_p)) =
-            crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
-        {
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|seg| seg_filter(os_str_bytes(seg)));
+        if let Ok((mode, unified_p)) = crate::blastinput::app::parse_comp_based_stats(
+            os_str_bytes(&self.comp_based_stats),
+            true,
+            false,
+        ) {
             inputs.comp_based_stats = mode as i32;
             inputs.unified_p = unified_p;
         }
@@ -426,7 +436,11 @@ impl PsiblastArgs {
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
     /// `-outfmt`.
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+    pub fn check_outfmt(
+        outfmt: impl AsRef<[u8]>,
+        out: Option<&std::path::Path>,
+        strategy: bool,
+    ) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
         // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
         let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?

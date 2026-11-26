@@ -146,14 +146,15 @@ pub(crate) fn query_range(
 
 /// The database that the applied arguments search (`-db`), when the strategy's subject is one.
 fn database_of(command: &Commands) -> Option<String> {
-    match command {
-        Commands::Blastp(args) => args.db.clone(),
-        Commands::Tblastn(args) => args.db.clone(),
-        Commands::Blastn(args) => args.db.clone(),
-        Commands::Tblastx(args) => args.db.clone(),
-        Commands::Blastx(args) => args.db.clone(),
+    let db = match command {
+        Commands::Blastp(args) => args.db.as_deref(),
+        Commands::Tblastn(args) => args.db.as_deref(),
+        Commands::Blastn(args) => args.db.as_deref(),
+        Commands::Tblastx(args) => args.db.as_deref(),
+        Commands::Blastx(args) => args.db.as_deref(),
         _ => None,
-    }
+    };
+    db.map(|name| name.to_string_lossy().into_owned())
 }
 
 /// Sets the arguments' `-out` (the file of `run_to_file`).

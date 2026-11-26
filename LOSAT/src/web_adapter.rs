@@ -114,11 +114,11 @@ struct SearchFiles<'a> {
     subject: Option<&'a std::path::Path>,
     in_pssm: Option<&'a std::path::Path>,
     in_msa: Option<&'a std::path::Path>,
-    out_pssm: Option<&'a str>,
-    out_ascii_pssm: Option<&'a str>,
-    masker: Option<&'a str>,
+    out_pssm: Option<&'a std::path::Path>,
+    out_ascii_pssm: Option<&'a std::path::Path>,
+    masker: Option<&'a std::ffi::OsStr>,
     filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
-    repeats: Option<&'a str>,
+    repeats: Option<&'a std::ffi::OsStr>,
 }
 
 impl<'a> SearchFiles<'a> {
@@ -228,11 +228,11 @@ pub fn open_strategy_file(
     }));
     others.extend(files.out_pssm.map(|out_pssm| RunFileName {
         option: "out_pssm",
-        name: std::ffi::OsStr::new(out_pssm),
+        name: out_pssm.as_os_str(),
     }));
     others.extend(files.out_ascii_pssm.map(|out_ascii_pssm| RunFileName {
         option: "out_ascii_pssm",
-        name: std::ffi::OsStr::new(out_ascii_pssm),
+        name: out_ascii_pssm.as_os_str(),
     }));
     others.extend(log_file(words).map(|name| RunFileName {
         option: "logfile",
@@ -240,7 +240,7 @@ pub fn open_strategy_file(
     }));
     others.extend(files.masker.map(|masker| RunFileName {
         option: "window_masker_db",
-        name: std::ffi::OsStr::new(masker),
+        name: masker,
     }));
     // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
     // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
@@ -272,9 +272,8 @@ pub fn open_strategy_file(
         if let Some(path) = read_there {
             let repeats = files.filter.is_none()
                 || files.repeats.is_some_and(|repeats| {
-                    path.as_os_str()
-                        .as_encoded_bytes()
-                        .starts_with(repeats.as_bytes())
+                    crate::utils::os_bytes::os_str_bytes(path.as_os_str())
+                        .starts_with(&crate::utils::os_bytes::os_str_bytes(repeats))
                 });
             others.push(RunFileName {
                 option: if repeats { "filtering_db" } else { "db" },

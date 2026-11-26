@@ -10,6 +10,7 @@ fn fixture_data() -> CddData {
             "{}/tests/fixtures/rpsbproc/data/{name}",
             env!("CARGO_MANIFEST_DIR")
         )
+        .into_bytes()
     };
     CddData::load(&DataFiles {
         cddids: file("cddid.tbl"),
@@ -276,4 +277,66 @@ fn query_labels() {
     assert_eq!(query_accession(&query(vec![local, refseq])), b"NP_414783.1");
     assert_eq!(query_accession(&query(vec![ParsedSeqId::Gi(123)])), b"123");
     assert_eq!(query_accession(&query(Vec::new())), b"");
+}
+
+// `CBioseq::IsNa` (Bioseq.cpp:345-348, Seq_inst.hpp:90-95) and `GetDescrTitleFromBioseq`
+// (biodata_core.cpp:297-366, ncbiobj.hpp:1047-1054): `dna` (1), `rna` (2) and `na` (4) are NA
+// while `not-set` (0), `aa` (3) and `other` (255) are not; an explicit `title` descriptor (even
+// empty) wins over `annot`, else `AnnotTitle::Title` is used, else empty; a `NULL` `Seq-annot` or
+// `Seq-feat` reached before a matching feature is refused.
+#[test]
+fn query_title_and_is_na_mol() {
+    assert!(!is_na_mol(0));
+    assert!(is_na_mol(1));
+    assert!(is_na_mol(2));
+    assert!(!is_na_mol(3));
+    assert!(is_na_mol(4));
+    assert!(!is_na_mol(255));
+
+    let base = |title: Option<Vec<u8>>, annot_title: AnnotTitle| Query {
+        ids: vec![ParsedSeqId::Local(ObjectId::Str(b"Query_1".to_vec()))],
+        title,
+        annot_title,
+        mol: 3,
+        length: Some(1),
+        seq_data: Some(("ncbieaa", b"M".to_vec())),
+        ..Query::default()
+    };
+    let title_of = |q: Query| fill_sequence(&q).map(|(_, t, _, _)| t);
+
+    assert_eq!(
+        title_of(base(
+            Some(b"explicit".to_vec()),
+            AnnotTitle::Title(b"feat".to_vec())
+        ))
+        .ok(),
+        Some(b"explicit".to_vec())
+    );
+    assert_eq!(
+        title_of(base(Some(Vec::new()), AnnotTitle::Title(b"feat".to_vec()))).ok(),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        title_of(base(
+            Some(b"ok".to_vec()),
+            AnnotTitle::NullElement("a NULL Seq-annot in Bioseq.annot")
+        ))
+        .ok(),
+        Some(b"ok".to_vec())
+    );
+    assert_eq!(
+        title_of(base(None, AnnotTitle::Title(b"from prot".to_vec()))).ok(),
+        Some(b"from prot".to_vec())
+    );
+    assert_eq!(
+        title_of(base(None, AnnotTitle::None)).ok(),
+        Some(Vec::new())
+    );
+    let Err(ProcessError::Unsupported(msg)) = title_of(base(
+        None,
+        AnnotTitle::NullElement("a NULL Seq-annot in Bioseq.annot"),
+    )) else {
+        panic!("expected refusal for NULL Seq-annot");
+    };
+    assert!(msg.contains("NULL Seq-annot"), "{msg}");
 }

@@ -82,7 +82,7 @@ fn test_matrix_suggests_threshold_and_window() {
         "-matrix",
         "pam30",
     ]);
-    assert_eq!(args.matrix.as_deref(), Some("pam30"));
+    assert_eq!(args.matrix.as_deref(), Some(std::ffi::OsStr::new("pam30")));
     assert_eq!(args.matrix_name(), "pam30");
     assert!(matches!(
         args.scoring_matrix(),

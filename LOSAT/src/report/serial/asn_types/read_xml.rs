@@ -1029,7 +1029,6 @@ impl<S: AsnSource> Input for XmlInput<S> {
     /// and processing instructions up to it, or a failure in them.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:118-129
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         let pos = self.x.pos;
         self.x.src.byte_at(pos).is_none() || self.x.skip_ws_and_comments().is_err()

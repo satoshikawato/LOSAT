@@ -19,7 +19,7 @@ LOSAT Web is an in-browser graphical interface for local sequence searches built
 - **Repeats filtering in BLASTN:** local nucleotide repeats databases (`-filtering_db`), WindowMasker counts files (`-window_masker_db`), and downloaded or browser-made taxonomy ID counts (`-window_masker_taxid`), with both `-subject` and `-db` searches. When `-no_taxid_expansion` is enabled on a database search, LOSAT Web guides WindowMasker to a counts file (`-window_masker_db`) and highlights the NCBI incompatibility if `-window_masker_taxid` is also set.
 - **Not available in LOSAT Web:**
   - Remote NCBI options (`-remote`, `-entrez_query`);
-  - RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`).
+  - RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, `blast_formatter`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`).
 
 ## Threads in the browser
 

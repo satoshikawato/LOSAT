@@ -66,6 +66,30 @@ impl EProgram {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-75
+    /// The program's value in NCBI's `EProgram` (`eBlastn` 1 to `eMapper` 16), which the Blast
+    /// Type of a Seq-annot writes.
+    pub(crate) fn number(self) -> i32 {
+        match self {
+            EProgram::Blastn => 1,
+            EProgram::Blastp => 2,
+            EProgram::Blastx => 3,
+            EProgram::Tblastn => 4,
+            EProgram::Tblastx => 5,
+            EProgram::RpsBlast => 6,
+            EProgram::RpsTblastn => 7,
+            EProgram::Megablast => 8,
+            EProgram::DiscMegablast => 9,
+            EProgram::PsiBlast => 10,
+            EProgram::PsiTblastn => 11,
+            EProgram::PhiBlastp => 12,
+            EProgram::PhiBlastn => 13,
+            EProgram::DeltaBlast => 14,
+            EProgram::VecScreen => 15,
+            EProgram::Mapper => 16,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:43-44
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-755
     /// `Blast_QueryIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`): the
@@ -495,8 +519,10 @@ pub fn compute_program(program: &[u8], service: &[u8]) -> Result<EProgram, NcbiE
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:757-810
-/// `ProgramNameToEnum` of the name that `ComputeProgram` made (lower case already).
-fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
+/// `ProgramNameToEnum` of a program name: the name that `ComputeProgram` made (lower case
+/// already), and the program name of blast_formatter's formatter (`blast_formatter::
+/// search_program::blast_type`).
+pub(crate) fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
     let lower = name.to_ascii_lowercase();
     Ok(
         if lower.starts_with(b"blastn") || lower.starts_with(b"rmblastn") {
@@ -1097,11 +1123,9 @@ pub fn import_options(
     })
 }
 
-/// [`import_options`] of a strategy's request as the archive model read it ([`Request::params`]:
-/// each list in the file's order, a name as often as it is stored). An absent list is given as
-/// an empty one: NCBI's builder and `FetchData` take nothing from either.
-pub(crate) fn import_request(request: &Request) -> Result<ImportedOptions, NcbiException> {
-    let list = |set: ParamSet| -> Vec<RawParam<'_>> {
+/// The request's algorithm, program and format options, each in the request's order.
+fn request_lists(request: &Request) -> [Vec<RawParam<'_>>; 3] {
+    [ParamSet::Algorithm, ParamSet::Program, ParamSet::Format].map(|set| {
         request
             .params()
             .iter()
@@ -1111,12 +1135,14 @@ pub(crate) fn import_request(request: &Request) -> Result<ImportedOptions, NcbiE
                 value: param.value().value,
             })
             .collect()
-    };
-    let (algorithm, program, format) = (
-        list(ParamSet::Algorithm),
-        list(ParamSet::Program),
-        list(ParamSet::Format),
-    );
+    })
+}
+
+/// [`import_options`] of a strategy's request as the archive model read it ([`Request::params`]:
+/// each list in the file's order, a name as often as it is stored). An absent list is given as
+/// an empty one: NCBI's builder and `FetchData` take nothing from either.
+pub(crate) fn import_request(request: &Request) -> Result<ImportedOptions, NcbiException> {
+    let [algorithm, program, format] = request_lists(request);
     import_options(
         &request.program,
         &request.service,
@@ -1124,6 +1150,47 @@ pub(crate) fn import_request(request: &Request) -> Result<ImportedOptions, NcbiE
             algorithm: Some(&algorithm),
             program: Some(&program),
             format: Some(&format),
+        },
+    )
+}
+
+impl BuiltOptions {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:136
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:233, 253
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:108
+    /// `GetHitlistSize()` of the options built: the last `SetHitlistSize` of the builder's calls,
+    /// else the factory default, 500 for every program (`BLAST_HITLIST_SIZE`).
+    pub fn hitlist_size(&self) -> i32 {
+        self.setters
+            .iter()
+            .rev()
+            .find_map(|setter| match setter {
+                Setter::HitlistSize(size) => Some(*size),
+                _ => None,
+            })
+            .unwrap_or(crate::blastinput::report_counts::BLAST_HITLIST_SIZE as i32)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1715-1739
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2018-2027
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:299-313
+/// The options of a BLAST archive's request as `CRemoteBlast::GetSearchOptions` builds them when
+/// blast_formatter loads the archive's first object: [`build`] over the request's algorithm and
+/// program options, with its format options for the program's adjustment only where the
+/// request's service is `psi` (the loader keeps the format options of that service alone). The
+/// loader's locality `eRemote` is `eBoth` in the options' constructor, so the options are those of
+/// a strategy's import. Nothing of `FetchData` (the strategy's iteration count) is read.
+pub(crate) fn archive_request(request: &Request) -> Result<BuiltOptions, NcbiException> {
+    let [algorithm, program, format] = request_lists(request);
+    let psi = request.service.as_slice() == b"psi";
+    build(
+        &request.program,
+        &request.service,
+        OptionLists {
+            algorithm: Some(&algorithm),
+            program: Some(&program),
+            format: psi.then_some(format.as_slice()),
         },
     )
 }

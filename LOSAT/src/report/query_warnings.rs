@@ -1707,8 +1707,23 @@ fn residue_positions(positions: &[usize]) -> Option<String> {
 /// The warning for a hit list size below 5.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
-pub fn few_matches_warning(program: &str) -> Vec<u8> {
-    format!("Warning: [{program}] Examining 5 or more matches is recommended\n").into_bytes()
+/// The warning of a hit list size below 5. `prefix` is the application's prefix of its posts
+/// (`SetDiagPostPrefix`: the search programs' `[blastn] `; blast_formatter sets none).
+pub fn few_matches_warning(prefix: Option<&str>) -> Vec<u8> {
+    formatting_warning(prefix, "Examining 5 or more matches is recommended")
+}
+
+/// The formatting handler's post of a message at the level `Warning` (`blastinput::report_counts`)
+/// in an application whose posts have the prefix `prefix` (none: no `[...] `): the post's line
+/// (`ncbi_exception::post_line_in`) with its message, which these warnings always keep.
+pub fn formatting_warning(prefix: Option<&str>, message: &str) -> Vec<u8> {
+    crate::ncbi_exception::post_line_in(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        prefix,
+        message.as_bytes(),
+        false,
+    )
 }
 
 #[cfg(test)]

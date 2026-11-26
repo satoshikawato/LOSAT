@@ -1,0 +1,27 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program seg,
+  algo-options "edge unsorted mid",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 250,
+          to 279,
+          id local id 5
+        },
+        {
+          from 100,
+          to 129,
+          id local id 5
+        },
+        {
+          from 320,
+          to 339,
+          id local id 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

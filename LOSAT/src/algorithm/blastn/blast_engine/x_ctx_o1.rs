@@ -56,7 +56,8 @@ pub(super) enum CtxO1 {
         len: u64,
         total_len: usize,
     },
-    /// One entry per block of `2^shift` offsets.
+    /// One entry per block of `2^shift` offsets. Made only by `build_with`, whose assert on
+    /// `shift` and the length of `entries` makes `XBlocks::get`'s unchecked read sound.
     Blocks {
         shift: u32,
         entries: Vec<u32>,
@@ -338,10 +339,10 @@ impl<const RANKS: bool> XCtxGet for XBlocks<'_, RANKS> {
             return None;
         }
         debug_assert!(n >> self.shift < self.entries.len());
-        // SAFETY: `n < total_len`, and `CtxO1::build_with` (the sole constructor of
-        // `CtxO1::Blocks`, whose fields are private to this module) asserted that `shift < 31` and
-        // `entries` holds every block of `2^shift` offsets below `total_len`, so
-        // `n >> shift < entries.len()`.
+        // SAFETY: `n < total_len`. An `XBlocks` is made only by `CtxO1::x_view` from a
+        // `CtxO1::Blocks`, and only `CtxO1::build_with` makes one (nothing changes it after), after
+        // asserting that `shift < 31` and `entries` holds every block of `2^shift` offsets below
+        // `total_len`, so `n >> shift < entries.len()`.
         let entry = unsafe { *self.entries.get_unchecked(n >> self.shift) };
         let low = (n as u32) & self.low_mask;
         let place = entry & self.crowded_place;

@@ -1,0 +1,7 @@
+# BLASTN 2.17.0+
+# Query: q1
+# Database: tests/db_search/taxfilter/tfn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q1	ENST00000251595.11	100.000	50	0	0	1	50	1	50	3.01e-23	93.5
+q1	ENST00000320868.9	100.000	50	0	0	1	50	1	50	3.01e-23	93.5

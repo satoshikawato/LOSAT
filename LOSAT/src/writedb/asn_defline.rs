@@ -2,9 +2,12 @@
 //! `CDeflineGenerator` in `losat makeblastdb -input_type asn1_txt|asn1_bin`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:612-1434,1916-2096,2578-2645,3928-4107
-//! NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:103-248,586-776,2731-3340
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:103-248,586-776,2106-2142,2731-3340
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:1060-1275,2548-2589
-//! NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,481-513,1653-1850
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,300-513,1653-1850
+//! NCBI reference (598d8ae6): c++/include/objmgr/impl/tse_info.hpp:335-346
+//! NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:1514-1531,1644-1654
+//! NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1177-1253
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-292,1359-1435
 
 use std::cell::RefCell;
@@ -83,6 +86,7 @@ struct DeflineSchema {
     seq_annot_data: usize,
     seq_annot_ftable: usize,
     seq_feat_id: usize,
+    seq_feat_ids: usize,
     seq_feat_data: usize,
     seq_feat_partial: usize,
     seq_feat_except: usize,
@@ -204,6 +208,7 @@ fn dschema() -> &'static DeflineSchema {
             seq_annot_data,
             seq_annot_ftable: member_index(annot_data_ty, "ftable"),
             seq_feat_id: member_index(named::SEQ_FEAT, "id"),
+            seq_feat_ids: member_index(named::SEQ_FEAT, "ids"),
             seq_feat_data: member_index(named::SEQ_FEAT, "data"),
             seq_feat_partial: member_index(named::SEQ_FEAT, "partial"),
             seq_feat_except: member_index(named::SEQ_FEAT, "except"),
@@ -275,6 +280,32 @@ fn as_list(val: &Value) -> Option<&[Value]> {
         Value::List(items) => Some(items.as_slice()),
         _ => None,
     }
+}
+
+/// `CObject_id` key (`id` or `str`) for `CTSE_Info` local Feat-id lookup.
+///
+/// NCBI reference (598d8ae6): c++/include/objmgr/impl/tse_info.hpp:335-346
+/// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:1514-1531,1644-1654
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum FeatObjId {
+    Id(i32),
+    Str(Vec<u8>),
+}
+
+fn feat_obj_id(val: &Value) -> Option<FeatObjId> {
+    let s = dschema();
+    match as_choice(val) {
+        Some((c, Value::Int(n))) if c == s.object_id_id => Some(FeatObjId::Id(*n as i32)),
+        Some((c, Value::Str(b))) if c == s.object_id_str => Some(FeatObjId::Str(b.clone())),
+        _ => None,
+    }
+}
+
+fn local_feat_id(val: &Value) -> Option<FeatObjId> {
+    let s = dschema();
+    as_choice(val)
+        .filter(|(c, _)| *c == s.feat_id_local)
+        .and_then(|(_, v)| feat_obj_id(v))
 }
 
 fn obj_id_str(val: &Value) -> Option<&[u8]> {
@@ -359,6 +390,12 @@ pub(crate) struct CompactLoc {
     strand: i32,
     /// Whether the top-level `Seq-loc` is `mix` or `packed-int` (`CAnnotObjectType_Less`).
     is_complex: bool,
+    /// Candidate `s_GetStrand` value kept when pieces name multiple `Seq-id` keys; applied in
+    /// `build_indices` only when `loc_single_bioseq` resolves all pieces to one Bioseq
+    /// (`IsSameBioseq`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
+    deferred_strand: Option<i32>,
     /// FASTA string of the first Seq-id (for `cannot find sequence` error on missing product).
     first_id_fasta: Option<Vec<u8>>,
 }
@@ -432,7 +469,7 @@ impl ProtFeature {
 #[derive(Clone, Debug)]
 struct GeneFeature {
     seq_order: usize,
-    feat_id: Option<i32>,
+    feat_ids: Vec<FeatObjId>,
     loc: CompactLoc,
     gene: CompactGeneRef,
     qual_comment_fallback: Vec<u8>,
@@ -466,7 +503,7 @@ struct CdsFeature {
     frame: i32,
     xref_prot_label: Option<Vec<u8>>,
     xref_gene: Option<CompactGeneRef>,
-    feat_id_xrefs: Vec<i32>,
+    feat_id_xrefs: Vec<FeatObjId>,
     qual_comment_fallback: Vec<u8>,
 }
 
@@ -545,7 +582,7 @@ pub(crate) struct TseFeatureIndex {
     cds_by_bioseq: HashMap<usize, Vec<usize>>,
     cds_by_product: HashMap<usize, Vec<usize>>,
     biosrcs_by_bioseq: HashMap<usize, SpanIndex>,
-    gene_by_feat_id: HashMap<i32, Vec<usize>>,
+    gene_by_feat_id: HashMap<FeatObjId, Vec<usize>>,
 }
 
 impl TseFeatureIndex {
@@ -671,16 +708,23 @@ impl TseFeatureIndex {
                 processed,
             });
         } else if fchoice == s.feat_gene {
-            let feat_id = feat
-                .member(s.seq_feat_id)
-                .and_then(as_choice)
-                .filter(|(c, _)| *c == s.feat_id_local)
-                .and_then(|(_, v)| obj_id_int(v));
+            // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1234-1241
+            let mut feat_ids = Vec::new();
+            if let Some(fid) = feat.member(s.seq_feat_id).and_then(local_feat_id) {
+                feat_ids.push(fid);
+            }
+            if let Some(ids) = feat.member(s.seq_feat_ids).and_then(as_list) {
+                for item in ids {
+                    if let Some(fid) = local_feat_id(item) {
+                        feat_ids.push(fid);
+                    }
+                }
+            }
             let gene = extract_gene_ref(fval);
             let qual_comment_fallback = extract_qual_comment_fallback(feat);
             self.genes.push(GeneFeature {
                 seq_order,
-                feat_id,
+                feat_ids,
                 loc,
                 gene,
                 qual_comment_fallback,
@@ -708,12 +752,8 @@ impl TseFeatureIndex {
             let mut feat_id_xrefs = Vec::new();
             if let Some(xrefs) = feat.member(s.seq_feat_xref).and_then(as_list) {
                 for xr in xrefs {
-                    if let Some((ic, iv)) = xr.member(s.xref_id).and_then(as_choice) {
-                        if ic == s.feat_id_local {
-                            if let Some(id_num) = obj_id_int(iv) {
-                                feat_id_xrefs.push(id_num);
-                            }
-                        }
+                    if let Some(fid) = xr.member(s.xref_id).and_then(local_feat_id) {
+                        feat_id_xrefs.push(fid);
                     }
                     if let Some((dc, dv)) = xr.member(s.xref_data).and_then(as_choice) {
                         if dc == s.feat_prot {
@@ -769,6 +809,35 @@ impl TseFeatureIndex {
         }
     }
 
+    /// Resolves `sequence::GetStrand` for multi-`Seq-id` complex locations once `id_to_bioseq`
+    /// is populated, applying the cached `s_GetStrand` value only when all pieces resolve to one
+    /// Bioseq (`IsSameBioseq`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
+    fn resolve_deferred_strands(&mut self) {
+        for i in 0..self.genes.len() {
+            if let Some(st) = self.genes[i].loc.deferred_strand.take() {
+                if self.loc_single_bioseq(&self.genes[i].loc).is_some() {
+                    self.genes[i].loc.strand = st;
+                }
+            }
+        }
+        for i in 0..self.cds.len() {
+            if let Some(st) = self.cds[i].loc.deferred_strand.take() {
+                if self.loc_single_bioseq(&self.cds[i].loc).is_some() {
+                    self.cds[i].loc.strand = st;
+                }
+            }
+        }
+        for i in 0..self.biosrcs.len() {
+            if let Some(st) = self.biosrcs[i].loc.deferred_strand.take() {
+                if self.loc_single_bioseq(&self.biosrcs[i].loc).is_some() {
+                    self.biosrcs[i].loc.strand = st;
+                }
+            }
+        }
+    }
+
     /// Finalizes inverted indices once all Bioseq IDs are mapped in `id_to_bioseq`.
     pub(crate) fn build_indices(&mut self) {
         if self.prots.is_empty()
@@ -778,6 +847,7 @@ impl TseFeatureIndex {
         {
             return;
         }
+        self.resolve_deferred_strands();
         for (idx, feat) in self.prots.iter().enumerate() {
             index_loc_bioseqs(
                 &feat.loc,
@@ -788,8 +858,11 @@ impl TseFeatureIndex {
         }
         let mut raw_genes: HashMap<usize, Vec<usize>> = HashMap::new();
         for (idx, feat) in self.genes.iter().enumerate() {
-            if let Some(fid) = feat.feat_id {
-                self.gene_by_feat_id.entry(fid).or_default().push(idx);
+            for fid in &feat.feat_ids {
+                self.gene_by_feat_id
+                    .entry(fid.clone())
+                    .or_default()
+                    .push(idx);
             }
             index_loc_bioseqs(&feat.loc, &self.id_to_bioseq, &mut raw_genes, idx);
         }
@@ -1151,8 +1224,8 @@ impl TseFeatureIndex {
     /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2737-2740
     fn best_gene_for_cds(&self, cds: &CdsFeature) -> Option<&GeneFeature> {
         // Explicit Feat-id xref only matches a gene that `AddGenesForCds` collected into `m_InfoMap`.
-        for &fid in &cds.feat_id_xrefs {
-            if let Some(gis) = self.gene_by_feat_id.get(&fid) {
+        for fid in &cds.feat_id_xrefs {
+            if let Some(gis) = self.gene_by_feat_id.get(fid) {
                 for &gi in gis {
                     let g = &self.genes[gi];
                     if self.total_range_and_strand_intersects(&cds.loc, &g.loc) {
@@ -1431,7 +1504,7 @@ fn cfeat_ci_intervals_strand_match(query: &CompactLoc, cand: &CompactLoc) -> boo
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:970-974
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval.cpp:244-251
 fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
-    let mut pieces: Vec<LocPiece> = loc
+    let pieces: Vec<LocPiece> = loc
         .pieces
         .iter()
         .rev()
@@ -1449,13 +1522,11 @@ fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
     } else {
         reverse_strand(loc.strand)
     };
-    if pieces.is_empty() {
-        pieces = Vec::new();
-    }
     CompactLoc {
         pieces,
         strand,
         is_complex: loc.is_complex,
+        deferred_strand: None,
         first_id_fasta: loc.first_id_fasta.clone(),
     }
 }
@@ -1478,6 +1549,7 @@ fn force_loc_strand(loc: &CompactLoc, strand: i32) -> CompactLoc {
         pieces,
         strand,
         is_complex: loc.is_complex,
+        deferred_strand: None,
         first_id_fasta: loc.first_id_fasta.clone(),
     }
 }
@@ -1817,6 +1889,7 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
         }
     }
     out.strand = compute_top_strand(root, &out.pieces);
+    out.deferred_strand = deferred_top_strand(root, &out.pieces);
     out
 }
 
@@ -1916,6 +1989,25 @@ fn compute_top_strand(loc: &Value, pieces: &[LocPiece]) -> i32 {
         return 0;
     }
     eval_s_get_strand(loc)
+}
+
+/// Candidate `s_GetStrand` for multi-`Seq-id` complex locations (`packed-int`, `mix`, `bond`)
+/// whose `IsOneBioseq` check requires `id_to_bioseq` synonym resolution in `build_indices`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-389,481-513
+fn deferred_top_strand(loc: &Value, pieces: &[LocPiece]) -> Option<i32> {
+    let s = dschema();
+    let (choice, _) = as_choice(loc)?;
+    if choice == s.seqloc_int
+        || choice == s.seqloc_whole
+        || choice == s.seqloc_pnt
+        || choice == s.seqloc_packed_pnt
+        || pieces_are_one_id(pieces)
+        || pieces.is_empty()
+    {
+        return None;
+    }
+    Some(eval_s_get_strand(loc))
 }
 
 fn pieces_are_one_id(pieces: &[LocPiece]) -> bool {

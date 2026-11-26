@@ -1395,8 +1395,11 @@ pub(crate) fn translate_na_to_aa_exception() -> NcbiException {
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-754
 /// `CAlnVec::x_GetSeqLeftSeg()` / `x_GetSeqRightSeg(): Invalid Dense-seg: Row <row> contains
 /// gaps only.` (`alnmap.cpp:732,753`): thrown when every segment of `row` in a Dense-seg has a
-/// negative start (for example, TBLASTN `-in_pssm -window_size 0` `-db` negative frame whose
-/// entire alignment lies in the trailing NULLB segment with `s_from` in `{-3, -2, -1}`).
+/// negative start (row 0 for BLASTN `-db` left-of-query alignments; row 1 for TBLASTN `-in_pssm
+/// -window_size 0` `-db` negative-frame alignments whose entire alignment lies in the trailing
+/// NULLB segment with `s_from` in `{-3, -2, -1}`).
+#[cold]
+#[inline(never)]
 pub(crate) fn aln_vec_row_gaps_only(row: usize, left: bool) -> NcbiException {
     let (line, method) = if left {
         (732, "x_GetSeqLeftSeg")

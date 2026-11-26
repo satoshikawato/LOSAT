@@ -410,9 +410,12 @@ pub(crate) enum PairwiseEdge {
     /// TBLASTN `-in_pssm -window_size 0` `-db`, negative frame, every subject residue in the
     /// trailing `Sub` segment (`NullbReport::subject_row_empty`): `GetSeqRange` on row 1 throws
     /// `Row is empty` (`EmptyRowsStop::RowRange(RowRangeError::Empty)`) in `-sorthsps 4` and the
-    /// description table; with `-num_descriptions 0`, outfmt 0 skips the HSP inside its per-HSP
-    /// `try` block and outfmt 1-4 merges the query segment without a subject row.
-    NullbEmptySubjectRow,
+    /// description table; with `-num_descriptions 0`, `-html` outfmt 0 throws
+    /// `CAlnException::eInvalidDenseg` in `x_PreProcessSeqAlign` (`left` true for `rem == 2` /
+    /// `x_GetSeqLeftSeg`, false for `rem in {0, 1}` / `x_GetSeqRightSeg`), plain outfmt 0 skips
+    /// the HSP inside its per-HSP `try` block, and outfmt 1-4 merges the query segment without a
+    /// subject row.
+    NullbEmptySubjectRow { left: bool },
 }
 
 impl PairwiseHit {
@@ -431,7 +434,7 @@ impl PairwiseHit {
             self.edge,
             PairwiseEdge::QueryLeftOfRecord
                 | PairwiseEdge::NullbSkipTranslate
-                | PairwiseEdge::NullbEmptySubjectRow
+                | PairwiseEdge::NullbEmptySubjectRow { .. }
         )
     }
 
@@ -493,7 +496,7 @@ fn seen_row_range(
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:176-230
     // A TBLASTN `-db` negative-frame NULLB-start HSP with no backed subject residues has an empty
     // subject range (`Row is empty`), even when `rem in {0, 1}` keeps its trailing `Sub` op.
-    if row == AlignRow::Subject && hit.edge == PairwiseEdge::NullbEmptySubjectRow {
+    if row == AlignRow::Subject && matches!(hit.edge, PairwiseEdge::NullbEmptySubjectRow { .. }) {
         return Some(RowRangeError::Empty);
     }
     super::serial::seqalign::reported_std_seg_row_range(
@@ -3663,7 +3666,7 @@ fn tblastn_row_segments(
     hit: &PairwiseHit,
     segments: &mut super::serial::seqalign::Segments,
 ) -> super::query_anchored::HspStrands {
-    if hit.edge == PairwiseEdge::NullbEmptySubjectRow {
+    if matches!(hit.edge, PairwiseEdge::NullbEmptySubjectRow { .. }) {
         return super::serial::seqalign::empty_subject_row_segments(
             &hit.hit,
             hit.subject_frame.unwrap_or(1),
@@ -4566,15 +4569,17 @@ fn subject_skipped_id(
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
-/// The Seq-id text of the Seq-align id of the `-subject` record `s_idx` without and with its
-/// version (`CSeq_id::GetSeqIdString` with false and true, `x_pairwise_par::QuerySections::
+/// The Seq-id text of the Seq-align id of subject `s_idx` without and with its version
+/// (`CSeq_id::GetSeqIdString` with false and true, `x_pairwise_par::QuerySections::
 /// alignment_id_texts`): `subject_skipped_id`, and with the version the label of a parsed id
-/// (`seqid::label::content`); the local id `Subject_N` of a record without one has no version.
-fn record_alignment_id_texts(
+/// (`seqid::label::content`); `BL_ORD_ID:<oid>` (`oids = Some`) and `Subject_N` (`oids = None`)
+/// have no version.
+fn subject_alignment_id_texts(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    oids: Option<&[u32]>,
     s_idx: u32,
 ) -> [Vec<u8>; 2] {
-    let id = subject_skipped_id(parsed, None, s_idx);
+    let id = subject_skipped_id(parsed, oids, s_idx);
     let versioned = match parsed.get(s_idx as usize).and_then(Option::as_deref) {
         Some(subject) => {
             let mut text = Vec::new();
@@ -6041,7 +6046,14 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     // Each hit keeps its index in `hits` (the final result order), which identifies it
     // to the probe.
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut has_nullb_denseg_edge = false;
     for (hsp_index, hit) in hits.iter().enumerate() {
+        if matches!(
+            hit.edge,
+            PairwiseEdge::NullbStdSegLengths | PairwiseEdge::NullbEmptySubjectRow { .. }
+        ) {
+            has_nullb_denseg_edge = true;
+        }
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
             bucket.push((hsp_index, hit));
         }
@@ -6064,6 +6076,7 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
             row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
             subject_oids,
+            has_nullb_denseg_edge,
         },
         0,
         &hits_by_query,
@@ -6106,6 +6119,9 @@ struct TblastnSections<'a> {
     loads: &'a crate::report::db_subject::HitLoads,
     /// Database OIDs by subject rank (`None` for `-subject`).
     subject_oids: Option<&'a [u32]>,
+    /// Whether any HSP in this report has a NULLB Dense-seg / CAlnVec throw edge
+    /// (`NullbStdSegLengths` or `NullbEmptySubjectRow`).
+    has_nullb_denseg_edge: bool,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
@@ -6326,6 +6342,52 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         alignment_id_local(self.parsed_subjects, s_idx)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1934,2006-2009,4577-4640
+    // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:665-671
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-754
+    // In `-html` outfmt 0 (`!merges_alignments`), `x_PreProcessSeqAlign` calls
+    // `x_CalcUrlLinksParams` before the first alignment: `CreateDensegFromStdseg` throws
+    // `StdSegLengths`, and `GetSeqStart` on row 1 for a `-db` negative-frame empty subject row
+    // throws `CAlnException::eInvalidDenseg` (`x_GetSeqLeftSeg` when `rem == 2`,
+    // `x_GetSeqRightSeg` when `rem in {0, 1}`). In outfmt 1-4 (`merges_alignments`), `CAlnMix`
+    // calls `CreateDensegFromStdseg` (throwing `StdSegLengths`) without calling `GetSeqStart` on
+    // row 1.
+    fn subject_densegs<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+        s_idx: u32,
+    ) -> io::Result<()> {
+        if !self.has_nullb_denseg_edge {
+            return Ok(());
+        }
+        let merges = self.merges_alignments();
+        for hit in &group.subject_hits[&s_idx] {
+            match hit.edge {
+                PairwiseEdge::NullbStdSegLengths => {
+                    writer.flush()?;
+                    return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
+                }
+                PairwiseEdge::NullbEmptySubjectRow { left } if !merges => {
+                    writer.flush()?;
+                    return Err(
+                        super::serial::seqalign::aln_vec_row_gaps_only(1, left).into_io_error()
+                    );
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+    // Only reports carrying a NULLB Dense-seg / CAlnVec throw edge (`has_nullb_denseg_edge`) can
+    // throw in `subject_densegs`, so ordinary reports skip allocating Seq-id texts.
+    fn alignment_id_texts(&self, s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        self.has_nullb_denseg_edge
+            .then(|| subject_alignment_id_texts(self.parsed_subjects, self.subject_oids, s_idx))
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
     /// The query-anchored section of the query's aligned subjects: Dense-segs of a protein query
     /// row and a translated nucleotide subject row (`seqalign::translated_row_segments`).
@@ -6335,19 +6397,6 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         q_idx: usize,
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
-        let stops = group
-            .subject_order
-            .iter()
-            .take(self.report.num_alignments)
-            .any(|s_idx| {
-                group.subject_hits[s_idx]
-                    .iter()
-                    .any(|hit| hit.edge == PairwiseEdge::NullbStdSegLengths)
-            });
-        if stops {
-            writer.flush()?;
-            return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
-        }
         write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
             section_hsps(
                 super::query_anchored::Hsps::of_translated_subjects(),
@@ -6861,7 +6910,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     // report gives no texts and makes none: where `subject_densegs` throws, this gives texts.
     fn alignment_id_texts(&self, s_idx: u32) -> Option<[Vec<u8>; 2]> {
         self.remaps()
-            .then(|| record_alignment_id_texts(self.records_parsed, s_idx))
+            .then(|| subject_alignment_id_texts(self.records_parsed, None, s_idx))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552

@@ -2328,7 +2328,7 @@ fn search(
                 &titles,
                 &results,
                 &spans,
-                (prefetch_format, resolved.gapped),
+                (prefetch_format, resolved.gapped, pssm.is_some()),
             )
             .filter(|(span, _)| {
                 failed
@@ -2479,6 +2479,7 @@ fn search(
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
+                    has_nullb,
                     query_bioseqs.numbered_from(0),
                 )
                 // A read of a reported sequence that

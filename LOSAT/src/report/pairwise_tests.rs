@@ -1845,3 +1845,108 @@ fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
     assert_eq!(db_str.matches("<a name=BL_ORD_ID:0></a>").count(), 1);
     assert_eq!(db_str.matches("<hsp>").count(), 2);
 }
+
+#[test]
+fn tblastn_nullb_empty_subject_row_html_preprocess_and_id_texts() {
+    use crate::report::x_pairwise_par::{QueryGroup, QuerySections};
+
+    assert_eq!(std::mem::size_of::<PairwiseEdge>(), 1);
+    assert_eq!(
+        subject_alignment_id_texts(&[], Some(&[7]), 0),
+        [b"BL_ORD_ID:7".to_vec(), b"BL_ORD_ID:7".to_vec()]
+    );
+    assert_eq!(
+        subject_alignment_id_texts(&[], None, 0),
+        [b"Subject_1".to_vec(), b"Subject_1".to_vec()]
+    );
+
+    let check = |view: PairwiseView, left: bool| -> io::Result<()> {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.edge = PairwiseEdge::NullbEmptySubjectRow { left };
+        let queries = [BlastpPairwiseQuery {
+            query_name: Vec::new(),
+            query_length: 30,
+            ungapped_karlin: Default::default(),
+            effective_search_space: 0,
+            valid: true,
+            batch_skipped: false,
+        }];
+        let query_titles = [Arc::<[u8]>::from(&b"q"[..])];
+        let subject_titles = [Arc::<[u8]>::from(&b"s"[..])];
+        let report = BlastpPairwiseReport {
+            version: String::new(),
+            database_name: Vec::new(),
+            database_num_sequences: 1,
+            database_total_letters: 57,
+            matrix_name: None,
+            gap_open: 11,
+            gap_extend: 1,
+            word_threshold: 1.0,
+            window_size: 0,
+            gapped_karlin: Default::default(),
+            gumbel: None,
+            gapped: true,
+            show_linked_set_size: false,
+            num_descriptions: 0,
+            num_alignments: 1,
+        };
+        let config = PairwiseConfig {
+            view,
+            ..Default::default()
+        };
+        let loads = crate::report::db_subject::HitLoads::default();
+        let oids = [0u32];
+        let sections = TblastnSections {
+            config: &config,
+            queries: &queries,
+            query_titles: &query_titles,
+            query_validity: &[true],
+            query_batch_skipped: &[false],
+            parsed_subjects: &[],
+            subject_sources: &[],
+            report: &report,
+            database: None,
+            anchored: None,
+            row_masks: HtmlRowMasks::new(None, 0),
+            loads: &loads,
+            subject_oids: Some(&oids),
+            has_nullb_denseg_edge: true,
+        };
+        let group = QueryGroup::for_sections(&[(0, &hit)], &subject_titles, &sections).unwrap();
+        let mut out = Vec::new();
+        sections.subject_densegs(&mut out, &group, 0)
+    };
+
+    // Outfmt 0 `-html` (`!merges_alignments`): throws alnmap.cpp:753 (left=false) or :732 (left=true).
+    let err_right = check(PairwiseView::Pairwise, false).unwrap_err();
+    let exc_right = crate::ncbi_exception::NcbiException::of_io_error(&err_right).unwrap();
+    assert_eq!(exc_right.site().line, 753);
+    assert!(exc_right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let err_left = check(PairwiseView::Pairwise, true).unwrap_err();
+    let exc_left = crate::ncbi_exception::NcbiException::of_io_error(&err_left).unwrap();
+    assert_eq!(exc_left.site().line, 732);
+    assert!(exc_left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    // Outfmt 1-4 (`merges_alignments`): `CreateDensegFromStdseg` succeeds without reading row 1's start.
+    check(
+        PairwiseView::QueryAnchored {
+            identity: true,
+            anchored: true,
+        },
+        false,
+    )
+    .unwrap();
+    check(
+        PairwiseView::QueryAnchored {
+            identity: true,
+            anchored: true,
+        },
+        true,
+    )
+    .unwrap();
+}

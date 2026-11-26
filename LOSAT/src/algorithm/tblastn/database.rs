@@ -951,7 +951,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
-    (format, gapped): (shared::PrefetchFormat, bool),
+    (format, gapped, has_pssm): (shared::PrefetchFormat, bool, bool),
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -976,9 +976,10 @@ pub(super) fn prefetch_stop(
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
         if shared::prefetch_off(format, seq_aligns)
-            || hitlists
-                .get(span.clone())
-                .is_some_and(super::nullb_report::hitlists_have_empty_subject_row_db)
+            || (has_pssm
+                && hitlists
+                    .get(span.clone())
+                    .is_some_and(super::nullb_report::hitlists_have_empty_subject_row_db))
         {
             return None;
         }
@@ -1218,6 +1219,7 @@ pub(super) fn reported_subjects(
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
+    has_nullb: bool,
     seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -1244,7 +1246,8 @@ pub(super) fn reported_subjects(
         batches,
         |span| seq_aligns_of(&hitlists[span], gapped),
         |span| {
-            super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()])
+            (has_nullb
+                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
                 || shared::BatchPrefetch::prefetch_fails_among(
                     hitlists[span]
                         .iter()

@@ -1740,4 +1740,15 @@ fn gapped_row_range_and_aln_vec_row_gaps_only() {
     assert!(right
         .to_string()
         .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let row0_left = aln_vec_row_gaps_only(0, true);
+    assert_eq!(row0_left.site().line, 732);
+    assert!(row0_left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 0 contains gaps only."));
+    let row0_right = aln_vec_row_gaps_only(0, false);
+    assert_eq!(row0_right.site().line, 753);
+    assert!(row0_right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 0 contains gaps only."));
 }

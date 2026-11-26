@@ -1647,7 +1647,9 @@ fn pairwise_hits(
                 let query_letters = QueryLetters::new(query, query_bioseq);
                 let edge = match payload.nullb {
                     Some(nullb) if nullb.subject_row_empty => {
-                        crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow
+                        crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow {
+                            left: nullb.wrapped_minus_tail == 0,
+                        }
                     }
                     Some(nullb) if nullb.std_seg_lengths_inaccurate => {
                         crate::report::pairwise::PairwiseEdge::NullbStdSegLengths
@@ -1711,9 +1713,10 @@ fn pairwise_hits(
                 // start and the record's length (the search's frame without
                 // `-subject_loc`).
                 let subject_length = ranges.subjects.length(oid, subject_seq.len());
-                let subject_frame = if edge
-                    == crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow
-                    && s_start < 1
+                let subject_frame = if matches!(
+                    edge,
+                    crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow { .. }
+                ) && s_start < 1
                 {
                     frame
                 } else {

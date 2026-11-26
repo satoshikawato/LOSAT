@@ -432,6 +432,10 @@ impl ReportFormat {
                 | FlatQueryAnchoredIdentities
                 | FlatQueryAnchoredNoIdentities
                 | Xml
+                | Json
+                | Xml2
+                | JsonS
+                | Xml2S
                 | Tabular
                 | TabularWithComments
                 | CommaSeparatedValues

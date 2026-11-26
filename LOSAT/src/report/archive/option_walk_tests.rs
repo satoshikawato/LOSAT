@@ -220,6 +220,9 @@ const PSIBLAST: &[Case] = &[
         )],
     ),
     ("show_gis", &["-show_gis"], &[]),
+    // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+    // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+    ("html", &["-html"], &[]),
     ("parse_deflines", &["-parse_deflines"], &[]),
     (
         "searchsp",

@@ -334,10 +334,14 @@ impl TblastnDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-763
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-890
     /// The open of the taxonomy database by the rows `rows` of the final hit lists `hitlists`
     /// (subjects named by rank, `reported_subjects`) after their batch's prefetch
     /// (`shared::RowLookups::open_after_prefetch`): the rows of a subject that the reports load
-    /// (`HitLoads::loaded`; a row whose load throws looks nothing up).
+    /// (`HitLoads::loaded`; a row whose load throws looks nothing up). With `ends_on_throw`
+    /// (`AfterThrow::EndsReport` or `EndsRun`), a query's subjects stop at the first whose load
+    /// throws: its report loads nothing after it (`shared::one_by_one_query_reads`).
     pub(super) fn open_for_rows(
         &self,
         reported: &ReportedSubjects,

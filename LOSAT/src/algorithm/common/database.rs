@@ -8198,7 +8198,9 @@ pub(crate) fn subject_read_texts<'s>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-763
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-890
 /// Filters a single query's one-by-one report subject keys (`ranks`, in hit-list order) to match
 /// the `Hit` reads NCBI actually makes:
 /// - When `joins_copies` is true (BLAST XML, XML2, JSON), drops adjacent keys that join the

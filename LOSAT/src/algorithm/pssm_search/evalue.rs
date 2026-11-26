@@ -6,8 +6,8 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
 
+use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::{blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
-use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// What the e-values and the hit-saving cutoff of a PSSM search read besides the Karlin block:
 /// the Gumbel block, and without it the context's effective search space.
@@ -44,7 +44,7 @@ impl<'a> EvalueStats<'a> {
     pub(crate) fn e_value(&self, score: i32, kbp: &KarlinParams, m: i32, n: i32) -> f64 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_stoe(score, kbp, gumbel, m, n),
-            None => karlin_stoe_simple(score, kbp, self.search_space),
+            None => evalue_from_raw_score(score, kbp, self.search_space as f64),
         }
     }
 
@@ -74,19 +74,6 @@ impl<'a> EvalueStats<'a> {
             .max(1),
         }
     }
-}
-
-/// `BLAST_KarlinStoE_simple`: the e-value of `score` in the search space `searchsp`, -1 for a
-/// block without valid values.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4156-4171
-/// `kbp->logK` is the natural log of `kbp->K` in every block a PSSM search reads
-/// (psiblast_aux_priv.cpp:121, blast_kappa.c:2127).
-fn karlin_stoe_simple(score: i32, kbp: &KarlinParams, searchsp: i64) -> f64 {
-    if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
-        return -1.0;
-    }
-    searchsp as f64 * (-kbp.lambda * score as f64 + kbp.k.glibc_ln()).glibc_exp()
 }
 
 #[cfg(test)]

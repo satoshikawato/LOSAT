@@ -164,8 +164,7 @@ pub(super) fn traceback_post_purge(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1887-1891
         let eff_searchsp = query_eff_searchsp.get(context_idx).copied().unwrap_or(0);
         let reeval_params = ReevalParams {
-            lambda: search_karlin_ref[context_idx].gapped.lambda,
-            k: search_karlin_ref[context_idx].gapped.k,
+            karlin: search_karlin_ref[context_idx].gapped,
             eff_searchsp,
             round_down_evalue_score,
         };

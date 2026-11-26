@@ -422,11 +422,12 @@ fn calculate_blastn_context_statistics(
     } else {
         raw_score
     };
-    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        -1.0
-    } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
-    };
+    let e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+        evalue_score,
+        params,
+        log_k,
+        eff_searchsp as f64,
+    );
     (bit_score, e_value)
 }
 

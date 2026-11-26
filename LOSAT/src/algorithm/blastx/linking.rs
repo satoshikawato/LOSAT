@@ -11,6 +11,7 @@ use crate::core::link_hsps::{
     LinkHsp,
 };
 use crate::stats::{
+    karlin::evalue_from_raw_score,
     spouge::{blast_spouge_stoe, BlastGumbelBlk},
     sum_statistics::{gap_decay_divisor, uneven_gap_sum_e},
     tables::KarlinParams,
@@ -293,8 +294,7 @@ pub fn link_uneven(
                     subject_length,
                 )
             } else {
-                lengths[context].search_space as f64
-                    * (-kbp.lambda * hsp.score as f64 + kbp.k.glibc_ln()).glibc_exp()
+                evalue_from_raw_score(hsp.score, kbp, lengths[context].search_space as f64)
             } / gap_decay_divisor(link.gap_decay_rate, 1);
             let sum_score = kbp.lambda * hsp.score as f64 - kbp.k.glibc_ln();
             WorkHsp {

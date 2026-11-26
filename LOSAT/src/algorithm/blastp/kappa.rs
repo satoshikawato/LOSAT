@@ -28,6 +28,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
     BlastRedoRangeResult, EMatrixAdjustRule, XSubjectComposition,
 };
+use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{blast_spouge_stoe, e_to_p, p_to_e, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
@@ -1383,12 +1384,11 @@ fn get_evalues(
                 );
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
         None => {
             let search_space = query_workspace.redo_query_info.eff_search_space;
             for hsp in &mut hsp_list.hsps {
-                hsp.e_value = search_space
-                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.glibc_ln())
-                        .glibc_exp();
+                hsp.e_value = evalue_from_raw_score(hsp.raw_score, eval_params, search_space);
             }
         }
     }

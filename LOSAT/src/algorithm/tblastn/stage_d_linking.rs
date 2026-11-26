@@ -7,6 +7,7 @@ use anyhow::{ensure, Result};
 
 use super::search_gapped::GappedHsp;
 use super::stage_d_stats::{LocalContextLength, LocalLinkParameters};
+use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, BlastGumbelBlk};
 use crate::stats::sum_statistics::{gap_decay_divisor, uneven_gap_sum_e};
 use crate::stats::tables::KarlinParams;
@@ -413,10 +414,8 @@ fn x_link_values(
                     query_lengths[context],
                     subject_nt_length / 3,
                 ),
-                None => {
-                    lengths[context].eff_searchsp as f64
-                        * (-kbp.lambda * hsp.score as f64 + kbp.k.glibc_ln()).glibc_exp()
-                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
+                None => evalue_from_raw_score(hsp.score, kbp, lengths[context].eff_searchsp as f64),
             } / gap_decay_divisor(link.gap_decay_rate, 1);
             WorkHsp {
                 value: LinkedHsp {

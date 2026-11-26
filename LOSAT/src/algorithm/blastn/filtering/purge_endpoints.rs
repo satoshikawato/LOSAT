@@ -897,8 +897,7 @@ pub fn blast_hsp_test_identity_and_length(
 /// Parameters needed for E-value and bit score recalculation after re-evaluation.
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-250 s_HSPListPostTracebackUpdate
 pub struct ReevalParams {
-    pub lambda: f64,
-    pub k: f64,
+    pub karlin: crate::stats::KarlinParams,
     pub eff_searchsp: i64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
     pub round_down_evalue_score: bool,
@@ -1239,9 +1238,9 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         const LN2: f64 = std::f64::consts::LN_2; // NCBIMATH_LN2 (ncbi_math.h:161), the same f64
 
         // Bit score calculation
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c BLAST_KarlinStoE_simple
-        let log_k = params.k.glibc_ln();
-        hit.bit_score = ((params.lambda * (score as f64)) - log_k) / LN2;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1923-1928
+        let log_k = params.karlin.k.glibc_ln();
+        hit.bit_score = ((params.karlin.lambda * (score as f64)) - log_k) / LN2;
 
         // E-value calculation
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
@@ -1251,11 +1250,13 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
             score
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-        // E = K * searchsp * exp(-lambda * score)
         if params.eff_searchsp > 0 {
-            hit.e_value = params.k
-                * (params.eff_searchsp as f64)
-                * (-params.lambda * (evalue_score as f64)).glibc_exp();
+            hit.e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+                evalue_score,
+                &params.karlin,
+                log_k,
+                params.eff_searchsp as f64,
+            );
         }
     }
 

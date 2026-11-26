@@ -41,6 +41,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::blast_hits::reap_by_query_coverage;
+use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::standard_score;
 
@@ -288,13 +289,12 @@ impl OrdinaryTraceback<'_> {
                     );
                 }
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
             None => {
                 let search_space =
                     self.search_spaces[hsp_list.query_index as usize].effective_space;
                 for hsp in &mut hsp_list.hsps {
-                    hsp.e_value = search_space
-                        * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.glibc_ln())
-                            .glibc_exp();
+                    hsp.e_value = evalue_from_raw_score(hsp.raw_score, self.karlin, search_space);
                 }
             }
         }

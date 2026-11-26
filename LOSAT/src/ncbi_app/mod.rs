@@ -691,7 +691,7 @@ fn run_app(
     } else {
         files
     };
-    match files.log_target(log_file(words)) {
+    match files.log_target_for(words, start, log_file(words)) {
         Err(reason) => {
             let mut diag = Diag::new(&DiagTarget::Stderr, err, tool);
             diag.refuse(&crate::seqmasks_io::run::unsupported(

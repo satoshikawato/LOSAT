@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.34 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.35 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -79,7 +79,10 @@
   `-version` line `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`; line RG item
   D2c, RG DECISIONS D2c-1, D2c-2 and D2c-4; Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07);
-  1.34 2026-11-26 (exception 10: the tools end at NCBI's write that meets the closed pipe, through
+  1.34 2026-11-26 (exception 12: when an exception's message is empty, keep `<code>` as the message
+  instead of leaving a blank error line, e.g. `GenCountsException::empty genome` -> `empty genome`;
+  line NW-EMP, Owner instruction of 2026-11-26);
+  1.35 2026-11-26 (exception 10: the tools end at NCBI's write that meets the closed pipe, through
   NCBI's stream of their output, so the lines NCBI wrote before that write are written; line RG
   item T8a, RG DECISIONS T8-1; Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
@@ -297,7 +300,7 @@ BLAST+.
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
    sees the failed write and ends the program at once, with exit status 0 and no message, in
    every mode and format: nothing more is read, written or reported, as in NCBI's ended process.
-   Since version 1.34 (line RG item T8a) the output goes through NCBI's stream (its buffer, its
+   Since version 1.35 (line RG item T8a) the output goes through NCBI's stream (its buffer, its
    insertions and flushes), so LOSAT meets the closed pipe at NCBI's write that meets it: at the
    flush of a `-out` file's buffer when it fills or is flushed, or, as NCBI's `cerr` is tied to
    `cout`, at the writes of the standard output's buffer before a line of diagnostics. The lines
@@ -454,7 +457,9 @@ BLAST+.
      exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
      (`Application's initialization failed (<class>::<code>) <message>`) they become `: `, as does a
      report glued to the text before it (NCBI's `<message>NCBI C++ Exception:` posts, which
-     read `<message>: <message>`);
+     read `<message>: <message>`); when an exception's message is empty (since version 1.34,
+     e.g. `GenCountsException::empty genome`), `<code>` is kept as the message so the error line is
+     not blank (`Error: empty genome`, `Application's execution failed: empty genome`);
      `(m_Pos = <n>)` reads `(position <n>)`;
    - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
      -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.

@@ -352,10 +352,11 @@ fn bucket_sliding_ring_matches_full_table_for_two_hit_and_one_hit() {
     let mut overflow = Vec::new();
     // Place hits across buckets 0, 1, 2 (adjacent), skip buckets 3..10 (empty gap > ring slots),
     // hit buckets 10, 11 (adjacent across gap), and cross group boundary at bucket 63 -> 64 -> 68.
+    // Step 11 (< window 40) creates dense two-hit pairs on the same diagonals across bucket bounds.
     let mut entries_a = Vec::new();
     for &b in &[0usize, 1, 2, 10, 11, 63, 64, 68] {
         let base = b * RPS_BUCKET_SIZE;
-        for step in (0..RPS_BUCKET_SIZE).step_by(193) {
+        for step in (0..RPS_BUCKET_SIZE).step_by(11) {
             let pos = base + step;
             if pos >= 2 && pos + 1 < rows_count {
                 entries_a.push(pos as i32);

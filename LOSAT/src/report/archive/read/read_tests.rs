@@ -91,14 +91,10 @@ fn exception(stop: Stop) -> (&'static str, u32, &'static str, String) {
 }
 
 /// The archives of rpsbproc's tests that are copies of NCBI's edited by hand
-/// (`fixtures/rpsbproc/README.md`: a member id in brackets, `length -0`, an `org` descriptor, no
-/// `inst.length`, no query `seq-data`, a `delta` query): rpsbproc's own cases, not NCBI's writer's
-/// layout (`length -0` is not even read).
-const EDITED: [&str; 6] = [
-    "fixtures/rpsbproc/root/bracket_member.asn",
-    "fixtures/rpsbproc/root/neg0_length.asn",
-    "fixtures/rpsbproc/root/org_descr.asn",
-    "fixtures/rpsbproc/root/nolength.asn",
+/// (`fixtures/rpsbproc/README.md`: no query `seq-data`, a `delta` query): rpsbproc's own cases,
+/// not NCBI's writer's layout. (The whole `fixtures/rpsbproc/root/` directory holds synthetic
+/// root/bad-char/syntax-error inputs for rpsbproc and is skipped below alongside `arch/bad`.)
+const EDITED: [&str; 2] = [
     "fixtures/rpsbproc/arch/q_nodata.asn",
     "fixtures/rpsbproc/arch/mfirst_delta.asn",
 ];
@@ -135,15 +131,18 @@ fn has_placeholder(text: &[u8]) -> bool {
     between(b'@', b'@', u8::is_ascii_uppercase) || between(b'{', b'}', u8::is_ascii_lowercase)
 }
 
-/// Whether the text holds an archive that its writer cut: NCBI's object stream threw in the middle
-/// of the archive (an element stated as `NULL` in a list of a PSSM query, the `db.ptr.*` rows of
-/// line RG item D3c-3c) and the program wrote its error archive right after the cut, so a second
-/// archive header follows a byte that is not a line break.
+/// Whether the text holds an archive that its writer cut: either NCBI's object stream threw in
+/// the middle of the archive (an element stated as `NULL` in a list of a PSSM query, the
+/// `db.ptr.*` rows of line RG item D3c-3c) and the program wrote its error archive right after
+/// the cut (so a second archive header follows a byte that is not a line break), or the output
+/// device filled mid-archive (`db.device.*.half.11.out`, ending mid-object instead of `}`).
 fn cut_by_its_writer(text: &[u8]) -> bool {
     const HEADER: &[u8] = b"Blast4-archive ::=";
-    text.windows(HEADER.len())
-        .enumerate()
-        .any(|(at, window)| at > 0 && window == HEADER && text[at - 1] != b'\n')
+    !text.trim_ascii_end().ends_with(b"}")
+        || text
+            .windows(HEADER.len())
+            .enumerate()
+            .any(|(at, window)| at > 0 && window == HEADER && text[at - 1] != b'\n')
 }
 
 /// The text without the line breaks inside its strings (a doubled quote toggles twice).
@@ -174,6 +173,7 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
 fn every_archive_of_the_fixtures_is_written_back_as_read() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let bad = tests.join("fixtures/rpsbproc/arch/bad");
+    let rps_root = tests.join("fixtures/rpsbproc/root");
     let mut todo = vec![tests];
     let (mut files, mut objects, mut cut) = (0, 0, 0);
     let mut failures = Vec::new();
@@ -181,7 +181,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
         for entry in std::fs::read_dir(&dir).expect("a directory") {
             let path = entry.expect("a directory entry").path();
             if path.is_dir() {
-                if path != bad {
+                if path != bad && path != rps_root {
                     todo.push(path);
                 }
                 continue;

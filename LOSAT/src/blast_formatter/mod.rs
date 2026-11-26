@@ -121,7 +121,10 @@ impl Options {
                 .and_then(|number| u8::try_from(number).ok())
         };
         Options {
-            outfmt: args.value("outfmt").unwrap_or("0").to_string(),
+            outfmt: args.bytes("outfmt").map_or_else(
+                || "0".to_string(),
+                |bytes| String::from_utf8_lossy(&bytes).into_owned(),
+            ),
             show_gis: args.flag("show_gis"),
             num_descriptions: count("num_descriptions"),
             num_alignments: count("num_alignments"),
@@ -169,7 +172,7 @@ fn run_body(
             diag,
         );
     }
-    let rid = match args.as_string("rid") {
+    let rid = match args.as_bytes("rid") {
         Ok(rid) => rid,
         Err(error) => {
             return catch_all(

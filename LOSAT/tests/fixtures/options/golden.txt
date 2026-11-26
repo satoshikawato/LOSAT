@@ -1634,6 +1634,7 @@ num_alignments = None
 formatting.line_length = None
 formatting.sort_hits = None
 formatting.sort_hsps = None
+formatting.hitlist_start = None
 max_hsps_per_subject = None
 qcov_hsp_perc = None
 culling_limit = None

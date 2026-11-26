@@ -18,3 +18,11 @@ INTEGER and a BOOLEAN; `D/d3/c3a/probe/ber_src/e1r.asn`); the others change its 
 `D/d3/c3a/tools/gen_seqentry.py`): definite lengths (`def*`, `len81*`), long tags (`tag_long`, `tag_app_int`), cuts
 (`cut_1`, `cut_last`), members out of place (`member9`, `order`, `missing_inst`) and string bytes (`title_*`,
 `store_ff`).
+
+`makeblastdb/` (D3c-4): frozen official NCBI BLAST+ 2.17.0 (Linux x86-64, `makeblastdb 2.17.0+`, build `Jul 1 2025
+08:59:18`, run under `TZ=UTC`) comparison fixtures for `losat makeblastdb -input_type asn1_txt` and
+`-input_type asn1_bin`, read by `src/writedb/makeblastdb_asn1_tests.rs`. `in/` holds compact ASN.1 text/binary,
+compressed (`.gz`, `.bz2`, `.zst`), mask and taxid-map inputs supplementing the top-level files above;
+`ncbi_2_17_0_manifest.tsv` records 82 runs with their exit codes, normalized standard output, unmodified raw NCBI
+standard error (mapped through `crate::wording::losat_bytes` by the test), and SHA-256 digests of every output
+database file after masking only the creation timestamp in `.nin`/`.pin` and `"last-updated"` in `.njs`/`.pjs`.

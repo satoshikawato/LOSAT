@@ -47,7 +47,7 @@ use crate::report::blast_xml::{
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
 use crate::report::serial::seqalign::{
-    read_num_ident, reported_std_seg_rows_range, row_range_exception, seqalign_evalue,
+    read_num_ident, reported_std_seg_rows_range, row_range_exception, seqalign_evalue_read,
 };
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -162,7 +162,12 @@ pub(super) fn query_stats(
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
             Some(length) if valid => {
-                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
+                // A gapped block that the ancillary data does not keep (a PSSM file's,
+                // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
+                let karlin = gapped
+                    .filter(|karlin| crate::stats::tables::ancillary_kept(karlin.lambda))
+                    .unwrap_or(ungapped_karlin[q_idx]);
                 XmlStats {
                     hsp_len: length.length_adjustment as i32,
                     eff_space: length.eff_searchsp,
@@ -647,7 +652,7 @@ impl PreparedXml {
                                     XmlHsp::unaligned(
                                         linked.hsp.score,
                                         payload.bit_score,
-                                        seqalign_evalue(linked.evalue),
+                                        seqalign_evalue_read(linked.evalue),
                                         read_num_ident(i64::from(payload.num_ident), program_type),
                                     )
                                 },
@@ -723,7 +728,7 @@ impl PreparedXml {
                                 hsps.hsp(&XmlHsp {
                                     score: hsp.score,
                                     bit_score: payload.bit_score,
-                                    evalue: seqalign_evalue(linked.evalue),
+                                    evalue: seqalign_evalue_read(linked.evalue),
                                     query_from: q_start,
                                     query_to: q_end,
                                     hit_from,

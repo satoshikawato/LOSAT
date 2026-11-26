@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "l4short" }, descr { title "4na length shorter" }, inst { repr raw, mol dna, length 3, seq-data ncbi4na '1248'H } }

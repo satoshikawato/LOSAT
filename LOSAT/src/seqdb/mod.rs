@@ -776,8 +776,21 @@ impl SeqDbError {
 // blastdbcheck 2.17.0 names these lines and functions, rows pp_p4_ver7, d_p4_pin_nucl_prot,
 // a_gizero, d_n5_no_ndb and pp_p5_pdb_cut of row RG-D2b. The missing
 // LMDB file's text starts with its path: `LMDB_MISSING_TAIL`.)
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:879-885
+// (`SetMemBit` throws in the inline header without a function name in NCBI's report; blastdbcheck
+// 2.17.0 at verbosity 3/4 reports `include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp`, line
+// 881, with no function prefix.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 11] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 12] = [
+    (
+        "MEMB_BIT error: conflicting bit found.",
+        ThrowSite {
+            file: "include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp",
+            line: 881,
+            kind: "CSeqDBException::eInvalid",
+            function: None,
+        },
+    ),
     (
         "Error: requested sequence type does not match DB.",
         seqdb_site(
@@ -1882,6 +1895,7 @@ impl SeqDb {
                     words: None,
                     all_bits_special_set: false,
                     mask_types: Vec::new(),
+                    memb_bits: Vec::new(),
                     lists: Vec::new(),
                 }
             }
@@ -1953,11 +1967,14 @@ impl SeqDb {
         )
     }
 
-    /// Gives the volumes their `OID_MASK_TYPE` and the id lists of `oids`, and the database the
-    /// shape of NCBI's bit set; returns `oids` without them.
+    /// Gives the volumes their `OID_MASK_TYPE`, `MEMB_BIT` and the id lists of `oids`, and the
+    /// database the shape of NCBI's bit set; returns `oids` without them.
     fn set_tree_oids(&mut self, mut oids: alias::AliasOids) -> alias::AliasOids {
         for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
             volume.set_oid_mask_type(mask_type);
+        }
+        for (volume, &memb_bit) in self.volumes.iter_mut().zip(&oids.memb_bits) {
+            volume.set_memb_bit(memb_bit);
         }
         for (at, lists) in std::mem::take(&mut oids.lists).into_iter().enumerate() {
             let start = self.volume_starts[at];
@@ -3062,13 +3079,16 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
     /// Whether NCBI's header read of the sequence at `at` filters the set it read
     /// (`x_GetFilteredHeader`): the database is restricted by a list or the alias files attached
-    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing), or
-    /// the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the third case, is refused
-    /// (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header of no bytes, no set,
-    /// makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing),
+    /// the volume has a non-zero `MEMB_BIT`, or the volume has an `OID_MASK_TYPE`. The filter
+    /// needs a set: a stored header of no bytes, no set, makes NCBI's read throw there
+    /// (`Source::null_set` of blastdbcmd).
     pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
         let volume = &self.volumes[at.volume];
-        self.is_restricted() || volume.has_alias_lists() || volume.has_oid_mask_type()
+        self.is_restricted()
+            || volume.has_alias_lists()
+            || volume.has_memb_bit()
+            || volume.has_oid_mask_type()
     }
 
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has

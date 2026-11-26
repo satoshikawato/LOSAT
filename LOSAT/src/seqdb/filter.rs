@@ -519,19 +519,27 @@ impl DeflineRule {
 // Seq-ids or whose taxids in the header are not those of the lookup files (makeblastdb writes
 // both from the same lines and gives each line a taxid, 0 where none is known; review 2 of line
 // RG D1c, R2): the hits leave the reports the same way (`SeqDb::drops_lineless_hits`).
-/// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, under
-/// the search's list rule `rule` and the alias files' lists `lists` attached to the volume
-/// (none: empty): `None` when a seqid rule passes no line and no alias taxid list rescues one;
-/// NCBI's exception of a lookup.
+/// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, after
+/// `MEMB_BIT` (`memb_kept`) under the search's list rule `rule` and the alias files' lists
+/// `lists` attached to the volume (none: empty): a line whose `memb_kept` entry is `false` is
+/// dropped before its Seq-ids or taxids are tested (`seqdbvol.cpp:2008-2059`), so no lookup
+/// exception or alias taxid rescue runs on it and it does not count toward `user_passed_any`.
+/// Returns `None` when a seqid rule passes no line and no alias taxid list rescues one, or NCBI's
+/// exception of a lookup.
 pub(crate) fn line_mask(
     rule: Option<&DeflineRule>,
     lists: &[Arc<super::id_list::AliasIdList>],
     set: &DeflineSet,
+    memb_kept: Option<&[bool]>,
 ) -> Result<Option<Vec<bool>>, NcbiException> {
     let mut user_passed_any = false;
     let has_vol_taxids = lists.iter().any(|list| list.has_taxids());
     let mut mask = Vec::with_capacity(set.deflines.len());
-    for defline in &set.deflines {
+    for (index, defline) in set.deflines.iter().enumerate() {
+        if memb_kept.is_some_and(|kept| !kept[index]) {
+            mask.push(false);
+            continue;
+        }
         // Without a list of its kind a test passes; with one, a line passes it by a Seq-id.
         let (mut have_user, mut have_vol) = (rule.is_none(), lists.is_empty());
         for id in &defline.ids {

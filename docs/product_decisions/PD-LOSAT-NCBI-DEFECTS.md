@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.114
+- Version: 1.115
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -818,10 +818,29 @@
   NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
-  1.114 2026-11-24 (the tabular rows of 1.37 and 1.50 at which NCBI stops with its null pointer or
-  prints an uninitialised taxid: NCBI's bytes before the stop are written, then the refusal of
-  rule 3, in every program, through one owner of the rows' stops; line RG-KB item 18b,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.113;
+  1.114 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
+  not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
+  batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
+  the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
+  1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
+  at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.113 (psiblast line item PS14); first 1.101, then 1.103 at the
+  merge of dev that brought line RG item KC-11d's 1.100, exception 30's 1.101 and psiblast line
+  item PS10e's 1.102, then 1.104 at the merge of dev that brought line RG item K10a's 1.103, then
+  1.106 at the merge of dev that brought line NP item M4b-T3's 1.104 and psiblast line item PS10b's
+  1.105, then 1.107 at the merge of dev that brought line NP item M4b-3c part 2's 1.106, then 1.108
+  at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
+  brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
+  1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
+  1.115 2026-11-24 (the tabular rows of 1.37, 1.50 and 1.114 at which NCBI stops with its null
+  pointer or prints an uninitialised taxid: NCBI's bytes before the stop are written, then the
+  refusal of rule 3, in every program, through one owner of the rows' stops; line RG-KB item 18b,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.114;
   first 1.100, then 1.101 at the merge of dev that brought line RG item X-short-tbx-link's 1.99 and
   line RG item KC-11d's 1.100, then 1.104 at the merge of dev of 2026-11-25 that brought line RG
   item D5c's 1.101, psiblast line item PS10e's 1.102 and line RG item K10a's 1.103, then 1.108 at
@@ -830,7 +849,8 @@
   the merge of dev of 2026-11-26 that brought line RG item X-short-bat-2's 1.108, then 1.113 at the
   merge of dev of 2026-11-26 that brought line RG item D1c-2's 1.109, line RG item X-short-bat-2's
   1.110, psiblast line item PS7c's 1.111 and line RG item D3c-4's 1.112, then 1.114 at the merge of
-  dev of 2026-11-26 that brought psiblast line item PS14's 1.113)
+  dev of 2026-11-26 that brought psiblast line item PS14's 1.113, then 1.115 at the merge of dev of
+  2026-11-26 that brought line DBID item pfoff-7's 1.114)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3275,14 +3295,14 @@ file would differ, and NCBI's programs still could not open the database).
   of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
   of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
   (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). Since
-  version 1.114 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
+  version 1.115 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
   the rows before it and the row's fields before that field, each after its delimiter (`Print`
   writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
   the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
   its build and install and the addresses of its run, and the uninitialised number differs from
   run to run, so no program can write either. NCBI's run ends at the null pointer, so no later
   row, query or batch is written; after the uninitialised number NCBI goes on (exit 0). Before
-  1.114 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
+  1.115 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
   output was a prefix of NCBI's then too (probe of line RG-KB item 18b: blastp, psiblast, blastx,
   tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line

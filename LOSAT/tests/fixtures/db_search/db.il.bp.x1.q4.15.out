@@ -1,0 +1,103 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/idlist/x1"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "x4",
+          "query_len": 150,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "ref|NP_000107.1|",
+                  "accession": "NP_000107",
+                  "title": "e1",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                },
+                {
+                  "id": "ref|NP_000107.1|"
+                }
+              ],
+              "len": 150,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 314.309,
+                  "score": 804,
+                  "evalue": 3.03654e-116,
+                  "identity": 150,
+                  "positive": 150,
+                  "query_from": 1,
+                  "query_to": 150,
+                  "hit_from": 1,
+                  "hit_to": 150,
+                  "align_len": 150,
+                  "gaps": 0,
+                  "qseq": "YYQKCTKECYKWALWEQHRPIAQMRPRQIDFNFTEKVSPVAHILPGVQKLAKRDCWCNVSSDCPTKVYEEFSRACELWHRVYIGISILCEALDWDSTCLNKAHVHQAFSFTEPRTCVSQCGTPTAVTKEPIAHNWPHVCTHKYHWPKPTS",
+                  "hseq": "YYQKCTKECYKWALWEQHRPIAQMRPRQIDFNFTEKVSPVAHILPGVQKLAKRDCWCNVSSDCPTKVYEEFSRACELWHRVYIGISILCEALDWDSTCLNKAHVHQAFSFTEPRTCVSQCGTPTAVTKEPIAHNWPHVCTHKYHWPKPTS",
+                  "midline": "YYQKCTKECYKWALWEQHRPIAQMRPRQIDFNFTEKVSPVAHILPGVQKLAKRDCWCNVSSDCPTKVYEEFSRACELWHRVYIGISILCEALDWDSTCLNKAHVHQAFSFTEPRTCVSQCGTPTAVTKEPIAHNWPHVCTHKYHWPKPTS"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "ref|NP_000106.1|"
+                }
+              ],
+              "len": 150,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.6234,
+                  "score": 26,
+                  "evalue": 4.75076,
+                  "identity": 4,
+                  "positive": 5,
+                  "query_from": 26,
+                  "query_to": 31,
+                  "hit_from": 66,
+                  "hit_to": 71,
+                  "align_len": 6,
+                  "gaps": 0,
+                  "qseq": "PRQIDF",
+                  "hseq": "PGQVDF",
+                  "midline": "P Q+DF"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 1050,
+            "hsp_len": 29,
+            "eff_space": 102487,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

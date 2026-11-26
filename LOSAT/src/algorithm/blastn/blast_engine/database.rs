@@ -1684,7 +1684,11 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: output_formats.iter().any(|format| {
             format.is_tabular()
-                && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec())
+                && crate::report::tabular::stops_at_lookup_failure(format.tabular_spec())
+        }),
+        stops_at_lineless: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && crate::report::tabular::stops_at_lineless_accession(format.tabular_spec())
         }),
         pairwise,
         structured: output_formats

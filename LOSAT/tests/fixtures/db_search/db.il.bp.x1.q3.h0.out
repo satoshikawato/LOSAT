@@ -1,0 +1,85 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: x1
+           7 sequences; 1,050 total letters
+
+
+
+<b>Query=</b> x3
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for NP_000106.1" href="https://www.ncbi.nlm.nih.gov/protein/NP_000106.1?report=genbank&log$=prottop&blast_rank=1&RID=" >NP_000106.1 </a>Unknown                                                   319     3e-118
+<a title="Show report for NP_000104.1" href="https://www.ncbi.nlm.nih.gov/protein/NP_000104.1?report=genbank&log$=prottop&blast_rank=2&RID=" >NP_000104.1 </a>short                                                     <a href=#NP_000104.1>15.8</a>    1.8   
+<a title="Show report for NP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/NP_000101.1?report=genbank&log$=prottop&blast_rank=3&RID=" >NP_000101.1 </a>alpha                                                     <a href=#NP_000101.1>15.4</a>    2.5   
+<a title="Show report for NP_000107.1" href="https://www.ncbi.nlm.nih.gov/protein/NP_000107.1?report=genbank&log$=prottop&blast_rank=4&RID=" >NP_000107.1 </a>Unknown                                                   14.6    4.8   
+
+
+Sequence with id NP_000106 no longer exists in database...alignment skipped
+Sequence with id NP_000104 no longer exists in database...alignment skipped
+><a title="Show report for NP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/NP_000101.1?report=genbank&log$=protalign&blast_rank=3&RID=0" >NP_000101.1</a><a name=NP_000101.1></a> alpha
+Length=150
+
+ Score = 15.4 bits (28),  Expect = 2.5, Method: Compositional matrix adjust.
+ Identities = 7/25 (28%), Positives = 11/25 (44%), Gaps = 0/25 (0%)
+
+Query  30  NHPLPDYDSCLALYKHVPNVVPNAV  54
+           N P  D D   AL++ +  +    V
+Sbjct  2   NTPGDDIDVRGALFQVIKQLTRQNV  26
+
+
+Sequence with id NP_000107 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.326    0.138    0.493    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 102487
+
+
+  Database: x1
+    Posted date:  Nov 24, 2026  8:43 PM
+  Number of letters in database: 1,050
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

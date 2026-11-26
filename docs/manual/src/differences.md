@@ -103,6 +103,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI finds the cutoff's score by doubling and halving a signed 32-bit integer, which overflows there (undefined in C). LOSAT makes the same search without overflow and keeps the hits whose score reaches that cutoff: over a billion for that PSSM, or, below about 3.4e-9 and below 0, above every score. So for that PSSM no hit is kept.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### Large `-task megablast` gap costs
+
+- **What you see.** `blastn -task megablast` (with or without `-no_greedy`) runs with any `-gapopen` and `-gapextend` up to 2147483647. Where NCBI BLAST+ finishes, LOSAT writes the same output. With very large values without `-no_greedy`, NCBI BLAST+ can stop with `BLAST engine error: Unknown error code -1`, crash, or run out of memory; LOSAT finishes and writes the alignments that NCBI BLAST+ finds when its arithmetic does not overflow.
+- **When.** `blastn -task megablast` with very large `-gapopen` or `-gapextend` values.
+- **Why.** NCBI's failures come from 32-bit signed overflow (undefined behaviour in C) and from tables sized by the gap costs. LOSAT computes in 64-bit integers and stores only the distances it reaches.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.

@@ -1,0 +1,61 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: x1
+           7 sequences; 1,050 total letters
+
+
+
+Query= x2
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ref|NP_000104.1|short                                                 317     2e-117
+ref|NP_000106.1|Unknown                                               15.8    1.8   
+ref|NP_000110.1|Unknown                                               14.2    6.9   
+
+
+Sequence with id NP_000104 no longer exists in database...alignment skipped
+Sequence with id NP_000106 no longer exists in database...alignment skipped
+Sequence with id NP_000110 no longer exists in database...alignment skipped
+Sequence with id NP_000110 no longer exists in database...alignment skipped
+Sequence with id NP_000110 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.326    0.139    0.499    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 102487
+
+
+  Database: x1
+    Posted date:  Nov 24, 2026  8:43 PM
+  Number of letters in database: 1,050
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

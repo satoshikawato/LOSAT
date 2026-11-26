@@ -63,7 +63,7 @@ fn believed_query_title(
     protein: bool,
     believed: &crate::blastinput::fasta_reader::believed::BelievedIds,
 ) -> Result<Option<Vec<u8>>, Refusal> {
-    let ids = crate::report::db_subject::bioseq_facts(&believed.ids);
+    let ids = crate::report::defline::bioseq_facts(&believed.ids);
     let Ok(defline) = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
     else {
         return Ok(None);

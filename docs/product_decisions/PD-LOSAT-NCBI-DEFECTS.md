@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.111
+- Version: 1.112
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -780,7 +780,7 @@
   that exhaust NCBI's overflow banks (decision D3, LOSAT's rejection with exit status 1, no
   longer reported as an engine error) after the same reports; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.109; first 1.99, then 1.109 at the merge of dev that brought 1.99 to 1.108,
-  then 1.110 at the merge of dev of 2026-11-26 that brought 1.109, line RG item D1c-2)
+  then 1.110 at the merge of dev of 2026-11-26 that brought 1.109, line RG item D1c-2);
   1.111 2026-11-24 (approved exception 31, the Spouge cutoff search past `Int4`, psiblast line item
   PS7c: psiblast and tblastn `-in_pssm` search for the score of the hit-saving cutoff
   (`BLAST_SpougeEtoS`) without the signed overflow of its `Int4` doubling and bisection; the Owner's
@@ -796,7 +796,17 @@
   2026-11-26 that brought 1.108, line RG item X-short-bat-2, then 1.110 at the merge of dev of
   2026-11-26 that brought 1.109, line RG item D1c-2, then 1.111 at the merge of dev of
   2026-11-26 that brought 1.110, line RG item X-short-bat-2; this item's exception was 30 until
-  the 1.104 merge)
+  the 1.104 merge);
+  1.112 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
+  explicit rejections, rule 3, of a nucleotide ASN.1 sequence whose `Seq-data` (`iupacna`,
+  `ncbi2na` or `ncbi4na`) is shorter than `Seq-inst.length` asks for (including a `-hash_index`
+  read of 1 to 3 packed tail bases past the data, class of 1.86), of `NULL` elements inside
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set`, or
+  `Blast-def-line.seqid` and an empty `Delta-ext` list (class of 1.45 and 1.52), and of a
+  punctuation-only Bioseq title that NCBI's `x_CleanAndCompress` reads past the end of (class of
+  1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.111 at the merge of dev that brought line RG item X-short-bat-2's 1.110 (#1647) and
+  psiblast line item PS7c's 1.111; first 1.105, then 1.106, 1.107, 1.108, 1.109 and 1.110)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4151,6 +4161,19 @@ file would differ, and NCBI's programs still could not open the database).
   `db.il.bp.v5.sq.uns.*`, `db.il.bp.v5.sq.amb1.plain.6`, and `db.il.bp.v5.sq.nslamb.6` of
   `LOSAT/tests/db_search_manifest/blastp.il.tsv`; unit test
   `v5_rejects_non_strict_weak_equivalent_seqid_pairs` in `LOSAT/src/seqdb/alias_tests.rs`.
+- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.112, 2026-11-25,
+  line RG item D3c-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07):
+  (a) a nucleotide `Bioseq` whose `iupacna`, `ncbi2na` or `ncbi4na` `Seq-data` holds fewer bytes or
+  letters than `Seq-inst.length` asks for (including a `-hash_index` `CSeqVector` read of 1 to 3
+  packed tail bases past the end of `ncbi2na`/`ncbi4na` data), where `WriteDB_Ncbi4naToBinary`,
+  `WriteDB_Ncbi2naToBinary` and `copy_2bit_any`/`copy_4bit_any` read past the buffer (class of
+  1.86; fixture `llong.asn`); (b) a list element stated as `NULL` (`05 00` in BER) in
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set` or
+  `Blast-def-line.seqid`, or an empty `Delta-ext` list, where NCBI dereferences a null pointer or
+  `dext.Get().front()` (`build_db.cpp:309`) and crashes (class of 1.45 and 1.52); and (c) a
+  punctuation-only Bioseq title that `CDeflineGenerator::x_CleanAndCompress` reads past the end of
+  and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
+  partial build (`erase_after_refusal`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

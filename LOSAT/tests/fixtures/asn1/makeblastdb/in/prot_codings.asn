@@ -1,0 +1,19 @@
+Seq-entry ::= set {
+  seq-set {
+    seq {
+      id { local str "pe" },
+      descr { title "ncbieaa" },
+      inst { repr raw, mol aa, length 5, seq-data ncbieaa "MKTW*" }
+    },
+    seq {
+      id { local str "pi" },
+      descr { title "iupacaa" },
+      inst { repr raw, mol aa, length 5, seq-data iupacaa "MKTWX" }
+    },
+    seq {
+      id { local str "ps" },
+      descr { title "ncbistdaa" },
+      inst { repr raw, mol aa, length 4, seq-data ncbistdaa '0C0B1316'H }
+    }
+  }
+}

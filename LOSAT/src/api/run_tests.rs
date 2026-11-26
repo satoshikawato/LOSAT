@@ -280,6 +280,7 @@ fn the_html_links_reach_outfmt_0_in_any_place() {
         Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
+        Program::Psiblast,
     ] {
         let (query, subject) = self_pair(program);
         let search = validate(program, &["-html"]).unwrap();
@@ -313,6 +314,7 @@ fn each_html_report_of_a_call_of_several_formats_is_its_report_alone() {
         Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
+        Program::Psiblast,
     ] {
         let (query, subject) = self_pair(program);
         let search = validate(program, &["-html"]).unwrap();

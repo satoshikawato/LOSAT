@@ -361,13 +361,13 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let bare_v4 = cwd.join("bare_v4");
     let bare_args = crate::writedb::makeblastdb::MakedbArgs {
-        input: "-".to_string(),
+        input: std::ffi::OsString::from("-"),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
-        title: Some("bare_v4".to_string()),
-        out: Some(bare_v4.to_str().unwrap().to_string()),
+        title: Some(std::ffi::OsString::from("bare_v4")),
+        out: Some(bare_v4.as_os_str().to_os_string()),
         blastdb_version: 4,
-        max_file_sz: "1GB".to_string(),
+        max_file_sz: std::ffi::OsString::from("1GB"),
         metadata_output_prefix: None,
         oid_masks: None,
         logfile: None,
@@ -412,7 +412,7 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
     );
     let database = BlastxDatabase {
         db: SeqDb::open_in(spec.as_bytes(), SeqType::Protein, &search).unwrap(),
-        name: spec,
+        name: spec.into_bytes(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: false,
         program: PROGRAM,

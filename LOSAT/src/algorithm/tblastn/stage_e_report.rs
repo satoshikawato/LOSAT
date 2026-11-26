@@ -1291,55 +1291,56 @@ fn pairwise_hits(
                 // residue and reverse strand endpoints run in descending order.
                 let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let query_letters = QueryLetters::new(query, query_bioseq);
-                let nullb_stop = match payload.nullb {
+                let edge = match payload.nullb {
                     Some(nullb) if nullb.std_seg_lengths_inaccurate => {
-                        Some(crate::report::pairwise::PairwiseNullbStop::StdSegLengths)
+                        crate::report::pairwise::PairwiseEdge::NullbStdSegLengths
                     }
                     Some(nullb) if nullb.translate_na_failure => {
-                        Some(crate::report::pairwise::PairwiseNullbStop::SkipTranslate)
+                        crate::report::pairwise::PairwiseEdge::NullbSkipTranslate
                     }
-                    _ => None,
+                    _ => crate::report::pairwise::PairwiseEdge::Normal,
                 };
-                let (qseq, sseq, report_positives) = if nullb_stop.is_some() {
-                    if html_masks.is_some() {
-                        row_masks.clear();
-                    }
-                    (String::new(), String::new(), 0)
-                } else {
-                    let (qseq, sseq) = aligned_sequences(
-                        query_letters,
-                        subject_seq,
-                        &mut x_window,
-                        &code,
-                        &mut translation,
-                        hsp.frame,
-                        hsp.q_start,
-                        hsp.s_start,
-                        hsp.s_end,
-                        &payload.edit_script,
-                        payload.nullb,
-                    )?;
-                    // The row holds its masks in lower case; the lists are left to the next row
-                    // (`query_anchored::output_seq`), or copied under `-html`.
-                    if html_masks.is_some() {
-                        row_masks.clear();
-                    }
-                    let qseq = query_row_masks(
-                        qseq,
-                        &report_masks,
-                        hsp.q_start,
-                        hsp.q_end,
-                        &mut row_masks,
-                    )?;
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
-                    let report_positives = crate::report::row_letters::display_positives(
-                        qseq.as_bytes(),
-                        sseq.as_bytes(),
-                        scoring.matrix,
-                        query_letters.case(),
-                    );
-                    (qseq, sseq, report_positives)
-                };
+                let (qseq, sseq, report_positives) =
+                    if edge != crate::report::pairwise::PairwiseEdge::Normal {
+                        if html_masks.is_some() {
+                            row_masks.clear();
+                        }
+                        (String::new(), String::new(), 0)
+                    } else {
+                        let (qseq, sseq) = aligned_sequences(
+                            query_letters,
+                            subject_seq,
+                            &mut x_window,
+                            &code,
+                            &mut translation,
+                            hsp.frame,
+                            hsp.q_start,
+                            hsp.s_start,
+                            hsp.s_end,
+                            &payload.edit_script,
+                            payload.nullb,
+                        )?;
+                        // The row holds its masks in lower case; the lists are left to the next row
+                        // (`query_anchored::output_seq`), or copied under `-html`.
+                        if html_masks.is_some() {
+                            row_masks.clear();
+                        }
+                        let qseq = query_row_masks(
+                            qseq,
+                            &report_masks,
+                            hsp.q_start,
+                            hsp.q_end,
+                            &mut row_masks,
+                        )?;
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
+                        let report_positives = crate::report::row_letters::display_positives(
+                            qseq.as_bytes(),
+                            sseq.as_bytes(),
+                            scoring.matrix,
+                            query_letters.case(),
+                        );
+                        (qseq, sseq, report_positives)
+                    };
                 if let Some(table) = html_masks.as_deref_mut() {
                     table.push(row_masks.copy_rows());
                 }
@@ -1421,8 +1422,7 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
-                    nullb_stop,
-                    query_left_of_record: false,
+                    edge,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'

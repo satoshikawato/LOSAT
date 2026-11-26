@@ -94,6 +94,44 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+/// The E-value and the bit score that a Seq-align of an HSP whose search made `evalue` and
+/// `bit_score` carries: the E-value after `seqalign_evalue` (every value below 1e-180, a negative
+/// one too, is 0), which leaves a NaN, the E-value the Seq-align lacks (`seqalign_evalue_absent`),
+/// and the bit score where it is 0 or above, else the readers' default -1
+/// (`CAlignFormatUtil::GetAlnScores`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-826
+pub(crate) fn seqalign_scores(evalue: f64, bit_score: f64) -> (f64, f64) {
+    (
+        seqalign_evalue(evalue),
+        if bit_score >= 0.0 { bit_score } else { -1.0 },
+    )
+}
+
+/// Whether the Seq-align of an HSP lacks its E-value `evalue`, a NaN (NCBI writes a value of 0 or
+/// above only, and every other value is 0 or above after `seqalign_evalue`). The lists of every
+/// program carry the absent E-value as the NaN that the search made (a PSSM whose gapped block
+/// is not valid gives it), so a list's value means the same whatever filled it: the one test of
+/// the writers that omit it (the ASN.1 scores) and of `seqalign_evalue_read`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
+pub(crate) fn seqalign_evalue_absent(evalue: f64) -> bool {
+    evalue.is_nan()
+}
+
+/// The E-value that a reader of an HSP's Seq-align takes (`GetAlnScores`, the XML's `Hsp_evalue`,
+/// the report's columns and comparators): -1 where the Seq-align lacks it
+/// (`seqalign_evalue_absent`), else `seqalign_evalue`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-826
+pub(crate) fn seqalign_evalue_read(evalue: f64) -> f64 {
+    if seqalign_evalue_absent(evalue) {
+        -1.0
+    } else {
+        seqalign_evalue(evalue)
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1490-1496
 /// The `num_ident` score of an HSP's Seq-align (`s_AddScoresToSeqAlign`), from the engine's
@@ -856,10 +894,9 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
     if hsp.num > 1 {
         write_score_int(enc, "sum_n", hsp.num);
     }
-    let evalue = seqalign_evalue(hsp.evalue);
-    if evalue >= 0.0 {
+    if !seqalign_evalue_absent(hsp.evalue) {
         let score_type = if hsp.num <= 1 { "e_value" } else { "sum_e" };
-        write_score_real(enc, score_type, evalue);
+        write_score_real(enc, score_type, seqalign_evalue(hsp.evalue));
     }
     if hsp.bit_score >= 0.0 {
         write_score_real(enc, "bit_score", hsp.bit_score);

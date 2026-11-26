@@ -1,0 +1,9 @@
+0|P00001.1|seq0_dl0 bit1
+0|1ABC_A|seq0_dl1 bit2
+1|NP_000001.1|seq1_dl0 bit1and3
+1|XP_000001.1|seq1_dl1 bit1model_twoints
+2|NP_000002.1|seq2_dl0 nomemb
+3|NP_000003.1|seq3_dl0 emptymemb
+4|NP_000004.1|seq4_dl0 bit32
+4|NP_000005.1|seq4_dl1 bit31
+5|NP_000006.1|seq5_dl0 membzero

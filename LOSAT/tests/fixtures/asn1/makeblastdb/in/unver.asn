@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "u1" }, descr { title "unverified one", user { type str "Unverified", data { { label str "Type", data str "Organism" } } } }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "u2" }, descr { title "verified two" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGG" } }
+  }
+}

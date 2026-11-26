@@ -2762,7 +2762,7 @@ fn preliminary_profile<'a>(
         gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
             scoring.gap_xdrop_bits,
             scoring.final_xdrop_bits,
-            gapped.lambda,
+            crate::core::x_drop::extension_lambda(&gapped),
         )
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
@@ -4589,7 +4589,7 @@ fn finish_local_mode0_no_sum_stats(
         let final_xdrop = local_extension_final_xdrop(
             scoring.gap_xdrop_bits,
             scoring.final_xdrop_bits,
-            gapped_params[context].lambda,
+            crate::core::x_drop::extension_lambda(&gapped_params[context]),
         )?;
         // Dispatch point: the scores of the batch's PSSM query (`-in_pssm`, the same for every
         // list), else the matrix's.

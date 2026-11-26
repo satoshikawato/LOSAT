@@ -1,0 +1,44 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: dmg.fna
+           3 sequences; 180 total letters
+
+
+
+Query= qa
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1                                                                    111     1e-30
+
+
+>s1 
+Length=60
+
+ Score = 111 bits (60),  Expect = 1e-30
+ Identities = 60/60 (100%), Gaps = 0/60 (0%)
+ Strand=Plus/Plus
+
+Query  1   CAACTTCTTCAAACTGAGGAAGCTGCGGGGCGAGACAGTTTTTCGCCACTTCATCTTTAT  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   CAACTTCTTCAAACTGAGGAAGCTGCGGGGCGAGACAGTTTTTCGCCACTTCATCTTTAT  60
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 5671

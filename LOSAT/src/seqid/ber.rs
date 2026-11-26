@@ -169,12 +169,6 @@ const END_OF_FILE: ThrowSite = site(
     "CEofException::eEof",
     Some("ncbi::CIStreamBuffer::FillBuffer"),
 );
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:715-755
-const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
-    "src/serial/member.cpp",
-    752,
-    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
-);
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-451
@@ -364,17 +358,11 @@ impl BerError {
     #[inline(never)]
     fn member_read(self, member: &'static str) -> Self {
         match *self.0 {
-            Failure::Serial { exception } => {
-                let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-                BerError(Box::new(Failure::Serial {
-                    exception: exception.rethrow_same(
-                        file,
-                        line,
-                        function,
-                        format!("error while reading {member}"),
-                    ),
-                }))
-            }
+            Failure::Serial { exception } => BerError(Box::new(Failure::Serial {
+                exception: crate::report::serial::asn_types::read::rethrow_set_flag_member(
+                    exception, member,
+                ),
+            })),
             failure => BerError(Box::new(failure)),
         }
     }

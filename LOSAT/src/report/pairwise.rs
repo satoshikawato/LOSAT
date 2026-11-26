@@ -377,41 +377,50 @@ pub struct PairwiseHit {
     /// TBLASTX's rows translated by the display's tables count others. Every count is at least
     /// 0, so every Seq-align carries it.
     pub(crate) seqalign_num_ident: usize,
-    /// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
-    /// NULLB-start alignment (`None` for all ordinary HSPs).
-    pub(crate) nullb_stop: Option<PairwiseNullbStop>,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982
     // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_diag.hpp:98-121
-    /// Whether this is a BLASTN `-db` HSP whose Seq-align query start lies below 0 in record
-    /// coordinates (class N): outfmt 0 skips it at `x_PrepareRowData` without starting a heading
-    /// or changing `previousId`, outfmt 1-4 feeds its negative query start into `CAlnMix` (which
-    /// throws `alnmerger.cpp:372`), and `HspScores` uses its unsigned `TSeqPos` query range for
-    /// coverage and signed minimum coordinate for `-sorthsps 2`. When true, the record query start
-    /// (as `u32` bits) and query length are carried in `hit.sort_query_offset` and
-    /// `hit.sort_query_end` (otherwise unused in BLASTN) so `PairwiseHit` stays at 376 bytes
-    /// (`left_of_record`). `false` for all in-context HSPs and all other programs.
-    pub(crate) query_left_of_record: bool,
+    /// Program-specific report edge marker packed into one byte so `PairwiseHit` stays at 376
+    /// bytes: [`PairwiseEdge::QueryLeftOfRecord`] for BLASTN `-db` class N HSPs (carrying record
+    /// query start/len in `hit.sort_query_offset`/`hit.sort_query_end`), or the two TBLASTN
+    /// `-in_pssm -window_size 0` NULLB-start stop/skip markers. [`PairwiseEdge::Normal`] for all
+    /// ordinary HSPs.
+    pub(crate) edge: PairwiseEdge,
 }
 
-/// Report-time stop or per-HSP skip action for [`PairwiseHit::nullb_stop`]
-/// (`algorithm::tblastn::nullb_report`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PairwiseNullbStop {
-    /// `-subject`, positive frame, `rem in {1, 2}`, `k >= 2`: `CreateDensegFromStdseg` throws
-    /// `Std-seg segment lengths not accurate!` (`EmptyRowsStop::StdSegLengths`).
-    StdSegLengths,
-    /// Positive frame, `rem in {1, 2}`, `-db` or (`-subject` with `k == 1`): `CAlnVec::TranslateNAToAA`
-    /// throws inside outfmt 0's per-HSP `try` block, writing `alignment skipped` with the
-    /// subject's Seq-id text (`subject_skipped_id`) without emitting the subject heading yet.
-    SkipTranslate,
+/// One-byte mutually exclusive report edge marker for [`PairwiseHit::edge`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PairwiseEdge {
+    /// Ordinary HSP.
+    #[default]
+    Normal,
+    /// BLASTN `-db` HSP whose Seq-align query start lies below 0 in record coordinates (class N):
+    /// outfmt 0 skips it at `x_PrepareRowData` without starting a heading or changing `previousId`,
+    /// outfmt 1-4 feeds its negative query start into `CAlnMix` (`alnmerger.cpp:372`), and
+    /// `HspScores` uses its unsigned `TSeqPos` query range for coverage and signed minimum
+    /// coordinate for `-sorthsps 2`.
+    QueryLeftOfRecord,
+    /// TBLASTN `-in_pssm -window_size 0` `-subject`, positive frame, `rem in {1, 2}`, `k >= 2`:
+    /// `CreateDensegFromStdseg` throws `Std-seg segment lengths not accurate!`
+    /// (`EmptyRowsStop::StdSegLengths`).
+    NullbStdSegLengths,
+    /// TBLASTN `-in_pssm -window_size 0`, positive frame, `rem in {1, 2}`, `-db` or (`-subject`
+    /// with `k == 1`): `CAlnVec::TranslateNAToAA` throws inside outfmt 0's per-HSP `try` block,
+    /// writing `alignment skipped` with `subject_skipped_id` without emitting the heading yet.
+    NullbSkipTranslate,
 }
 
 impl PairwiseHit {
+    /// Whether this is a BLASTN `-db` class N HSP (`PairwiseEdge::QueryLeftOfRecord`).
+    #[inline]
+    pub(crate) fn query_left_of_record(&self) -> bool {
+        self.edge == PairwiseEdge::QueryLeftOfRecord
+    }
+
     /// Record-coordinate `(query_start, query_len)` of a BLASTN `-db` class N HSP
     /// (`query_left_of_record`), or `None` for normal in-context HSPs.
     #[inline]
     pub(crate) fn left_of_record(&self) -> Option<(i32, u32)> {
-        self.query_left_of_record.then_some((
+        self.query_left_of_record().then_some((
             self.hit.sort_query_offset as u32 as i32,
             self.hit.sort_query_end as u32,
         ))
@@ -662,8 +671,7 @@ impl From<Hit> for PairwiseHit {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident,
-            nullb_stop: None,
-            query_left_of_record: false,
+            edge: PairwiseEdge::Normal,
         }
     }
 }
@@ -1126,13 +1134,13 @@ fn write_tblastn_subject_with_skips<'h, W: Write>(
     );
     let first_ok = hits
         .iter()
-        .position(|h| !matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)));
+        .position(|h| h.edge != PairwiseEdge::NullbSkipTranslate);
     let heading = heading_of(s_idx);
     let mut heading_skipped: Option<Vec<u8>> = None;
     for i in part {
         let hit = hits[i];
         let hsp_index = indices[i];
-        if matches!(hit.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)) {
+        if hit.edge == PairwiseEdge::NullbSkipTranslate {
             let id = subject_skipped_id(records, subject_oids, s_idx);
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
@@ -1328,7 +1336,7 @@ fn write_database_subject_alignments_part<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
-    if hits.iter().any(|hit| hit.query_left_of_record) {
+    if hits.iter().any(|hit| hit.query_left_of_record()) {
         return write_database_subject_with_left_of_record(
             writer,
             probe,
@@ -1417,7 +1425,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
         DatabaseHeading::Parsed(subject, _) => subject.skipped_id().to_vec(),
         DatabaseHeading::Title(..) => subject_skipped_id(parsed, oids, s_idx),
     };
-    let Some(first_shown) = hits.iter().position(|hit| !hit.query_left_of_record) else {
+    let Some(first_shown) = hits.iter().position(|hit| !hit.query_left_of_record()) else {
         for &hsp_index in &hsp_indices[part] {
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
@@ -1436,7 +1444,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
     let mut seen_shown_in_part = false;
     for idx in part {
         let (hit, hsp_index) = (hits[idx], hsp_indices[idx]);
-        if hit.query_left_of_record {
+        if hit.query_left_of_record() {
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
@@ -3099,26 +3107,32 @@ fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     };
     // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
     crate::report::ostream::ncbi_endl(writer)?;
-    writeln!(writer, "Lambda      K        H        a         alpha")?;
-    write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.k)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a_un)?;
-    write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+    // A block that the query's results do not keep (`stats::tables::ancillary_kept`) has no
+    // part in the footer.
+    if crate::stats::tables::ancillary_kept(ungapped_karlin.lambda) {
+        writeln!(writer, "Lambda      K        H        a         alpha")?;
+        write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.k)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a_un)?;
+        write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer, "Gapped")?;
-    writeln!(
-        writer,
-        "Lambda      K        H        a         alpha    sigma"
-    )?;
-    write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, gapped_karlin.k)?;
-    write_ncbi_ka_field(writer, gapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a)?;
-    write_ncbi_ka_field(writer, gumbel.alpha)?;
-    write_ncbi_ka_field(writer, gumbel.sigma)?;
-    writeln!(writer)?;
+    if crate::stats::tables::ancillary_kept(gapped_karlin.lambda) {
+        writeln!(writer, "Gapped")?;
+        writeln!(
+            writer,
+            "Lambda      K        H        a         alpha    sigma"
+        )?;
+        write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, gapped_karlin.k)?;
+        write_ncbi_ka_field(writer, gapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a)?;
+        write_ncbi_ka_field(writer, gumbel.alpha)?;
+        write_ncbi_ka_field(writer, gumbel.sigma)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
     writeln!(
         writer,
@@ -4126,6 +4140,31 @@ pub struct BlastnPairwiseReport {
     pub subject_oids: Option<Arc<[u32]>>,
 }
 
+/// The HSP of a subject's HSPs `hits` whose values the description table shows
+/// (`GetSeqAlignSetCalcParams`): NCBI keeps the highest bit score from 0 and takes the bit score,
+/// E-value, identities and length of each HSP that raises it, so the HSP is the first of the
+/// highest bit score above 0, and a subject whose HSPs all have a bit score of 0 or less or NaN (a
+/// PSSM whose gapped Karlin-Altschul block is not valid gives -1 or NaN) has none. The one
+/// predicate of the table's scores (`table_scores`) and of `-sorthits`' identity
+/// (`SortColumnValues::of`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4261-4309
+pub(super) fn shown_hsp<'a>(hits: &[&'a PairwiseHit]) -> Option<&'a PairwiseHit> {
+    let mut shown: Option<&PairwiseHit> = None;
+    for &hit in hits {
+        if hit.hit.bit_score > shown.map_or(0.0, |shown| shown.hit.bit_score) {
+            shown = Some(hit);
+        }
+    }
+    shown
+}
+
+/// The bit score and E-value that the description table shows for a subject whose shown HSP is
+/// `shown` (`shown_hsp`): 0.0 and 0.0 without one.
+pub(super) fn table_scores(shown: Option<&PairwiseHit>) -> (f64, f64) {
+    shown.map_or((0.0, 0.0), |hit| (hit.hit.bit_score, hit.hit.e_value))
+}
+
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
 // (`write_blastn_description_table`), BLASTX's
 // (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
@@ -4199,17 +4238,18 @@ fn write_description_table<W: Write>(
     if described.is_empty() {
         return writeln!(writer);
     }
-    let rows: Vec<(u32, &PairwiseHit, f64, i32, Option<SortColumnValues>)> = described
+    let rows: Vec<(
+        u32,
+        Option<&PairwiseHit>,
+        f64,
+        i32,
+        Option<SortColumnValues>,
+    )> = described
         .iter()
         .filter_map(|s_idx| {
             let hits = subject_hits.get(s_idx)?;
             let first = *hits.first()?;
-            let mut best = first;
-            for hit in hits {
-                if hit.hit.bit_score > best.hit.bit_score {
-                    best = hit;
-                }
-            }
+            let best = shown_hsp(hits);
             let sum_n = first.sum_n.filter(|&num| num > 1).unwrap_or(1);
             Some((
                 *s_idx,
@@ -4227,12 +4267,8 @@ fn write_description_table<W: Write>(
     let mut max_total = "Total".len();
     let mut max_sum_n = 1;
     for (index, (_, best, total, sum_n, _)) in rows.iter().enumerate() {
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4293-4310
-        // `highest_bits` starts at 0.0, so a subject whose HSPs all had invalidated scores (-1.0)
-        // displays 0.0 in the description table.
-        let best_bit_score = best.hit.bit_score.max(0.0);
-        max_score = max_score.max(format_bitscore_ncbi(best_bit_score).len());
-        max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
+        max_score = max_score.max(format_bitscore_ncbi(table_scores(*best).0).len());
+        max_evalue = max_evalue.max(format_evalue_ncbi(table_scores(*best).1).len());
         max_sum_n = max_sum_n.max(sum_n.to_string().len());
         let total_len = format_total_bitscore_ncbi(*total).len();
         if index + 1 == rows.len() && last_row_counted {
@@ -4294,7 +4330,7 @@ fn write_description_table<W: Write>(
         // the lines before it are written (`QueryWarnings::subject_read`).
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
         super::x_pairwise_par::end_here(end, index)?;
-        let bits = format_bitscore_ncbi(best.hit.bit_score.max(0.0));
+        let bits = format_bitscore_ncbi(table_scores(*best).0);
         match html {
             None => {
                 label_of(*s_idx).write_cut(writer)?;
@@ -4325,7 +4361,7 @@ fn write_description_table<W: Write>(
         write!(
             writer,
             "  {:<max_evalue$}",
-            format_evalue_ncbi(best.hit.e_value)
+            format_evalue_ncbi(table_scores(*best).1)
         )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
         if show_sum_n {
@@ -4390,12 +4426,12 @@ struct SortColumnValues {
 impl SortColumnValues {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4271-4306
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1525-1530
-    /// The columns of the subject whose HSPs are `hits` and whose best HSP (the first of the
-    /// highest bit score, `write_description_table`) is `best`: `GetSeqAlignSetCalcParams` with
-    /// `m_TranslatedNucAlignment` false (TBLASTX's identities over its nucleotide lengths). The
+    /// The columns of the subject whose HSPs are `hits` and whose shown HSP is `best`
+    /// (`shown_hsp`; without one NCBI's identities 0 over a length of 1): `GetSeqAlignSetCalcParams`
+    /// with `m_TranslatedNucAlignment` false (TBLASTX's identities over its nucleotide lengths). The
     /// cover is computed without NCBI's `int` product `100*master_covered_length`, which
     /// overflows above about 21 million covered letters.
-    fn of(hits: &[&PairwiseHit], best: &PairwiseHit, columns: SortColumns) -> Self {
+    fn of(hits: &[&PairwiseHit], best: Option<&PairwiseHit>, columns: SortColumns) -> Self {
         use super::hit_sort::{percent_identity, query_coverage, HspScores};
         let scores: Vec<HspScores> = hits.iter().map(|hit| HspScores::of(hit)).collect();
         let covered = query_coverage(&scores);
@@ -4404,11 +4440,14 @@ impl SortColumnValues {
         if percent_coverage > 100 {
             percent_coverage = percent_coverage.min(99);
         }
-        let best = HspScores::of(best);
-        let identity = percent_identity(
-            best.num_ident,
-            best.alignment_length(columns.tblastx, false),
-        );
+        let (num_ident, length) = best.map_or((0, 1), |best| {
+            let best = HspScores::of(best);
+            (
+                best.num_ident,
+                best.alignment_length(columns.tblastx, false),
+            )
+        });
+        let identity = percent_identity(num_ident, length);
         let mut percent_identity = (0.5 + identity) as i64;
         if percent_identity > 100 {
             percent_identity = percent_identity.min(99);
@@ -4736,7 +4775,10 @@ fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>
 ) -> io::Result<()> {
     // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
     crate::report::ostream::ncbi_endl(writer)?;
-    if let Some((ungapped, _)) = karlin {
+    // (A block that the results do not keep is not written, `stats::tables::ancillary_kept`.)
+    if let Some((ungapped, _)) =
+        karlin.filter(|(ungapped, _)| crate::stats::tables::ancillary_kept(ungapped.lambda))
+    {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, ungapped.lambda)?;
         write_ncbi_ka_field(writer, ungapped.k)?;
@@ -4746,7 +4788,10 @@ fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>
     writeln!(writer)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1130-1159
     // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
-    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
+    if let Some((_, gapped_block)) = karlin
+        .filter(|_| gapped)
+        .filter(|(_, gapped_block)| crate::stats::tables::ancillary_kept(gapped_block.lambda))
+    {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, gapped_block.lambda)?;
@@ -5025,14 +5070,15 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             let sort = self.config.sort;
             let hits_throw = sort.hits == Some(4)
                 && group.subject_order.len() >= 2
-                && group
-                    .subject_order
-                    .iter()
-                    .any(|s| group.subject_hits[s].iter().any(|h| h.query_left_of_record));
+                && group.subject_order.iter().any(|s| {
+                    group.subject_hits[s]
+                        .iter()
+                        .any(|h| h.query_left_of_record())
+                });
             let hsps_throw = sort.hsps == Some(2)
                 && group.subject_order.iter().any(|s| {
                     let hsps = &group.subject_hits[s];
-                    hsps.len() >= 2 && hsps.iter().any(|h| h.query_left_of_record)
+                    hsps.len() >= 2 && hsps.iter().any(|h| h.query_left_of_record())
                 });
             if hits_throw || hsps_throw {
                 writer.flush()?;
@@ -5055,9 +5101,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // lookup.
         let described = group.described(report.num_descriptions);
         if report.gapped
-            && described
-                .iter()
-                .any(|s| group.subject_hits[s].iter().any(|h| h.query_left_of_record))
+            && described.iter().any(|s| {
+                group.subject_hits[s]
+                    .iter()
+                    .any(|h| h.query_left_of_record())
+            })
         {
             if self.config.html.is_some() {
                 place(
@@ -6054,9 +6102,9 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 descriptions
                     .iter()
                     .any(|oid| {
-                        grouped[oid].iter().any(|hit| {
-                            matches!(hit.nullb_stop, Some(PairwiseNullbStop::StdSegLengths))
-                        })
+                        grouped[oid]
+                            .iter()
+                            .any(|hit| hit.edge == PairwiseEdge::NullbStdSegLengths)
                     })
                     .then_some(EmptyRowsStop::StdSegLengths)
             });
@@ -6125,11 +6173,11 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         let hits = &group.subject_hits[&s_idx];
         let stop = part
             .clone()
-            .find(|&hsp| matches!(hits[hsp].nullb_stop, Some(PairwiseNullbStop::StdSegLengths)));
+            .find(|&hsp| hits[hsp].edge == PairwiseEdge::NullbStdSegLengths);
         let written = part.start..stop.unwrap_or(part.end);
         let has_skip = hits
             .iter()
-            .any(|h| matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)));
+            .any(|h| h.edge == PairwiseEdge::NullbSkipTranslate);
         let heading = |subject| {
             group_heading(
                 group,
@@ -6212,7 +6260,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             .any(|s_idx| {
                 group.subject_hits[s_idx]
                     .iter()
-                    .any(|hit| matches!(hit.nullb_stop, Some(PairwiseNullbStop::StdSegLengths)))
+                    .any(|hit| hit.edge == PairwiseEdge::NullbStdSegLengths)
             });
         if stops {
             writer.flush()?;

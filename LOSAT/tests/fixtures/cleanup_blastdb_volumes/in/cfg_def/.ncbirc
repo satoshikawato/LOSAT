@@ -1,0 +1,3 @@
+[DEFAULT]
+BLASTDB = <RUN>/in/envdb
+[BLAST]

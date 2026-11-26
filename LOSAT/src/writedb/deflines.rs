@@ -181,37 +181,43 @@ fn parse_second_ids(
     Ok(vec![id])
 }
 
-/// `CBioseq::GetNonLocalId()` of a FASTA Bioseq: its best id by `s_BestNonLocalRank` if
-/// that is not local, else the non-local row of its Seq-hist alignment (an id with a
-/// range).
+/// `s_BestNonLocalRank`: ranks every non-local Seq-id by `best_rank_score` and local ids last.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:281-289
+pub(crate) fn best_non_local_rank(id: &ParsedSeqId) -> i32 {
+    if matches!(id, ParsedSeqId::Local(_)) {
+        i32::MAX - 1
+    } else {
+        best_rank_score(id)
+    }
+}
+
+/// `CBioseq::GetNonLocalId()` of a Bioseq: its best id by `s_BestNonLocalRank` if that is not
+/// local, else the non-local row paired with its local id in `Seq-hist.assembly`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:280-323
-/// The alignment of `CFastaReader::xCreateAlignment` has the generated `lcl|N` as its
-/// first row and the replaced id as its second; the generated id is the Bioseq's only id
-/// (the edits of `AddSequences` keep local ids), so the second row is returned when it is
-/// not local.
-fn non_local_id(parsed: &ParsedIds) -> Option<&ParsedSeqId> {
-    let score = |id: &ParsedSeqId| {
-        if matches!(id, ParsedSeqId::Local(_)) {
-            i32::MAX - 1
-        } else {
-            best_rank_score(id)
-        }
-    };
-    let best = find_best(&parsed.ids, score)?;
+fn non_local_id<'a>(
+    ids: &'a [ParsedSeqId],
+    hist_old_id: Option<&'a ParsedSeqId>,
+) -> Option<&'a ParsedSeqId> {
+    let best = find_best(ids, best_non_local_rank)?;
     if !matches!(best, ParsedSeqId::Local(_)) {
         return Some(best);
     }
-    let old = parsed.hist_old_id.as_ref()?;
-    let generated = parsed.ids.first()?;
+    let old = hist_old_id?;
+    let generated = ids.first()?;
     (generated == best && !matches!(old, ParsedSeqId::Local(_))).then_some(old)
 }
 
 /// `s_UseFastaReaderDeflines` of the bioseq and its deflines (`long_seqid` false).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:736-762
-fn use_fasta_reader_deflines(parsed: &ParsedIds, deflines: &DeflineSet) -> bool {
-    match non_local_id(parsed) {
+pub(crate) fn use_fasta_reader_deflines(
+    ids: &[ParsedSeqId],
+    hist_old_id: Option<&ParsedSeqId>,
+    deflines: &DeflineSet,
+) -> bool {
+    match non_local_id(ids, hist_old_id) {
         None | Some(ParsedSeqId::Prf(_)) | Some(ParsedSeqId::Pir(_)) => true,
         Some(_) => deflines.deflines.iter().any(|defline| {
             find_best(&defline.ids, best_rank_score)
@@ -235,7 +241,7 @@ pub fn extract_bioseq_deflines(bioseq: &Bioseq, warn: Warn<'_>) -> DeflineSet {
         .as_ref()
         .expect("a Bioseq read with -parse_seqids");
     if let Some(deflines) = second_parse(parsed, bioseq.is_aa, warn) {
-        if use_fasta_reader_deflines(parsed, &deflines) {
+        if use_fasta_reader_deflines(&parsed.ids, parsed.hist_old_id.as_ref(), &deflines) {
             return deflines;
         }
     }
@@ -310,19 +316,31 @@ pub(crate) struct BioseqDeflinesRead {
 /// The decoded binary `Blast-def-line-set`, noting empty `CRef<>` elements so the whole BER
 /// object finishes reading (emitting posts and any syntax errors in NCBI's order) before
 /// `s_CheckEmptyLists`, `FixTaxId`, or serialization checks run.
-struct DecodedBinaryDeflines {
-    set: DeflineSet,
-    null_defline: bool,
-    null_seqids: Vec<(usize, usize)>,
+pub(crate) struct DecodedBinaryDeflines {
+    pub(crate) set: DeflineSet,
+    pub(crate) null_defline: bool,
+    pub(crate) null_seqids: Vec<(usize, usize)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:777-808
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:722-733,777-808
 /// Decodes `Blast-def-line-set` from `header` through the single shared table-driven BER reader
-/// (`report::serial::asn_types`).
+/// (`report::serial::asn_types`), using `names` for stream refusal wording.
+pub(crate) fn decode_binary_deflines_with_names(
+    header: &[u8],
+    names: Names,
+) -> (Result<DecodedBinaryDeflines, ReadError>, Vec<Post>) {
+    let (mut decoded, posts) = ObjectStream::binary(SliceSource::new(header), names)
+        .read_typed(named::BLAST_DEF_LINE_SET, read_defline_set);
+    if let Ok(ref mut inner) = decoded {
+        inner.set.utf8 = posts.iter().any(|post| matches!(post, Post::Utf8Tag(_)));
+    }
+    (decoded, posts)
+}
+
+/// Decodes `Blast-def-line-set` from `header` with `Names::BINARY_DEFLINES`.
 fn decode_binary_deflines(header: &[u8]) -> (Result<DecodedBinaryDeflines, ReadError>, Vec<Post>) {
-    ObjectStream::binary(SliceSource::new(header), Names::BINARY_DEFLINES)
-        .read_typed(named::BLAST_DEF_LINE_SET, read_defline_set)
+    decode_binary_deflines_with_names(header, Names::BINARY_DEFLINES)
 }
 
 fn read_defline_set<I: Input>(r: &mut TypedReader<I>) -> R<DecodedBinaryDeflines> {
@@ -598,6 +616,35 @@ fn binary_header(descr: &[Seqdesc]) -> Result<Option<&[u8]>, BioseqDeflinesError
         }
     }
     Ok(None)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:560-589
+/// `s_CheckEmptyLists`: clears empty `memberships` and `links` lists on every definition line.
+pub(crate) fn strip_empty_lists(set: &mut DeflineSet) {
+    for defline in &mut set.deflines {
+        if defline.memberships.as_ref().is_some_and(Vec::is_empty) {
+            defline.memberships = None;
+        }
+        if defline.links.as_ref().is_some_and(Vec::is_empty) {
+            defline.links = None;
+        }
+    }
+}
+
+/// `second_parse` from a raw `CFastaReader` `DefLine` field string (escaped as stored in the user
+/// object) without constructing a `ParsedIds`.
+pub(crate) fn second_parse_field(
+    defline_field: &[u8],
+    is_aa: bool,
+    warn: Warn<'_>,
+) -> Option<DeflineSet> {
+    let parsed = ParsedIds {
+        ids: Vec::new(),
+        hist_old_id: None,
+        defline_field: defline_field.to_vec(),
+        title_descr: None,
+    };
+    second_parse(&parsed, is_aa, warn)
 }
 
 #[cfg(test)]

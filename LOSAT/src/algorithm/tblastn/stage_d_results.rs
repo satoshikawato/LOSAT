@@ -189,6 +189,7 @@ impl KappaResultHitList {
     fn sort_hsps_for_report(&mut self) {
         for list in &mut self.lists {
             sort_hsps_by_evalue(list);
+            seqalign_scores_of(list);
         }
     }
 
@@ -437,6 +438,22 @@ fn sort_hsps_by_evalue(list: &mut KappaResultList) {
         let (hsps, payloads) = paired.into_iter().unzip();
         list.hsps.hsps = hsps;
         list.payloads = payloads;
+    }
+}
+
+/// The E-values and bit scores of a list's HSPs as the Seq-align that NCBI makes of them carries
+/// them (`seqalign_scores`: a negative E-value is 0, a NaN one stays as the E-value that the
+/// Seq-align lacks, and a bit score below 0, which a PSSM whose gapped Karlin-Altschul block is
+/// not valid gives, is the readers' -1).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
+fn seqalign_scores_of(list: &mut KappaResultList) {
+    for linked in &mut list.hsps.hsps {
+        linked.evalue = crate::report::serial::seqalign::seqalign_scores(linked.evalue, 0.0).0;
+    }
+    for payload in &mut list.payloads {
+        payload.bit_score =
+            crate::report::serial::seqalign::seqalign_scores(0.0, payload.bit_score).1;
     }
 }
 

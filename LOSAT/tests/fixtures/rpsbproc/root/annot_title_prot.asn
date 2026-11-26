@@ -1,0 +1,299 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 79,
+              seq-data ncbieaa "MTQSVLLPPGPFTRRQAQAVTTTYSNITLEDDQGSHFRLVVRDTEGRMVWRAWNFEPDAGEGLNRYIRTSGIRTDTATR"
+            },
+            annot {
+              {
+                data locs {}
+              },
+              {
+                data ftable {
+                  {
+                    data gene { desc "ignored gene" },
+                    location null NULL
+                  },
+                  {
+                    data region "ignored region",
+                    location null NULL
+                  },
+                  {
+                    data prot { desc "only desc" },
+                    location null NULL
+                  },
+                  {
+                    data prot { name {} },
+                    location null NULL
+                  },
+                  {
+                    data prot { name { "proténame", "second alias" } },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              name "descr-name"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              :Seq-annot {
+                data ftable {
+                  :Seq-feat {
+                    data prot { name { "from ptr prot" } },
+                    location null NULL,
+                    title "ignored feat title"
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "", "second" } },
+                    location null NULL
+                  },
+                  {
+                    data prot { name { "later" } },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              title ""
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "not used" } },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              title "explicit title"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              NULL
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 4,
+              seq-data ncbieaa "MKTW"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "before null" } },
+                    location null NULL
+                  },
+                  NULL
+                }
+              },
+              NULL
+            }
+          }
+        }
+      },
+      subject database "Cdd",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -2 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "DbLength",
+          value big-integer 15821058
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 399285312
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 337
+          },
+          {
+            id str "blast_score",
+            value int 337
+          },
+          {
+            id str "e_value",
+            value real { 504742318164089, 10, -57 }
+          },
+          {
+            id str "bit_score",
+            value real { 133903752533461, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 60
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 63
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 891075949367089, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 488084
+            }
+          },
+          starts {
+            4,
+            0
+          },
+          lens {
+            70
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318894682407865, 10, -15 },
+        k { 132560830496981, 10, -15 },
+        h { 404681998198166, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 399285312",
+      "Effective search space used: 399285312",
+      "Length adjustment: 47"
+    }
+  }
+}

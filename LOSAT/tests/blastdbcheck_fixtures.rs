@@ -460,22 +460,21 @@ fn must_refuse(name: &str) -> bool {
 /// all non-overflow warnings (`a_ov2` `.msk` extension warning) and returning exit status 0.
 fn expected_widened(name: &str) -> Run {
     let alias_ok = |alias: &str, warn: &str| -> Vec<u8> {
-        format!(
-            "Writing messages to <stdout> at verbosity (Detailed)\n\
-             ISAM testing is ENABLED.\n\
-             Legacy testing is DISABLED.\n\
-             TaxID testing is DISABLED.\n\
-             Testing every 100-th OID.\n\
-             \n\
-             Testing 1 volume(s).\n\
-              <RUN>/cases/a/p5\n\
-              Result=SUCCESS. No errors reported for 1 volume(s).\n\
-             Testing 1 alias(es).\n\
-              <RUN>/cases/a/{alias}\n\
-             {warn}\
-              Result=SUCCESS. No errors reported for 1 alias(es).\n"
-        )
-        .into_bytes()
+        let mut s = String::from(concat!(
+            "Writing messages to <stdout> at verbosity (Detailed)\n",
+            "ISAM testing is ENABLED.\n",
+            "Legacy testing is DISABLED.\n",
+            "TaxID testing is DISABLED.\n",
+            "Testing every 100-th OID.\n",
+            "\n",
+            "Testing 1 volume(s).\n",
+            " <RUN>/cases/a/p5\n",
+            " Result=SUCCESS. No errors reported for 1 volume(s).\n",
+            "Testing 1 alias(es).\n",
+        ));
+        s.push_str(&format!(" <RUN>/cases/a/{alias}\n{warn}"));
+        s.push_str(" Result=SUCCESS. No errors reported for 1 alias(es).\n");
+        s.into_bytes()
     };
     let (out, rc): (Vec<u8>, i32) = match name {
         "a_ov1" => (alias_ok("ov1.pal", ""), 0),

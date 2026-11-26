@@ -12,8 +12,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "LOSAT"
 SPECS = {
-    "serial-command": ("wasm32-wasip1", ["--bin", "losat", "--no-default-features"], []),
-    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "losat", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
+    "serial-command": ("wasm32-wasip1", ["--bin", "losat", "--no-default-features", "--features", "no-web-abi-v1"], ["no-web-abi-v1"]),
+    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "losat", "--features", "wasm-threads,no-web-abi-v1"], ["parallel", "wasm-threads", "no-web-abi-v1"]),
     "threaded-reactor": ("wasm32-wasip1-threads", ["--lib", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
     "serial-reactor": ("wasm32-wasip1", ["--lib", "--no-default-features"], []),
 }

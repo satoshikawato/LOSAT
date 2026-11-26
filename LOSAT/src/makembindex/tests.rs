@@ -188,3 +188,56 @@ fn a_utf8_string_of_a_header_is_warned_in_the_volume_s_line() {
          update\ndone\ncreating @O@.01.idx...removed (empty)\n"
     );
 }
+
+/// `-show_filters` whose output is a closed pipe ends at once with exit status 0 and no extra
+/// message (NCBI 2.17.0 is ended by SIGPIPE; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+/// An earlier warning (such as `-stride` on a legacy index) still goes to stderr before
+/// `-show_filters` writes to stdout.
+#[test]
+fn show_filters_on_a_closed_pipe_ends_silently() {
+    fn broken_pipe() -> std::io::Error {
+        std::io::ErrorKind::BrokenPipe.into()
+    }
+    struct ClosedPipe;
+    impl std::io::Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(broken_pipe())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(broken_pipe())
+        }
+    }
+
+    let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/makembindex/in/mdb/m");
+    let input = OsString::from(input);
+    let words = [
+        OsString::from("-input"),
+        input.clone(),
+        OsString::from("-show_filters"),
+    ];
+    let mut err = Vec::new();
+    let status = run_with(&words, &mut std::io::empty(), &mut ClosedPipe, &mut err);
+    assert_eq!((status, String::from_utf8_lossy(&err).as_ref()), (0, ""));
+
+    let words_with_warn = [
+        OsString::from("-input"),
+        input,
+        OsString::from("-show_filters"),
+        OsString::from("-stride"),
+        OsString::from("5"),
+    ];
+    let mut err = Vec::new();
+    let status = run_with(
+        &words_with_warn,
+        &mut std::io::empty(),
+        &mut ClosedPipe,
+        &mut err,
+    );
+    assert_eq!(
+        (status, String::from_utf8_lossy(&err).as_ref()),
+        (
+            0,
+            "Warning: -stride has no effect upon legacy index creation\n"
+        )
+    );
+}

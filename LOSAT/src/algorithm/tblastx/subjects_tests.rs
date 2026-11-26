@@ -82,7 +82,8 @@ fn frames_of_records_are_those_of_their_letters_and_bases() {
 /// ncbi4na value of no base or of more than one.
 #[test]
 fn one_base_is_the_resolve_without_a_draw() {
-    use crate::core::blast_encoding::{resolve_ncbi4na_base, NcbiRandom};
+    use crate::core::blast_encoding::resolve_ncbi4na_base;
+    use crate::utils::random_gen::NcbiRandom;
     for byte in 0..=u8::MAX {
         let code = ncbi4na_of(byte);
         let known = ONE_BASE[usize::from(byte)];

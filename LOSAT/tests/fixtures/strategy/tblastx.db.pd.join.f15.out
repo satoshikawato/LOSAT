@@ -1,0 +1,152 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_tbx_snucl"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NM_000001.1",
+          "query_title": "first",
+          "query_len": 150,
+          "query_masking": [
+            {
+              "from": 2,
+              "to": 44
+            }
+          ],
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 576,
+            "hsp_len": 13,
+            "eff_space": 5661,
+            "kappa": 0.135736775792815,
+            "lambda": 0.316770964012546,
+            "entropy": 0.405800859700688
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_tbx_snucl"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NM_000001.1",
+          "query_title": "first",
+          "query_len": 150,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "sx1 plus strand gene"
+                }
+              ],
+              "len": 218,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.9808,
+                  "score": 22,
+                  "evalue": 1.26697,
+                  "identity": 5,
+                  "positive": 6,
+                  "query_from": 58,
+                  "query_to": 87,
+                  "query_frame": 1,
+                  "hit_from": 109,
+                  "hit_to": 138,
+                  "hit_frame": -3,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "PKIIRFTWHN",
+                  "hseq": "PAIIFPAFHN",
+                  "midline": "P II   +HN"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 12.5225,
+                  "score": 21,
+                  "evalue": 1.26697,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 143,
+                  "query_to": 163,
+                  "query_frame": 2,
+                  "hit_from": 79,
+                  "hit_to": 99,
+                  "hit_frame": -3,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "PVCFVWV",
+                  "hseq": "PVSDFWV",
+                  "midline": "PV   WV"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 12.5225,
+                  "score": 21,
+                  "evalue": 2.39231,
+                  "identity": 4,
+                  "positive": 5,
+                  "query_from": 82,
+                  "query_to": 99,
+                  "query_frame": 1,
+                  "hit_from": 116,
+                  "hit_to": 133,
+                  "hit_frame": -2,
+                  "align_len": 6,
+                  "gaps": 0,
+                  "qseq": "HNHPSL",
+                  "hseq": "NNFPSL",
+                  "midline": "+N PSL"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 576,
+            "hsp_len": 13,
+            "eff_space": 7191,
+            "kappa": 0.133956144488482,
+            "lambda": 0.317605957635731,
+            "entropy": 0.401214524497119
+          }
+        }
+      }
+    }
+  }
+]
+}

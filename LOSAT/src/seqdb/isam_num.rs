@@ -98,14 +98,15 @@ impl NumericIsam {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:136-145
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:161-175
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-224
     // The lookups open the volume's ISAM only for a volume with OIDs: the GIs' as the single
-    // lookups do (a failure to open is caught), the TIs' where both files are regular files
-    // (`IndexExists`), whose constructor's errors are not caught.
+    // lookups do (a failure to open is caught), the TIs' and PIGs' where both files are regular
+    // files (`IndexExists`), whose constructor's errors are not caught.
     /// The volume's ISAM of `kind` for the lookups of an id list (`x_OpenGiFile`,
-    /// `x_OpenTiFile`), and the trace-id ISAM of a single lookup: `None` where NCBI has none
-    /// ("... list specified but no ISAM file found").
+    /// `x_OpenTiFile`, `x_OpenPigFile`), and the trace-id ISAM of a single lookup: `None` where
+    /// NCBI has none ("... list specified but no ISAM file found").
     pub(crate) fn open_for_list(
         base: &Path,
         seqtype: SeqType,
@@ -130,6 +131,13 @@ impl NumericIsam {
                 let data_path = with_extension(base, seqtype, "td");
                 match super::isam::open_if_exists(&index_path, &data_path)? {
                     Some((index, data)) => Self::open_files(index, data, "TI").map(Some),
+                    None => Ok(None),
+                }
+            }
+            ListIsam::Pig => {
+                let (index_path, data_path) = Self::pig_file_names(base, seqtype);
+                match super::isam::open_if_exists(&index_path, &data_path)? {
+                    Some((index, data)) => Self::open_files(index, data, "PIG").map(Some),
                     None => Ok(None),
                 }
             }
@@ -398,6 +406,62 @@ impl NumericIsam {
         }
         Ok(())
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:219-302
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1428-1457
+    // Every data page is walked in order; each row's key is tested against the sorted negative
+    // list with parabolic search, and each row whose OID is below `vol_end` marks `oid + vol_start`
+    // visible when its key is listed and included when it is not.
+    /// `x_SearchNegativeMulti`: walks every row of the numeric ISAM and records each OID
+    /// (plus `vol_start`, where the row's OID is below `vol_end`) in `out` as visible when its key
+    /// is in `sorted_keys` and included otherwise.
+    pub(crate) fn negative_scan(
+        &self,
+        vol_start: u32,
+        vol_end: u32,
+        sorted_keys: &[i64],
+        out: &mut super::isam::NegativeOids,
+    ) -> Result<(), SeqDbError> {
+        debug_assert!(
+            sorted_keys.windows(2).all(|w| w[0] <= w[1]),
+            "sorted_keys sorted"
+        );
+        let term_size = self.term_size();
+        let term_len = term_size as usize;
+        let oid_off = if self.long_id { 8 } else { 4 };
+        let overflow = || SeqDbError::Format {
+            path: self.data.path().to_path_buf(),
+            message: "numeric ISAM OID plus the start of the volume overflows".to_string(),
+        };
+        let mut list_index = 0usize;
+        for sample_index in 0..self.num_samples {
+            let (start, count) = self.page(sample_index);
+            let begin = row_offset(term_size, start, 0);
+            let end = row_offset(term_size, start, count);
+            let page = self.data.read_range(begin, end)?;
+            for row in page.chunks_exact(term_len) {
+                let key = self.key_of(row);
+                let val = be_i32(&row[oid_off..]);
+                let found = if list_index < sorted_keys.len() {
+                    find_in_negative_list(sorted_keys, &mut list_index, key)
+                } else {
+                    false
+                };
+                if i64::from(val) < i64::from(vol_end) {
+                    let oid = (val as u32).checked_add(vol_start).ok_or_else(overflow)?;
+                    if i32::try_from(oid).is_err() {
+                        return Err(overflow());
+                    }
+                    if found {
+                        out.add_visible_oid(oid);
+                    } else {
+                        out.add_included_oid(oid);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A numeric ISAM opened for an id list's lookups or a single TI's ([`NumericIsam::open_for_list`]).
@@ -416,6 +480,8 @@ pub(crate) enum ListIsam {
     Gi,
     /// `.pti`/`.ptd`, `.nti`/`.ntd`.
     Ti,
+    /// `.ppi`/`.ppd`, `.npi`/`.npd`.
+    Pig,
 }
 
 /// One entry of a numeric id list (`CSeqDBGiList::SGiOid`, `STiOid`): the id and its OID, set by
@@ -465,6 +531,22 @@ fn set_translation(gis: &mut [NumOid], gi_index: &mut usize, key: i64, value: i3
         gis[*gi_index].oid = Some((value as u32).wrapping_add(vol_start));
         *gi_index += 1;
     }
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1428-1457
+/// `x_FindInNegativeList`: advances `index` past entries below `key` and reports whether `key` is
+/// at `index`.
+fn find_in_negative_list(ids: &[i64], index: &mut usize, key: i64) -> bool {
+    let ids_size = ids.len();
+    while *index < ids_size && ids[*index] < key {
+        *index += 1;
+        let mut jump = 2;
+        while *index + jump < ids_size && ids[*index + jump] < key {
+            *index += jump;
+            jump += jump;
+        }
+    }
+    *index < ids_size && ids[*index] == key
 }
 
 /// The byte offset of a row; past every file when a damaged header gives a row beyond 64 bits.

@@ -51,11 +51,16 @@ pub(crate) struct BlastnXml<'a> {
     pub taxdb_notes: crate::algorithm::common::database::TaxdbNotes,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
+    /// Whether the search is ungapped (`-ungapped`, Dense-diag Seq-aligns).
+    pub ungapped: bool,
     /// Whether the document ends with this call.
     pub epilog: bool,
     /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
     /// is not among them; the library takes several formats).
     pub only_xml2: bool,
+    /// Under `-parse_deflines`, the scopes of the call's queries, which say how each result is
+    /// shown (`query_batch::xml_show_of`); `None` otherwise.
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -75,10 +80,13 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     // XML is never streamed, `x_rpt_stream::Off::Xml`, so the call is the run's last) never
     // writes the `-subject` report of its last query, which NCBI holds back, unless another
     // format of the call (outfmt 5) writes it (`written_queries`).
+    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
+    let holds_back = xml.only_xml2 && document.holds_back();
     let reports = written_queries(
         xml.queries.len(),
         !xml.epilog,
-        xml.only_xml2 && document.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(xml.query_scopes, xml.queries.len()),
     );
     let has_hits = |q_idx: usize| {
         hit_lists
@@ -92,6 +100,14 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         false,
         &xml.messages,
         has_hits,
+        |q_idx| {
+            crate::blastinput::query_batch::names_unshown_in(
+                xml.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            )
+        },
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
@@ -111,18 +127,15 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
-    for (q_idx, record) in xml.queries.iter().enumerate() {
+    for q_idx in 0..xml.queries.len() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
-            // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
-            if q_idx < reports {
-                warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
-            }
         }
+        let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf)?;
+            document.unwritten(&mut buf, show.joins_held)?;
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),
@@ -130,17 +143,28 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..xml.queries.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
         let text = &texts[q_idx];
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
         let query = XmlQuery {
-            id: text.query_id(record.local_id.as_bytes()),
-            title: &text.title,
-            len: xml.searched_lengths[q_idx] as i32,
+            id: texts[label].query_id(xml.queries[label].local_id.as_bytes()),
+            title: &texts[label].title,
+            len: xml.searched_lengths[label] as i32,
             stats: xml.stats[q_idx],
             message: text.message.as_deref(),
             searched: xml.searched.get(q_idx).copied().unwrap_or(true),
             masks: xml.masks.get(q_idx).map_or(&[], Vec::as_slice),
+            joins_held: show.joins_held,
         };
         let hit_list = hit_lists.get(q_idx).and_then(Option::as_ref);
         let start = buf.len();
@@ -172,12 +196,13 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 posts.hit(sink.position(), &hit, lists[range.start].oid, |texts| {
                     if posting {
-                        taxdb_printer.at_names((q_idx, s_idx), subject, texts)
+                        taxdb_printer.at_names(subject, texts)
                     } else {
                         Ok(())
                     }
                 })?;
                 sink.hit(&hit, |hsps| {
+                    let q_offset = xml.query_records.record(q_idx).map_or(0, |r| r.offset);
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         let identities = read_num_ident(hsp.num_ident as i64, None);
                         if hsps.unaligned([XmlHsp::unaligned(
@@ -187,6 +212,16 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             identities,
                         )])? {
                             continue;
+                        }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:249-257
+                        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:197-199
+                        // An alignment whose query row starts below 0 in record coordinates becomes
+                        // an all-gap row 0 in the Dense-seg, so `GetSeqStart` throws `Row is empty`.
+                        if hsp.starts_left_of_record(q_offset, xml.ungapped) {
+                            return Err(crate::report::blast_xml::CaughtException(
+                                super::left_of_query::dense_seg_empty_row_start(),
+                            )
+                            .into());
                         }
                         xml_rows_into(
                             hsp,

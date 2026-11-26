@@ -890,6 +890,8 @@ def tool() -> list[dict]:
     # A registry file of the run's directory (`-conffile wm.ini`), which the run and its validation read.
     (directory / "wm.ini").write_text("[WINDOW_MASKER]\n")
     files["wm.ini"] = str(directory / "wm.ini")
+    (directory / "keep").write_text("k\n")
+    with_logs = {**files, "logs/keep": str(directory / "keep")}
     state, lines = 12345, [">big generated record\n"]
     letters = []
     for _ in range(TOOL_BIG_LETTERS):
@@ -1034,6 +1036,23 @@ def tool() -> list[dict]:
     add("ustat.dev_null", f"{mask} -in fa/dm2L_3k.fa -out /dev/null")
     add("refusal.out_existing", f"{mask} -in fa/dm2L_3k.fa -out fa/short.fa", failure="refusal")
     add("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", failure="refusal")
+    # -logfile against the run's real files (D19 cases t0-t4).
+    add("d19.t0_nofolder", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile logs/run.log", failure=True)
+    add("d19.t0_nofolder_clean", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out x.counts -logfile logs/run.log")
+    add("d19.t0_folder", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile logs/run.log",
+        failure=True, published=with_logs)
+    add("d19.t1_folder", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa", failure=True)
+    add("d19.t1_folder_slash", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/", failure=True)
+    add("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", failure="refusal")
+    add("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", failure="refusal")
+    add("d19.t3_stdout", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile /dev/stdout", failure=True)
+    add("d19.t3_stdout_counts", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -logfile /dev/stdout")
+    add("d19.t3_stdout_both", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out /dev/stdout -logfile /dev/stdout")
+    add("d19.t3_stdout_binary", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary -out - -logfile /dev/stdout")
+    add("d19.t4_space", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out x.counts -logfile ' run.log'")
+    add("d19.t4_slash", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out x.counts -logfile logs/")
+    add("d19.t4_out_dot", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./x.counts -logfile ./run.log")
+    add("d19.t4_out_up", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out fa/../x.counts -logfile fa/../run.log")
     # The help and the version words.
     for word in ("-h", "-help", "-xmlhelp", "-version", "-version-full", "-version-full-xml", "-version-full-json"):
         add(f"print{word}", word)
@@ -1063,7 +1082,10 @@ def tool() -> list[dict]:
             ("convert.stdin.out_dash", "-convert -in - -out -", True),
             ("ustat.ids_and_exclude_ids", f"{mask} -in fa/dm2L_3k.fa -ids ids/a.txt -exclude_ids ids/b.txt",
              "late_failure"),
-            ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False)):
+            ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False),
+            ("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", "refusal"),
+            ("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", "refusal"),
+            ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True)):
         add(f"validate.{case_id}", words, failure, kind="validate")
     return rows
 

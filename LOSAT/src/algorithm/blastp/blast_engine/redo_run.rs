@@ -1234,7 +1234,7 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
 /// strategy request. LOSAT gives NCBI's one-thread output at every `-num_threads`. The error names
 /// the batch's first query (`batch_start`, a query of this call: the search of all queries, the only
 /// call that runs `-use_sw_tback`, `x_query_block_plan`), as the error of a header file that a
-/// batch reaches does (`database::HeaderReadError`), whose batches before `search` searches again
+/// batch reaches does (`ErrorAfterBatchReports`), whose batches before `search` searches again
 /// and reports alone.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
@@ -1272,8 +1272,8 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
         "blastp",
         first_query.n > 0,
     );
-    super::database::HeaderReadError {
-        query: batch_start,
+    crate::blastinput::app::ErrorAfterBatchReports {
+        query: Some(batch_start),
         error,
         utf8,
     }
@@ -1295,8 +1295,8 @@ pub(in crate::algorithm::blastp) fn sw_endless(
     batch_start: usize,
     utf8: Option<super::database::Utf8Read>,
 ) -> anyhow::Error {
-    super::database::HeaderReadError {
-        query: batch_start,
+    crate::blastinput::app::ErrorAfterBatchReports {
+        query: Some(batch_start),
         utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
     }
@@ -1310,7 +1310,7 @@ pub(in crate::algorithm::blastp) fn sw_endless(
 /// splits no query), the error of the call's first query batch with a valid context, and `Ok` for
 /// a call without one or without `use_sw_tback`. The batches before it have no valid context, and
 /// NCBI reports them with their warnings and does not search them. As [`sw_batch_failed`], the
-/// error follows their reports (`database::HeaderReadError`), and a run without a searched batch
+/// error follows their reports (`ErrorAfterBatchReports`), and a run without a searched batch
 /// ends as NCBI's does. Exit status 1, its message.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
@@ -1336,13 +1336,10 @@ pub(super) fn sw_ungapped_check(
 #[inline(never)]
 fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
     // NCBI crashes at the redo's set-up, before its fetches read a header of the batch.
-    super::database::HeaderReadError {
-        query: batch_start,
-        error: crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(
-            "blastp",
-        ),
-        utf8: None,
-    }
+    crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+        batch_start,
+        crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error("blastp"),
+    )
     .into()
 }
 

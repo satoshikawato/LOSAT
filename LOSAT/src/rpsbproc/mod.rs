@@ -35,6 +35,7 @@ use std::io::{BufReader, Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
+use crate::report::serial::asn_types::read::{Post, PostSink};
 
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
@@ -254,6 +255,16 @@ impl Report {
     fn stopped(&mut self) -> bool {
         self.sync();
         self.failed.is_some()
+    }
+}
+
+/// What NCBI's reader posts while it reads an archive, written when it is posted (the stream's
+/// posts, `ArchiveStream::posts`): before rpsbproc uses the object, also when the object then
+/// fails to read. rpsbproc sets no prefix for the posts (`Post::line`).
+impl PostSink for Report {
+    fn post(&mut self, post: Post) {
+        self.before_post();
+        self.diag.post_bytes(&post.line(None));
     }
 }
 
@@ -576,9 +587,15 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:57-68
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
 // (`CSerialObject::x_GetVerifyData`, serialobject.cpp:180-221, reads `SERIAL_VERIFY_DATA_GET`
-// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
-// member is no longer a read error, and the getter of an unset member gives its default instead
-// of throwing `CUnassignedMember`. `YES`, `ALWAYS` and other values keep NCBI's default.)
+// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off
+// (`ncbi_environment::verification_off`): a missing member is no longer a read error, and the
+// getter of an unset member gives its default instead of throwing `CUnassignedMember`. `YES`,
+// `ALWAYS` and other values keep NCBI's default.)
+// rpsbproc refuses the whole run where the other programs refuse only an input that fails a check
+// (`ncbi_environment::ReadVerification`): its readers of the archive and of the BLAST XML report
+// read past members that they do not keep without checking them, where NCBI's check of a
+// missing mandatory member stops the read by default and only posts under these values; a run
+// whose input would pass the check is not told apart from one that would not.
 // `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value
 // when the input is an archive (`xml` false: a BlastOutput document has no `Seq-descr`).
 // The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
@@ -596,9 +613,7 @@ fn reader_variable(
         let changes = match name {
             "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => !xml,
             "SERIAL_VERIFY_DATA_READ" | "SERIAL_VERIFY_DATA_GET" => {
-                ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
-                    .iter()
-                    .any(|off| value.eq_ignore_ascii_case(off))
+                crate::blastinput::ncbi_environment::verification_off(&value)
             }
             _ => false,
         };
@@ -905,9 +920,8 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         )
     } else {
         run_sessions(
-            &mut report,
             &header,
-            ArchiveStream::new(input, &[first]),
+            ArchiveStream::new(input, &[first], &mut report),
             &data,
             args.mode(),
             args.show_families,
@@ -942,9 +956,8 @@ fn value_variant(value: &ParamValue) -> &'static str {
 // both (main:886-896 are not reached). The refusals that a session's request decides come
 // before anything of that session.
 fn run_sessions<R: Read>(
-    report: &mut Report,
     header: &[u8],
-    mut stream: ArchiveStream<R>,
+    mut stream: ArchiveStream<R, &mut Report>,
     data: &CddData,
     mode: DataMode,
     show_families: bool,
@@ -953,15 +966,20 @@ fn run_sessions<R: Read>(
 ) -> Outcome {
     // NCBI's function-static motif positions (`MotifCheck`): one list for the whole run.
     let mut motif_state = MotifState::default();
+    // The report is where the stream's posts go (`PostSink for Report`): the stream writes them
+    // while it reads an object, rpsbproc between the objects.
+    let report: &mut Report = stream.posts();
     report.write(header);
     report.line(&[b"DATA"]);
     let mut session = 0usize;
     let mut queries_done = 0usize;
     loop {
-        if report.stopped() {
+        if stream.posts().stopped() {
             return Outcome::Exit(E_OK);
         }
-        let archive = match stream.next_archive() {
+        let archive = stream.next_archive();
+        let report: &mut Report = stream.posts();
+        let archive = match archive {
             Ok(Some(archive)) => archive,
             Ok(None) => break,
             Err(refusal) => return Outcome::refused(refusal.message),
@@ -1112,6 +1130,7 @@ fn run_sessions<R: Read>(
         report.line(&[b"ENDSESSION\t", session_text.as_bytes()]);
         report.progress(&format!("RPSBlast session {session} done..."));
     }
+    let report: &mut Report = stream.posts();
     report.line(&[b"ENDDATA"]);
     report.progress(&format!("All done, {queries_done} queries processed\n"));
     Outcome::Exit(E_OK)

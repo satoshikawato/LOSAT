@@ -1305,8 +1305,8 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
 fn invalid_databases_give_ncbis_errors() {
     let error = open_error("alias_mixed", SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Format { message, .. }
-            if message == "DB list contains both Version 4 and Version 5 dbs"),
+        matches!(&error, SeqDbError::MixedVersions { .. })
+            && error.ncbi_message().as_deref() == Some(MIXED_VERSIONS.as_bytes()),
         "{error}"
     );
     let error = open_error("alias_loop_a", SeqType::Protein);
@@ -1607,6 +1607,23 @@ fn a_record_holds_a_seqid_where_any_line_has_one() {
         path
     )
     .unwrap());
+    // A line without its mandatory `seqid` member (a title only; a title and then a taxid; no
+    // member) or with a member out of order fails NCBI's read check: the full read reports it,
+    // so the walk counts it as holding one, even after a line whose list is empty.
+    let title_only = [
+        0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b't', 0, 0, 0, 0, 0, 0,
+    ];
+    assert!(holds_a_seqid(&title_only, path).unwrap());
+    assert!(holds_a_seqid(&set(&[&without, &title_only]), path).unwrap());
+    let title_taxid = [
+        0x30, 0x0c, 0x30, 0x0a, 0xa0, 0x03, 0x1a, 0x01, b't', 0xa2, 0x03, 0x02, 0x01, 0x07,
+    ];
+    assert!(holds_a_seqid(&title_taxid, path).unwrap());
+    assert!(holds_a_seqid(&[0x30, 0x02, 0x30, 0x00], path).unwrap());
+    let taxid_then_ids = [
+        0x30, 0x0b, 0x30, 0x09, 0xa2, 0x03, 0x02, 0x01, 0x07, 0xa1, 0x02, 0x30, 0x00,
+    ];
+    assert!(holds_a_seqid(&taxid_then_ids, path).unwrap());
     // An empty record is read as before; one cut short is the reader's error.
     assert!(holds_a_seqid(&[], path).unwrap());
     assert!(holds_a_seqid(&without[..without.len() - 4], path).is_err());
@@ -1794,9 +1811,10 @@ fn a_masklist_name_not_utf8_is_read_by_its_bytes() {
 }
 
 #[test]
-fn every_filtering_alias_key_is_rejected() {
+fn alias_filter_keys_open_or_refuse_as_ncbi() {
     let dir = temp_dir("keys");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    copy_database("prot_v5", &["pin", "psq", "phr", "pdb"], &dir);
     let name = dir.join("keyed").to_str().unwrap().to_string();
     // The id lists are read: a missing file is NCBI's memory map error, and a version 4
     // database reads no TAXIDLIST (it still makes NCBI scan the totals).
@@ -1820,17 +1838,55 @@ fn every_filtering_alias_key_is_rejected() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
-    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT stays refused.
-    std::fs::write(
-        dir.join("keyed.pal"),
-        "TITLE t\nDBLIST prot_v4\nMEMB_BIT 1\n",
-    )
-    .unwrap();
-    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("MEMB_BIT")),
-        "{error}"
-    );
+    // On a version 5 database, GILIST, TILIST, SEQIDLIST and TAXIDLIST are all read (a missing
+    // file is NCBI's memory map error).
+    let name_v5 = dir.join("keyed_v5").to_str().unwrap().to_string();
+    for key in ["GILIST", "TILIST"] {
+        std::fs::write(
+            dir.join("keyed_v5.pal"),
+            format!("TITLE t\nDBLIST prot_v5\n{key} 1\n"),
+        )
+        .unwrap();
+        let error = SeqDb::open(&name_v5, SeqType::Protein).unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::MemoryMap(message)
+                if String::from_utf8_lossy(message)
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR))),
+            "v5 {key}: {error}"
+        );
+    }
+    for key in ["SEQIDLIST", "TAXIDLIST"] {
+        std::fs::write(
+            dir.join("keyed_v5.pal"),
+            format!("TITLE t\nDBLIST prot_v5\n{key} 1\n"),
+        )
+        .unwrap();
+        let error = SeqDb::open(&name_v5, SeqType::Protein).unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Ncbi(_))
+                && error
+                    .to_string()
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR)),
+            "v5 {key}: {error}"
+        );
+    }
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT is read on both v4 and
+    // v5 and enables definition-line filtering (`drops_lineless_hits`) when non-zero.
+    for (alias_file, db_name, base) in [
+        ("keyed.pal", &name, "prot_v4"),
+        ("keyed_v5.pal", &name_v5, "prot_v5"),
+    ] {
+        for (bit, drops) in [(1, true), (0, false)] {
+            std::fs::write(
+                dir.join(alias_file),
+                format!("TITLE t\nDBLIST {base}\nMEMB_BIT {bit}\n"),
+            )
+            .unwrap();
+            let db = SeqDb::open(db_name, SeqType::Protein).unwrap();
+            assert_eq!(db.num_seqs(), 10);
+            assert_eq!(db.drops_lineless_hits(), drops);
+        }
+    }
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.
     std::fs::write(
@@ -2388,6 +2444,85 @@ fn header_members_lengths_and_bytes() {
     assert_eq!(deflines[0].title, b"p10#last ## protein#");
 }
 
+// D3c-3d: a header record without its mandatory seqid, read under `SERIAL_VERIFY_DATA_READ`.
+// NCBI's default read throws "member seqid expected"; with the check off it posts the member as
+// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`), alone
+// (`read_header`, `defline_set`) and in a piece (`visit_sequence_headers`). The decoder of the
+// ordinal ids takes such a record for one of parsed Seq-ids under every setting, and its readers
+// then read the whole set (`Volume::decode_header`). The other variable, the values that keep the
+// check, and the other records read as before.
+#[test]
+fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
+    use crate::blastinput::ncbi_environment::ReadVerification;
+    use std::ffi::OsStr;
+    let dir = temp_dir("unchecked-reads");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let path = dir.join("prot_v4.phr");
+    let mut bytes = std::fs::read(&path).unwrap();
+    // The first record, rewritten at its length with a longer title in place of the Seq-ids.
+    let first = defline_record(b"p01 first protein [Test organism]", &bl_ord_id(&[0]));
+    assert_eq!(&bytes[..first.len()], first.as_slice());
+    let title = first.len() - 14;
+    let mut record = vec![0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, title as u8];
+    record.extend(std::iter::repeat_n(b't', title));
+    record.extend_from_slice(&[0; 6]);
+    bytes[..first.len()].copy_from_slice(&record);
+    std::fs::write(&path, bytes).unwrap();
+    let name = dir.join("prot_v4").display().to_string();
+    let setting = |read: &str, get: &str| {
+        ReadVerification::of(
+            (!read.is_empty()).then_some(OsStr::new(read)),
+            (!get.is_empty()).then_some(OsStr::new(get)),
+        )
+    };
+    for (read, get, refused) in [
+        ("", "", false),
+        ("YES", "", false),
+        ("ALWAYS", "NO", false),
+        ("NO", "", true),
+        ("defvalue", "YES", true),
+    ] {
+        let mut db = SeqDb::open(&name, SeqType::Protein).unwrap();
+        db.refuse_unchecked_reads(&setting(read, get));
+        let ordinal = db.deflines(0).unwrap_err();
+        assert!(ordinal.is_parsed_seqids(), "{read:?} {get:?}: {ordinal}");
+        let errors = [
+            db.read_header(0).unwrap_err(),
+            db.defline_set(0).unwrap_err(),
+        ];
+        let mut visited = Vec::new();
+        db.visit_sequence_headers(db.header_ranges(10)[0], |ordinal, header| {
+            visited.push((ordinal, header.map(|_| 1)));
+            true
+        });
+        for error in errors
+            .iter()
+            .chain(visited.iter().filter_map(|(_, r)| r.as_ref().err()))
+        {
+            match error {
+                SeqDbError::Setting(text) => {
+                    assert!(refused, "{read:?} {get:?}");
+                    assert_eq!(
+                        text,
+                        &format!(
+                            "the environment variable SERIAL_VERIFY_DATA_READ={read} with a database header record that lacks a mandatory member"
+                        )
+                    );
+                }
+                SeqDbError::Ncbi(exception) => {
+                    assert!(!refused, "{read:?} {get:?}");
+                    assert!(exception.get_msg().ends_with(b"member seqid expected"));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(matches!(visited[0], (0, Err(_))));
+        assert!(visited[1..].iter().all(|(_, lines)| matches!(lines, Ok(1))));
+        assert_eq!(db.deflines(1).unwrap().len(), 1);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// `expected/date_pairs.tsv`: the date NCBI's blastdbcmd reports for a database
 /// of two volumes with the given date strings, or `ERROR` where it fails.
 #[test]
@@ -2876,7 +3011,6 @@ fn ncbis_errors_are_told_from_losats() {
     for message in [
         "Error: Not a valid version 4 or 5 database.",
         "Error: requested sequence type does not match DB.",
-        "DB list contains both Version 4 and Version 5 dbs",
         "Illegal configuration: DB alias files are mutually recursive.",
     ] {
         assert_eq!(
@@ -3354,9 +3488,41 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
     for text in [
         "Too many open files, please raise the open file limit",
         "Database memory map file error - CMemoryFile: Cannot memory map file 'x':No such file",
-        "Error: Not a valid version 4 or 5 database.",
+        "Illegal configuration: DB alias files are mutually recursive.",
         "Accessions to Oids lookup error in x",
     ] {
         assert_eq!(throw_site(text.as_bytes()), None, "{text}");
+    }
+    // The places that blastdbcheck 2.17.0 names (rows pp_p4_ver7, d_p4_pin_nucl_prot, a_gizero,
+    // pp_p5_pdb_cut and d_n5_no_ndb of row RG-D2b).
+    assert_eq!(place("Error: Not a valid version 4 or 5 database.").1, 182);
+    assert_eq!(
+        place("Error: requested sequence type does not match DB."),
+        (
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            223,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile"
+        )
+    );
+    assert_eq!(place("Specified file is empty.").1, 864);
+    assert_eq!(place("LMDB runtime error: MDB_INVALID").1, 95);
+    let missing = missing_lmdb_file(Path::new("/x/p5.pdb"));
+    let text = missing.ncbi_request_message().unwrap();
+    assert_eq!(throw_site(&text).map(|site| site.line), Some(88));
+    // A list of volumes of both versions names one of two throws (rows mix45_v4 and mix45_v5).
+    for (version4_after_version5, line) in [(true, 225), (false, 232)] {
+        let error = SeqDbError::MixedVersions {
+            path: PathBuf::from("/x/p4"),
+            version4_after_version5,
+        };
+        assert_eq!(
+            error.ncbi_message().as_deref(),
+            Some(MIXED_VERSIONS.as_bytes())
+        );
+        let site = error.throw_site().unwrap();
+        assert_eq!(
+            (site.line, site.function),
+            (line, Some("BLASTDB::ncbi::CSeqDBLMDBSet::CSeqDBLMDBSet"))
+        );
     }
 }

@@ -1,0 +1,18 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 0 and last 0 OIDs.
+
+Testing 1 volume(s).
+ <RUN>/in/p5
+  <RUN>/in/p5 / EndPoints: <testing 0 OIDs at each end>
+  <RUN>/in/p5 / EndPoints:     Failed during headers, oid 9: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbimpl.cpp", line 813: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBImpl::GetSeqIDs() - OID not found
+
+  <RUN>/in/p5 / EndPoints:       Status for OID 9: FAIL
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

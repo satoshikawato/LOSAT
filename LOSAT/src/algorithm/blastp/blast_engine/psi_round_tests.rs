@@ -25,3 +25,20 @@ fn only_a_shown_unsure_subject_is_refused() {
     let error = found.refuse_unsure_shown([0, 2]).unwrap_err().to_string();
     assert!(error.contains("gb|ABC12.1| and emb|ABC12.1|"), "{error}");
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545 (cited at
+// `seqalign_pssm_evalue`).
+#[test]
+fn the_pssm_reads_an_absent_evalue_as_10_and_any_negative_one_as_0() {
+    // A NaN, which the lists carry for the E-value that the Seq-align lacks: 10.
+    assert_eq!(seqalign_pssm_evalue(f64::NAN), 10.0);
+    assert_eq!(seqalign_pssm_evalue(-1.0), 0.0);
+    // A database of a negative size gives negative E-values, which are 0 in the Seq-align.
+    assert_eq!(seqalign_pssm_evalue(-3.5), 0.0);
+    assert_eq!(seqalign_pssm_evalue(-1.0e-200), 0.0);
+    assert_eq!(seqalign_pssm_evalue(1.0e-200), 0.0);
+    assert_eq!(seqalign_pssm_evalue(0.5), 0.5);
+    assert_eq!(seqalign_pssm_evalue(1.0e9), 10.0);
+    assert!(included(-3.5, 0.002));
+    assert!(!included(f64::NAN, 0.002));
+}

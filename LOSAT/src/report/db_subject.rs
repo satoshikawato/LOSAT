@@ -23,14 +23,13 @@ use crate::seqdb::DbSequence;
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
 };
-use crate::seqid::model::PatentNumber;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
 use super::blast_xml::HitTaxonomy;
 use super::defline::{
-    bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline, SourceTaxname,
-    UnknownEncoding,
+    bioseq_facts, bioseq_title_from_source, generate_bioseq_defline, BioseqFacts, Defline,
+    SourceTaxname, UnknownEncoding,
 };
 use super::html_ids::{self, HtmlHeading};
 
@@ -171,11 +170,16 @@ pub enum FoundInstead {
         instead: Option<DbSequence>,
         why: String,
     },
-    /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
-    /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
-    /// formatters stop, its prefetch catches the exception with its warning
-    /// (`ParsedSubject::prefetch_fails`).
-    ThrowsOnId(String),
+    /// The lookup throws this exception on the id itself before it reads a file
+    /// (`SeqidLookup::throws_on_id`: a `gnl|PIG|abc` or `gnl|BL_ORD_ID|zz` that makeblastdb stores
+    /// with a text tag, `CObject_id::GetId`'s `CInvalidChoiceSelection`; a `gnl|ti|xyz`,
+    /// `NStr::StringToInt8`'s `CStringException`): NCBI's prefetch catches it with its warning
+    /// (`ParsedSubject::prefetch_fails`), which ends its loads, and its formatters, which then
+    /// load the batch's subjects one by one, meet it where they load the subject
+    /// (`ParsedSubject::lookup_throws`): each format writes it as where a lookup fails on a file
+    /// with the prefetch off (`FormatThrow`, `HitLoad::Throws`; line DBID pfoff-7), and a run that
+    /// it ends ends with `Error: ` and its `what()`, exit status 255 (`cli::NativeError::exception`).
+    ThrowsOnId(crate::ncbi_exception::NcbiException),
 }
 
 /// What NCBI's scope can show for a subject by a weak match where its formatters read the
@@ -194,6 +198,15 @@ pub enum WeakMatch {
     /// The lookup of the sequences that could match weakly failed, with this message (LOSAT's
     /// lookup of the name alone; NCBI's scope makes none).
     Failed(String),
+    /// A Seq-align id with weak keys whose matches the reader of its header did not look for, in
+    /// a run whose every batch prefetches (`common::database::HeaderReader::found_instead`): its
+    /// reports read one by one only in a batch whose prefetch fails at a Seq-align id whose lookup
+    /// throws on the id (`common::database::BatchPrefetch::loads_one_by_one`), where NCBI's scope
+    /// may match it weakly to a sequence loaded before (by that prefetch too). Every reader of what
+    /// the scope shows for the subject one by one looks them up first
+    /// (`common::database::weak_sought`, as with the prefetch off; review 1 of line DBID pf7, M1),
+    /// so `fetched` never meets it there; it refuses it where a caller did not.
+    Unsought,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:832-880 (cited at
@@ -646,6 +659,20 @@ impl std::fmt::Display for LookupFailure {
     }
 }
 
+/// What NCBI does where it reads a subject whose lookup throws on the id itself
+/// (`FoundInstead::ThrowsOnId`), for the reason of LOSAT's refusal: its prefetch writes its warning
+/// and its formatters meet the exception where they load the subject, each format as where a
+/// lookup fails on a file with the prefetch off ([`LookupFailure::what_ncbi_does`]'s situation);
+/// where the run's formats refuse it (`refused`, [`FormatThrow::Refused`]), with the words of that
+/// situation ([`ThrowRefusal::words`]).
+fn throws_on_id_does(refused: Option<ThrowRefusal>) -> std::borrow::Cow<'static, str> {
+    const DOES: &str = "NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and its formatters fail to read it and stop or go on as each format does";
+    match refused {
+        Some(refused) => format!("{DOES}; {}", refused.words()).into(),
+        None => DOES.into(),
+    }
+}
+
 /// Why the reports can show apart a copy of a subject with the same definition lines but for
 /// their taxids (`FoundInstead::CopyApart`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -810,6 +837,13 @@ impl ParsedSubject {
     pub fn weak_match(mut self, weak: Option<WeakMatch>) -> Self {
         self.weak_match = weak;
         self
+    }
+
+    /// Whether the reader of the subject's header did not look for its weak matches
+    /// (`WeakMatch::Unsought`), which `common::database::weak_sought` looks for where a report
+    /// may load it one by one.
+    pub fn weak_unsought(&self) -> bool {
+        self.weak_match == Some(WeakMatch::Unsought)
     }
 
     /// The subject with `holder`, another sequence that holds an id NCBI's scope takes for the
@@ -1084,13 +1118,17 @@ impl ParsedSubject {
     // outside any `catch` of the hit; the report function of outfmt 15 and 16 catches it, 13 and 14
     // end the program with it (probe of line DBID mixdb, `PU.off`; DECISIONS 62 (2)).
     /// The exception that NCBI's lookup of the Seq-align id throws where a formatter loads the
-    /// subject one by one (a batch whose prefetch is off): a lookup that fails on a file with
-    /// NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
-    /// `LookupFailure::exception`). Where the batch prefetches, its prefetch throws first and
-    /// stops the run (`prefetch_stops`).
+    /// subject one by one (a batch whose prefetch is off, or fails): a lookup that fails on a file
+    /// with NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
+    /// `LookupFailure::exception`; where the batch prefetches, its prefetch throws first and
+    /// stops the run, `prefetch_stops`), or one that throws on the id itself
+    /// (`FoundInstead::ThrowsOnId`, whose prefetch catches it, `prefetch_fails`). The one owner of
+    /// "the load by this id throws": the walk of the reports' loads (`HitLoads`) and every
+    /// writer's answer to it (`FormatThrow`) take it, whatever the cause.
     pub fn lookup_throws(&self) -> Option<crate::ncbi_exception::NcbiException> {
         match &self.found_instead {
             Some(FoundInstead::Failed(failure)) => failure.exception(),
+            Some(FoundInstead::ThrowsOnId(exception)) => Some(exception.clone()),
             _ => None,
         }
     }
@@ -1176,6 +1214,10 @@ impl ParsedSubject {
                 "has the Seq-align id {}, for which LOSAT cannot look up the sequences that can match it weakly ({message}): in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format that NCBI BLAST+ 2.17.0 does not prefetch for), where NCBI BLAST+ 2.17.0 reads the reported sequences one by one, it can write the names and letters of such a sequence read before",
                 id()
             )),
+            Some(WeakMatch::Unsought) => Err(format!(
+                "has the Seq-align id {}, which ids of other sequences can match weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name), in a batch whose prefetch ends at another subject's Seq-align id whose lookup throws on the id itself (NCBI BLAST+ 2.17.0 writes Error pre-fetching sequence data, then reads the reported sequences one by one): NCBI BLAST+ 2.17.0 can write the names and letters of such a sequence read before for it, and LOSAT did not look those sequences up",
+                id()
+            )),
         }
     }
 
@@ -1234,8 +1276,10 @@ impl ParsedSubject {
                 "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
                 failure.what_ncbi_does(refused)
             ),
-            FoundInstead::ThrowsOnId(message) => format!(
-                "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
+            FoundInstead::ThrowsOnId(exception) => format!(
+                "has the Seq-align id {id}, whose lookup in the database throws on the id itself ({}; {})",
+                String::from_utf8_lossy(exception.get_msg()),
+                throws_on_id_does(refused)
             ),
             FoundInstead::Nothing => format!(
                 "has the Seq-align id {id}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)"
@@ -1272,9 +1316,10 @@ impl ParsedSubject {
             // The prefetch catches the exception of a failed lookup and writes its warning, or
             // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
             // Bioseq stop (`fetched`).
-            Some(FoundInstead::ThrowsOnId(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
-                String::from_utf8_lossy(&self.alignment_fasta())
+            Some(FoundInstead::ThrowsOnId(exception)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database throws on the id itself ({}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and its later loads of the batch's subjects are made one by one)",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                String::from_utf8_lossy(exception.get_msg())
             )),
             Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
                 "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
@@ -2263,88 +2308,6 @@ fn check_pairwise_record(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.txt:241-266 (the rows of the RefSeq
-// kinds that `x_SetFlags` tests; `3+6` is a prefix of three characters and six digits)
-/// The RefSeq kind that `CSeq_id::IdentifyAccession` gives `accession` where `x_SetFlags` tests
-/// it: a chromosome or ncRNA (`BioseqFacts::refseq_chromosome_or_ncrna`) or an mRNA
-/// (`BioseqFacts::refseq_mrna`).
-fn refseq_accession_kind(accession: &[u8]) -> Option<RefseqKind> {
-    if accession.len() < 3 || accession[2] != b'_' {
-        return None;
-    }
-    let digits = &accession[3..];
-    if !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let prefix = [
-        accession[0].to_ascii_uppercase(),
-        accession[1].to_ascii_uppercase(),
-    ];
-    match &prefix {
-        b"AC" | b"NC" | b"NR" if digits.len() == 6 => Some(RefseqKind::ChromosomeOrNcrna),
-        b"NM" | b"XM" if digits.len() == 6 || digits.len() == 9 => Some(RefseqKind::Mrna),
-        _ => None,
-    }
-}
-
-/// A RefSeq kind whose empty title `GenerateDefline` makes with its own function
-/// (`refseq_accession_kind`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RefseqKind {
-    /// `m_IsNC` or `m_IsNR`.
-    ChromosomeOrNcrna,
-    /// `m_IsNM`.
-    Mrna,
-}
-
-impl BioseqFacts {
-    /// Sets the flag of the RefSeq kind of `accession` (`refseq_accession_kind`), if any.
-    fn add_refseq_accession(&mut self, accession: Option<&[u8]>) {
-        match accession.and_then(refseq_accession_kind) {
-            Some(RefseqKind::ChromosomeOrNcrna) => self.refseq_chromosome_or_ncrna = true,
-            Some(RefseqKind::Mrna) => self.refseq_mrna = true,
-            None => {}
-        }
-    }
-}
-
-/// `BioseqFacts` of the Seq-ids `ids` of a Bioseq.
-pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
-    let mut flags = BioseqFacts::default();
-    for id in ids {
-        match id {
-            ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
-                flags.third_party = true;
-                flags.add_refseq_accession(text.accession.as_deref());
-            }
-            ParsedSeqId::Other(text)
-            | ParsedSeqId::Genbank(text)
-            | ParsedSeqId::Embl(text)
-            | ParsedSeqId::Ddbj(text) => {
-                flags.add_refseq_accession(text.accession.as_deref());
-            }
-            ParsedSeqId::Pdb(pdb) => {
-                let (chain_id, chain) = flags.pdb.get_or_insert_with(|| (Vec::new(), 0));
-                if let Some(id) = &pdb.chain_id {
-                    *chain_id = id.clone();
-                } else if let Some(value) = pdb.chain {
-                    *chain = value;
-                }
-            }
-            ParsedSeqId::Patent(patent) => {
-                let number = match &patent.cit.id {
-                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => {
-                        number.clone()
-                    }
-                };
-                flags.patent = Some((patent.seqid, patent.cit.country.clone(), number));
-            }
-            _ => {}
-        }
-    }
-    flags
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:336-359
 /// `s_WrapOutputLine`: `title`, with a newline after the first white space at or after each
 /// multiple of 60 bytes.
@@ -2774,6 +2737,38 @@ impl FormatThrow {
         }
     }
 
+    fn report_format(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        ReportFormat::from_number(parse_formatting_string(outfmt).ok()?.number)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
+    /// format is `outfmt` (`CBlastFormat::ResetScopeHistory` returns without emptying the scope
+    /// only for `eXml`, outfmt 5).
+    pub fn keeps_scope(outfmt: &str) -> bool {
+        Self::report_format(outfmt) == Some(crate::blastinput::app::ReportFormat::Xml)
+    }
+
+    /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
+    /// through `read_reported_taxonomy`.
+    pub fn is_xml2(outfmt: &str) -> bool {
+        Self::report_format(outfmt)
+            .and_then(super::blast_xml2::Xml2Kind::of)
+            .is_some()
+    }
+
+    /// `(keeps_scope, separate_xml2)` for the first format `outfmt` of a run (`None` when a call
+    /// has no output format): whether NCBI's formatter keeps its scope across query batches
+    /// ([`Self::keeps_scope`]), and whether any XML2/JSON format in the call is secondary
+    /// (`!Self::is_xml2`).
+    pub fn scope_flags(outfmt: Option<&str>) -> (bool, bool) {
+        match outfmt {
+            Some(outfmt) => (Self::keeps_scope(outfmt), !Self::is_xml2(outfmt)),
+            None => (false, false),
+        }
+    }
+
     /// The answer of two formats of one run: a refusal by either refuses, a format that reads
     /// nothing leaves the other's answer, and of two that write, the one that loads more after the
     /// throw (a subject is loaded where some report loads it), at the rows that either loads at,
@@ -3023,15 +3018,22 @@ pub enum HitLoad {
 }
 
 /// How one query's report reads its subjects in [`HitLoads::of`]: whether its batch's prefetch is
-/// off, so that the report loads each subject where it reaches it (`one_by_one`,
-/// `common::database::BatchPrefetch::reads_one_by_one`), and the query batch whose scope it reads
-/// in (`batch`: a number that the program gives each query batch of the run, the same in its
-/// record, `common::database::TaxdbRun::loads_before`; `None` for a report read in the scope of the
-/// report before, as `From<bool>` makes it: one query batch).
+/// off or fails, so that the report loads each subject where it reaches it (`one_by_one`,
+/// `common::database::BatchPrefetch::loads_one_by_one`), the query batch whose scope it reads in
+/// (`batch`: a number that the program gives each query batch of the run, the same in its record,
+/// `common::database::TaxdbRun::loads_before`; `None` for a report read in the scope of the report
+/// before, as `From<bool>` makes it: one query batch), and whether the batch's prefetch ran and
+/// failed at a subject whose lookup throws on the id (`prefetch_fails`,
+/// `ParsedSubject::prefetch_fails`; `one_by_one` then holds too): the prefetch may have loaded
+/// each other subject of the batch before the failure, in an order that LOSAT does not follow
+/// (`common::database::batch_prefetch` refuses such a batch where a load writes a text), so the
+/// walk takes every subject of the batch's reports whose load does not throw as loaded before
+/// them, a superset of the loads that NCBI's scope may hold there (line DBID pfoff-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReportRead {
     pub one_by_one: bool,
     pub batch: Option<usize>,
+    pub prefetch_fails: bool,
 }
 
 impl From<bool> for ReportRead {
@@ -3039,6 +3041,7 @@ impl From<bool> for ReportRead {
         ReportRead {
             one_by_one,
             batch: None,
+            prefetch_fails: false,
         }
     }
 }
@@ -3055,6 +3058,9 @@ pub struct HitLoads {
     /// (`HitLoad::Held`).
     held: std::collections::HashMap<usize, Option<DbSequence>>,
     unread: std::collections::HashSet<usize>,
+    /// The subjects that a batch's failed prefetch may have loaded (`ReportRead::prefetch_fails`)
+    /// and that no report reaches: loaded, but read by no report (`HitLoads::reached`).
+    prefetched_only: std::collections::HashSet<usize>,
     /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
     refused: Option<ThrowRefusal>,
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
@@ -3065,7 +3071,7 @@ pub struct HitLoads {
 impl HitLoads {
     /// The loads of the query reports `reports`, in the order of the reports: whether the
     /// query's batch has its prefetch off, so that its report loads each subject where it reaches
-    /// it (`one_by_one`, `common::database::BatchPrefetch::reads_one_by_one`), and the subject key
+    /// it (`one_by_one`, `common::database::BatchPrefetch::loads_one_by_one`), and the subject key
     /// of each of its HSP lists (or HSPs) in the report's order (`None` for an entry that shows
     /// nothing). The entries make `Hit`s as the XML writers make them (`blast_xml::hit_ranges`: a
     /// copy of one record that follows another joins its `Hit`, `joins_as_copy`; the entries of
@@ -3095,9 +3101,11 @@ impl HitLoads {
     ///   then the alignments load theirs up to the one that ends the run, if any
     ///   (`pairwise_report`); one whose batch prefetches gives its entries in any order.
     ///
-    /// A report whose batch prefetches loads every subject (a lookup that throws stops the
-    /// prefetch first, `common::database::batch_prefetch_stop`). A subject is loaded where some
-    /// report loads it; one that throws in a report throws in every report that reaches it.
+    /// A report whose batch prefetches loads every subject (a lookup that fails on a file stops
+    /// the prefetch first, `common::database::batch_prefetch`); one whose batch's prefetch fails
+    /// at a lookup that throws on the id (`ReportRead::prefetch_fails`) reads one by one after the
+    /// batch's other subjects, each taken as loaded by that prefetch. A subject is loaded where
+    /// some report loads it; one that throws in a report throws in every report that reaches it.
     /// `run` (the run's answer, [`FormatThrow::of_formats`]; `None` for `Unread`) that does not
     /// write: a format of the run refuses the throw (`HitLoad::Refused`, with the reason) or none
     /// reads the subjects, and every subject is loaded (`ParsedSubject::fetched` refuses such a
@@ -3155,6 +3163,24 @@ impl HitLoads {
         };
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
+        let reports: Vec<(ReportRead, ReportKeys)> = reports
+            .into_iter()
+            .map(|(read, keys)| (read.into(), keys.into()))
+            .collect();
+        // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
+        // have loaded before its failure (`ReportRead::prefetch_fails`), and those of them noted
+        // (`prefetched`): loaded for the holders and the run's record, but read only where a
+        // report reaches them (review 1 of line DBID pf7, H1).
+        let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
+            Default::default();
+        let mut prefetched = std::collections::HashSet::new();
+        for (read, keys) in reports.iter().filter(|(read, _)| read.prefetch_fails) {
+            let subjects = failed_prefetches.entry(read.batch).or_default();
+            match keys {
+                ReportKeys::Entries(entries) => subjects.extend(entries.iter().flatten()),
+                ReportKeys::Pairwise(reads) => subjects.extend(reads.hits.iter().flatten()),
+            }
+        }
         // The reports given, of which the run reaches those before the first that comes after
         // its end (`reached`).
         let mut given = 0;
@@ -3163,10 +3189,20 @@ impl HitLoads {
                 loads.reached.get_or_insert(report);
             }
             given = report + 1;
-            let read: ReportRead = read.into();
             let one_by_one = read.one_by_one;
             seen.enter(read.batch);
-            let subjects = match keys.into() {
+            // The batch's prefetch, which the run reaches, may have loaded every subject of the
+            // batch whose load does not throw before it failed.
+            if let Some(keys) = failed_prefetches
+                .remove(&read.batch)
+                .filter(|_| read.prefetch_fails && !ended.get())
+            {
+                let keys = keys.into_iter().filter(|&key| {
+                    parsed(key).is_none_or(|subject| subject.lookup_throws().is_none())
+                });
+                note_loads(seen, &mut prefetched, keys, &parsed);
+            }
+            let subjects = match keys {
                 ReportKeys::Pairwise(reads) => {
                     debug_assert!(one_by_one && run.after.is_pairwise());
                     loads.pairwise_report(
@@ -3256,14 +3292,16 @@ impl HitLoads {
         if ended.get() {
             loads.reached.get_or_insert(given);
         }
-        loads.unread = passed
+        let (prefetched_only, unread) = passed
             .into_iter()
             .filter(|key| {
                 !loaded.contains(key)
                     && !loads.throws.contains_key(key)
                     && !loads.held.contains_key(key)
             })
-            .collect();
+            .partition(|key| prefetched.contains(key));
+        loads.prefetched_only = prefetched_only;
+        loads.unread = unread;
         loads
     }
 
@@ -3396,6 +3434,7 @@ impl HitLoads {
                 .filter_map(|(old, holder)| Some((key(old)?, holder)))
                 .collect(),
             unread: self.unread.into_iter().filter_map(&key).collect(),
+            prefetched_only: self.prefetched_only.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
         }
@@ -3420,9 +3459,12 @@ impl HitLoads {
     /// a subject that NCBI's scope gives another sequence for without the lookup
     /// (`HitLoad::Held`), which reads nothing new and which `ParsedSubject::fetched` refuses with
     /// the words of that sequence (the reads of the taxonomy texts, which BLASTN and TBLASTX
-    /// make before they ask `fetched`, would refuse it with the words of its failing lookup).
+    /// make before they ask `fetched`, would refuse it with the words of its failing lookup); nor
+    /// a subject that only a batch's failed prefetch may have loaded, which no report reaches
+    /// ([`HitLoads::reached`]): no row, `Hit` or name of it is written, so none looks it up.
     pub fn loaded(&self, key: usize) -> bool {
         matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
+            && !self.prefetched_only.contains(&key)
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
@@ -3443,8 +3485,11 @@ impl HitLoads {
     /// though nothing of the subject is loaded (`loaded`: no taxonomy text, no definition line).
     /// A subject that NCBI's scope gives a sequence loaded before for (`HitLoad::Held`, where no
     /// lookup is made) is reached too: `ParsedSubject::fetched` refuses it, so no read is written.
+    /// A subject that a batch's failed prefetch may have loaded is loaded (`load`), but reached
+    /// only where a report reaches it: one shown only after a `Hit` that threw is read by no
+    /// report, and its texts are the prefetch's or none (review 1 of line DBID pf7, H1).
     pub fn reached(&self, key: usize) -> bool {
-        self.load(key) != HitLoad::Unread
+        self.load(key) != HitLoad::Unread && !self.prefetched_only.contains(&key)
     }
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).

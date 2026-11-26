@@ -1691,35 +1691,43 @@ fn show_gis_is_a_flag_of_every_search_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+// `-html` is a flag of all eight search programs (items T4a2, T4c1 and T4c2 of line RG).
 #[test]
-fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
-        assert!(parse(program, &["-html"]).is_ok(), "{program}");
-        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
-        let given = match parse(program, &["-html"]).unwrap().command {
+fn html_is_a_flag_of_the_search_programs() {
+    for (program, target) in [
+        ("blastn", ["-subject", "s.fa"]),
+        ("blastp", ["-subject", "s.fa"]),
+        ("blastx", ["-subject", "s.fa"]),
+        ("tblastn", ["-subject", "s.fa"]),
+        ("tblastx", ["-subject", "s.fa"]),
+        ("psiblast", ["-subject", "s.fa"]),
+        ("rpsblast", ["-db", "d"]),
+        ("rpstblastn", ["-db", "d"]),
+    ] {
+        let parse_with = |extra: &[&str]| {
+            let mut argv = vec!["losat", program, "-query", "q.fa", target[0], target[1]];
+            argv.extend_from_slice(extra);
+            try_parse_from(argv)
+        };
+        assert!(parse_with(&["-html"]).is_ok(), "{program}");
+        assert!(parse_with(&["-html", "true"]).is_err(), "{program}");
+        let html_of = |command: Commands| match command {
             Commands::Blastn(args) => args.html,
             Commands::Blastp(args) => args.html,
             Commands::Blastx(args) => args.html,
             Commands::Tblastn(args) => args.html,
             Commands::Tblastx(args) => args.html,
+            Commands::Psiblast(args) => args.html,
+            Commands::Rpsblast(args) => args.html,
+            Commands::Rpstblastn(args) => args.html,
             _ => panic!("{program}"),
         };
-        let absent = match parse(program, &[]).unwrap().command {
-            Commands::Blastn(args) => args.html,
-            Commands::Blastp(args) => args.html,
-            Commands::Blastx(args) => args.html,
-            Commands::Tblastn(args) => args.html,
-            Commands::Tblastx(args) => args.html,
-            _ => panic!("{program}"),
-        };
-        assert!(given && !absent, "{program}");
+        assert!(
+            html_of(parse_with(&["-html"]).unwrap().command),
+            "{program}"
+        );
+        assert!(!html_of(parse_with(&[]).unwrap().command), "{program}");
     }
-    let error = parse("psiblast", &["-html"]).unwrap_err().to_string();
-    assert!(
-        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
-        "{error}"
-    );
 }
 
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
@@ -1727,11 +1735,11 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-gilist", "ids.gil"][..]),
-        ("tblastx", &["-gilist", "ids.gil"]),
-        ("blastp", &["-gilist", "ids.gil"]),
+        ("tblastn", &["-import_search_strategy", "s.asn"][..]),
+        ("tblastx", &["-import_search_strategy", "s.asn"]),
+        ("blastp", &["-import_search_strategy", "s.asn"]),
     ] {
-        // With a database (`-gilist` excludes `-subject` in NCBI's reader).
+        // With a database (`-import_search_strategy` remains refused).
         let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
         argv.extend(words);
         let error = (parse_argv(argv).unwrap_err()).to_string();
@@ -2720,4 +2728,28 @@ fn use_index_parses_as_an_ncbi_boolean() {
     assert!(parse("blastp", &["-use_index", "false"]).is_err());
     assert!(parse("blastp", &["-index_name", "x"]).is_err());
     assert!(parse("blastn", &["-index_name", "x"]).is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+#[test]
+fn native_error_exception_truncates_what_at_first_nul() {
+    let site = crate::ncbi_exception::ThrowSite {
+        file: "src/objects/seq/../seqloc/Seq_id.cpp",
+        line: 2501,
+        kind: "CSeqIdException::eFormat",
+        function: Some("ncbi::objects::CSeq_id::Set"),
+    };
+    let plain = crate::ncbi_exception::NcbiException::new(site, b"Malformatted ID foo".to_vec());
+    let plain_err = crate::cli::NativeError::exception(&plain);
+    assert_eq!(plain_err.exit, 255);
+    assert_eq!(plain_err.message, b"Error: Malformatted ID foo\n\n");
+
+    let with_nul = crate::ncbi_exception::NcbiException::new(
+        site,
+        b"Malformatted ID \x00=\x00\x00\x00".to_vec(),
+    );
+    let nul_err = crate::cli::NativeError::exception(&with_nul);
+    assert_eq!(nul_err.exit, 255);
+    assert_eq!(nul_err.message, b"Error: Malformatted ID \n");
 }

@@ -53,7 +53,6 @@ fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
             .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
             .collect(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -89,7 +88,6 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         title: Vec::new(),
         sequence: b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -113,9 +111,11 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         positive: 1,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     };
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![lists
             .iter()
             .map(|&(oid, score)| HspList {
@@ -207,10 +207,13 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             false,
             crate::report::tabular::PrintedIds::default(),
             false,
-            false,
-            false,
+            crate::report::db_subject::ReportRead {
+                one_by_one: false,
+                batch: Some(0),
+                prefetch_fails: false,
+            },
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None, 0),
+            (crate::report::db_subject::FormatThrow::Unread, None),
         )
         .unwrap();
         let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -290,10 +293,13 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             false,
             crate::report::tabular::PrintedIds::default(),
             false,
-            false,
-            false,
+            crate::report::db_subject::ReportRead {
+                one_by_one: false,
+                batch: Some(0),
+                prefetch_fails: false,
+            },
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None, 0),
+            (crate::report::db_subject::FormatThrow::Unread, None),
         )
         .unwrap();
         for hsp in batches
@@ -316,7 +322,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
                     ),
                 ),
                 false,
-                false,
+                crate::algorithm::common::database::RowLookups::None,
                 None,
             )
             .unwrap();

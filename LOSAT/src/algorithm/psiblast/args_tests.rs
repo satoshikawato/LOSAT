@@ -147,9 +147,10 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    // Item PS15b-1: BLAST XML, the Seq-annots and the archive run; the formats of PS15b-2 are
-    // refused.
-    for format in ["5", "8", "9", "11"] {
+    // Items PS15b-1 and PS15b-2: BLAST XML, the Seq-annots, the archive, the query-anchored
+    // reports, the JSON Seq-aligns and the organism report run; the XML2 and JSON documents (the
+    // second part of PS15b-2) are refused.
+    for format in ["1", "2", "3", "4", "5", "8", "9", "11", "12", "18"] {
         assert!(
             parse(&["-outfmt", format])
                 .unwrap()
@@ -158,7 +159,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "outfmt {format}"
         );
     }
-    for format in ["1", "3", "4", "12", "15", "16", "18"] {
+    for format in ["15", "16"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()
@@ -305,17 +306,14 @@ fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
 
 #[test]
 fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-    for (option, value) in [("-phi_pattern", Some("x")), ("-html", None)] {
-        let mut extra = vec![option];
-        extra.extend(value);
-        let error = parse(&extra).unwrap_err();
-        assert!(
-            error.contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's PSIBLAST"
-            )),
-            "{option}: {error}"
-        );
-    }
+    let error = parse(&["-phi_pattern", "x"]).unwrap_err();
+    assert!(
+        error.contains("the NCBI BLAST+ option -phi_pattern is not supported by LOSAT's PSIBLAST"),
+        "-phi_pattern: {error}"
+    );
+    // `-html` (line RG item T4c2) is accepted and forwarded to blastp's search.
+    assert!(!parse(&[]).unwrap().into_blastp_args().unwrap().html);
+    assert!(parse(&["-html"]).unwrap().into_blastp_args().unwrap().html);
     // `-in_pssm` (PS4a) is an argument: with `-query` it is NCBI's reader's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();

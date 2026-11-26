@@ -1,5 +1,6 @@
 // The words for what an input that is not the user's file as given is made of (InputSnapshot.from; line WQA's D22,
 // 2026-11-23): the run's Run details, its header and its Outputs say which records a file left out.
+import type { RecordKey } from 'losat/domain';
 import type { InputPart } from './run';
 
 /** The most IDs a sentence names, and a part keeps; the rest are counted. */
@@ -55,4 +56,45 @@ export function inputLabel(input: { readonly name: string; readonly from?: reado
   if (input.from === undefined) return input.name;
   const names = input.from.map((part) => part.name).join(' + ');
   return leavesOut(input.from) ? `${names}, some records left out` : names;
+}
+
+/**
+ * Explains when the engine's reading of an assembled input (`readRecords`) differs from the
+ * per-file record tables (`tableRecords`) because NCBI's line reader keeps line-end state across
+ * parts (line WQA's D17). Undefined when they agree.
+ */
+export function readDifferenceText(
+  tableRecords: readonly RecordKey[],
+  readRecords: readonly RecordKey[] | undefined,
+  partCount: number,
+): string | undefined {
+  if (readRecords === undefined) return undefined;
+  const multiple = partCount > 1;
+  if (readRecords.length !== tableRecords.length) {
+    if (multiple) {
+      return `Read as one file, as the command line reads it, these give ${records(readRecords.length)} (${count(tableRecords.length)} when each file is read alone).`;
+    }
+    return `Read as one file, as the command line reads it, this selection gives ${records(readRecords.length)} (${count(tableRecords.length)} in the record table).`;
+  }
+  let diffCount = 0;
+  let first = -1;
+  for (let i = 0; i < tableRecords.length; i++) {
+    const want = tableRecords[i]!;
+    const got = readRecords[i]!;
+    if (want.id !== got.id || want.length !== got.length) {
+      if (first < 0) first = i;
+      diffCount++;
+    }
+  }
+  if (diffCount === 0) return undefined;
+  const want = tableRecords[first]!;
+  const got = readRecords[first]!;
+  const nameOf = (record: RecordKey) => (record.id === '' ? 'untitled' : `"${record.id}"`);
+  const detail =
+    want.id === got.id
+      ? `${want.id === '' ? `record ${first + 1}` : `record ${first + 1} (${want.id})`}: length ${count(got.length)} instead of ${count(want.length)}`
+      : `record ${first + 1}: ${nameOf(got)} (length ${count(got.length)}) instead of ${nameOf(want)} (length ${count(want.length)})`;
+  const target = multiple ? 'reading each file alone' : 'the record table';
+  const subject = diffCount === 1 ? '1 record differs' : `${count(diffCount)} records differ`;
+  return `Read as one file, as the command line reads it, ${subject} from ${target} (${diffCount === 1 ? detail : `first: ${detail}`}).`;
 }

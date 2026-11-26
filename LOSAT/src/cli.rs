@@ -149,6 +149,8 @@ fn entry_program_description(name: &str) -> &'static str {
         "makembindex" => "Create a BLAST database index.",
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         "blastdb_aliastool" => "Application to create BLAST database aliases",
+        "blastdbcheck" => "BLAST database integrity and validity checking application",
+        "cleanup-blastdb-volumes.py" => "Remove needless BLAST database volumes.",
         _ => "",
     }
 }
@@ -652,11 +654,17 @@ impl fmt::Display for NativeError {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 impl std::error::Error for NativeError {}
 
-/// Whether `error` is `NativeError::silent_end`.
+/// Whether `error` is `NativeError::silent_end` (including a writer's `StrategyWriteFault`).
 pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<NativeError>()
-        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+    NativeError::caught(error).is_some_and(|native| native.exit == 0 && native.message.is_empty())
+}
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
+/// The C-string prefix of `bytes` up to its first NUL byte (`const char *` output of
+/// `CException::what()`).
+pub(crate) fn c_string(bytes: &[u8]) -> &[u8] {
+    bytes.split(|&byte| byte == 0).next().unwrap_or_default()
 }
 
 impl NativeError {
@@ -675,15 +683,19 @@ impl NativeError {
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
-    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
-    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
-    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
-    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
-    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
-    /// errors of those codes are `common::database::database_error`'s). The one producer of these
-    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// BLAST program: `Error: `, the exception's `what()` as a C string (ending at the first NUL
+    /// byte, dropping any bytes and trailing line feed after it; without a NUL, `what()` ends
+    /// with a line feed) and the post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a
+    /// `CSeqDBException`, which `CATCH_ALL` catches before (its branch comes first),
+    /// `BLAST Database error: ` and its message, exit status 2 (`BLAST_DATABASE_ERROR`). Every
+    /// place of a `CSeqDBException` that LOSAT raises reports the code `eInvalid`
+    /// (`seqdb::throw_site`), so the texts of that branch for `eTooManyOpenFiles` and
+    /// `eMemoryMappingFailure` do not arise here (the reader's errors of those codes are
+    /// `common::database::database_error`'s). The one producer of these reports: an exception of
+    /// NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
@@ -691,9 +703,11 @@ impl NativeError {
                 message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
+        let what = e.what();
+        let what = c_string(&what);
         NativeError {
             exit: 255,
-            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
+            message: [b"Error: ".as_slice(), what, b"\n"].concat(),
         }
     }
 
@@ -748,16 +762,18 @@ impl NativeError {
     /// report's writer carries, where it carries one (`NcbiException::of_io_error`: raised
     /// mid-report by the `-html` registries, `report::formatter_registry`, by a subject's load
     /// that ends the run, `report::x_pairwise_par::end_here`, or by the merge of a query-anchored
-    /// section, `report::query_anchored::write_section`), whichever program wrote the report. The
+    /// section, `report::query_anchored::write_section` and
+    /// `report::query_anchored::write_unreadable_section`), whichever program wrote the report. The
     /// one mapping of such an error: at the programs' report boundaries (`of_writer`, BLASTX's
     /// `native::report_error`) and, through `caught`, at the command line's end
     /// (`exit_on_native_error`) and in the library's message (`api::error::chain_bytes`), so the
     /// library's bytes are the command line's.
     pub(crate) fn of_writer_exception<E: CaughtError + ?Sized>(error: &E) -> Option<NativeError> {
-        error
-            .find::<std::io::Error>()
-            .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-            .map(NativeError::exception)
+        let io = error.find::<std::io::Error>()?;
+        if crate::report::ostream::is_strategy_write_fault(io) {
+            return Some(NativeError::silent_end());
+        }
+        crate::ncbi_exception::NcbiException::of_io_error(io).map(NativeError::exception)
     }
 
     /// The report with which `CATCH_ALL` ends a run whose error (or one error of whose chain) is

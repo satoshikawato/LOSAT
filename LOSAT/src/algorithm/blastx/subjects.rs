@@ -134,7 +134,7 @@ impl<'a> Subjects<'a> {
         };
         let error = sequence_file_read_error(stream.db.seqdb(), "BLASTX")?;
         Some(match error.downcast::<PreliminaryReadError>() {
-            Ok(PreliminaryReadError(text)) => super::native::engine(text),
+            Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
             Err(refusal) => refusal,
         })
     }
@@ -259,16 +259,20 @@ impl<'a> Subjects<'a> {
     /// `MIN_SEQ_LENGTH`, 10 where it is not positive, without a list, the shortest sequence NCBI
     /// scans with one, DI-8b DECISIONS 21; BLASTX translates the query, so the value is not
     /// divided by 3, blast_setup.c:968-975).
-    pub(crate) fn shortest_length(&self) -> usize {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-975
+    pub(crate) fn shortest_length(&self) -> i32 {
         match self {
-            Subjects::Fasta(records) => records
-                .iter()
-                .map(|s| s.sequence.len())
-                .min()
-                .unwrap_or(0)
-                .max(BLAST_SEQSRC_MINLENGTH),
-            Subjects::Stream(stream) => usize::try_from(stream.db.min_length()).unwrap_or(0),
-            Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
+            Subjects::Fasta(records) => i32::try_from(
+                records
+                    .iter()
+                    .map(|s| s.sequence.len())
+                    .min()
+                    .unwrap_or(0)
+                    .max(BLAST_SEQSRC_MINLENGTH),
+            )
+            .unwrap_or(i32::MAX),
+            Subjects::Stream(stream) => stream.db.min_length(),
+            Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH as i32,
         }
     }
 

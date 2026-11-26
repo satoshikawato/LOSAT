@@ -7,12 +7,13 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords, userArgv } from '../domain/argv';
+import { commandWords, shellWord, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
-import { fromText, worthSaying } from '../domain/input-parts';
+import { fromText, readDifferenceText, worthSaying } from '../domain/input-parts';
 import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
+import { runInputRecords } from '../domain/run';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';
 import { NO_WARNINGS, warningsPlaceParts } from './message-place-text';
@@ -30,6 +31,9 @@ const record = computed(() => props.run.record);
  */
 const searched = computed(() => props.run.snapshot.prints === undefined);
 const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
+const commandEnv = computed(() =>
+  snapshot.value.database?.blastdbEnv ? { blastdb: snapshot.value.database.blastdbEnv } : undefined,
+);
 /** The -outfmt value of the output of the run's own -outfmt, if it has one. */
 const custom = computed(() => customOutfmt(snapshot.value.argv));
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
@@ -37,10 +41,17 @@ const time = (ms: number | undefined) => (ms === undefined ? '' : formatDateTime
 const duration = computed(() =>
   record.value.startedAt !== undefined && record.value.endedAt !== undefined ? formatDuration(record.value.endedAt - record.value.startedAt) : '',
 );
-/** The counts of a taxonomy ID: the file's name, the site it came from and the date of the file there. */
+/** The counts of a taxonomy ID: the file's name, its origin and date (downloaded or made in this browser). */
 const countsFile = COUNTS_FILE;
-const countsHost = computed(() => (record.value.windowMasker?.origin === undefined ? '' : new URL(record.value.windowMasker.origin.url).host));
-const countsDate = computed(() => dateOf(record.value.windowMasker?.origin?.lastModified));
+const countsHost = computed(() => {
+  const origin = record.value.windowMasker?.origin;
+  return origin?.kind === 'downloaded' ? new URL(origin.url).host : '';
+});
+const countsDate = computed(() => {
+  const origin = record.value.windowMasker?.origin;
+  if (origin === undefined) return undefined;
+  return origin.kind === 'made' ? new Date(origin.made.madeAt).toISOString().slice(0, 10) : dateOf(origin.lastModified);
+});
 /**
  * What Warnings says besides the diagnostics: where the run's warnings are when they went to the file of its -logfile or
  * nowhere, or that the engine wrote none (line WQA's sweep, D7, 2026-11-20).
@@ -48,10 +59,18 @@ const countsDate = computed(() => dateOf(record.value.windowMasker?.origin?.last
 const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, props.loaded.diagnostics, props.run));
 /** Whether those words say that the engine wrote no warnings (its place holds none). */
 const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
-const inputs = computed(() => [
-  { role: 'Query', input: snapshot.value.query },
-  { role: 'Subject', input: snapshot.value.subject },
-]);
+const inputs = computed(() => {
+  const roles: ReadonlyArray<{ readonly key: 'query' | 'subject'; readonly label: string }> = [
+    { key: 'query', label: 'Query' },
+    ...(snapshot.value.database === undefined ? [{ key: 'subject' as const, label: 'Subject' }] : []),
+  ];
+  return roles.map(({ key, label }) => {
+    const input = snapshot.value[key];
+    const records = runInputRecords(props.run, key);
+    const readDiff = readDifferenceText(input.records, record.value.readRecords?.[key], input.from?.length ?? 1);
+    return { key, role: label, input, records, readDiff };
+  });
+});
 </script>
 
 <template>
@@ -73,14 +92,47 @@ const inputs = computed(() => [
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
         <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
-        <template v-for="{ role, input } in searched ? inputs : []" :key="role">
+        <template v-for="{ key, role, input, records, readDiff } in searched ? inputs : []" :key="key">
           <dt>{{ role }}</dt>
-          <dd :data-testid="`run-input-${role.toLowerCase()}`">
-            {{ input.name }}: {{ formatCount(input.records.length) }} {{ input.records.length === 1 ? 'record' : 'records' }},
+          <dd :data-testid="`run-input-${key}`">
+            {{ input.name }}: {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }},
             {{ formatBytes(input.bytes.length) }}<br />
             <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
-            <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
+            <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${key}-from`">From {{ fromText(input.from) }}</span><br /></template>
+            <!-- Reading an assembled input as one file differed from the per-file tables (line WQA's D17). -->
+            <template v-if="readDiff !== undefined"><span :data-testid="`run-input-${key}-read-diff`">{{ readDiff }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.database">
+          <dt>Database</dt>
+          <dd data-testid="run-database">
+            <code>{{ snapshot.database.name }}</code> ({{ snapshot.database.kind }}, {{ formatCount(snapshot.database.fileCount) }}
+            {{ snapshot.database.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.database.totalBytes) }}<template
+              v-if="snapshot.database.taxdb || snapshot.database.sqlite"
+            >,
+              {{ [snapshot.database.taxdb ? 'taxdb' : '', snapshot.database.sqlite ? 'taxonomy4blast.sqlite3' : ''].filter(Boolean).join(' + ') }}</template
+            >)
+            <template v-if="snapshot.database.blastdbEnv">
+              <br />
+              <span class="muted small" data-testid="run-database-blastdb">
+                CLI reproduction: run from the folder's parent with <code>{{ shellWord(`BLASTDB=${snapshot.database.blastdbEnv}`) }}</code>
+              </span>
+            </template>
+            <template v-if="snapshot.database.filterFiles && snapshot.database.filterFiles.length > 0">
+              <br />
+              <span class="muted small" data-testid="run-database-filters">
+                Filter lists:
+                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${f.name} (${formatBytes(f.size)})`).join(', ') }}
+              </span>
+            </template>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.filteringDb">
+          <dt>Repeats database</dt>
+          <dd data-testid="run-filtering-db">
+            <code>{{ snapshot.filteringDb.name }}</code> ({{ formatCount(snapshot.filteringDb.fileCount) }}
+            {{ snapshot.filteringDb.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.filteringDb.totalBytes) }})
           </dd>
         </template>
         <template v-if="snapshot.conffile">
@@ -125,15 +177,18 @@ const inputs = computed(() => [
         <template v-if="record.windowMasker">
           <dt>WindowMasker counts</dt>
           <dd data-testid="run-window-masker">
-            <!-- The counts of a taxonomy ID: the ID, the file and where it came from (the Last-Modified when it was downloaded). -->
-            <template v-if="record.windowMasker.origin">
+            <!-- The counts of a taxonomy ID: the ID, the file and where it came from (downloaded or made in this browser). -->
+            <template v-if="record.windowMasker.origin?.kind === 'downloaded'">
               {{ record.windowMasker.origin.taxid }}: {{ countsFile }} from {{ countsHost }}<template v-if="countsDate"> ({{ countsDate }})</template>,
+            </template>
+            <template v-else-if="record.windowMasker.origin?.kind === 'made'">
+              {{ record.windowMasker.origin.taxid }}: {{ countsFile }} made in this browser by run {{ record.windowMasker.origin.made.run }} ({{ countsDate }}),
             </template>
             <template v-else>{{ record.windowMasker.name }},</template>
             {{ formatBytes(record.windowMasker.size) }},
             {{ record.windowMasker.retained ? 'kept from the previous search' : `read for this search in ${formatMillis(record.windowMasker.loadMs)}` }}<br />
             <span class="muted small">SHA-256 {{ record.windowMasker.sha256 }}</span>
-            <template v-if="record.windowMasker.origin"><br /><span class="muted small" data-testid="run-window-masker-url">{{ record.windowMasker.origin.url }}</span></template>
+            <template v-if="record.windowMasker.origin?.kind === 'downloaded'"><br /><span class="muted small" data-testid="run-window-masker-url">{{ record.windowMasker.origin.url }}</span></template>
           </dd>
         </template>
         <template v-if="record.runtimeGeneration !== undefined">
@@ -155,10 +210,10 @@ const inputs = computed(() => [
       <h3>Command line</h3>
       <ul class="commands">
         <li v-for="format in loaded.description.formats" :key="format">
-          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
+          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format, commandEnv)" :takes-value="takesValue" /></code>
         </li>
         <li v-if="custom !== undefined">
-          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
+          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT, commandEnv)" :takes-value="takesValue" /></code>
         </li>
       </ul>
     </template>

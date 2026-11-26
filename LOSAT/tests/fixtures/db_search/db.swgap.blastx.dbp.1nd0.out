@@ -1,0 +1,82 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nest.faa
+           1 sequences; 380 total letters
+
+
+
+Query= f101n
+
+Length=570
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+0        96   ............................................................  155
+
+Query_1  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+0        156  ............................................................  215
+0        287                                      ........................  310
+
+Query_1  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+0        216  ............................................................  275
+0        311  ............................................................  370
+
+Query_1  541  AEMYAAACRD  570
+0        276  ..........  285
+0        371  ..........  380
+
+For reading frame +2 of query sequence:
+
+Query_1  494  CGSGTITIIM*SVWEG  541
+0        57   ..T...VTHAGE.I..  72
+
+For reading frame -1 of query sequence:
+
+Query_1  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+0        96   ............................................................  155
+              \                                                           
+              |                                                           
+              MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILI
+
+Query_1  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+0        156  ............................................................  215
+
+Query_1  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+0        216  ............................................................  275
+
+Query_1  541  AEMYAAACRD  570
+0        276  ..........  285
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: nest.faa
+    Posted date:  Nov 24, 2026  5:03 PM
+  Number of letters in database: 380
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

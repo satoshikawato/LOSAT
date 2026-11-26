@@ -79,7 +79,8 @@ CXX_STORAGE = {
     "unsigned int": "Uint4", "Int2": "Int2", "Int8": "Int8", "TGi": "Int8", "TEntrezId": "Int8",
     "TIntId": "Int8", "ncbi::TGi": "Int8", "ncbi::TEntrezId": "Int8", "ncbi::TIntId": "Int8",
     "Int4": "Int4", "NCBI_NS_NCBI::TGi": "Int8", "NCBI_NS_NCBI::TEntrezId": "Int8",
-    "NCBI_NS_NCBI::TIntId": "Int8",
+    "NCBI_NS_NCBI::TIntId": "Int8", "TTaxId": "Int4", "ncbi::TTaxId": "Int4",
+    "NCBI_NS_NCBI::TTaxId": "Int4",
 }
 ENUM_CONST = re.compile(r"\b(e\w+)\s*=\s*(-?\d+)")
 
@@ -98,6 +99,9 @@ def kind_of_args(args: str, aliases: dict[str, tuple[str, str]]) -> Optional[str
         return "String:Store"
     if "STL_CHAR_vector" in args:
         return "Octets"
+    # `BigInt, ()`: `SERIAL_REF_BigInt`, an Int8 (serial/serialimpl.hpp:114-116).
+    if re.search(r"\bBigInt\b", args):
+        return "Integer"
     if "(ENUM," in args:
         return "Enumerated|Integer"
     if re.search(r"\bC_\w+", args):
@@ -155,10 +159,31 @@ def kind_agrees(mine: str, ncbi: str) -> bool:
     return ncbi.startswith("?") and mine.replace("String:", "") in ncbi
 
 
+BASE_CLASS = re.compile(r"^class (?:NCBI_\w+ )?C(\w+)_Base\b", re.M)
+HEADERS: dict[Path, dict[str, list[Path]]] = {}
+
+
+def generated_headers(include: Path, type_name: str) -> list[Path]:
+    """The generated header of `type_name`: `<Type>_.hpp`, or, where datatool shortened the file
+    name (`Blast4-queue-search-request` is `Blast4_queue_search_reques_.hpp`), the header that
+    declares its class `C<Type>_Base`."""
+    stem = type_name.replace("-", "_")
+    direct = sorted(include.glob(f"*/{stem}_.hpp"))
+    if direct:
+        return direct
+    if include not in HEADERS:
+        index: dict[str, list[Path]] = {}
+        for path in sorted(include.glob("*/*_.hpp")):
+            for m in BASE_CLASS.finditer(path.read_text(encoding="latin-1")):
+                index.setdefault(m.group(1), []).append(path)
+        HEADERS[include] = index
+    return HEADERS[include].get(stem, [])
+
+
 def header_constants(include: Path, type_name: str) -> dict[str, int]:
     """The enum constants (`eRepr_raw` with the value 2) of the generated header of `type_name`."""
     out: dict[str, int] = {}
-    for path in include.glob(f"*/{type_name.replace('-', '_')}_.hpp"):
+    for path in generated_headers(include, type_name):
         for m in ENUM_CONST.finditer(path.read_text(encoding="latin-1")):
             out.setdefault(m.group(1), int(m.group(2)))
     return out
@@ -192,7 +217,7 @@ def blocks_by_key(objects: Path) -> tuple[
 def header_typedefs(include: Path, type_name: str) -> dict[str, set[str]]:
     """`T<Member>` -> the C++ types of its typedefs in the generated header of `type_name`."""
     out: dict[str, set[str]] = {}
-    for path in include.glob(f"*/{type_name.replace('-', '_')}_.hpp"):
+    for path in generated_headers(include, type_name):
         for m in TYPEDEF.finditer(path.read_text(encoding="latin-1")):
             out.setdefault(m.group(2), set()).add(m.group(1).strip())
     return out

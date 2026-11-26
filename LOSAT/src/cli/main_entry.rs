@@ -73,6 +73,15 @@ fn run_main_entry() -> Result<()> {
     // (`ncbi_app::args`): the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
+    // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:159-161
+    // `cleanup-blastdb-volumes.py` is a standalone Python script in NCBI BLAST+, not an NCBI C++
+    // Toolkit application, so it runs before `ApplicationStart`.
+    if argv
+        .get(1)
+        .is_some_and(|word| word == "cleanup-blastdb-volumes.py")
+    {
+        std::process::exit(crate::cleanup_blastdb_volumes::run(&argv[2..]));
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
     // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
     // windowmasker) has a usage
@@ -138,6 +147,11 @@ fn run_main_entry() -> Result<()> {
     // `losat blastdb_aliastool` too.
     if let Some(start) = started("blastdb_aliastool") {
         std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1555-1559
+    // `losat blastdbcheck` too.
+    if let Some(start) = started("blastdbcheck") {
+        std::process::exit(crate::blastdbcheck::run(&argv[2..], start));
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
     // (`cli::top_level`), which has no options of its own.

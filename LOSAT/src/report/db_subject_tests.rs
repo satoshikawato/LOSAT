@@ -1418,7 +1418,10 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     assert_eq!(read(&other), Ok(()));
     for found in [
         FoundInstead::Nothing,
-        FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+        FoundInstead::ThrowsOnId(crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Error: ... is not a valid ordinal id",
+        )),
         FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2)),
     ] {
         assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
@@ -1540,7 +1543,12 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
         Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
     ));
-    let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+    let throws = Some(FoundInstead::ThrowsOnId(
+        crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Invalid choice selection",
+        ),
+    ));
     assert!(matches!(
         prefetched(throws.clone()),
         Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
@@ -1984,26 +1992,53 @@ fn copies_of_one_record_are_joined_and_other_matching_ids_are_not() {
 
 #[test]
 fn refseq_accessions_whose_empty_titles_come_from_the_source() {
-    use RefseqKind::{ChromosomeOrNcrna, Mrna};
-    for (accession, kind) in [
-        ("NC_000001", Some(ChromosomeOrNcrna)),
-        ("AC_000001", Some(ChromosomeOrNcrna)),
-        ("NM_000001", Some(Mrna)),
-        ("NM_000000001", Some(Mrna)),
-        ("XM_000000001", Some(Mrna)),
-        ("NR_000001", Some(ChromosomeOrNcrna)),
-        ("NR_000000001", None),
-        ("NC_0000001", None),
-        ("NP_000001", None),
-        ("WP_000000001", None),
-        ("XR_000001", None),
+    use crate::seqid::model::{PdbSeqId, TextseqId};
+    let flags_of = |accession: &str| {
+        let id = ParsedSeqId::Other(TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            ..TextseqId::default()
+        });
+        let f = bioseq_facts(&[id]);
+        (
+            f.refseq_chromosome_or_ncrna,
+            f.refseq_mrna,
+            f.refseq_contig,
+            f.refseq_unique_prot,
+        )
+    };
+    for (accession, expected) in [
+        ("NC_000001", (true, false, false, false)),
+        ("AC_000001", (true, false, false, false)),
+        ("NM_000001", (false, true, false, false)),
+        ("NM_000000001", (false, true, false, false)),
+        ("XM_000000001", (false, true, false, false)),
+        ("NR_000001", (true, false, false, false)),
+        ("NR_000000001", (false, false, false, false)),
+        ("NC_0000001", (false, false, false, false)),
+        ("NP_000001", (false, false, false, false)),
+        ("NT_000001", (false, false, true, false)),
+        ("NZ_AA000001", (false, false, true, false)),
+        ("WP_000000001", (false, false, false, true)),
+        ("XR_000001", (false, false, false, false)),
     ] {
-        assert_eq!(
-            refseq_accession_kind(accession.as_bytes()),
-            kind,
-            "{accession}"
-        );
+        assert_eq!(flags_of(accession), expected, "{accession}");
     }
+    // NCBI keeps m_PDBChainID set when a later PDB Seq-id sets only m_PDBChain.
+    let pdb_facts = bioseq_facts(&[
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: None,
+            chain_id: Some(b"AA".to_vec()),
+            rel: None,
+        }),
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(b'B' as i32),
+            chain_id: None,
+            rel: None,
+        }),
+    ]);
+    assert_eq!(pdb_facts.pdb, Some((b"AA".to_vec(), b'B' as i32)));
 }
 /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
 fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
@@ -3117,6 +3152,7 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
             ReportRead {
                 one_by_one: true,
                 batch: Some(batch),
+                prefetch_fails: false,
             },
             ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
         )

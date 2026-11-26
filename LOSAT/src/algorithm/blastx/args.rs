@@ -201,7 +201,7 @@ impl BlastxArgs {
             subject: args.given_option("subject")?,
             subject_loc: args.given_option("subject_loc")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
@@ -347,6 +347,14 @@ impl ResolvedOptions {
         ProgramName::of(&self.rpstblastn)
     }
 
+    /// The program type of the run's results where BLASTX does not name it
+    /// (`report::record::RunRecord::program_type`): RPSTBLASTN's for an RPSTBLASTN run.
+    pub(crate) fn program_type(&self) -> Option<crate::report::record::ProgramType> {
+        self.rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81 (cited at
     // `report::tabular::TabularSpec::std`)
     /// The report the tabular writer writes (`tabular::write_blastx_tabular`): `tabular`, or for
@@ -470,7 +478,7 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:43-49
 /// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
 /// of BLASTX's report before it wrote them through the shared tabular writer.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",
@@ -545,7 +553,7 @@ pub struct ResolvedOptions {
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for rpstblastn, which has no `-html`.
+    /// without `-html` or any of those formats.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
@@ -621,6 +629,16 @@ impl ResolvedOptions {
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
 impl BlastxArgs {
+    /// The NCBI application (`options::RequestKind`): RPSTBLASTN when `rpstblastn` is set, else
+    /// BLASTX.
+    pub(crate) fn request_kind(&self) -> crate::report::archive::options::RequestKind {
+        if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::Blastx
+        }
+    }
+
     /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
     /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
     /// sets for such a search; a gapped one refuses the name first).
@@ -815,11 +833,7 @@ impl BlastxArgs {
         // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
         // formats keep their own delimiter, the tab or the comma (`TabularSpec::of_app`;
         // `delim=` is still checked).
-        let app = if self.rpstblastn.is_some() {
-            crate::report::archive::options::RequestKind::Rpstblastn
-        } else {
-            crate::report::archive::options::RequestKind::Blastx
-        };
+        let app = self.request_kind();
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of_app(format, choice, app))
             .map(crate::report::tabular::TabularSpec::intern);

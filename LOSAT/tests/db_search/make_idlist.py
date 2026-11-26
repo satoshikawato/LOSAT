@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST and SEQIDLIST
-(line RG, series D, D1c-1; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI BLAST+ 2.17.0's
-makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never runs NCBI).
+"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST, SEQIDLIST and
+TAXIDLIST (line RG, series D, D1c-1 and D1c-2; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI
+BLAST+ 2.17.0's makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never
+runs NCBI).
 
 Usage: make_idlist.py NCBI_BIN   (writes into the idlist directory next to this script; g.faa, g.map,
 n.fna, n.map, q.faa and nq.fna there are the committed sources, every other file is made again).
@@ -56,6 +57,19 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
   -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
   sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
+- `pw`, `nw` (line DBID pfoff-7): version 4 of pw.faa and of nw.fna (its back-translation) with parsed Seq-ids: gi 7001
+  (`ref|NP_7001.1|`), then the general ids PIG|abc (gi 7001's letters with 4 changes), ti|xyz, BL_ORD_ID|zz and xyz|77,
+  whose lookups as Seq-align ids throw on the id itself where the tag is a string (PIG, BL_ORD_ID: `CObject_id::GetId()`)
+  or not a number (ti); NCBI's prefetch of a batch fails there (`Error pre-fetching sequence data`) and its formats load
+  the subjects one by one. `pwq.faa` (and `pwq.fna`, back-translated) holds a query without hits, then one query per
+  sequence after the first (the PIG|abc query hits gi 7001 second).
+- `pwk` (review 1 of line DBID pf7, M1): version 4 of pwk.faa with parsed Seq-ids: PIG|abc, `ref|NP_7001.1|` (no gi)
+  and `sp|P69905.2|HBA_HUMAN` (pw's third sequence), whose name gives it weak keys: in the batch whose prefetch fails
+  at PIG|abc the formats load it one by one, and no other sequence's id matches it weakly.
+- `gp` (D6): version 5 of g.faa with parsed Seq-ids, taxids from g.map, and a PIG ISAM (`gp.ppi`, `gp.ppd`)
+  mapping PIGs 1001, 1002, 1005 and 2147483649 (>= 2^31) to OIDs 0, 2, 5 and 10, leaving the other OIDs without
+  a PIG; `gpx` is `gp` again with its `.ppd` 64 zero bytes longer than its index says (uninitialised PIG ISAM).
+  `q_bx.fna` is `q.faa` back-translated (BLASTX).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -71,7 +85,7 @@ OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
            "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
-           "lnq2.faa"}
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -87,6 +101,28 @@ def ti_bin4(tis):
 
 def ti_bin8(tis):
     return b"\xff\xff\xff\xfc" + struct.pack(">I", len(tis)) + b"".join(struct.pack(">q", t) for t in tis)
+
+
+def bsl_bin(ids, title="sq_v5", date="Nov 25, 2026  1:00 PM"):
+    """A version-0 binary Seq-id list (.bsl), as written by blastdb_aliastool -seqid_file_in."""
+    title_b = title.encode("ascii")
+    date_b = date.encode("ascii")
+    body = bytearray()
+    for raw in ids:
+        b = raw.encode("ascii")
+        assert len(b) < 255
+        body.append(len(b))
+        body.extend(b)
+    header_rest = (
+        struct.pack("<Q", len(ids))
+        + struct.pack("<I", len(title_b))
+        + title_b
+        + bytes([len(date_b)])
+        + date_b
+        + struct.pack("<Q", 0)
+    )
+    file_size = 1 + 8 + len(header_rest) + len(body)
+    return b"\x00" + struct.pack("<Q", file_size) + header_rest + bytes(body)
 
 
 LISTS = {
@@ -138,10 +174,40 @@ LISTS = {
     "ti_a4.bin": ti_bin4([1020, 1050]),
     "ti_a8.bin": ti_bin8([1020, 1050]),
     "ti_bad.bin": gi_bin([1020]),
-    # A taxid list (version 4 reads none).
+    # A taxid list (version 4 reads none; version 5 reads it through LMDB).
     "tx_a.txt": b"9606\n",
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST files.
+    "sq_v5.bsl": bsl_bin(["NP_000103.1", "NP_000118.1", "P10102.1", "loc7"], title="sq_v5"),
+    "sq_v5_zero.bsl": bsl_bin([], title="sq_v5_zero"),
+    "sq_v5_ver.txt": b"NP_000103\nLOC7\nNP_000118.1\n",
+    "sq_v5_unp.txt": b"sp||\nNP_000103.1\n",
+    "tx_b.txt": b"10090\n7227\n",
+    "tx_big.txt": b"9606\n5000000000\n",
+    "tx_unk.txt": b"999999\n",
+    "tx_empty.txt": b"",
+    "tx_alpha.txt": b"9606\nabc\n",
+    "tx_hash.txt": b"#c\n9606\n",
+    "tx_n.txt": b"10090\n7955\n",
+    "u_1abc.txt": b"1ABC\n",
+    "u_np103v.txt": b"NP_000103\n",
     # An OID list of OIDs 1, 2 and 3 of g.
     "m123.msk": (13).to_bytes(4, "big") + bytes([0b0111_0000, 0]),
+    # CLI -gilist / -negative_gilist / -ipglist / -negative_ipglist (D6).
+    "gi_zero.txt": b"0\n",
+    "gi_dup.txt": b"117\n102\n108\n102\n",
+    "gi_101.txt": b"101\n",
+    "gi_102.txt": b"102\n",
+    "gi_101_102.txt": b"101\n102\n",
+    "gi_long.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 101),
+    "ipg_a.txt": b"2147483649\n1001\n1005\n",
+    "ipg_a.bin": gi_bin([1001, 1005, 2147483649]),
+    "ipg_neg.txt": b"1001\n1002\n",
+    "ipg_all.txt": b"1001\n1002\n1005\n2147483649\n",
+    "ipg_zero.txt": b"0\n",
+    "ipg_unk.txt": b"99999\n",
+    "ipg_alpha.txt": b"1001\nabc\n",
+    "ipg_bad.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 1001),
+    "ipg_empty.txt": b"",
 }
 
 ALIASES = {
@@ -227,6 +293,60 @@ ALIASES = {
     "n_gi.nal": "TITLE gi n\nDBLIST n\nGILIST gi_n.txt\n",
     "n4_sq.nal": "TITLE sq n v4\nDBLIST n4\nSEQIDLIST sq_n.txt\n",
     "n4_gi.nal": "TITLE gi n v4\nDBLIST n4\nGILIST gi_n.txt\n",
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST over g, gm, gu, ln, lx and n.
+    "g_sq.pal": "TITLE sq v5\nDBLIST g\nSEQIDLIST sq_a.txt\n",
+    "g_sql.pal": "TITLE sq v5 walk\nDBLIST g\nSEQIDLIST sq_a.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_sqb.pal": "TITLE sq v5 bsl\nDBLIST g\nSEQIDLIST sq_v5.bsl\n",
+    "g_sqc.pal": "TITLE sq v5 forms\nDBLIST g\nSEQIDLIST sq_c.txt\n",
+    "g_sqd.pal": "TITLE sq v5 lower\nDBLIST g\nSEQIDLIST sq_d.txt\n",
+    "g_sqver.pal": "TITLE sq v5 ver\nDBLIST g\nSEQIDLIST sq_v5_ver.txt\n",
+    "g_squnp.pal": "TITLE sq v5 unparseable\nDBLIST g\nSEQIDLIST sq_v5_unp.txt\n",
+    "g_sqe.pal": "TITLE sq v5 empty\nDBLIST g\nSEQIDLIST sq_empty.txt\n",
+    "g_sqbe.pal": "TITLE sq v5 empty bsl\nDBLIST g\nSEQIDLIST sq_v5_zero.bsl\n",
+    "g_sqm.pal": f"TITLE sq v5 missing\nDBLIST g\nSEQIDLIST {MISSING}\n",
+    "g_sqml.pal": f"TITLE sq v5 missing walk\nDBLIST g\nSEQIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_sq_gi.pal": "TITLE gi b and sq v5\nDBLIST g\nGILIST gi_b.txt\nSEQIDLIST sq_a.txt\n",
+    "g_sq_tx.pal": "TITLE sq and tx v5\nDBLIST g\nSEQIDLIST sq_a.txt\nTAXIDLIST tx_a.txt\n",
+    "g_sq_sib.pal": "TITLE sq v5 sib\nDBLIST g_sq g_gb\n",
+    "g_sq_bare.pal": "TITLE sq v5 bare\nDBLIST g_sq g\n",
+    "g_tx.pal": "TITLE tx v5\nDBLIST g\nTAXIDLIST tx_a.txt\n",
+    "g_txl.pal": "TITLE tx v5 walk\nDBLIST g\nTAXIDLIST tx_a.txt\nNSEQ 8\nLENGTH 999\n",
+    "g_txb.pal": "TITLE tx b v5\nDBLIST g\nTAXIDLIST tx_b.txt\n",
+    "g_txbig.pal": "TITLE tx big v5\nDBLIST g\nTAXIDLIST tx_big.txt\n",
+    "g_txunk.pal": "TITLE tx unk v5\nDBLIST g\nTAXIDLIST tx_unk.txt\n",
+    "g_txe.pal": "TITLE tx empty v5\nDBLIST g\nTAXIDLIST tx_empty.txt\n",
+    "g_txel.pal": "TITLE tx empty v5 walk\nDBLIST g\nTAXIDLIST tx_empty.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_txalpha.pal": "TITLE tx alpha v5\nDBLIST g\nTAXIDLIST tx_alpha.txt\n",
+    "g_txhash.pal": "TITLE tx hash v5\nDBLIST g\nTAXIDLIST tx_hash.txt\n",
+    "g_txm.pal": f"TITLE tx missing v5\nDBLIST g\nTAXIDLIST {MISSING}\n",
+    "g_txml.pal": f"TITLE tx missing v5 walk\nDBLIST g\nTAXIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_tx_gr.pal": "TITLE tx range\nDBLIST g\nTAXIDLIST tx_a.txt\nFIRST_OID 1\nLAST_OID 5\n",
+    "g_tx_go.pal": "TITLE tx oidlist\nDBLIST g\nTAXIDLIST tx_a.txt\nOIDLIST m123.msk\n",
+    "g_tx_nest.pal": "TITLE tx over tx\nDBLIST g_tx\nTAXIDLIST tx_b.txt\n",
+    "g_tx_sib.pal": "TITLE tx a or b\nDBLIST g_tx g_txb\n",
+    "g_tx_bare.pal": "TITLE tx bare\nDBLIST g_tx g\n",
+    "gm_sq.pal": "TITLE sq two volumes\nDBLIST gm\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v0.pal": "TITLE sq v0\nDBLIST gm.00\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v1.pal": "TITLE sq v1\nDBLIST gm.01\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v01.pal": "TITLE sq each vol\nDBLIST gm_sq_v0 gm_sq_v1\n",
+    "gm_sq_mix.pal": "TITLE sq v0 bare v1\nDBLIST gm_sq_v0 gm.01\n",
+    "gm_tx.pal": "TITLE tx two volumes\nDBLIST gm\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_v0.pal": "TITLE tx v0\nDBLIST gm.00\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_mix.pal": "TITLE tx v0 bare v1\nDBLIST gm_tx_v0 gm.01\n",
+    "gu_sq.pal": "TITLE sq over gu\nDBLIST gu\nSEQIDLIST sq_a.txt\n",
+    "gu_tx.pal": "TITLE tx over gu\nDBLIST gu\nTAXIDLIST tx_a.txt\n",
+    "ln_tx.pal": "TITLE tx over ln\nDBLIST ln\nTAXIDLIST tx_b.txt\n",
+    "lx_tx.pal": "TITLE tx over lx\nDBLIST lx\nTAXIDLIST tx_b.txt\n",
+    "n_sq.nal": "TITLE sq n v5\nDBLIST n\nSEQIDLIST sq_n.txt\n",
+    "n_sql.nal": "TITLE sq n v5 walk\nDBLIST n\nSEQIDLIST sq_n.txt\nNSEQ 2\nLENGTH 766\n",
+    "n_sqml.nal": f"TITLE sq n v5 missing walk\nDBLIST n\nSEQIDLIST {MISSING}\nNSEQ 2\nLENGTH 766\n",
+    "n_tx.nal": "TITLE tx n v5\nDBLIST n\nTAXIDLIST tx_n.txt\n",
+    "n_txl.nal": "TITLE tx n v5 walk\nDBLIST n\nTAXIDLIST tx_n.txt\nNSEQ 3\nLENGTH 1089\n",
+    "n_txml.nal": f"TITLE tx n v5 missing walk\nDBLIST n\nTAXIDLIST {MISSING}\nNSEQ 3\nLENGTH 1089\n",
+    # PIG ISAM database with alias GILIST (D6) and v5 SEQIDLIST / TAXIDLIST (D1c-2 R4).
+    "gp_gi.pal": "TITLE gp gi\nDBLIST gp\nGILIST gi_b.txt\n",
+    "gp_sq.pal": "TITLE gp sq v5\nDBLIST gp\nSEQIDLIST sq_a.txt\n",
+    "gp_tx.pal": "TITLE gp tx v5\nDBLIST gp\nTAXIDLIST tx_a.txt\n",
 }
 
 
@@ -243,6 +363,13 @@ def ti_isam(base: Path, num_oids: int, pad: int = 0):
     index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
     base.with_suffix(".pti").write_bytes(index)
     base.with_suffix(".ptd").write_bytes(data + bytes(pad))
+
+
+def build_pf7(mk):
+    """The databases of line DBID pfoff-7: pw, nw, and pwk of its review 1."""
+    for name, source, kind in (("pw", "pw.faa", "prot"), ("nw", "nw.fna", "nucl"), ("pwk", "pwk.faa", "prot")):
+        run([mk, "-in", source, "-dbtype", kind, "-out", name, "-title", name, "-parse_seqids",
+             "-blastdb_version", "4"])
 
 
 def build_d1c_fix1(mk, common):
@@ -383,6 +510,28 @@ def build_d1c1cb(ncbi: Path):
         (OUT / name).unlink()
 
 
+def pig_isam(base: Path, rows, pad: int = 0):
+    """A numeric PIG ISAM of 4-byte unsigned keys in one page; `pad` zero bytes after the data
+    file's rows, which its index does not count."""
+    rows = sorted(rows)
+    data = b"".join(struct.pack(">II", k, o) for k, o in rows)
+    header = struct.pack(">9i", 1, 0, len(data), len(rows), 1, 256, 0, 0, 0)
+    index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
+    base.with_suffix(".ppi").write_bytes(index)
+    base.with_suffix(".ppd").write_bytes(data + bytes(pad))
+
+
+def build_d6(mk, common):
+    """The databases of D6: gp (PIG ISAM with high PIG >= 2^31 and OIDs without PIG), gpx
+    (uninitialised PIG ISAM), and q_bx.fna (back-translated q.faa for BLASTX)."""
+    pig_rows = [(1001, 0), (1002, 2), (1005, 5), (2147483649, 10)]
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gp", "-title", "gp", *common, "g.map"])
+    pig_isam(OUT / "gp", pig_rows)
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gpx", "-title", "gpx", *common, "g.map"])
+    pig_isam(OUT / "gpx", pig_rows[:2], pad=64)
+    back_translate(OUT / "q.faa", OUT / "q_bx.fna")
+
+
 def main():
     ncbi = Path(sys.argv[1])
     for path in OUT.iterdir():
@@ -411,6 +560,8 @@ def main():
     build_d1c1b(mk, common)
     build_d1c1c(mk)
     build_d1c1cb(ncbi)
+    build_pf7(mk)
+    build_d6(mk, common)
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):
         path.unlink()
     for name, data in LISTS.items():

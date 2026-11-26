@@ -267,7 +267,7 @@ fn masked_reference<M: TbxScore>(
                 }
             }
         }
-        advance_tblastx_diag_offset(diag_offset, diag_array, window, subject.len());
+        advance_tblastx_diag_offset(diag_offset, diag_array, window, subject.len() as i32);
         sort_init_hsps_by_score_ncbi(&mut init_hsps);
         per_frame.push(init_hsps);
     }
@@ -283,6 +283,8 @@ fn unit_lists<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<Vec<Init
             offset: 0,
             length: s_frame.aa_len,
             overlap: 0,
+            ncbi_length: s_frame.aa_len as i32,
+            overlap_past_list: false,
         };
         let mut init_hsps = Vec::new();
         // The reference finds no hits in a frame shorter than a word.
@@ -477,6 +479,8 @@ fn a_walk_past_a_nullb_into_another_group_is_seen_by_its_units() {
             offset: 0,
             length: subject.len(),
             overlap: 0,
+            ncbi_length: subject.len() as i32,
+            overlap_past_list: false,
         };
         let units: Vec<XUnit> = (0..2).map(|g| pp.x_unit(&inp, 0, 0, chunk, g)).collect();
         // Each unit alone: the refusal and the P/P HSP the reference does not make.
@@ -1014,6 +1018,8 @@ fn masked_unit_tables_give_the_unmasked_units() {
             offset: 0,
             length: s_len,
             overlap: 0,
+            ncbi_length: s_len as i32,
+            overlap_past_list: false,
         };
         let mut scratch = XScratch::new(false);
         let mut aliased = false;
@@ -1277,6 +1283,8 @@ fn unit_lists_batched<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<
             offset: 0,
             length: s_frame.aa_len,
             overlap: 0,
+            ncbi_length: s_frame.aa_len as i32,
+            overlap_past_list: false,
         };
         let mut init_hsps = Vec::new();
         // The reference finds no hits in a frame shorter than a word.
@@ -2998,6 +3006,8 @@ fn units_equal_the_masked_reference(
                 offset: 0,
                 length: s_frame.aa_len,
                 overlap: 0,
+                ncbi_length: s_frame.aa_len as i32,
+                overlap_past_list: false,
             };
             for g in 0..pp.groups.len() {
                 if pp.groups[g].lookup.longest_chain <= 0 {

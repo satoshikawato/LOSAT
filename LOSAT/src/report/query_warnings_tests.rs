@@ -614,6 +614,14 @@ fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
     report.bytes.extend_from_slice(b"more\n");
     write_html_post(&mut report, &mut posts, b"").unwrap();
     assert_eq!(report.flushed, 5);
+    // The diagnostics as a writer that flushes the report before each post (BLASTX's posts before
+    // a batch's reports; review 1 of line DBID pf7, H2).
+    let mut after = PostsAfterReport::new(&mut report, &mut posts);
+    after
+        .write_all(b"Warning: [blastx] Error pre-fetching sequence data\n")
+        .unwrap();
+    assert_eq!(report.flushed, 10);
+    assert!(posts.ends_with(b"post\nWarning: [blastx] Error pre-fetching sequence data\n"));
     let (mut apart, mut diagnostics) = (Vec::new(), Vec::new());
     html_posts_sink(
         Some(&mut apart as &mut dyn Write),
@@ -644,4 +652,153 @@ fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
     assert_eq!(CutRefusal::of(&error), Some("refused"));
     assert_eq!(CutRefusal::of(&io::Error::other("refused")), None);
     assert!(texts.is_empty());
+}
+
+/// `QueryWarnings::before_query` flushes `report` before the first diagnostic byte emitted by a
+/// `Post::Request` release (matching NCBI's `cerr.tie(&cout)` for both `803.7` posts and strategy
+/// write failures such as `/dev/full`), while leaving `report` unflushed when a request mark
+/// writes no diagnostic bytes (matching NCBI's `SaveSearchStrategy`, which does not flush `cout`).
+#[test]
+fn request_mark_flushes_report_only_when_writing_diagnostics() {
+    use crate::blastinput::app::Program;
+    use crate::report::archive::bioseq::BioseqInput;
+    use crate::report::archive::options::OptionInputs;
+    use crate::report::archive::strategy::{StrategyExport, StrategySink};
+    use crate::report::archive::writer::{RequestInputs, RequestQueries};
+    use crate::report::archive::{ArchiveHandle, OptionsHandle};
+    use crate::report::ostream::{is_strategy_write_fault, StrategyStream};
+    use crate::report::serial::encoder::BufferPiece;
+
+    #[derive(Clone, Default)]
+    struct MergedLog {
+        merged: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+        buffered: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl Write for MergedLog {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.buffered.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            self.merged
+                .lock()
+                .unwrap()
+                .extend_from_slice(&self.buffered);
+            self.buffered.clear();
+            Ok(())
+        }
+    }
+
+    struct ErrWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl Write for ErrWriter {
+        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct AlwaysFail;
+    impl Write for AlwaysFail {
+        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::WriteZero.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("full"))
+        }
+    }
+
+    struct SilentSink;
+    impl StrategySink for SilentSink {
+        fn write_request(
+            &mut self,
+            _bytes: &[u8],
+            _pieces: &[BufferPiece],
+            _posts: &[(u64, Vec<u8>)],
+            _diagnostics: &mut dyn Write,
+            _archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+        fn write_partial(
+            &mut self,
+            _bytes: &[u8],
+            _posts: &[(u64, Vec<u8>)],
+            _diagnostics: &mut dyn Write,
+            _archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let query = [BioseqInput {
+        id: "Query_1",
+        ids: None,
+        seq_loc: None,
+        defline: std::borrow::Cow::Borrowed(b">q"),
+        title: b"q",
+        letters: b"MKV",
+        protein: true,
+    }];
+    let req = RequestInputs {
+        queries: RequestQueries::Bioseqs(&query),
+        subjects: &[],
+        required: None,
+        lcase_masks: &[],
+    };
+    let opts = OptionInputs::new(Program::Blastp, "blastp");
+
+    // 1. Silent request mark does NOT flush `report`.
+    let silent_export =
+        StrategyExport::new(Box::new(SilentSink), &opts, None, OptionsHandle::default());
+    silent_export.write_request(0..1, &req).unwrap();
+    let before = vec![silent_export.take_all_posts()];
+    let mut report = MergedLog::default();
+    report.write_all(b"PROLOG\n").unwrap();
+    let mut err = ErrWriter(report.merged.clone());
+    let mut warnings = QueryWarnings::of_posts(&before, None, &mut err);
+    warnings.before_query(0, &mut report).unwrap();
+    assert_eq!(report.flushes, 0);
+    assert!(report.merged.lock().unwrap().is_empty());
+
+    // 2. Failing strategy stream (batch 0 Close 4-line chain, batch 1 write fault) flushes
+    // buffered report bytes BEFORE each failure diagnostic reaches the merged stream.
+    let failing_export = StrategyExport::new(
+        Box::new(StrategyStream::new(Box::new(AlwaysFail), "blastp")),
+        &opts,
+        None,
+        OptionsHandle::default(),
+    );
+    failing_export.write_request(0..1, &req).unwrap();
+    failing_export.note_searched(0..1, None).unwrap();
+    failing_export.write_request(1..2, &req).unwrap();
+    let taken: Vec<Posts> = failing_export
+        .take_posts(usize::MAX)
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect();
+    let mut rep = MergedLog::default();
+    let mut diag = ErrWriter(rep.merged.clone());
+    let mut qw = QueryWarnings::of_posts(&taken, None, &mut diag);
+    rep.write_all(b"PROLOG_TAIL\n").unwrap();
+    qw.before_query(0, &mut rep).unwrap();
+    assert_eq!(rep.flushes, 1);
+    rep.write_all(b"FOOTER_0\n").unwrap();
+    let fault = qw.before_query(1, &mut rep).unwrap_err();
+    assert!(is_strategy_write_fault(&fault));
+    assert_eq!(rep.flushes, 2);
+    let text = String::from_utf8(rep.merged.lock().unwrap().clone()).unwrap();
+    let prolog_pos = text.find("PROLOG_TAIL\n").unwrap();
+    let close_pos = text.find("cannot close output stream").unwrap();
+    let footer_pos = text.find("FOOTER_0\n").unwrap();
+    let fault_pos = text.find("stack is empty: write fault").unwrap();
+    assert!(
+        prolog_pos < close_pos && close_pos < footer_pos && footer_pos < fault_pos,
+        "unexpected merged order:\n{text}"
+    );
 }

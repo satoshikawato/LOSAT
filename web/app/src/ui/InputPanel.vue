@@ -21,7 +21,10 @@ import {
   type FetchSourceId,
 } from '../domain/accession';
 import { sectionsAt, writtenValue } from '../domain/parameters';
+import { DB_BOOL_FILTER_FIELDS, DB_FILE_FILTER_FIELDS, DB_TEXT_FILTER_FIELDS } from '../domain/blast-db';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
+import DatabasePicker from './DatabasePicker.vue';
+import { formatBytes, optionHelp } from './format';
 import HelpTip from './HelpTip.vue';
 import { searchFormModel } from './form-model';
 import LosatLoader from './LosatLoader.vue';
@@ -146,12 +149,53 @@ const region = computed(() => {
   return props.draft.region(props.role);
 });
 
+/** Whether this panel is showing the local BLAST database picker (`-db`) instead of FASTA inputs. */
+const isDatabase = computed(() => props.role === 'subject' && props.state.subjectSource === 'database');
+
+/** Database filter options accepted by the current program's engine `describe`. */
+const describedFlags = computed(() => {
+  const params = props.state.description?.parameters;
+  return params === undefined ? undefined : new Set(params.map((p) => p.flag));
+});
+const dbFilters = computed(() =>
+  [...DB_TEXT_FILTER_FIELDS, ...DB_BOOL_FILTER_FIELDS, ...DB_FILE_FILTER_FIELDS].filter(
+    (f) => describedFlags.value === undefined || describedFlags.value.has(f.flag),
+  ),
+);
+function dbFilterId(flag: string): string {
+  return `db-filter-${flag.slice(1)}`;
+}
+function isDbFilterSet(field: { readonly flag: string; readonly kind: string }): boolean {
+  if (field.kind === 'file') return props.state.database.filterFiles[field.flag] !== undefined;
+  const val = props.state.database.filterValues[field.flag];
+  return field.kind === 'flag' ? val === true : typeof val === 'string' && val.trim() !== '';
+}
+const activeDbFilterCount = computed(() => dbFilters.value.filter(isDbFilterSet).length);
+const dbFilterFileInputs = ref<Record<string, HTMLInputElement | null>>({});
+
+function setDbFilterInputRef(flag: string, el: unknown): void {
+  dbFilterFileInputs.value[flag] = el instanceof HTMLInputElement ? el : null;
+}
+
+function onDbFilterFile(flag: string, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file !== undefined) props.draft.setDatabaseFilterFile(flag, file);
+  input.value = '';
+}
+
+function dbOptionHelp(flag: string): string {
+  const option = props.state.description?.parameters.find((p) => p.flag === flag);
+  return optionHelp(option?.help);
+}
+
 /** The role's genetic code (the query's of BLASTX and TBLASTX, the subjects' of TBLASTN and TBLASTX). */
 const codeFields = computed(() =>
   sectionsAt(program.value, props.state.description?.parameters, props.role).flatMap((section) => section.fields),
 );
-/** A subject genetic code other than the default: LOSAT's approved exception (AGENTS.md). */
+/** A subject genetic code other than the default: LOSAT's approved exception applies only to local `-subject`, not `-db`. */
 const subjectCodeNote = computed(() => {
+  if (isDatabase.value) return false;
   const field = codeFields.value.find((f) => f.flag === '-db_gencode');
   if (props.role !== 'subject' || field === undefined) return false;
   const option = props.state.description?.parameters.find((o) => o.flag === field.flag);
@@ -174,6 +218,7 @@ function onFiles(event: Event): void {
 
 function onDrop(event: DragEvent): void {
   dragging.value = false;
+  if (isDatabase.value) return;
   const files = [...(event.dataTransfer?.files ?? [])];
   if (files.length > 0) props.draft.addFiles(props.role, files);
 }
@@ -188,7 +233,148 @@ function onDrop(event: DragEvent): void {
     @dragleave.self="dragging = false"
     @drop.prevent.stop="onDrop"
   >
-    <legend>Enter {{ title }} Sequence</legend>
+    <legend>{{ isDatabase ? 'Choose Subject Database' : `Enter ${title} Sequence` }}</legend>
+
+    <div v-if="role === 'subject'" class="subject-source" role="radiogroup" aria-label="Subject source" data-testid="subject-source">
+      <label class="subject-source-option">
+        <input
+          type="radio"
+          name="subject-source"
+          value="fasta"
+          :checked="!isDatabase"
+          data-testid="subject-source-fasta"
+          @change="draft.setSubjectSource('fasta')"
+        />
+        FASTA sequences
+      </label>
+      <label class="subject-source-option">
+        <input
+          type="radio"
+          name="subject-source"
+          value="database"
+          :checked="isDatabase"
+          data-testid="subject-source-database"
+          @change="draft.setSubjectSource('database')"
+        />
+        Database <span class="flag">-db</span>
+      </label>
+    </div>
+
+    <template v-if="isDatabase">
+      <div class="subject-db-block" data-testid="subject-db-block">
+        <div class="entry-label">
+          <span>Local BLAST database</span>
+          <span class="kind">{{ kind }}</span>
+        </div>
+        <DatabasePicker
+          :pick="state.database"
+          :molecule-kind="kind"
+          :context-label="program.label"
+          test-id-prefix="subject-db"
+          @files="draft.setSubjectDatabaseFiles($event)"
+          @select="draft.selectSubjectDatabase($event)"
+          @clear="draft.clearSubjectDatabase()"
+        />
+      </div>
+
+      <ParameterField v-for="field in codeFields" :key="field.flag" :model="formModel" :field="field" />
+
+      <details class="db-filters" data-testid="subject-db-filters">
+        <summary data-testid="subject-db-filters-toggle">
+          Database filters
+          <span v-if="activeDbFilterCount > 0" class="muted" data-testid="subject-db-filters-count">({{ activeDbFilterCount }} set)</span>
+        </summary>
+        <div class="db-filter-rows">
+          <div
+            v-for="field in dbFilters"
+            :key="field.flag"
+            class="param-row"
+            :class="{ changed: isDbFilterSet(field) }"
+          >
+            <component
+              :is="field.kind === 'file' ? 'span' : 'label'"
+              :id="field.kind === 'file' ? `${dbFilterId(field.flag)}-label` : undefined"
+              :for="field.kind === 'file' ? undefined : dbFilterId(field.flag)"
+              class="param-label"
+            >
+              {{ field.label }} <span class="flag">{{ field.flag }}</span>
+            </component>
+            <div class="param-control">
+              <span v-if="field.kind === 'file'" class="file-pick">
+                <button
+                  type="button"
+                  :aria-describedby="`${dbFilterId(field.flag)}-label`"
+                  :data-testid="`${dbFilterId(field.flag)}-choose`"
+                  @click="dbFilterFileInputs[field.flag]?.click()"
+                >
+                  {{ state.database.filterFiles[field.flag] ? 'Change file…' : 'Choose file…' }}
+                </button>
+                <input
+                  :ref="(el) => setDbFilterInputRef(field.flag, el)"
+                  class="visually-hidden"
+                  type="file"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  :aria-label="`Choose ${field.label} file`"
+                  :data-testid="`${dbFilterId(field.flag)}-input`"
+                  @change="onDbFilterFile(field.flag, $event)"
+                />
+                <span class="hint-line">
+                  <template v-if="state.database.filterFiles[field.flag]">
+                    <span class="file-name" :data-testid="`${dbFilterId(field.flag)}-name`">
+                      {{ state.database.filterFiles[field.flag]!.name }} ({{ formatBytes(state.database.filterFiles[field.flag]!.size) }})
+                    </span>
+                    <button
+                      type="button"
+                      class="link"
+                      :data-testid="`${dbFilterId(field.flag)}-remove`"
+                      @click="draft.setDatabaseFilterFile(field.flag, undefined)"
+                    >
+                      Remove
+                    </button>
+                  </template>
+                  <HelpTip
+                    v-if="dbOptionHelp(field.flag)"
+                    :id="dbFilterId(field.flag)"
+                    :label="`About ${field.flag}`"
+                    :text="dbOptionHelp(field.flag)"
+                  />
+                </span>
+              </span>
+              <span v-else class="control-tip">
+                <input
+                  v-if="field.kind === 'flag'"
+                  :id="dbFilterId(field.flag)"
+                  type="checkbox"
+                  :checked="state.database.filterValues[field.flag] === true"
+                  :data-testid="dbFilterId(field.flag)"
+                  @change="draft.setDatabaseFilter(field.flag, ($event.target as HTMLInputElement).checked)"
+                />
+                <input
+                  v-else
+                  :id="dbFilterId(field.flag)"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :placeholder="field.placeholder ?? ''"
+                  :value="typeof state.database.filterValues[field.flag] === 'string' ? state.database.filterValues[field.flag] : ''"
+                  :data-testid="dbFilterId(field.flag)"
+                  @input="draft.setDatabaseFilter(field.flag, ($event.target as HTMLInputElement).value)"
+                />
+                <HelpTip
+                  v-if="dbOptionHelp(field.flag)"
+                  :id="dbFilterId(field.flag)"
+                  :label="`About ${field.flag}`"
+                  :text="dbOptionHelp(field.flag)"
+                />
+              </span>
+            </div>
+          </div>
+        </div>
+      </details>
+    </template>
+
+    <template v-else>
     <div class="entry">
       <div class="entry-paste">
         <div class="entry-label">
@@ -229,8 +415,10 @@ function onDrop(event: DragEvent): void {
               </select>
             </label>
           </template>
-          <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
-          <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
+          <span class="hint-line">
+            <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
+            <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
+          </span>
         </div>
         <ul v-if="groups.length > 0" ref="fetchGroupList" class="fetch-groups" :data-testid="`${role}-fetch-groups`">
           <li v-for="(group, index) in groups" :key="groupKey(group)" :data-testid="`${role}-fetch-group-${index}`">
@@ -368,5 +556,6 @@ function onDrop(event: DragEvent): void {
         Separate: one search for each
       </label>
     </fieldset>
+    </template>
   </fieldset>
 </template>

@@ -60,7 +60,7 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let (mut target, log_name) = match files.log_target(log_file(words)) {
+    let (mut target, log_name) = match files.log_target_for(words, &start, log_file(words)) {
         Ok(opened) => opened,
         Err(reason) => {
             let program = crate::cli::reader::tool(start.program()).map_or_else(

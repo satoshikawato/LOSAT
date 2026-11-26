@@ -1004,7 +1004,7 @@ fn open_database(
     } else {
         SeqType::Nucleotide
     };
-    let mut db: SeqDb = open_search_database(text, seqtype, settings)
+    let mut db: SeqDb = open_search_database(name, seqtype, settings)
         .map_err(|error| remote_database(&error, text))?;
     if let Some(taxids) = options
         .taxid_list
@@ -1024,7 +1024,7 @@ fn open_database(
     // `GetSearchOptions` keeps the filtering algorithm of the options only when it is not -1
     // (remote_blast.cpp:2056-2059).
     let filtering = options.db_filtering_algorithm_id.filter(|&id| id != -1);
-    db.read_name_records(text, filtering.is_some())
+    db.read_name_records(name, filtering.is_some())
         .map_err(|error| database_error(error, PROGRAM))?;
     if let Some(id) = filtering {
         db.name_mask_details(id)

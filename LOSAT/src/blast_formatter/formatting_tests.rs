@@ -115,23 +115,26 @@ fn the_custom_specifications_are_the_search_programs() {
     let choice = |text: &str| extract_formatting(&options(text), 500).unwrap().choice;
     // P2.161, P2.175, P2.177, P2.179.
     let custom = choice("6 delim=");
-    assert_eq!((custom.spec.as_str(), custom.delimiter.as_str()), ("", ""));
-    assert_eq!(choice("6 qseqid foo").spec, "qseqid foo");
+    assert_eq!(
+        (custom.spec.as_slice(), custom.delimiter.as_slice()),
+        (&b""[..], &b""[..])
+    );
+    assert_eq!(choice("6 qseqid foo").spec, b"qseqid foo");
     let custom = choice("7 delim=, qseqid");
     assert_eq!(
         (
             custom.number,
-            custom.spec.as_str(),
-            custom.delimiter.as_str()
+            custom.spec.as_slice(),
+            custom.delimiter.as_slice()
         ),
-        (7, "qseqid", ",")
+        (7, &b"qseqid"[..], &b","[..])
     );
-    assert_eq!(choice("6 delim=: qseqid sseqid").delimiter, ":");
+    assert_eq!(choice("6 delim=: qseqid sseqid").delimiter, b":");
     // P2.169: a format that takes no fields drops them.
     assert!(!choice("0 qseqid").custom());
     // SAM (eIsSAM) keeps its words (P2.193, P2.195).
     assert_eq!(choice("17").number, 17);
-    assert_eq!(choice("17 SQ").spec, "SQ");
+    assert_eq!(choice("17 SQ").spec, b"SQ");
 }
 
 // blast_formatter.cpp:350-355: SAM for blastn's archives only (P2.197, P2.199: blastp).

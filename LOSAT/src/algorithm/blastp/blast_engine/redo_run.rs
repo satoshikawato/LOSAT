@@ -1074,6 +1074,8 @@ where
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
 /// `sw_batch_failed_after` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a batch's
 /// stream runs in `(ordinal ASC, query DESC)` order.
 #[cold]
@@ -1093,6 +1095,8 @@ pub(super) fn sw_batch_failed_after_oid(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
 /// `sw_endless_after` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a batch's
 /// stream runs in `(ordinal ASC, query DESC)` order.
 #[cold]

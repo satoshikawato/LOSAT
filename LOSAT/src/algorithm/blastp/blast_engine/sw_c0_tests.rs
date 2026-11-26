@@ -388,8 +388,6 @@ mod par_tests {
             let win_m = 1 + rng.below(12);
             let limits = par::TestWindowLimits {
                 matches: win_m,
-                fill_matches: (1 + rng.below(6)).min(win_m),
-                small_heap_matches: (1 + rng.below(10)).min(win_m),
                 at_risk: 1 + rng.below(4),
             };
             let mut heaps: Vec<BlastCompoHeap> = (0..queries)
@@ -475,6 +473,59 @@ mod par_tests {
                 && continued > 100
                 && ended > 50,
             "clean={clean} fail={batch_failures} endless={endless} turned={turned} cont={continued} ended={ended}"
+        );
+    }
+
+    #[test]
+    fn window_match_budget_uses_fillable_deficit_without_threshold_cut() {
+        let limits = par::TestWindowLimits {
+            matches: 2048,
+            at_risk: 32,
+        };
+        let batches = [0..4];
+        assert_eq!(
+            par::test_window_match_budget(&batches, None, &[], &[], limits),
+            2048
+        );
+
+        // Monotone and continuous across the old 64 boundary (no step change at 63 vs 64).
+        let budget_for = |threshold: usize| {
+            let heaps: Vec<BlastCompoHeap> = (0..4)
+                .map(|_| BlastCompoHeap::new(threshold, ECUTOFF))
+                .collect();
+            let remaining = vec![threshold + 10; 4];
+            par::test_window_match_budget(&batches, Some(0), &heaps, &remaining, limits)
+        };
+        assert_eq!(budget_for(1), 32);
+        assert_eq!(budget_for(5), 32);
+        assert_eq!(budget_for(10), 40);
+        assert_eq!(budget_for(50), 200);
+        assert_eq!(budget_for(63), 252);
+        assert_eq!(budget_for(64), 256);
+        assert_eq!(budget_for(100), 400);
+        assert_eq!(budget_for(600), 2048);
+
+        // Queries that cannot exceed heap_threshold contribute zero deficit, so an unfillable
+        // batch uses the full window immediately.
+        let heaps: Vec<BlastCompoHeap> =
+            (0..4).map(|_| BlastCompoHeap::new(500, ECUTOFF)).collect();
+        let unfillable = [500, 100, 0, 499];
+        assert_eq!(
+            par::test_window_match_budget(&batches, Some(0), &heaps, &unfillable, limits),
+            2048
+        );
+
+        // Once all fillable heaps reach heap_threshold, the full window applies.
+        let mut full_heaps: Vec<BlastCompoHeap> =
+            (0..4).map(|_| BlastCompoHeap::new(2, ECUTOFF)).collect();
+        for (q, heap) in full_heaps.iter_mut().enumerate() {
+            for oid in 0..2u32 {
+                heap.insert(make_hsp_list(oid, q, 1e-10, false), 1e-10, 50, oid);
+            }
+        }
+        assert_eq!(
+            par::test_window_match_budget(&batches, Some(0), &full_heaps, &[20; 4], limits),
+            2048
         );
     }
 }

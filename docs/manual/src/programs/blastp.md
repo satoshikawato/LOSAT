@@ -89,7 +89,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-use_sw_tback` with `-ungapped` at the first query batch that is searched, and with `-use_sw_tback` the rare query batches on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
+- `-use_sw_tback` with `-ungapped`, at the first query batch that is searched. With `-use_sw_tback`, also a query batch on which NCBI BLAST+ crashes, and a query and subject whose alignment it never finishes (see [Rare and pathological inputs](../refusals-edge-cases.md#blastp)).
 - With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
 - With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).

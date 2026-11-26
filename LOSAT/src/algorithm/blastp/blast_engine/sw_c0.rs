@@ -19,8 +19,9 @@
 //! `x_redo_par`'s `x_sw_heap_test` / `x_compute_window_lpt`. Because queries are interleaved in
 //! OID order and preliminary E-values are not monotone, `sw_c0_windows` tracks per-query `before`
 //! counts across each window, interleaves `FetchExcludedMatch` marks at their exact database
-//! ordinals, speculates `Known(true)` when `x_sw_heap_test` defers (still short-circuiting
-//! `Known(false)` once heaps fill via a compact fill window for small hit lists), and replays all
+//! ordinals, speculates `Known(true)` when `x_sw_heap_test` defers (sizing each window to the
+//! front batch's remaining heap fill deficit while fillable heaps are unfilled, so later windows
+//! prune weak matches via `Known(false)`), and replays all
 //! order-dependent steps (early termination, deferred heap tests, batch status, heap insertions)
 //! in exact `(batch, ordinal ASC, query DESC)` order.
 //!
@@ -377,14 +378,11 @@ where
 mod par {
     use super::*;
 
-    /// Bounds of a CBS 0 Smith-Waterman window: normal window size, compact fill window for small
-    /// unfilled heaps, compact steady-state window for small heaps, and initial at-risk cap per
-    /// query batch.
+    /// Bounds of a CBS 0 Smith-Waterman window: maximum match count per window and initial
+    /// at-risk cap per query batch (also the floor for heap-fill windows).
     #[derive(Clone, Copy, Debug)]
     pub(super) struct SwC0WindowLimits {
         pub(super) matches: usize,
-        pub(super) fill_matches: usize,
-        pub(super) small_heap_matches: usize,
         pub(super) at_risk: usize,
     }
 
@@ -577,10 +575,13 @@ mod par {
             .collect()
     }
 
-    /// Chooses the target match count for the next window based on the active batch's hit list
-    /// size: small hit lists (`< 64`) fill empty heaps with a compact window first so subsequent
-    /// windows immediately prune weak matches via `x_sw_heap_test` (`Known(false)`).
-    fn window_match_budget(
+    /// Chooses the target match count for the next window from the front batch's remaining heap
+    /// fill deficit: while any query in the front batch can still fill its heap and has matches
+    /// left beyond `heap_threshold`, the window sizes to the total remaining slots needed to fill
+    /// those heaps (clamped to `[limits.at_risk.min(limits.matches), limits.matches]`), so later
+    /// windows prune weak matches via `x_sw_heap_test` (`Known(false)`). Once those heaps are
+    /// full, the normal window budget applies and `at_risk` / `caps` governs early termination.
+    pub(super) fn window_match_budget(
         batches: &[Range<usize>],
         front_batch: Option<usize>,
         heaps: &[BlastCompoHeap],
@@ -590,21 +591,16 @@ mod par {
         let Some(batch_idx) = front_batch else {
             return limits.matches;
         };
-        let batch = &batches[batch_idx];
-        let threshold = batch
+        let fill_deficit: usize = batches[batch_idx]
             .clone()
-            .map(|q| heaps[q].heap_threshold)
-            .min()
-            .unwrap_or(usize::MAX);
-        if threshold < 64 {
-            let needs_fill = batch
-                .clone()
-                .any(|q| heaps[q].n < heaps[q].heap_threshold && remaining[q] > 0);
-            if needs_fill {
-                limits.fill_matches
-            } else {
-                limits.small_heap_matches
-            }
+            .filter(|&q| {
+                heaps[q].n < heaps[q].heap_threshold
+                    && heaps[q].n.saturating_add(remaining[q]) > heaps[q].heap_threshold
+            })
+            .map(|q| heaps[q].heap_threshold - heaps[q].n)
+            .sum();
+        if fill_deficit > 0 {
+            fill_deficit.clamp(limits.at_risk.min(limits.matches), limits.matches)
         } else {
             limits.matches
         }
@@ -1083,8 +1079,6 @@ mod par {
             .saturating_mul(X_JOB_MATCHES);
         let limits = SwC0WindowLimits {
             matches: full_matches,
-            fill_matches: full_matches.min(threads.saturating_mul(32)),
-            small_heap_matches: full_matches.min(threads.saturating_mul(64)),
             at_risk: threads.saturating_mul(X_JOB_MATCHES),
         };
         let workspaces: Vec<OnceLock<BlastpKappaQueryWorkspace>> =
@@ -1185,8 +1179,9 @@ mod par {
 
     #[cfg(test)]
     pub(super) use {
-        sw_c0_run_windows as test_run_windows, SwC0Computed as TestComputed,
-        SwC0Window as TestWindow, SwC0WindowLimits as TestWindowLimits,
+        sw_c0_run_windows as test_run_windows, window_match_budget as test_window_match_budget,
+        SwC0Computed as TestComputed, SwC0Window as TestWindow,
+        SwC0WindowLimits as TestWindowLimits,
     };
 }
 

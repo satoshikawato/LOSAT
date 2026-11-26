@@ -14,7 +14,7 @@ import type { Compression } from '../../ports/inflate.js';
 import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 15;
+export const ABI_VERSION = 16;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -359,16 +359,31 @@ export class ReactorAbi {
 
   /**
    * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
-   * data loaders on (the *validation* JSON, ABI v2 §9, version 8), which `register` and `scanBegin`
-   * then take.
+   * data loaders on and, when the argv parses, with `-parse_deflines` on (the *validation* JSON,
+   * ABI v2 §9, version 15), which `register` and `scanBegin` then take. When the argv does not
+   * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
     // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
     // it is read before the error, whose call drops the responses.
-    const known = status < 0 && this.responses.length === 0 ? undefined : (this.response() as { data_loaders: boolean }).data_loaders;
-    if (status < 0) return { ok: false, message: this.lastError(), ...(known === undefined ? {} : { dataLoaders: known }) };
-    return { ok: true, dataLoaders: known! };
+    const known =
+      status < 0 && this.responses.length === 0
+        ? undefined
+        : (this.response() as { data_loaders: boolean; parse_deflines?: boolean });
+    if (status < 0) {
+      return {
+        ok: false,
+        message: this.lastError(),
+        ...(known === undefined
+          ? {}
+          : {
+              dataLoaders: known.data_loaders,
+              ...(known.parse_deflines === undefined ? {} : { parseDeflines: known.parse_deflines }),
+            }),
+      };
+    }
+    return { ok: true, dataLoaders: known!.data_loaders, parseDeflines: known!.parse_deflines ?? false };
   }
 
   /**
@@ -380,9 +395,11 @@ export class ReactorAbi {
     return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
   }
 
-  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
-  register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
-    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders and `-parse_deflines` on or off (ABI v2 §4, version 15). */
+  register(program: string, role: number, dataLoaders: boolean, parseDeflines: boolean, bytes: Uint8Array): RegisteredInput {
+    const handle = this.check(
+      this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, parseDeflines ? 1 : 0, bytes]),
+    );
     try {
       return { ...registeredInput(this.response() as RecordsResponse), handle };
     } catch (error) {
@@ -435,13 +452,14 @@ export class ReactorAbi {
     this.check(this.call(this.exports.losat_web2_release, [handle]));
   }
 
-  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 8). */
+  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 15). */
   scanBegin(reader: FastaReader): number {
     return this.check(
       this.call(this.exports.losat_web2_scan_begin, [
         encoder.encode(reader.program),
         reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT,
         reader.dataLoaders ? 1 : 0,
+        reader.parseDeflines ? 1 : 0,
       ]),
     );
   }

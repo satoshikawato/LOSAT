@@ -1,0 +1,189 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "pir||A12345",
+          "prf||1234567A",
+          "US5000000_1",
+          "DAA00001.1",
+          "gi|1000",
+          "TI:12345",
+          "Q99999.1",
+          "XP_000901.1",
+          "loc_x",
+          "gi|999"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "pq",
+            "query_title": "protein query one",
+            "query_len": 150,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "pat|US|5000000|1",
+                    "accession": "US5000000_1",
+                    "title": "patent subject"
+                  }
+                ],
+                "len": 150,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 15.0086,
+                    "score": 27,
+                    "evalue": 4.19272,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 2,
+                    "query_to": 5,
+                    "hit_from": 127,
+                    "hit_to": 130,
+                    "align_len": 4,
+                    "gaps": 0,
+                    "qseq": "YTHG",
+                    "hseq": "YTHG",
+                    "midline": "YTHG"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 30,
+              "eff_space": 123600,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "pir||A12345",
+          "prf||1234567A",
+          "US5000000_1",
+          "DAA00001.1",
+          "gi|1000",
+          "TI:12345",
+          "Q99999.1",
+          "XP_000901.1",
+          "loc_x",
+          "gi|999"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "pq2",
+            "query_title": "second query",
+            "query_len": 110,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sp|Q99999.1|NAME_HUMAN",
+                    "accession": "Q99999",
+                    "title": "two deflines first"
+                  }
+                ],
+                "len": 100,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 15.779,
+                    "score": 29,
+                    "evalue": 1.41681,
+                    "identity": 8,
+                    "positive": 12,
+                    "query_from": 77,
+                    "query_to": 101,
+                    "hit_from": 19,
+                    "hit_to": 41,
+                    "align_len": 25,
+                    "gaps": 2,
+                    "qseq": "INPYVPCPTKVRVDTYLNCGCCEVT",
+                    "hseq": "LNPY--CEIRSRVERPPRGRLAEIT",
+                    "midline": "+NPY  C  + RV+        E+T"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "pat|US|5000000|1",
+                    "accession": "US5000000_1",
+                    "title": "patent subject"
+                  }
+                ],
+                "len": 150,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 13.853,
+                    "score": 24,
+                    "evalue": 6.6167,
+                    "identity": 3,
+                    "positive": 5,
+                    "query_from": 78,
+                    "query_to": 83,
+                    "hit_from": 27,
+                    "hit_to": 32,
+                    "align_len": 6,
+                    "gaps": 0,
+                    "qseq": "NPYVPC",
+                    "hseq": "DPFFPC",
+                    "midline": "+P+ PC"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 28,
+              "eff_space": 86100,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -10,16 +10,19 @@ import type { InputRole, ProgramId } from './programs.js';
 export type FastaParserKind = 1 | 2;
 
 /**
- * The engine's reader of a program's input of a role (ABI v2 `scan_begin` and `register`, version 8):
+ * The engine's reader of a program's input of a role (ABI v2 `scan_begin` and `register`, version 15):
  * the reader of the CLI for that input, with NCBI's data loaders on or off as the run's registry sets
- * them (`[BLAST] DATA_LOADERS` of `-conffile`; the *validation* response's `data_loaders`). With the
- * loaders on, the reader refuses a first line that may be a Seq-id, in the CLI's words; with them off
- * it reads that line as data (line WQA's D13 and D16, 2026-11-20).
+ * them (`[BLAST] DATA_LOADERS` of `-conffile`; the *validation* response's `data_loaders`) and with
+ * `-parse_deflines` on or off (`parse_deflines`). With the loaders on, the reader refuses a first line
+ * that may be a Seq-id, in the CLI's words; with them off it reads that line as data (line WQA's D13
+ * and D16, 2026-11-20). With `parseDeflines` on, the scan reads each record's Seq-id molecule and
+ * letters as the engine's reader reads `-parse_deflines` (line RG-XT item X7-5, 2026-11-25).
  */
 export interface FastaReader {
   readonly program: ProgramId;
   readonly role: InputRole;
   readonly dataLoaders: boolean;
+  readonly parseDeflines: boolean;
 }
 
 /** One record of the index scan. Offsets are byte offsets in the source and stay below 2^53. */

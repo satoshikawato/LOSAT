@@ -315,7 +315,7 @@ export class EngineRuntime {
       const prints = started.start.prints !== null;
       // A search of -db searches the database of its directory: it has no subject, and the engine takes subject handle 0
       // (ABI v2 §4). A search of -in_pssm or -in_msa reads its query from its directory: it has no FASTA query, and the
-      // engine takes query handle 0 (ABI v2 §4, version 15).
+      // engine takes query handle 0 (ABI v2 §4, version 16).
       const database = started.start.database;
       const fileQuery = started.start.queryFile != null;
       if (!prints && fileQuery && request.query !== undefined) throw new EngineCallError('a run of -in_pssm or -in_msa has no query: give no query');
@@ -340,7 +340,7 @@ export class EngineRuntime {
         let queryHandle = 0;
         const givenQuery = request.query;
         if (givenQuery !== undefined) {
-          const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, givenQuery.bytes);
+          const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, false, givenQuery.bytes);
           query = registered.handle;
           const queryMismatch = recordMismatch(givenQuery.records, registered.records);
           if (queryMismatch !== undefined) {
@@ -564,7 +564,7 @@ export class EngineRuntime {
     const abi = loaded.instance.abi;
     if (this.retains(loaded, given, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, given.bytes);
+    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, false, given.bytes);
     loaded.retained = { key: given.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }

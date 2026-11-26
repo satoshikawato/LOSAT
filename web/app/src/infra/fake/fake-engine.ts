@@ -273,8 +273,8 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       if (option === undefined) return { ok: false, message: unknownArgument(program as ProgramId, word) };
       if (option.takesValue && value === undefined) i++;
     }
-    // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
-    return { ok: true, dataLoaders: true };
+    // The fake reads no registry and parses no deflines: its runs have data loaders on and parseDeflines off.
+    return { ok: true, dataLoaders: true, parseDeflines: false };
   }
 
   async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {

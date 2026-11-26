@@ -484,9 +484,12 @@ impl QuerySections for RoundSections<'_> {
             return Ok(());
         }
         super::write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
-            super::blastp_section_hsps(self.report.num_alignments, group, |s_idx| {
-                sequences.subject_is_query(q_idx, s_idx)
-            })
+            super::blastp_section_hsps(
+                self.report.num_alignments,
+                group,
+                self.parsed_subjects,
+                |s_idx| sequences.subject_is_query(q_idx, s_idx),
+            )
         })
     }
 

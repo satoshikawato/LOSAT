@@ -101,8 +101,8 @@ describe.skipIf(REACTORS === undefined)('psiblast and tblastn -in_pssm through t
     expect(desc.parameters.some((p) => p.flag === '-out_ascii_pssm')).toBe(true);
 
     // 1) psiblast -query + -subject with -num_iterations 2 and PSSM outputs
-    const q1 = abi.register('psiblast', ROLE_QUERY, true, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1b_gi.faa')));
-    const s1 = abi.register('psiblast', ROLE_SUBJECT, true, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1_subj_ids.faa')));
+    const q1 = abi.register('psiblast', ROLE_QUERY, true, false, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1b_gi.faa')));
+    const s1 = abi.register('psiblast', ROLE_SUBJECT, true, false, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1_subj_ids.faa')));
     const argv1 = [
       'psiblast',
       '-query',
@@ -192,7 +192,7 @@ describe.skipIf(REACTORS === undefined)('psiblast and tblastn -in_pssm through t
 
     // 3) tblastn -in_pssm + -subject
     directory.open(await mountFiles(['tests/fixtures/pssm/q1b_gi.asn'], paths));
-    const s3 = abi.register('tblastn', ROLE_SUBJECT, true, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1b_gi_nt.fna')));
+    const s3 = abi.register('tblastn', ROLE_SUBJECT, true, false, readFileSync(join(LOSAT, 'tests/fasta/psiblast/q1b_gi_nt.fna')));
     const argv3 = ['tblastn', '-in_pssm', 'tests/fixtures/pssm/q1b_gi.asn', '-subject', 'tests/fasta/psiblast/q1b_gi_nt.fna', '-num_threads', '1'];
     const st3 = abi.start(argv3);
     expect(st3.ok && st3.start.queryFile === 'tests/fixtures/pssm/q1b_gi.asn' && !st3.start.database).toBe(true);

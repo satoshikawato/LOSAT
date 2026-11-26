@@ -97,8 +97,8 @@ export function warmUp(abi: ReactorAbi, argv: readonly string[]): boolean {
       const registered = abi.registerInputs(runArgv, inputs.query, inputs.subject);
       handles.push(registered.query!.handle, registered.subject!.handle);
     } else {
-      handles.push(abi.register(program, ROLE_QUERY, validation.dataLoaders, inputs.query).handle);
-      handles.push(abi.register(program, ROLE_SUBJECT, validation.dataLoaders, inputs.subject).handle);
+      handles.push(abi.register(program, ROLE_QUERY, validation.dataLoaders, false, inputs.query).handle);
+      handles.push(abi.register(program, ROLE_SUBJECT, validation.dataLoaders, false, inputs.subject).handle);
     }
     abi.run(runArgv, handles[0]!, handles[1]!, () => undefined);
     return true;

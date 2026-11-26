@@ -11,9 +11,10 @@ pub(crate) mod title;
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
 /// last one shorter, each ended by a line feed (none for no letters): blastdbcmd's FASTA
-/// (`blastdbcmd::fasta`).
+/// (`blastdbcmd::fasta`). `out` grows once, by the letters and their line feeds.
 pub(crate) fn write_fasta_lines(letters: &[u8], width: u32, out: &mut Vec<u8>) {
     let mut lines = FastaLines::new(width);
+    out.reserve(letters.len() + letters.len().div_ceil(lines.width));
     lines.write(letters, out);
     lines.end(out);
 }

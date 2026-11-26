@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{files_place, GiMask, GiMasks};
-use crate::writedb::tests::{seqdb_fixtures, TempDir};
+use crate::utils::test_dir::TempDir;
+use crate::writedb::tests::{base_in, seqdb_fixtures};
 use crate::writedb::WriteDbError;
 
 const EXTENSIONS: [&str; 6] = ["gmd", "gnd", "gmo", "gno", "gmi", "gni"];
@@ -157,11 +158,16 @@ fn rebuild(fixture: &Path, name: &str, max_file_size: u64, out: &TempDir) -> usi
     for (gi, volume, offset) in entries {
         records.entry((volume, offset)).or_default().push(gi);
     }
-    let base = out.base(name);
+    let base = base_in(out, name);
     if let Some(parent) = Path::new(&base).parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
-    let mut mask = GiMask::new(&base, &head.desc, max_file_size, [head.date, le_date]);
+    let mut mask = GiMask::new(
+        base.as_bytes(),
+        &head.desc,
+        max_file_size,
+        [head.date, le_date],
+    );
     let mut data = BTreeMap::new();
     for ((volume, offset), gis) in &records {
         let bytes = data.entry(*volume).or_insert_with(|| match head.num_vols {
@@ -171,7 +177,7 @@ fn rebuild(fixture: &Path, name: &str, max_file_size: u64, out: &TempDir) -> usi
         mask.add_gi_mask(gis, &record(bytes, *offset as usize));
     }
     mask.close();
-    assert_eq!(mask.name(), base);
+    assert_eq!(mask.name(), base.as_bytes());
     head.num_gis
 }
 
@@ -205,9 +211,9 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
             .filter(|name| listed.iter().filter(|l| l.as_str() == *name).count() < 2)
             .collect();
         for name in names {
-            let out = TempDir::new("gi-mask-rebuild");
+            let out = TempDir::unique("writedb-gi-mask-rebuild");
             let num_gis = rebuild(&fixture, name, max_file_size, &out);
-            let written = files_under(&out.0);
+            let written = files_under(&out);
             let want = mask_files(&expected, name);
             assert_eq!(
                 written.iter().collect::<Vec<_>>(),
@@ -216,7 +222,7 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
             );
             for file in want {
                 assert!(
-                    std::fs::read(out.0.join(file)).unwrap()
+                    std::fs::read(out.join(file)).unwrap()
                         == std::fs::read(fixture.join(file)).unwrap(),
                     "{case}: {file} differs from makeblastdb's"
                 );
@@ -255,29 +261,29 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
 
 #[test]
 fn an_algorithm_without_gis_writes_nothing_and_loses_its_name() {
-    let out = TempDir::new("gi-mask-empty");
+    let out = TempDir::unique("writedb-gi-mask-empty");
     let mut masks = GiMasks::default();
-    masks.add(2, &out.base("used"), b"dust:", 0, dates());
-    masks.add(3, &out.base("unused"), b"dust:x", 0, dates());
+    masks.add(2, base_in(&out, "used").as_bytes(), b"dust:", 0, dates());
+    masks.add(3, base_in(&out, "unused").as_bytes(), b"dust:x", 0, dates());
     // `SetMaskData` passes no sequence without a GI (`super::super::mask_data`).
     masks.add_gi_mask(2, &[5, 3], &[(1, 4)]).unwrap();
     // An algorithm that was never registered is ignored, as `m_MaskAlgoMap` has no entry for it.
     masks.add_gi_mask(9, &[7], &[(1, 4)]).unwrap();
     masks.close();
-    let names: Vec<&str> = masks.names().collect();
-    assert_eq!(names, [out.base("used").as_str(), ""]);
-    let files = files_under(&out.0);
+    let names: Vec<&[u8]> = masks.names().collect();
+    assert_eq!(names, [base_in(&out, "used").as_bytes(), b""]);
+    let files = files_under(&out);
     assert_eq!(
         files,
         ["used.gmd", "used.gmi", "used.gmo", "used.gnd", "used.gni", "used.gno"]
     );
-    let gmo = std::fs::read(out.0.join("used.gmo")).unwrap();
+    let gmo = std::fs::read(out.join("used.gmo")).unwrap();
     // The GIs sorted, then their volume and offset: one record at offset 0.
     assert_eq!(
         gmo,
         [0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     );
-    let gno = std::fs::read(out.0.join("used.gno")).unwrap();
+    let gno = std::fs::read(out.join("used.gno")).unwrap();
     assert_eq!(
         gno,
         [3, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -302,30 +308,30 @@ const RANGE: [(u32, u32); 1] = [(1, 4)];
 
 #[test]
 fn two_algorithms_writing_one_data_file_at_once_are_refused() {
-    let out = TempDir::new("gi-mask-place");
-    std::fs::create_dir(out.0.join("sub")).unwrap();
-    let x = out.base("x");
-    let dotted = format!("{}/./x", out.0.display());
-    let up = format!("{}/sub/../x", out.0.display());
-    let upper = out.base("X");
+    let out = TempDir::unique("writedb-gi-mask-place");
+    std::fs::create_dir(out.join("sub")).unwrap();
+    let x = base_in(&out, "x");
+    let dotted = format!("{}/./x", out.display());
+    let up = format!("{}/sub/../x", out.display());
+    let upper = base_in(&out, "X");
     let mut masks = GiMasks::default();
     for (id, name) in [
         (2, x.clone()),
         (3, x.clone()),
         (4, dotted.clone()),
         (5, up.clone()),
-        (6, out.base("y")),
-        (7, out.base("x.00")),
-        (8, out.base("sub/x")),
-        (9, out.base("missing/x")),
-        (10, out.base("missing/x")),
+        (6, base_in(&out, "y")),
+        (7, base_in(&out, "x.00")),
+        (8, base_in(&out, "sub/x")),
+        (9, base_in(&out, "missing/x")),
+        (10, base_in(&out, "missing/x")),
         (11, upper.clone()),
     ] {
-        masks.add(id, &name, b"dust:", 0, dates());
+        masks.add(id, name.as_bytes(), b"dust:", 0, dates());
     }
     // Registrations write nothing, and an algorithm of the same files that writes nothing is
     // not refused.
-    assert_eq!(files_under(&out.0), Vec::<String>::new());
+    assert_eq!(files_under(&out), Vec::<String>::new());
     masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     assert_refused(masks.add_gi_mask(3, &[2], &RANGE), &format!("\"{x}\""));
     assert_refused(
@@ -354,8 +360,8 @@ fn two_algorithms_writing_one_data_file_at_once_are_refused() {
         assert_eq!(masks.masks[id as usize - 2].open_volume(), None, "{id}");
     }
     // Relative names are read from the current directory.
-    assert_eq!(files_place("x"), files_place("./x"));
-    assert_eq!(files_place(&out.base("missing/x")), None);
+    assert_eq!(files_place(b"x"), files_place(b"./x"));
+    assert_eq!(files_place(base_in(&out, "missing/x").as_bytes()), None);
 }
 
 /// Two algorithms of one name whose data volumes are written one after the other: each file is
@@ -363,12 +369,12 @@ fn two_algorithms_writing_one_data_file_at_once_are_refused() {
 /// the other algorithm's of that number is open.
 #[test]
 fn data_volumes_written_one_after_another_are_written_in_turn() {
-    let out = TempDir::new("gi-mask-turn");
-    let x = out.base("x");
+    let out = TempDir::unique("writedb-gi-mask-turn");
+    let x = base_in(&out, "x");
     let mut masks = GiMasks::default();
     // Room for one record of one range (12 bytes) per volume.
-    masks.add(2, &x, b"dust:", 20, dates());
-    masks.add(3, &x, b"dust:y", 20, dates());
+    masks.add(2, x.as_bytes(), b"dust:", 20, dates());
+    masks.add(3, x.as_bytes(), b"dust:y", 20, dates());
     masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     // Volume 1 of the first algorithm; its volume 0 is closed.
     masks.add_gi_mask(2, &[2], &RANGE).unwrap();
@@ -377,24 +383,24 @@ fn data_volumes_written_one_after_another_are_written_in_turn() {
     // Its volume 1 would open the first algorithm's open volume 1.
     assert_refused(masks.add_gi_mask(3, &[4], &RANGE), &format!("\"{x}\""));
     masks.close();
-    let names: Vec<&str> = masks.names().collect();
-    assert_eq!(names, [x.as_str(), x.as_str()]);
+    let names: Vec<&[u8]> = masks.names().collect();
+    assert_eq!(names, [x.as_bytes(), x.as_bytes()]);
     // The second algorithm's single volume was renamed after the first one's close; its offset
     // and index files were written last.
     assert_eq!(
-        files_under(&out.0),
+        files_under(&out),
         ["x.01.gmd", "x.01.gnd", "x.gmd", "x.gmi", "x.gmo", "x.gnd", "x.gni", "x.gno"]
     );
     assert_eq!(
-        std::fs::read(out.0.join("x.gmd")).unwrap(),
+        std::fs::read(out.join("x.gmd")).unwrap(),
         [0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 9]
     );
     assert_eq!(
-        std::fs::read(out.0.join("x.01.gmd")).unwrap(),
+        std::fs::read(out.join("x.01.gmd")).unwrap(),
         [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 4]
     );
     assert_eq!(
-        std::fs::read(out.0.join("x.gmo")).unwrap(),
+        std::fs::read(out.join("x.gmo")).unwrap(),
         [0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0]
     );
 }
@@ -402,15 +408,26 @@ fn data_volumes_written_one_after_another_are_written_in_turn() {
 #[cfg(unix)]
 #[test]
 fn a_directory_reached_through_a_link_is_the_same_directory() {
-    let out = TempDir::new("gi-mask-link");
-    std::os::unix::fs::symlink(&out.0, out.0.join("link")).unwrap();
+    let out = TempDir::unique("writedb-gi-mask-link");
+    std::os::unix::fs::symlink(&out, out.join("link")).unwrap();
     let mut masks = GiMasks::default();
-    let linked = out.base("link/x");
-    masks.add(2, &out.base("x"), b"dust:", 0, dates());
-    masks.add(3, &linked, b"dust:", 0, dates());
+    let linked = base_in(&out, "link/x");
+    masks.add(2, base_in(&out, "x").as_bytes(), b"dust:", 0, dates());
+    masks.add(3, linked.as_bytes(), b"dust:", 0, dates());
     masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     assert_refused(
         masks.add_gi_mask(3, &[2], &RANGE),
-        &format!("\"{}\" and \"{linked}\"", out.base("x")),
+        &format!("\"{}\" and \"{linked}\"", base_in(&out, "x")),
+    );
+}
+
+#[test]
+fn lowercase_utf8_bytes_keeps_distinct_invalid_bytes_apart() {
+    use super::lowercase_utf8_bytes;
+    assert_eq!(lowercase_utf8_bytes(b"Gm\xffA"), b"gm\xffa");
+    assert_eq!(lowercase_utf8_bytes(b"Gm\xfeA"), b"gm\xfea");
+    assert_ne!(
+        lowercase_utf8_bytes(b"a\xff"),
+        lowercase_utf8_bytes(b"a\xfe")
     );
 }

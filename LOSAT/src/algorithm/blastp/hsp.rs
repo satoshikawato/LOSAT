@@ -44,7 +44,62 @@ pub(crate) struct BlastpHsp {
     pub num: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// `BlastpHsp` stores 1-based inclusive starts and ends (`q_start - 1`, `q_end` are NCBI's 0-based
+// half-open `offset` and `end`), and keeps `length` equal to the merged query span.
+impl crate::core::blast_hits::ChunkMergeHsp for BlastpHsp {
+    fn merge_context(&self) -> i32 {
+        self.query_context
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.subject_frame
+    }
+    fn merge_q_start(&self) -> i32 {
+        (self.q_start - 1) as i32
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end as i32
+    }
+    fn merge_s_start(&self) -> i32 {
+        (self.s_start - 1) as i32
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end as i32
+    }
+    fn merge_score(&self) -> i32 {
+        self.raw_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.gapped_q_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.gapped_s_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = (q_start + 1) as usize;
+        self.q_end = q_end as usize;
+        self.s_start = (s_start + 1) as usize;
+        self.s_end = s_end as usize;
+        self.length = (q_end - q_start) as usize;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.gapped_q_start = q_gapped_start;
+        self.gapped_s_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.raw_score = score;
+    }
+}
+
 impl BlastpHsp {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478-478
+    /// The gap columns: the alignment's columns that are neither identities nor mismatches, as
+    /// the default report's mismatches are the columns of neither (`Hit::gap_letters`).
+    #[inline]
+    pub(crate) fn gap_letters(&self) -> usize {
+        usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
+    }
+
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub(crate) fn from_hit(hit: Hit) -> Self {
         let Hit {
@@ -360,7 +415,7 @@ pub(crate) fn subject_offset_end(s_start: usize, s_end: usize) -> (usize, usize)
     (s_start.saturating_sub(1), s_end)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 pub(crate) fn score_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
     let (a_q_start, a_q_end, a_s_start, a_s_end) = a.offsets();
     let (b_q_start, b_q_end, b_s_start, b_s_end) = b.offsets();
@@ -529,7 +584,7 @@ pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
     hit_list.hsplist_array = kept;
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1748
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1749
 pub(crate) fn update_best_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     let mut best = i32::MAX as f64;
     for hsp in &list.hsps {
@@ -564,7 +619,7 @@ pub(crate) fn trim_by_max_hsps(list: &mut BlastpHspList, max_hsps_per_subject: u
     crate::core::blast_hits::trim_by_max_hsps(&mut list.hsps, max_hsps_per_subject);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3077-3106
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3077-3107
 fn compare_hsp_lists<H: HitListHsp>(a: &BlastpHspList<H>, b: &BlastpHspList<H>) -> Ordering {
     if a.hsps.is_empty() && b.hsps.is_empty() {
         return Ordering::Equal;
@@ -1033,7 +1088,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3172-3187
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3171-3188
     fn purge(&mut self) {
         let mut index = 0usize;
         while index < self.hsplist_count {
@@ -1084,7 +1139,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
         self.hsplist_count = self.hsplist_array.len();
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-892
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-893
     pub(crate) fn prune_by_size(&mut self, hitlist_size: usize) {
         if hitlist_size == 0 {
             self.hsplist_array.clear();

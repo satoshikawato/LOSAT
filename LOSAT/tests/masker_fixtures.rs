@@ -745,6 +745,52 @@ fn windowmasker_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+#[test]
+fn windowmasker_empty_genome_reports_code_instead_of_blank_error() {
+    let expected_err = concat!(
+        "computing the genome length\n",
+        "Error: empty genome\n",
+        "Error: (106.16) Application's execution failed: empty genome\n",
+    );
+    // Run the exact reported command in an empty directory: `losat windowmasker -mk_counts
+    // -fa_list true -in list.txt -out c.counts` (rc 3).
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("windowmasker-empty-genome-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .args([
+            "windowmasker",
+            "-mk_counts",
+            "-fa_list",
+            "true",
+            "-in",
+            "list.txt",
+            "-out",
+            "c.counts",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr, expected_err);
+    assert!(!stderr.contains("Error: \n"));
+    assert!(!stderr.contains("Application's execution failed: \n"));
+
+    // Frozen NCBI 2.17.0 empty-genome rows map to the exact same non-blank stderr.
+    let rows = cases("windowmasker");
+    for name in ["k_falist_missing", "k_emptyfile", "k_ids_none"] {
+        let case = rows.iter().find(|c| c.name == name).expect(name);
+        let got = run("windowmasker", case);
+        let want = expected("windowmasker", case);
+        assert_eq!(got, want, "{name}");
+        assert_eq!(String::from_utf8(got.1).unwrap(), expected_err, "{name}");
+    }
+}
+
 /// The rows of `EMPTY_ID_ROWS` are what the table says: each row is NCBI's crash (exit status 139,
 /// no output) after the error of its first such line, the one `bad id` error of a row of one line;
 /// and each row is its near row with only its list changed, the list of the near row with the lines

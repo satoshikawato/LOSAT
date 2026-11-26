@@ -255,3 +255,36 @@ fn the_formatter_s_constructor_throws_on_a_stream_that_failed() {
         (6, "BLAST failed to write output\n")
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851
+#[cfg(unix)]
+#[test]
+fn non_utf8_outfmt_argument_preserves_raw_bytes_in_error() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let archive = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/blast_formatter/in/bn.asn"
+    ))
+    .unwrap();
+    for bad in [&b"8\xff"[..], &b"\xff"[..]] {
+        let line = vec![
+            OsString::from("-archive"),
+            OsString::from("-"),
+            OsString::from("-outfmt"),
+            OsString::from_vec(bad.to_vec()),
+        ];
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = super::super::run_with(&line, &mut &archive[..], &mut out, &mut err);
+        let expected = [
+            b"LOSAT query/options error: '",
+            bad,
+            b"' is not a valid output format\n",
+            crate::wording::USER_MANUAL_FOOTER.as_bytes(),
+            b"\n",
+        ]
+        .concat();
+        assert_eq!((status, out, err), (1, Vec::new(), expected), "{bad:?}");
+    }
+}

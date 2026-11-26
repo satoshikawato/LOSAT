@@ -19,7 +19,7 @@
 
 use std::ffi::OsString;
 
-// The command line's arguments (`cli.rs`): the clap types of every program, how NCBI's reader
+// The command line's arguments (`cli.rs`): the option types of every program, how NCBI's reader
 // and LOSAT's refusals end an argv (the text that the command line prints where its reader
 // stopped at a help word, an argument error's report, a refusal), and the command line's own
 // errors.
@@ -32,7 +32,7 @@ pub use crate::ncbi_app::args::{genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,
-/// clap's conversion: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
+/// the program's options: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
 /// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are taken, as the
 /// library API takes them, and the help words stop the reader as on the command line, `-xmlhelp`
 /// included: the run prints their text (`ArgvError::Printed`; line WQA's D14, 2026-11-20). The
@@ -45,7 +45,7 @@ pub use crate::ncbi_app::args::{genetic_codes, string_values};
 /// start (an argv read on its own: `None`) the posts are the report's, as without `-logfile`.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
-/// other clap type.
+/// other type.
 pub fn try_parse_cli<I, S>(argv: I, started: Option<&CallerStart>) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
@@ -65,6 +65,104 @@ where
 /// the command line prints where the reader stopped at a help word.
 pub fn argv_message(error: &ArgvError) -> String {
     error.to_string()
+}
+
+/// Scans `words` (the command line after the program's name) using `program`'s NCBI argument
+/// definitions (`ncbi_app::args::scan_argv`), calling `visit(canonical_name, value)` for each
+/// recognized option before `--` (`None` for a flag, `Some(value)` for an option taking a value).
+pub fn scan_program_argv(
+    program: &str,
+    words: &[&str],
+    mut visit: impl FnMut(&'static str, Option<&str>),
+) {
+    crate::ncbi_app::args::scan_argv(program, words, |name, value| {
+        visit(name, value.and_then(std::ffi::OsStr::to_str));
+    });
+}
+
+/// The input file names that a `windowmasker` run with `words` opens for reading
+/// (`windowmasker::read_files`): `(for_logfile, for_out)`.
+pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::windowmasker::read_files(words)
+}
+
+/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
+/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
+/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
+/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
+/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+pub fn search_database_read_files(
+    program: crate::api::Program,
+    arguments: &[&str],
+    registry: &dyn RegistryFiles,
+    dbs: &[&str],
+    filtering_dbs: &[&str],
+    outfmt: &str,
+    expands_taxids: bool,
+) -> Vec<Vec<u8>> {
+    use crate::algorithm::common::database::{
+        outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
+    };
+    use crate::report::archive::options::RequestKind;
+    let request_kind = match program {
+        crate::api::Program::Blastp => RequestKind::Blastp,
+        crate::api::Program::Blastn => RequestKind::Blastn,
+        crate::api::Program::Blastx => RequestKind::Blastx,
+        crate::api::Program::Tblastn => RequestKind::Tblastn,
+        crate::api::Program::Tblastx => RequestKind::Tblastx,
+        crate::api::Program::Psiblast => RequestKind::Psiblast,
+    };
+    let has_db = !dbs.is_empty();
+    let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
+    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+        return Vec::new();
+    }
+    let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
+        program.name(),
+        arguments,
+        &[],
+        registry,
+    )
+    .settings()
+    .ok()
+    .and_then(|settings| settings.blastdb);
+    let seqtype = match program {
+        crate::api::Program::Blastp
+        | crate::api::Program::Blastx
+        | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
+        crate::api::Program::Blastn
+        | crate::api::Program::Tblastn
+        | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
+    };
+    let mut out = Vec::new();
+    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
+        let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
+        out.extend(crate::seqdb::alias::database_lookup_files(
+            trimmed,
+            db_type,
+            blastdb.as_deref(),
+        ));
+    };
+    for db in dbs {
+        push_db(&mut out, db, seqtype);
+    }
+    let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
+    out.extend(crate::seqdb::taxdb::lookup_files_for_use(
+        blastdb.as_deref(),
+        taxdb_use,
+        prefetches,
+    ));
+    if has_db && expands_taxids {
+        let tax_file = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
+        let search = crate::seqdb::SearchPath::from_environment(blastdb.as_deref());
+        if search.resolve_file(tax_file).is_some() {
+            out.push(tax_file.to_vec());
+        }
+    }
+    for fdb in filtering_dbs {
+        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
+    }
+    out
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
@@ -93,9 +191,9 @@ struct SearchFiles<'a> {
     label: &'a str,
     query: &'a std::path::Path,
     subject: Option<&'a std::path::Path>,
-    masker: Option<&'a str>,
+    masker: Option<&'a std::ffi::OsStr>,
     filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
-    repeats: Option<&'a str>,
+    repeats: Option<&'a std::ffi::OsStr>,
 }
 
 /// `SearchFiles` of the arguments `command`: `None` for a program that writes no strategy file.
@@ -195,7 +293,7 @@ pub fn open_strategy_file(
     }));
     others.extend(files.masker.map(|masker| RunFileName {
         option: "window_masker_db",
-        name: std::ffi::OsStr::new(masker),
+        name: masker,
     }));
     // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
     // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
@@ -206,10 +304,14 @@ pub fn open_strategy_file(
     if files.filter.is_some() || files.repeats.is_some() {
         if let Some(filter) = files.filter {
             for (option, list) in [
+                ("gilist", &filter.gilist),
+                ("negative_gilist", &filter.negative_gilist),
                 ("seqidlist", &filter.seqidlist),
                 ("negative_seqidlist", &filter.negative_seqidlist),
                 ("taxidlist", &filter.taxidlist),
                 ("negative_taxidlist", &filter.negative_taxidlist),
+                ("ipglist", &filter.ipglist),
+                ("negative_ipglist", &filter.negative_ipglist),
             ] {
                 others.extend(list.as_deref().map(|name| RunFileName {
                     option,
@@ -223,9 +325,8 @@ pub fn open_strategy_file(
         if let Some(path) = read_there {
             let repeats = files.filter.is_none()
                 || files.repeats.is_some_and(|repeats| {
-                    path.as_os_str()
-                        .as_encoded_bytes()
-                        .starts_with(repeats.as_bytes())
+                    crate::utils::os_bytes::os_str_bytes(path.as_os_str())
+                        .starts_with(&crate::utils::os_bytes::os_str_bytes(repeats))
                 });
             others.push(RunFileName {
                 option: if repeats { "filtering_db" } else { "db" },
@@ -236,7 +337,6 @@ pub fn open_strategy_file(
     crate::report::archive::strategy::open_strategy_file_in(
         run_files,
         files.strategy,
-        None,
         files.label,
         &others,
     )
@@ -322,27 +422,47 @@ pub fn run_windowmasker(
 /// end.
 pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
-    /// The file of `-logfile`, kept for the message.
-    #[derive(Default)]
-    struct Log(Mutex<Vec<u8>>);
+    /// The file of `-logfile`, kept for the message, carrying the tool's read input names so
+    /// `-logfile` and `-out` naming a missing input that the CLI reads back are refused.
+    struct Log {
+        bytes: Mutex<Vec<u8>>,
+        read: Vec<Vec<u8>>,
+        out_read: Vec<Vec<u8>>,
+    }
     impl FileReceiver for Log {
         fn receive(&self, _name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
-            self.0
+            self.bytes
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend_from_slice(bytes);
             Ok(())
         }
+
+        fn read_files(&self) -> &[Vec<u8>] {
+            &self.read
+        }
+
+        fn output_read_files(&self) -> &[Vec<u8>] {
+            &self.out_read
+        }
     }
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-    let log = Arc::new(Log::default());
+    let (read, out_read) = crate::windowmasker::read_files(&words);
+    let log = Arc::new(Log {
+        bytes: Mutex::new(Vec::new()),
+        read,
+        out_read,
+    });
+    let mut out = Vec::new();
     let mut err = Vec::new();
-    let status = crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut err);
+    let status =
+        crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
     if status == 0 {
         return Ok(());
     }
+    err.extend_from_slice(&out);
     err.extend_from_slice(
-        &log.0
+        &log.bytes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
     );
@@ -424,8 +544,11 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 // The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
-// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
-// the refusal of a record longer than LOSAT reads.
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line,
+// the refusal of a record longer than LOSAT reads, and the `-parse_deflines` molecule and letter
+// rules (`defline_named_molecule`, `DataLineAlphabet`).
+pub use crate::blastinput::fasta_reader::believed::defline_named_molecule;
+pub use crate::blastinput::fasta_reader::reader::DataLineAlphabet;
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 
 /// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the

@@ -455,17 +455,16 @@ fn a_blastx_strategy_run_that_ends_in_ncbis_error_writes_ncbis_order() {
 /// The run of `a_blastx_strategy_run_that_ends_in_ncbis_error_writes_ncbis_order` with standard
 /// output a full device: NCBI BLAST+ 2.17.0 aborts where `cerr`'s tie writes q1's report (exit
 /// status 134, `terminate called after throwing an instance of 'std::__ios_failure'`, review 5's
-/// `out2/ncbi.full.err`), after the warning of `-max_target_seqs 1`. LOSAT reports the failed write
-/// with a non-zero exit status where NCBI aborts (as PD-LOSAT-CLI-NONSEARCH-DIFFERENCES's outfmt 6
-/// and 7; `cli::NcbiReportBuffer`) and writes nothing after it: the run stops at the tie (`Error:
-/// No space left on device`, exit status 1), with `q3 café` as with `q3 cafe` (no hold since line
-/// RG K4b; line RG T2's held run stopped at the release's write, "BLAST failed to write output",
-/// exit status 6).
+/// `out2/ncbi.full.err`), after the warning of `-max_target_seqs 1`. LOSAT aborts there as NCBI does
+/// (`report::ostream::ReportStream`: the tie of a failed `cout` while the formatter lives; line RG
+/// T6a) and writes nothing after it, with `q3 café` as with `q3 cafe` (no hold since line RG K4b;
+/// line RG T2's held run stopped at the release's write, "BLAST failed to write output", exit
+/// status 6).
 #[cfg(target_os = "linux")]
 #[test]
 fn a_blastx_strategy_run_on_a_full_standard_output_reports_the_failed_write() {
     const WARNING: &str = "Warning: [blastx] Examining 5 or more matches is recommended\n";
-    const FAILURE: &str = "Error: No space left on device (os error 28)\n";
+    const FAILURE: &str = "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n";
     for replaced in [true, false] {
         let dir = scratch(&format!("blastx-hold-full-{replaced}"));
         let output = hold_error_run(&dir, "1", replaced)
@@ -480,10 +479,10 @@ fn a_blastx_strategy_run_on_a_full_standard_output_reports_the_failed_write() {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             (
-                output.status.code(),
+                std::os::unix::process::ExitStatusExt::signal(&output.status),
                 String::from_utf8_lossy(&output.stderr)
             ),
-            (Some(1), format!("{WARNING}{FAILURE}").into()),
+            (Some(6), format!("{WARNING}{FAILURE}").into()),
             "replaced {replaced}"
         );
     }

@@ -224,10 +224,13 @@ fn compressed_batch_past_capacity_is_refused() {
         )
         .expect("word size 5")
     };
-    // A later batch: its own table is built for the test.
-    assert!(build(&[0..1, 1..2, 2..3, 3..4], large - 1).is_err());
+    // A later batch: its own table is built for the test, and the refusal names it.
+    assert_eq!(
+        build(&[0..1, 1..2, 2..3, 3..4], large - 1).err(),
+        Some(BanksFilled(1))
+    );
     assert!(build(&[0..1, 1..2, 2..3, 3..4], large).is_ok());
-    assert!(build(&[1..2, 2..4], large - 1).is_err());
+    assert_eq!(build(&[1..2, 2..4], large - 1).err(), Some(BanksFilled(0)));
     // The first batch: the table so far is its own.
     let first = unlimited_table(LOW_THRESHOLD, &query, &locations[0..2])
         .overflow_cells
@@ -236,7 +239,7 @@ fn compressed_batch_past_capacity_is_refused() {
         .overflow_cells
         .len();
     assert!(first >= large && rest < first - 1);
-    assert!(build(&[0..2, 2..4], first - 1).is_err());
+    assert_eq!(build(&[0..2, 2..4], first - 1).err(), Some(BanksFilled(0)));
     assert!(build(&[0..2, 2..4], first).is_ok());
     // The large query in a split batch (no table of its own) is not tested.
     assert!(build(&[0..1, 2..3, 3..4], small).is_ok());
@@ -315,7 +318,8 @@ fn compressed_batch_shortcut_agrees_with_exact_test() {
         }
         capacities.retain(|&capacity| capacity > 0);
         for capacity in capacities {
-            let refused = exact.iter().any(|&(cells, _)| cells > capacity);
+            // The first table whose own words fill the banks.
+            let refused = exact.iter().position(|&(cells, _)| cells > capacity);
             shortcut_undecided += exact
                 .iter()
                 .filter(|&&(cells, shortcut)| cells <= capacity && shortcut > capacity)
@@ -331,9 +335,13 @@ fn compressed_batch_shortcut_agrees_with_exact_test() {
             )
             .expect("word size 5");
             match built {
-                Err(()) => assert!(refused, "round {round}, capacity {capacity}"),
+                Err(filled) => assert_eq!(
+                    Some(filled),
+                    refused.map(BanksFilled),
+                    "round {round}, capacity {capacity}"
+                ),
                 Ok(table) => {
-                    assert!(!refused, "round {round}, capacity {capacity}");
+                    assert_eq!(refused, None, "round {round}, capacity {capacity}");
                     assert_same_table(&table, &whole);
                 }
             }
@@ -727,7 +735,7 @@ fn compressed_scan_subject_emits_ncbi_subject_major_order() {
     assert_eq!(s_range[1], 6);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405
 #[test]
 fn compressed_scan_subject_small_buffer_resumes_without_splitting_subject_offset() {
     let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");

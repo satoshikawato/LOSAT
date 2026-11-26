@@ -276,7 +276,7 @@ fn context_block_is_the_gapped_block_or_the_contexts_own() {
         karlin_params: own,
     };
     let mut args = make_blastp_args();
-    args.comp_based_stats = "0".to_string();
+    args.comp_based_stats = std::ffi::OsString::from("0");
     let gapped = args.resolve().expect("gapped");
     args.ungapped = true;
     let ungapped = args.resolve().expect("ungapped");
@@ -311,10 +311,10 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
     let report = |extra: &[(&str, &str)], ungapped: bool| -> String {
         let mut args = make_blastp_args();
         args.ungapped = ungapped;
-        args.comp_based_stats = "0".to_string();
+        args.comp_based_stats = std::ffi::OsString::from("0");
         for &(name, value) in extra {
             match name {
-                "matrix" => args.matrix = Some(value.to_string()),
+                "matrix" => args.matrix = Some(std::ffi::OsString::from(value)),
                 "gapopen" => args.gap_open = Some(value.parse().unwrap()),
                 "gapextend" => args.gap_extend = Some(value.parse().unwrap()),
                 _ => unreachable!(),
@@ -328,7 +328,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     refusal: FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -510,14 +510,14 @@ fn make_blastp_args() -> BlastpArgs {
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: "2".to_string(),
+        comp_based_stats: std::ffi::OsString::from("2"),
         seg: None,
         soft_masking: None,
         lcase_masking: false,
         use_sw_tback: false,
         query_loc: None,
         subject_loc: None,
-        outfmt: "6".to_string(),
+        outfmt: std::ffi::OsString::from("6"),
         archive: None,
         export_search_strategy: None,
         import_search_strategy: None,
@@ -529,6 +529,7 @@ fn make_blastp_args() -> BlastpArgs {
         taxdb_setting: None,
         matrix_search: None,
         write_verification: None,
+        read_verification: Default::default(),
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,
@@ -807,7 +808,7 @@ fn test_blastp_diag_last_hit_after_one_hit_matches_ncbi_formula() {
     assert_eq!(11 - (5 - 1) + 19, 26);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-521
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:521-530
 #[test]
 fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     let mut skip_diag = DiagStruct::default();
@@ -833,7 +834,7 @@ fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     assert_eq!(reset_diag.last_hit(), 90);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:581-588
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:596-606
 #[test]
 fn test_blastp_two_hit_diag_update_matches_ncbi_flag_and_last_hit_updates() {
     let mut right_extended_diag = DiagStruct::default();
@@ -925,7 +926,7 @@ fn test_one_hit_caller_passes_ncbi_payload_directly_to_blastp_save_init_hsp() {
     assert_eq!(init_hsps[0].ungapped_data.length, 5);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension_occurs() {
     let query = vec![
@@ -968,7 +969,7 @@ fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension
     assert_eq!(init_hsps[0].ungapped_data.length, 6);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_left_stops_early() {
     let query = vec![
@@ -1064,9 +1065,9 @@ fn test_blastp_for_each_offset_pair_preserves_scan_emission_order() {
     assert_eq!(emitted, expected);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:111-128
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-511
 #[test]
 fn test_blastp_for_each_offset_pair_preserves_absolute_query_offsets_across_queries() {
     let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
@@ -1346,7 +1347,7 @@ fn test_validate_requested_blastp_support_accepts_word_size_two() {
 fn test_validate_requested_blastp_support_takes_unified_p_modes() {
     for value in ["1u", "2u", "3U", "Du", "tu"] {
         let mut args = make_blastp_args();
-        args.comp_based_stats = value.to_string();
+        args.comp_based_stats = std::ffi::OsString::from(value);
         let resolved = args.resolve().expect("resolved blastp args");
         assert!(resolved.comp_based_stats.unified_p, "{value}");
         validate_requested_blastp_support(&resolved).expect(value);
@@ -1367,7 +1368,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
                 matrix.ncbi_name().to_lowercase(),
             ] {
                 let mut args = make_blastp_args();
-                args.matrix = Some(name.clone());
+                args.matrix = Some(std::ffi::OsString::from(&name));
                 args.gap_open = Some(gap_open);
                 args.gap_extend = Some(gap_extend);
                 let resolved = args.resolve().expect("resolved blastp args");
@@ -1380,7 +1381,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
         // there (psiblast takes the standard matrices only, blast_options.c:913-917).
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         if matrix == ScoringMatrix::Identity {
             let err = args.resolve().expect_err("psiblast IDENTITY");
             assert!(err
@@ -1413,7 +1414,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     ] {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.matrix = Some("IDENTITY".to_string());
+        args.matrix = Some(std::ffi::OsString::from("IDENTITY"));
         args.word_size = word_size;
         let resolved = args.resolve().expect("resolved blastp args");
         validate_requested_blastp_support(&resolved).expect("IDENTITY's options");
@@ -1431,7 +1432,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     }
     for word_size in [6, 7] {
         let mut args = make_blastp_args();
-        args.matrix = Some("identity".to_string());
+        args.matrix = Some(std::ffi::OsString::from("identity"));
         args.word_size = Some(word_size);
         let err = args.resolve().expect_err("IDENTITY word 6 and 7");
         assert!(
@@ -1500,9 +1501,9 @@ fn test_psi_contexts_take_the_search_matrix() {
     let resolved = |matrix: Option<&str>| {
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.seg = Some("no".to_string());
+        args.seg = Some(std::ffi::OsString::from("no"));
         if let Some(matrix) = matrix {
-            args.matrix = Some(matrix.to_string());
+            args.matrix = Some(std::ffi::OsString::from(matrix));
         }
         args.resolve().expect("resolved psiblast args")
     };
@@ -1989,7 +1990,7 @@ fn test_invalid_blastp_context_uses_ncbi_placeholder_cutoffs() {
         is_valid: false,
         ..make_query_context(0, 0)
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3577-3622
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3532-3533
     let scoring = crate::config::ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
         gap_open: 11,
@@ -2610,6 +2611,53 @@ fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
     assert!(plan(&gumbel, &counts_0).is_some_and(|blocks| blocks > 1));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
+// Line RG item X-short-bat-2: the refusal of a compressed table whose words fill NCBI's overflow
+// banks is the failure of the batch of the first table that fills them (`banks_filled_refusal`):
+// a batch that NCBI splits has no table among NCBI's tables (its chunks are searches of their own,
+// whose one table names the chunk's call's first query, made its batch's by
+// `search_split_query_batches`); an ungapped search splits none. One query per batch; the second
+// of 20,000 letters is split at the default chunk size.
+#[test]
+fn banks_filled_refusal_names_the_batch_of_the_table() {
+    let records = x_block_test_records(&[100, 20000, 100, 100]);
+    let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+    let batches = seq_range::QueryInput::whole(&records).batches(1);
+    assert_eq!(batches.len(), 4);
+    let resolve = |ungapped: bool| {
+        let mut args = make_blastp_args();
+        args.task = "blastp-fast".to_string();
+        // An ungapped search takes no composition adjustment.
+        args.comp_based_stats = std::ffi::OsString::from("0");
+        args.ungapped = ungapped;
+        args.resolve().expect("resolved blastp-fast args")
+    };
+    let gapped = resolve(false);
+    let ungapped = resolve(true);
+    let named = |args: &ResolvedBlastpArgs, filled: usize, chunk: bool| {
+        let failure = banks_filled_refusal(args, &batches, &lengths, chunk, BanksFilled(filled))
+            .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+            .expect("a batch's failure");
+        assert!(
+            failure.error.to_string().contains("1024 overflow banks"),
+            "{}",
+            failure.error
+        );
+        failure.query
+    };
+    for (filled, query) in [(0, 0), (1, 2), (2, 3)] {
+        assert_eq!(named(&gapped, filled, false), Some(query), "table {filled}");
+    }
+    for filled in 0..4 {
+        assert_eq!(
+            named(&ungapped, filled, false),
+            Some(filled),
+            "table {filled}"
+        );
+    }
+    assert_eq!(named(&gapped, 0, true), Some(0));
+}
+
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary
 // stage runs in blocks (`x_blocks_contexts`, no table) are those of each table's builder, every
 // field and the Karlin blocks bit for bit. The builders make their contexts in the pass that
@@ -2656,9 +2704,9 @@ fn x_blocks_contexts_are_the_builders_contexts() {
     for (task, matrix, word_size) in configs {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.seg = Some("yes".to_string());
+        args.seg = Some(std::ffi::OsString::from("yes"));
         args.lcase_masking = true;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         args.word_size = word_size;
         let resolved = match args.resolve() {
             Ok(resolved) => resolved,
@@ -3044,4 +3092,125 @@ fn hard_mask_starts_and_ends_move_the_table() {
         assert_eq!(scratch.diag_offset, start.offset);
         assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
     }
+}
+
+// Review 1 of D1c-1c-b PR 2b, M1 and I1: a refusal at a tabular row of a later batch fails that
+// batch (`failed_lookup_batch`): the error names the query of the refused result set (the result
+// sets are the queries with hit lists), carries the call's first UTF8String read only where the
+// failing batch made it, and holds what NCBI writes of the batch's reports before that row (its
+// prefetch texts, then the own warnings of its queries up to the row's, without the reader
+// messages that the failure writes first), which `ErrorAfterPosts::written` writes before it
+// gives back the refusal.
+#[test]
+fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
+    let lineless = crate::report::tabular::LookupFailure {
+        lineless: true,
+        ..Default::default()
+    };
+    let spec = crate::report::tabular::TabularSpec::of_app(
+        crate::blastinput::app::ReportFormat::Tabular,
+        &crate::blastinput::app::FormatChoice {
+            number: 6,
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
+        },
+        crate::report::archive::options::RequestKind::Blastp,
+    )
+    .unwrap();
+    // Queries 0, 2 and 3 have hit lists: result set 2 is query 3, in the batch of queries 2 and 3.
+    let refusal = || {
+        crate::report::tabular::check_failed_lookups(
+            Some(&spec),
+            [vec![0], vec![0], vec![1]],
+            |s_idx| (s_idx == 1).then_some(lineless),
+            |s_idx, failure| {
+                crate::report::tabular::failed_database_subject(s_idx, None, None, failure)
+            },
+            crate::blastinput::app::Program::Blastp,
+            "BLASTP",
+            true,
+        )
+        .unwrap_err()
+    };
+    let hit = || Some(BlastpHitList::new(1));
+    let hit_lists = [hit(), None, hit(), hit()];
+    let batches = [
+        seq_range::RangedBatch {
+            input: 0..2,
+            searched: 0..2,
+        },
+        seq_range::RangedBatch {
+            input: 2..4,
+            searched: 2..4,
+        },
+    ];
+    let lines = [
+        b"R0\nW0\n".to_vec(),
+        Vec::new(),
+        b"R2\nW2\n".to_vec(),
+        b"W3\n".to_vec(),
+    ];
+    let reader = [b"R0\n".to_vec(), Vec::new(), b"R2\n".to_vec(), Vec::new()];
+    let prefetches = [
+        (
+            0,
+            crate::report::diag_log::Posts::of_lines(b"P0\n".to_vec()),
+        ),
+        (
+            2,
+            crate::report::diag_log::Posts::of_lines(b"P2\n".to_vec()),
+        ),
+    ];
+    for (read_by, carried) in [(3, true), (1, false)] {
+        let utf8 = database::Utf8Read {
+            query: read_by,
+            path: "Seq-entry.title".to_string(),
+        };
+        let stop = LookupStop {
+            hit_lists: &hit_lists,
+            batches: &batches,
+            lines: &lines,
+            reader: &reader,
+            prefetches: &prefetches,
+            reads: &[],
+            utf8: Some(&utf8),
+        };
+        let failure = failed_lookup_batch(refusal(), &stop)
+            .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+            .unwrap();
+        assert_eq!(failure.query, Some(3));
+        assert_eq!(
+            failure.utf8,
+            carried.then(|| utf8.clone()),
+            "read by {read_by}"
+        );
+        let mut written = Vec::new();
+        let error = database::ErrorAfterPosts::written(failure.error, &mut written, None).unwrap();
+        assert_eq!(written, b"P2\nW2\nW3\n");
+        assert_eq!(
+            error
+                .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+                .unwrap()
+                .set(),
+            2
+        );
+    }
+    // Any other error stays, and writes nothing.
+    let stop = LookupStop {
+        hit_lists: &hit_lists,
+        batches: &batches,
+        lines: &lines,
+        reader: &reader,
+        prefetches: &prefetches,
+        reads: &[],
+        utf8: None,
+    };
+    let other = failed_lookup_batch(anyhow::anyhow!("another error"), &stop);
+    assert!(other
+        .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+        .is_none());
+    let mut written = Vec::new();
+    let other = database::ErrorAfterPosts::written(other, &mut written, None).unwrap();
+    assert!(written.is_empty());
+    assert_eq!(other.to_string(), "another error");
 }

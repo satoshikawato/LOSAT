@@ -7,11 +7,12 @@ use super::{
     archive,
     args::{BlastxArgs, ResolvedOptions, SemanticOptionsError},
     database::{BlastxDatabase, ReportedSubjects},
+    empty_rows::SubjectLoc,
     input::FastaRecord,
+    input_source::{from_shared_ref, BatchCutter, CutSettings},
     native::{
-        archive_error, database_search_error, engine, input_error, options_error, output_error,
-        report_error, reported_batch, run_query_batches, write_empty_subject_warnings,
-        ReportedAsks,
+        archive_error, database_search_error, engine, options_error, report_error, reported_batch,
+        run_query_batches, write_empty_subject_warnings, ReportedAsks,
     },
     query_setup::BATCH_SIZE,
     report::{self, LocalReport, RecordsParsed, ShownSubjects},
@@ -23,9 +24,7 @@ use crate::api::local_blast::{FormatProbe, ReportOutputs, ReportedSubject};
 use crate::api::QueryEnd;
 use crate::blastinput::app::{self, Program};
 use crate::blastinput::fasta_reader;
-use crate::blastinput::seq_range::{
-    parse_optional_range, record_cut, record_interval, RangeRole, RecordInterval, SequenceRange,
-};
+use crate::blastinput::seq_range::{parse_optional_range, record_cut, RangeRole, SequenceRange};
 use anyhow::{bail, ensure, Result};
 use std::io::{self, Write};
 
@@ -47,7 +46,7 @@ use std::io::{self, Write};
 /// subject as it is read, each query as its batch is read (`native::run_inner`).
 ///
 /// The records are those of NCBI's reader (`fasta_reader`): the queries as its nucleotide reader
-/// reads them, the subjects as its protein reader reads them (`blastx_record`). Their messages are
+/// reads them, the subjects as its protein reader reads them (`input_source::from_shared_ref`). Their messages are
 /// written where BLASTX's reader writes them: a subject's as the subjects are read, a query's
 /// before the report of the batch that holds it. Queries without a record are NCBI's
 /// `Query is Empty!`.
@@ -126,7 +125,7 @@ fn search_records(
     // past its end stops the reading after its messages (`native::run_inner`).
     let mut subjects = Vec::with_capacity(subject_records.len());
     for record in subject_records {
-        let mut subject = blastx_record(record, args.lcase_masking).map_err(input_error)?;
+        let mut subject = from_shared_ref(record, args.lcase_masking)?;
         diagnostics.write_all(&record.warnings)?;
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
@@ -153,7 +152,7 @@ fn search_records(
         options.query_range = query_range;
     }
     // The taxonomy database of the reports, where the command line asks (`native::run`).
-    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref());
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
@@ -250,17 +249,15 @@ fn search_records(
 pub(super) fn subject_taxonomy(
     resolved: &mut [ResolvedOptions],
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();
     }
-    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -402,21 +399,18 @@ fn batch_shown<'a>(
     }
 }
 
-/// The reader batches of `query_records` as BLASTX's reader makes them
-/// (`input::emit_fasta_batch`), given to `deliver` in order: a record's messages (`warn`), then
-/// the record, and the batch once it holds `batch_size` letters or more; the rest at the end. With
-/// `query_range` (`-query_loc`) a record is cut to its interval (its whole letters kept with
-/// `keep_whole`, the archive's) and the batch counts the whole record; a record whose interval
-/// starts more than one letter past its end is not searched and adds nothing, so the last batch
-/// can hold none (NCBI's `Empty CBlastQueryVector`). Only the batch being read is kept. The
-/// skipped records are kept for the batch's scope (`FastaRecord::skipped`) with `keep_skipped`
-/// (`input::FastaStream::keep_skipped`). Under `-parse_deflines` (`count`) each record counts as
-/// NCBI's reader counts it (`query_batch::BatchCount`: a repeated id by its first record's
-/// letters). After the records comes `end`, as BLASTX's reader meets
-/// it after the last record it read (`input::read_fasta_stream_batches`): a reader error stops the
-/// reading in the batch being read, after the messages of its records and of the record the reader
-/// failed on, so that batch is never delivered (line WQA's D10, 2026-11-19); blank lines alone, an
-/// input without a record, are a batch without a query (NCBI's `Empty CBlastQueryVector`).
+/// The reader batches of `query_records` as BLASTX's reader makes them (`input_source::BatchCutter`,
+/// the command line's too), given to `deliver` in order: a record's messages (`warn`), then the
+/// record. `query_range` (`-query_loc`) cuts each record to its interval (its whole letters kept
+/// with `keep_whole`, the archive's); the skipped records are kept for the batch's scope
+/// (`FastaRecord::skipped`) with `keep_skipped` (`input_source::QueryStream::keep_skipped`). Under
+/// `-parse_deflines` (`count`) each record counts as NCBI's reader counts it
+/// (`query_batch::BatchCount`). After the records comes `end`, as BLASTX's reader meets it after
+/// the last record it read (`input_source::QueryStream::read_batches`): a reader error stops the
+/// reading in the batch being read, after the messages of its records and of the record the
+/// reader failed on, so that batch is never delivered (line WQA's D10, 2026-11-19); blank lines
+/// alone, an input without a record, are a batch without a query (NCBI's `Empty
+/// CBlastQueryVector`).
 fn reader_batches(
     query_records: &[fasta_reader::FastaRecord],
     end: &QueryEnd,
@@ -426,58 +420,25 @@ fn reader_batches(
     keep_whole: bool,
     around: usize,
     keep_skipped: bool,
-    mut count: Option<crate::blastinput::query_batch::BatchCount>,
+    count: Option<crate::blastinput::query_batch::BatchCount>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
-    let mut batch = Vec::new();
-    // The batch's records that the range skips, for its first record (`FastaRecord::skipped`):
-    // NCBI's reader added them to its scope.
-    let mut skipped = Vec::new();
-    let (mut letters, mut records_read) = (0, 0);
+    let mut cutter = BatchCutter::new(CutSettings {
+        range: query_range.as_ref(),
+        keep_whole,
+        around,
+        keep_skipped,
+        batch_size,
+        count,
+        blank_batch: true,
+    });
     for record in query_records {
-        let mut query = blastx_record(record, lowercase)?;
+        let query = from_shared_ref(record, lowercase)?;
         if !record.warnings.is_empty() {
             warn(&record.warnings)?;
         }
-        let length = query.sequence.len();
-        records_read += 1;
-        let interval = query_range.map(|range| record_interval(&range, length));
-        let skipped_now = matches!(interval, Some(RecordInterval::PastEnd));
-        // A skipped record counts 0 and joins the scope (`BatchCount::count`), as in the stream
-        // reader (`input::emit_fasta_batch`).
-        letters += match count.as_mut() {
-            Some(count) => count.count(record.believed(), length, skipped_now),
-            None if skipped_now => 0,
-            None => length,
-        };
-        match interval {
-            None => {}
-            Some(RecordInterval::Letters { from, to }) => {
-                // The whole letters of a record whose letter before the interval is lower
-                // case, for the chunks of a split query (`split::x_chunk_masks`).
-                let keep_whole = keep_whole || query.lower_case_before(from);
-                query.keep_around(from, to + 1, around);
-                query.cut_in_place(from, to + 1, keep_whole)
-            }
-            Some(RecordInterval::Empty) => query.cut_in_place(length, length, keep_whole),
-            Some(RecordInterval::PastEnd) => {
-                if keep_skipped {
-                    skipped.push(super::input::SkippedRecord::of(&query, batch.len()));
-                }
-                continue;
-            }
-        }
-        batch.push(query);
-        if letters >= batch_size {
-            super::input::attach_skipped(&mut batch, &mut skipped);
-            deliver(&batch)?;
-            batch.clear();
-            (letters, records_read) = (0, 0);
-            if let Some(count) = count.as_mut() {
-                count.end_batch();
-            }
-        }
+        cutter.add(query, deliver)?;
     }
     if let QueryEnd::Error(error) = end {
         if !error.warnings().is_empty() {
@@ -485,12 +446,11 @@ fn reader_batches(
         }
         return Err(error.app_error());
     }
-    let no_record = query_records.is_empty() && matches!(end, QueryEnd::BlankLines);
-    if records_read > 0 || no_record {
-        super::input::attach_skipped(&mut batch, &mut skipped);
-        deliver(&batch)?;
+    // An input without a line gives no batch; blank lines alone give one without a query.
+    if query_records.is_empty() && !matches!(end, QueryEnd::BlankLines) {
+        return Ok(());
     }
-    Ok(())
+    cutter.finish(deliver)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
@@ -752,11 +712,9 @@ fn write_run(
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
-            writer.write_all(&start).map_err(output_error)?;
+            writer.write_all(&start)?;
         }
-        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-            writer.flush().map_err(output_error)?;
-        }
+        writer.flush()?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -846,7 +804,7 @@ fn write_run(
         // search strategy request holds (`take` below).
         batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
-        report::sort_lists(results);
+        report::sort_lists(results, SubjectLoc::of_run(database.is_some()));
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback
@@ -860,7 +818,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
-                &mut *diagnostics,
+                (&mut *diagnostics, archive),
             )?,
             None => None,
         };
@@ -1016,7 +974,7 @@ fn write_run(
                     &mut shared,
                 )
                 .map_err(archive_error)
-                .and_then(|()| writer.flush().map_err(output_error));
+                .and_then(|()| writer.flush().map_err(Into::into));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
@@ -1041,6 +999,10 @@ fn write_run(
                 xml_scan.stops_after == Some(queries_before + queries.len()),
                 documents[index].as_mut(),
                 xml_matrix,
+                query_scopes
+                    .borrow()
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(queries_before)),
                 pool,
                 Some(LocalReport {
                     probe: probe.as_mut(),
@@ -1052,7 +1014,7 @@ fn write_run(
                 }),
             )
             .map_err(report_error)
-            .and_then(|()| writer.flush().map_err(output_error));
+            .and_then(|()| writer.flush().map_err(Into::into));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
             let written = refusal.check(rendered)?;
@@ -1106,8 +1068,7 @@ fn write_run(
         search_error,
         &mut render,
         &mut take,
-    )
-    .map_err(input_error)?;
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // The first format that is still written writes the warnings of the epilogs.
     let first = refusals.iter().position(|refusal| !refusal.refused());
@@ -1137,7 +1098,7 @@ fn write_run(
             xml_matrix,
         )
         .map_err(report_error)
-        .and_then(|()| writer.flush().map_err(output_error));
+        .and_then(|()| writer.flush().map_err(Into::into));
         // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
         refusal.check(ended)?;
     }
@@ -1222,8 +1183,11 @@ fn search_database(
         check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
+    let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+        outputs.formats.first().map(|format| format.outfmt),
+    );
     let database = BlastxDatabase::open_restricted(
-        name,
+        &name,
         &settings,
         list.as_ref(),
         args.db_mask.option().as_ref(),
@@ -1232,11 +1196,13 @@ fn search_database(
         args.app_name(),
     )?
     .showing_gis(args.show_gis)
-    .after_calls(args.first_query_ordinal > 0);
+    .after_calls(args.first_query_ordinal > 0)
+    .keeping_scope(keeps_scope, separate_xml2);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
         &args.db_filter,
+        database.list_gis(),
         database.list_taxids(),
         &database.statistics(),
         false,
@@ -1324,12 +1290,17 @@ fn search_database(
     };
     // The database's sequences, read in blocks where they are searched; the empty database's error
     // belongs to the first batch with a valid context (`native::run_inner`).
-    let (longest, unreadable) = match database.x_open_stream() {
+    let allow_long = resolved
+        .first()
+        .and_then(|options| options.db_mask.as_ref())
+        .is_some_and(|mask| mask.is_hard());
+    let (longest, unreadable) = match database.x_open_stream_with_long(allow_long) {
         Ok(longest) => (Some(longest), None),
         Err(error) => (None, Some(error)),
     };
-    let stream =
-        longest.map(|longest| super::x_db_stream::XStreamDb::new(database.x_seqdb(), longest));
+    let stream = longest.map(|longest| {
+        super::x_db_stream::XStreamDb::new_with_long(database.x_seqdb(), longest, allow_long)
+    });
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match &stream {
         Some(stream) => Subjects::Stream(super::x_db_stream::XStream {
@@ -1397,7 +1368,8 @@ fn search_database(
 /// (`OutputSink::Files`, which LOSAT Web gives them): a run without one gives NCBI's error after the
 /// records are read (`ReportOutputs::xinclude_check`).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts)?;
+    let outfmt_bytes: Vec<&[u8]> = outfmts.iter().map(|s| s.as_bytes()).collect();
+    let (choices, resolutions) = read_options(args, &outfmt_bytes)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1438,7 +1410,7 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
 /// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
 /// subjects are read (`native::run_inner`).
-fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with
@@ -1447,7 +1419,7 @@ fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
 }
 
 /// The `-outfmt` value of each output of `outputs`.
-fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
+fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o [u8]> {
     outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
@@ -1459,7 +1431,7 @@ type ReadOptions = (Vec<app::EarlyFormat>, Vec<Result<ResolvedOptions>>);
 /// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
 /// and 14 whose side files have no file name to go by get NCBI's error later, where the command
 /// line gives it (`ReportOutputs::xinclude_check`).
-fn read_format_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_format_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`);
     // where the argv names a search strategy file a value that does not parse is left to the
     // formatting handler (`app::early_format_choice`, `check_resolutions`).
@@ -1511,17 +1483,18 @@ fn check_resolutions(
     diagnostics: &mut dyn Write,
 ) -> Result<(Vec<app::FormatChoice>, Vec<ResolvedOptions>)> {
     let mut choices = Vec::with_capacity(early.len());
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     for choice in early {
-        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        let choice = choice.at_formatting_handler(&outfmt_bytes)?;
         app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(
         args.html,
-        args.app(),
-        Program::Blastx,
-        args.database_name(),
+        args.app_request_kind(),
+        args.request_kind(),
+        args.database_name().as_deref(),
         &outfmts,
     )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -1547,43 +1520,4 @@ fn check_resolutions(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok((choices, resolved))
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-/// A record of NCBI's reader (`fasta_reader`, the records that LOSAT Web registers) as BLASTX's
-/// reader (`input.rs`) reads the same input: the residues in upper case and, with
-/// `-lcase_masking` (`lowercase`), the lowercase mask's intervals, which `fasta_reader` keeps as
-/// the case of the residues (a `>?` gap inside a masked interval, too), and the title's bytes.
-/// The reader's messages stay with the caller's record.
-fn blastx_record(record: &fasta_reader::FastaRecord, lowercase: bool) -> Result<FastaRecord> {
-    let title = record.title.clone();
-    if record.sequence.len() > i32::MAX as usize {
-        bail!("BLASTX sequence exceeds Int4 length");
-    }
-    let mut sequence = record.sequence.clone();
-    let mut lowercase_masks: Vec<(i32, i32)> = Vec::new();
-    for (offset, residue) in sequence.iter_mut().enumerate() {
-        if !residue.is_ascii_lowercase() {
-            continue;
-        }
-        residue.make_ascii_uppercase();
-        if lowercase {
-            // The length is at most `i32::MAX` (above).
-            let offset = offset as i32;
-            match lowercase_masks.last_mut().filter(|r| r.1 + 1 == offset) {
-                Some(last) => last.1 = offset,
-                None => lowercase_masks.push((offset, offset)),
-            }
-        }
-    }
-    Ok(FastaRecord {
-        internal_id: record.local_id.clone(),
-        title,
-        sequence,
-        lowercase_masks,
-        warnings: Vec::new(),
-        source: record.source.clone(),
-        around: None,
-        skipped: None,
-    })
 }

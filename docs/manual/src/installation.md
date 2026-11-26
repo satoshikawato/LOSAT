@@ -142,10 +142,10 @@ To build them yourself, add the two targets with `rustup target add wasm32-wasip
 
 ```bash
 # serial WASI command
-cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
+cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1
 
 # threaded WASI command (needs a shared-memory host)
-cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1
 ```
 
 ## Next steps

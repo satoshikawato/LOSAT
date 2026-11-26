@@ -4,11 +4,13 @@
 A maintainer tool: LOSAT's build does not run it, and users need nothing of it. It reads NCBI's
 ASN.1 modules (`c++/src/objects/**/*.asn`) and the storage overrides of their `.def` files, takes
 the closure of the types that the root types reach (by default NCBI-ScoreMat's
-`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, NCBI-BlastDL's
-`Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`, and NCBI-Blast4's
-`Blast4-archive`, `Blast4-request` and `Blast4-get-search-strategy-reply`, the BLAST archive of
-`-outfmt 11` and the search strategy files), and writes the table that LOSAT's ASN.1 reader runs
-on (`report::serial::asn_types`). Its companion check,
+`PssmWithParameters`, the PSSM file of psiblast, tblastn `-in_pssm` and makeprofiledb,
+NCBI-BlastDL's `Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`,
+NCBI-BlastDL's `Blast-def-line-set`, the binary definition lines of makeprofiledb, and
+NCBI-Blast4's `Blast4-archive`, `Blast4-request` and `Blast4-get-search-strategy-reply`, the
+BLAST archive of `-outfmt 11`, the input of `losat rpsbproc` and the search strategy files), and
+writes the table that LOSAT's ASN.1 reader runs on (`report::serial::asn_types`). Its companion
+check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
 
@@ -510,12 +512,15 @@ class Table:
                 "INTEGER": ("Integer", ""), "BOOLEAN": ("Boolean", ""), "NULL": ("Null", ""),
                 "REAL": ("Real", ""), "VisibleString": ("String", "Visible"),
                 "UTF8String": ("String", "Utf8"), "StringStore": ("String", "Store"),
-                "OCTET STRING": ("Octets", ""),
+                "OCTET STRING": ("Octets", ""), "BigInt": ("Integer", ""),
             }
             if typ.name not in kinds:
                 raise ValueError(f"{path}: the primitive {typ.name} is not supported")
             kind, string = kinds[typ.name]
-            entry = Entry(-1, kind, string=string or "Visible", storage=storage or "Int4")
+            # `BigInt` is datatool's `CBigIntDataType`, an `Int8` (`CStdTypeInfo<Int8>`, read with
+            # `ReadInt8`: serial/datatool/statictype.cpp:995-1005).
+            default = "Int8" if typ.name == "BigInt" else "Int4"
+            entry = Entry(-1, kind, string=string or "Visible", storage=storage or default)
             return entry
         if isinstance(typ, Named):
             return Entry(-1, "Enumerated", values=typ.values, integer=typ.integer)
@@ -722,6 +727,7 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
 DEFAULT_ROOTS = [
     ("NCBI-ScoreMat", "PssmWithParameters"),
     ("NCBI-BlastDL", "Blast-db-mask-info"),
+    ("NCBI-BlastDL", "Blast-def-line-set"),
     ("NCBI-Blast4", "Blast4-archive"),
     ("NCBI-Blast4", "Blast4-request"),
     ("NCBI-Blast4", "Blast4-get-search-strategy-reply"),

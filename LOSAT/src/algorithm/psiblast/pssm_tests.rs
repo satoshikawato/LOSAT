@@ -26,7 +26,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         save_pssm_after_last_round: save_last,
         save_each_pssm: save_each,
         out_pssm: None,
-        out_ascii_pssm: ascii.map(str::to_string),
+        out_ascii_pssm: ascii.map(std::path::PathBuf::from),
         pseudocount: 0,
         in_pssm: None,
         in_msa: None,
@@ -67,7 +67,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
     assert!(options(false, false, Some("a.txt")).check().is_ok());
     // `-out_pssm` satisfies both checks too.
     let asn_only = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, true, None)
     };
     assert!(asn_only.check().is_ok());
@@ -87,7 +87,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         request,
         PssmRequest {
             asn_path: None,
-            ascii_path: Some("-".to_string()),
+            ascii_path: Some(std::path::PathBuf::from("-")),
             save_each: true,
             pseudocount: 0,
             versions: Default::default(),
@@ -95,11 +95,14 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
     );
     assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
     let with_asn = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, false, None)
     };
     let request = with_asn.request().unwrap();
-    assert_eq!(request.asn_path.as_deref(), Some("p.asn"));
+    assert_eq!(
+        request.asn_path.as_deref(),
+        Some(std::path::Path::new("p.asn"))
+    );
     assert_eq!(request.ascii_path, None);
     let diagnostics = request.diagnostics();
     assert!(diagnostics.frequency_ratios);
@@ -107,7 +110,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         !diagnostics.information_content && !diagnostics.sigma && !diagnostics.num_matching_seqs
     );
     let no_asn_flag = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(false, false, None)
     };
     assert_eq!(no_asn_flag.request(), None);
@@ -383,7 +386,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
-// (`GetLowestEvalue`, cited at `input_msa`): the e-value counts as at most
+// (`GetLowestEvalue`, cited at `seqalign_pssm_evalue`): the e-value counts as at most
 // BLAST_EXPECT_VALUE (10), and a NaN as 10.
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {
@@ -429,6 +432,48 @@ fn fixed_formats_as_the_c_library() {
     ] {
         assert_eq!(fixed(value, precision), text, "{value}");
     }
+}
+
+// Line PS item PS7c (review S2): a block of a Lambda below 0 or not a number is left out of the
+// footer, gapped or ungapped (`stats::tables::ancillary_kept`, cited at its definition).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
+    let block = |lambda| KarlinBlk {
+        lambda,
+        ..BLOSUM62_11_1
+    };
+    let labels = |ancillary: PssmAncillary| -> Vec<&'static str> {
+        ancillary_blocks(&ancillary)
+            .iter()
+            .map(|(label, _)| label.trim_end())
+            .collect()
+    };
+    let all = PssmAncillary {
+        ungapped: BLOSUM62_11_1,
+        gapped: BLOSUM62_11_1,
+        psi_ungapped: BLOSUM62_11_1,
+        psi_gapped: BLOSUM62_11_1,
+    };
+    assert_eq!(labels(all).len(), 4);
+    for lambda in [f64::NEG_INFINITY, f64::NAN, -1.0] {
+        let gapped_out = PssmAncillary {
+            gapped: block(lambda),
+            psi_gapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(gapped_out), ["Standard Ungapped", "PSI Ungapped"]);
+        let ungapped_out = PssmAncillary {
+            ungapped: block(lambda),
+            psi_ungapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(ungapped_out), ["Standard Gapped", "PSI Gapped"]);
+    }
+    let infinite = PssmAncillary {
+        psi_gapped: block(f64::INFINITY),
+        ..all
+    };
+    assert_eq!(labels(infinite).len(), 4);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (cited at
@@ -499,7 +544,7 @@ const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
 fn pssm_request(pseudocount: i32) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some("-".to_string()),
+        ascii_path: Some(std::path::PathBuf::from("-")),
         save_each: false,
         pseudocount,
         versions: Default::default(),
@@ -603,7 +648,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
     let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let request = PssmRequest {
-        asn_path: Some("p.asn".to_string()),
+        asn_path: Some(std::path::PathBuf::from("p.asn")),
         ascii_path: None,
         save_each: false,
         pseudocount: 0,
@@ -735,20 +780,14 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
 }
 
 /// A directory of its own for a test's files.
-fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-pssm-{}-{name}",
-        crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("pssm-{name}"))
 }
 
 fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some(path.to_str().unwrap().to_string()),
+        ascii_path: Some(path.to_path_buf()),
         save_each,
         pseudocount: 0,
         versions: Default::default(),
@@ -757,7 +796,7 @@ fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
 
 fn asn_request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
-        asn_path: Some(path.to_str().unwrap().to_string()),
+        asn_path: Some(path.to_path_buf()),
         ascii_path: None,
         save_each,
         pseudocount: 0,
@@ -812,12 +851,11 @@ fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {
     assert!(!missing.exists());
     // The same name for both files: each query's ASN.1 file, then its ASCII one.
     let both = PssmRequest {
-        asn_path: Some(file.to_str().unwrap().to_string()),
+        asn_path: Some(file.clone()),
         ..request(&file, false)
     };
     write_files(&both, &[b"asn 1\n", b"asn 2\n"], &pssms).unwrap();
     assert_eq!(std::fs::read(&file).unwrap(), b"second\n");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321 (cited at
@@ -867,7 +905,6 @@ fn staged_asn_files_change_no_target_before_the_commit() {
     assert_eq!(names(&dir), ["p.asn", "p.asn.1", "p.asn.2"]);
     assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm 1\n");
     assert_eq!(std::fs::read(dir.join("p.asn.2")).unwrap(), b"pssm 2\n");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318 (cited at
@@ -911,7 +948,6 @@ fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
         assert_eq!(checked(&fresh, 3), Ok(()));
         assert_eq!(checked(&fresh, 4), Err(refusal));
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:50-66 (cited at
@@ -939,7 +975,6 @@ fn the_commit_makes_or_truncates_the_file_as_ncbi() {
     assert_eq!(truncated.ino(), numbered.ino());
     assert_eq!(truncated.mode(), numbered.mode());
     assert_eq!(std::fs::read(dir.join("p.asn.1")).unwrap(), b"pssm\n");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI 2.17.0 `err.baddir.p`: an -out_pssm file that cannot be opened stops the run after that
@@ -992,7 +1027,6 @@ fn an_asn_file_that_cannot_be_written_is_refused_when_staged() {
         )
         .unwrap();
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // A file that cannot be opened for writing: version 0 removes it when its directory allows
@@ -1024,7 +1058,6 @@ fn a_read_only_file_is_replaced_only_with_version_0() {
     write_files(&asn_request(&file, false), &[b"pssm\n"], &[]).unwrap();
     assert_eq!(std::fs::read(&file).unwrap(), b"pssm\n");
     assert_eq!(names(&dir), ["p.asn", "p.asn.1"]);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // The re-review of PS3 (RS1): the staging file's name is short, so a target name that NCBI can
@@ -1045,7 +1078,6 @@ fn a_long_target_name_is_staged_and_a_too_long_one_refused() {
         .starts_with("a -out_pssm file that cannot be written ("));
     drop(files);
     assert_eq!(names(&dir), ["L".repeat(245)]);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // The re-review of PS3 (RS2): an existing file that opens for writing in a directory that takes no
@@ -1084,7 +1116,6 @@ fn an_existing_file_in_a_directory_that_takes_no_file_is_written_in_place() {
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
     let _ = std::fs::remove_file(ro.join("probe"));
     assert_eq!(names(&ro), ["p.asn", "p.asn.1"]);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // The re-review of PS3 (RN1): `/dev/null` keeps no PSSM bytes; another device keeps them for the
@@ -1155,7 +1186,6 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
                 .starts_with("an -out_ascii_pssm file that is also the standard "));
         }
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:302-321 and 440-450
@@ -1227,7 +1257,6 @@ fn a_querys_read_messages_keep_the_order_of_the_queries() {
     );
     assert!(files.take_read_warnings().is_empty());
     drop(files);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// psiblast's PSSM file with a query title outside the visible ASCII range: NCBI's ASN.1 text

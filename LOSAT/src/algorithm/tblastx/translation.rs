@@ -151,18 +151,8 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1216-1218
-// NCBI translates the one frame of the HSP. The frame here is the one `generate_frames` makes,
-// present under the same condition (`i + 3 <= len`): `translate_sequence` of `seq[i..]` or of
-// `revcomp(seq)[i..]`, whose codon k is the letters `seq[i + 3k..i + 3k + 3]`, or the complements
-// of `seq[len - i - 3k - 1]`, `seq[len - i - 3k - 2]` and `seq[len - i - 3k - 3]` (`revcomp` is
-// `rev().map(complement)`). `x_codons_into` reads those letters in place and gives each codon the
-// residue `codon_to_aa_ncbistdaa` gives it.
-/// The number of residues of frame `frame` (+1..+3, -1..-3) of `generate_frames` of `len` letters,
-/// or `None` where `generate_frames` makes no such frame.
-pub(crate) fn frame_length(len: usize, frame: i8) -> Option<usize> {
-    let i = usize::from(frame.unsigned_abs()).checked_sub(1)?;
-    (i < 3 && i + 3 <= len).then(|| (len - i) / 3)
-}
+// Shared with the translated chunk walk (`common::translated_chunks::frame_length`).
+pub(crate) use crate::algorithm::common::translated_chunks::frame_length;
 
 /// The residues of frame `frame` (+1..+3, -1..-3) of `generate_frames(seq, table)` without its
 /// sentinels, appended to `out`, and their number; `None` (and `out` unchanged) where
@@ -346,8 +336,8 @@ fn x_letter_masks() -> &'static XLetterMasks {
 /// A letter of each ncbi4na mask: `base_mask(X_MASK_LETTERS[m]) == m`.
 const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424 (`s_CodonToAA`; the
-// quote is at `GeneticCode::get`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-425 (`s_CodonToAA`, which
+// `GeneticCode::get` ports)
 // `GeneticCode::get` reads a codon only through the masks of its three letters (`base_mask`;
 // its table read gives the loop's residue for single-bit masks), so the residue of a codon
 // is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.

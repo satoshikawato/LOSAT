@@ -32,6 +32,50 @@ fn an_average_query_length_of_zero_takes_ncbis_expected_length_of_zero() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1036-1072
+// A short query against a short subject whose database is not longer than the subject less the
+// expected length (here one subject; line RG item X-short-tbx-link): an expected length of 0 makes
+// `y_variable` 0 and the logarithm of `x_variable` -inf, a negative one makes them negative and the
+// logarithm NaN. NCBI's x86-64
+// conversion gives `INT_MIN` for both, so the big-gap cutoff is one more; Rust's `as i32`
+// gave 0 for NaN, a cutoff of 1, before this item.
+#[test]
+fn a_short_query_against_one_short_subject_takes_ncbis_big_gap_cutoff_of_int_min_plus_1() {
+    let kbp = KarlinParams {
+        lambda: 0.3176,
+        k: 0.134,
+        h: 0.4012,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+    // An average of 2 letters against 12 bases (4 letters): log(0.134 * 8) / 0.4012 = 0.17, an
+    // expected length of 0, y = log(4 / 4) = 0.
+    let zero = calculate_link_hsp_cutoffs(&kbp, 2, 12, 12, true, || 41);
+    assert_eq!(
+        (zero.cutoff_small_gap, zero.cutoff_big_gap, zero.gap_prob),
+        (0, i32::MIN + 1, 0.0)
+    );
+    // An average of 1 letter against 6 bases (2 letters): log(0.134 * 2) / 0.4012 = -3.28, an
+    // expected length of -3; the subject length becomes 5, above the database's 2, so
+    // y = log((5 - 3) / 5) < 0 and log(x) is NaN.
+    let negative = calculate_link_hsp_cutoffs(&kbp, 1, 6, 6, true, || 41);
+    assert_eq!(
+        (
+            negative.cutoff_small_gap,
+            negative.cutoff_big_gap,
+            negative.gap_prob
+        ),
+        (0, i32::MIN + 1, 0.0)
+    );
+    // A database longer than the subject (another subject of 12 bases) keeps y positive and the
+    // cutoff finite: y = log(8 / 4) * K / 0.5, x = 0.25 * y * 2 * 4 = 0.3715, floor(-3.12) + 1.
+    let two = calculate_link_hsp_cutoffs(&kbp, 2, 12, 24, true, || 41);
+    assert_eq!(
+        (two.cutoff_small_gap, two.cutoff_big_gap, two.gap_prob),
+        (0, -3, 0.0)
+    );
+}
+
 // NCBI blast_parameters.c:788-815 with `DEFAULT_LONGEST_INTRON` 122: the values of
 // `-max_intron_length` on both sides of each branch.
 #[test]

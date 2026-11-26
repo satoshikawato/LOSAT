@@ -53,8 +53,12 @@ pub use writer::{
     KaBlock, RequestInputs, SearchedContext0,
 };
 
-/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes: the missing
+/// one (-1) for a block that the ancillary data does not keep (`stats::tables::ancillary_kept`).
 pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
+    if !crate::stats::tables::ancillary_kept(params.lambda) {
+        return KaBlock::missing(gapped);
+    }
     KaBlock {
         lambda: params.lambda,
         k: params.k,
@@ -142,7 +146,7 @@ impl ArchiveEncoding {
     /// Whether the string values of `params` are written as they are (`writes_text`).
     pub fn writes_params(self, params: &[options::Param]) -> bool {
         params.iter().all(|param| match &param.value {
-            options::ParamValue::Str(value) => self.writes_text(value.as_bytes()),
+            options::ParamValue::Str(value) => self.writes_text(value),
             _ => true,
         })
     }
@@ -155,9 +159,9 @@ impl ArchiveEncoding {
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
 /// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
-pub fn writes_error_archive(outfmt: &str) -> bool {
+pub fn writes_error_archive(outfmt: impl AsRef<[u8]>) -> bool {
     use crate::ncbi_str::{string_to_int, truncate_spaces};
-    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+    string_to_int(truncate_spaces(outfmt.as_ref()), 0)
         .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
@@ -187,7 +191,7 @@ pub struct ArchiveRequest {
 impl ArchiveRequest {
     /// The request of a run of `inputs.kind`: `database` is the `-db` argument as typed (`None`
     /// for `-subject`).
-    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
+    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&[u8]>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
@@ -202,7 +206,7 @@ impl ArchiveRequest {
                 .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
-            database: database.map(|name| name.as_bytes().to_vec()),
+            database: database.map(<[u8]>::to_vec),
             step_number,
         }
     }
@@ -303,8 +307,8 @@ struct DatabaseMasking {
 
 #[derive(Debug)]
 struct DatabaseFilter {
-    /// The `TaxidList` or `NegativeTaxidList` program option.
-    list: Option<options::Param>,
+    /// The `GiList`/`NegativeGiList` and `TaxidList`/`NegativeTaxidList` program options.
+    list: Vec<options::Param>,
     /// How the `EffectiveSearchSpace` option of a searched batch is made.
     request_length: RequestLength,
 }
@@ -329,14 +333,14 @@ pub struct HandleCarry(options::ParamList);
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
     /// What the database's list and statistics make of the requests: its `program-options`
-    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// parameter (`DbFilterArgs::archive_parameters`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
     /// for a statistics length that is not positive it is not the search's own value, though the
     /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per
     /// run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_database_filter(
         &self,
-        list: Option<options::Param>,
+        list: Vec<options::Param>,
         request_length: RequestLength,
     ) -> anyhow::Result<()> {
         let set = self.0.filter.set(DatabaseFilter {
@@ -411,8 +415,10 @@ impl OptionsHandle {
         self.0
             .filter
             .get()
-            .and_then(|filter| filter.list.clone())
+            .map(|filter| &filter.list)
             .into_iter()
+            .flatten()
+            .cloned()
             .chain(
                 self.0
                     .masking
@@ -525,7 +531,7 @@ impl ArchiveHandle {
     /// (made once per run; its search strategy shares it).
     pub fn for_program(
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, options)
@@ -535,7 +541,7 @@ impl ArchiveHandle {
     pub fn for_encoding(
         encoding: ArchiveEncoding,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::new(
@@ -570,7 +576,7 @@ impl ArchiveHandle {
     /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
     /// The archives of the batches are not affected.
     #[must_use]
-    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+    pub fn with_outfmt_text(self, outfmt: impl AsRef<[u8]>) -> Self {
         self.0
             .error_archive
             .store(writes_error_archive(outfmt), Ordering::Relaxed);
@@ -660,6 +666,11 @@ impl ArchiveHandle {
     /// The messages saved since the last archive.
     pub fn take_messages(&self) -> Vec<Message> {
         self.with_state(|state| state.log.take())
+    }
+
+    /// The messages of an archive whose write failed, saved again (`DiagLog::restore`).
+    pub fn restore_messages(&self, messages: Vec<Message>) {
+        self.with_state(|state| state.log.restore(messages));
     }
 
     /// What the next archive's request holds of the options handle beyond the command line's
@@ -921,6 +932,22 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         OPTIONS_ERROR.as_bytes(),
         QUERY_OPTIONS_ERROR.as_bytes(),
     ];
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    // The report stream's failure (`ostream::ReportStream::finish`): NCBI's handler saves the
+    // posts of the exception's region (802.4 of `~CObjectOStream`) and that post, one message
+    // each (`CBlastAppDiagHandler::Post`, blast_aux.cpp:1155-1170).
+    if native.exit == 6 && native.message.ends_with(b"BLAST failed to write output\n") {
+        return Some(
+            native
+                .message
+                .split(|&byte| byte == b'\n')
+                .filter_map(|line| {
+                    let text = crate::report::diag_log::sanitize(line);
+                    (!text.is_empty()).then_some((ERROR, text))
+                })
+                .collect(),
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
     // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
@@ -1011,7 +1038,7 @@ pub fn write_error_archive_after_post(
     handle: &ArchiveHandle,
     error: &anyhow::Error,
     lines: &[Message],
-    sink: &mut dyn Write,
+    sink: &mut dyn crate::report::ostream::ReportWrite,
 ) -> anyhow::Result<()> {
     if handle.error_archive_enabled() {
         let _ = sink.flush();

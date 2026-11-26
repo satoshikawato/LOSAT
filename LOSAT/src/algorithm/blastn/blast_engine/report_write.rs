@@ -22,10 +22,11 @@ use crate::report::record::{QueryNames, SubjectNames};
 use anyhow::Result;
 use std::sync::Arc;
 
-/// Refuses the call, before any format of it is written, when one of its query-anchored reports
-/// (outfmt 1 to 4) is a report that NCBI BLAST+ aborts: a query whose own record is one of the
-/// subjects (`-subject`) and a reported database sequence that NCBI's scope finds as a query of its
-/// batch. `rows_of` renders the hits of a range of queries; `pairwise_hits` holds those of every
+/// Refuses the call, before any format of it is written, when a description line of its outfmt 0
+/// to 4 shows what LOSAT does not write as NCBI (`common::database::refuse_described_lines`), or
+/// when one of its query-anchored reports (outfmt 1 to 4) is a report that NCBI BLAST+ aborts: a
+/// query whose own record is one of the subjects (`-subject`) and a reported database sequence that
+/// NCBI's scope finds as a query of its batch. `rows_of` renders the hits of a range of queries; `pairwise_hits` holds those of every
 /// query when the call made them already.
 ///
 /// No NCBI counterpart: the refusal is LOSAT's (PD-LOSAT-NCBI-DEFECTS rule 3); NCBI writes bytes before
@@ -46,6 +47,66 @@ pub(super) fn refuse_anchored_reports(
     // `lcl|Query_N`) or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
     // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
+    let sort = report.formatting.report_sort();
+    let rows_of_query = |q_idx: usize| query_rows(pairwise_hits, rows_of, q_idx);
+    let reported_ranks = |q_idx: usize| reported_subjects(hit_lists, q_idx);
+    let described = |view: crate::report::pairwise::PairwiseView, q_idx: usize| {
+        let rows = rows_of_query(q_idx)?;
+        Ok(crate::report::pairwise::blastp_described_subjects(
+            view.report_sort(sort),
+            None,
+            report.num_descriptions,
+            q_idx,
+            &rows,
+            |previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    report.database_parsed,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+        ))
+    };
+    // The description lines of outfmt 0 to 4 (line RG-KB item 12 review 1) and the display id
+    // lookup of outfmt 0 (`refuse_query_ids_of_anchored_reports` with `anchored = false`).
+    if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
+        let oids = reader.oid_map();
+        let mut pairwise_batches = None;
+        for format in output_formats {
+            if let BlastnOutputFormat::Pairwise(view) = format {
+                crate::algorithm::common::database::refuse_described_lines(
+                    hit_lists.len(),
+                    reported_ranks,
+                    |q_idx| described(*view, q_idx),
+                    report.database_parsed,
+                    |rank| report.database_loads.load(rank as usize),
+                    |rank| oids.oid(ordinals[rank as usize]),
+                    "BLASTN",
+                )?;
+                let batches = pairwise_batches.get_or_insert_with(|| {
+                    crate::blastinput::query_batch::AnchoredBatchScopes::new(
+                        report.queries,
+                        if report.batch_spans.is_empty() {
+                            vec![0..report.queries.len()]
+                        } else {
+                            report.batch_spans.to_vec()
+                        },
+                    )
+                });
+                crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                    hit_lists.len(),
+                    reported_ranks,
+                    |q_idx| described(*view, q_idx),
+                    report.database_parsed,
+                    |rank| oids.oid(ordinals[rank as usize]),
+                    |q_idx| batches.of_query(q_idx),
+                    batches.generated(),
+                    *view != crate::report::pairwise::PairwiseView::Pairwise,
+                    "BLASTN",
+                )?;
+            }
+        }
+    }
     let anchored_view = output_formats.iter().find_map(|format| match format {
         BlastnOutputFormat::Pairwise(view)
             if *view != crate::report::pairwise::PairwiseView::Pairwise =>
@@ -55,13 +116,6 @@ pub(super) fn refuse_anchored_reports(
         _ => None,
     });
     if let Some(view) = anchored_view {
-        let sort = report.formatting.report_sort();
-        let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
-            Ok(match pairwise_hits {
-                Some(hits) => std::borrow::Cow::Borrowed(hits),
-                None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
-            })
-        };
         if report.database_reader.is_none() {
             for (q_idx, record) in report.queries.iter().enumerate() {
                 if record.believed().is_none_or(|ids| ids.shared.is_none()) {
@@ -89,6 +143,7 @@ pub(super) fn refuse_anchored_reports(
                         crate::report::pairwise::blastn_section_hsps(
                             report.num_alignments,
                             group,
+                            &[],
                             is_query,
                         )
                     },
@@ -100,49 +155,73 @@ pub(super) fn refuse_anchored_reports(
                 }
             }
         }
-        if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
-            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::new(
-                report.queries,
-                if report.batch_spans.is_empty() {
-                    vec![0..report.queries.len()]
-                } else {
-                    report.batch_spans.to_vec()
-                },
-            );
-            let oids = reader.oid_map();
-            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+    }
+    Ok(())
+}
+
+/// The rows of the hits that the reports of query `q_idx` show: every query's where the call made
+/// them (`pairwise_hits`), else that query's (`rows_of`).
+fn query_rows<'h>(
+    pairwise_hits: Option<&'h [PairwiseHit]>,
+    rows_of: &dyn Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+    q_idx: usize,
+) -> Result<std::borrow::Cow<'h, [PairwiseHit]>> {
+    Ok(match pairwise_hits {
+        Some(hits) => std::borrow::Cow::Borrowed(hits),
+        None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+    })
+}
+
+/// The subjects of query `q_idx`'s final hit list (`hit_lists`), by rank or subject index.
+fn reported_subjects(hit_lists: &[Option<BlastnHitList>], q_idx: usize) -> Vec<u32> {
+    hit_lists[q_idx]
+        .iter()
+        .flat_map(|hit_list| &hit_list.hsplist_array)
+        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
+        .collect()
+}
+
+/// The refusals of the description lines of the `-subject` records whose ids `-parse_deflines`
+/// read (`report.database_parsed` of a call without `-db`;
+/// `common::database::refuse_described_records`, review 2 of line RG-KB item 12, N2), before any
+/// format of the call is written: each pairwise format's own (`FormatRefusal`), as the refusal of
+/// their titles (`db_subject::check_pairwise_records`). The report joins no hits of `-subject`
+/// records.
+pub(super) fn refuse_described_records(
+    output_formats: &[BlastnOutputFormat],
+    formats: &mut [crate::api::local_blast::FormatOutput<'_>],
+    report: &BlastnReportInputs<'_>,
+    hit_lists: &[Option<BlastnHitList>],
+    pairwise_hits: Option<&[PairwiseHit]>,
+    rows_of: &dyn Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+) -> Result<()> {
+    if report.database_reader.is_some() || report.database_parsed.is_empty() {
+        return Ok(());
+    }
+    let sort = report.formatting.report_sort();
+    for (format, output_format) in formats.iter_mut().zip(output_formats) {
+        let BlastnOutputFormat::Pairwise(view) = output_format else {
+            continue;
+        };
+        format.refusal.check(
+            crate::algorithm::common::database::refuse_described_records(
                 hit_lists.len(),
+                |q_idx| reported_subjects(hit_lists, q_idx),
                 |q_idx| {
-                    hit_lists[q_idx]
-                        .iter()
-                        .flat_map(|hit_list| &hit_list.hsplist_array)
-                        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
-                        .collect()
-                },
-                |q_idx| {
-                    let rows = rows_of_query(q_idx)?;
+                    let rows = query_rows(pairwise_hits, rows_of, q_idx)?;
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(sort),
                         None,
                         report.num_descriptions,
                         q_idx,
                         &rows,
-                        |previous, s_idx| {
-                            crate::report::db_subject::rank_joins_as_copy(
-                                report.database_parsed,
-                                previous as usize,
-                                s_idx as usize,
-                            )
-                        },
+                        |_, _| false,
                     ))
                 },
                 report.database_parsed,
-                |rank| oids.oid(ordinals[rank as usize]),
-                |q_idx| batches.of_query(q_idx),
-                batches.generated(),
                 "BLASTN",
-            )?;
-        }
+            ),
+        )?;
     }
     Ok(())
 }
@@ -176,7 +255,7 @@ pub(super) fn write_sam(
         searched_lengths: query_lengths,
         placements: &report.ranges.queries.placements,
     };
-    match (
+    let added = match (
         report.database_ordinals,
         report.database,
         report.database_reader,
@@ -205,7 +284,7 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Database(&letters_of),
                 },
-            )?;
+            )
         }
         _ => {
             // The records as read with `-subject_loc` (never packed), else the
@@ -236,8 +315,15 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Records(whole_records),
                 },
-            )?;
+            )
         }
+    };
+    if let Err(error) = added {
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316
+        // `~CSAM_Formatter()` flushes all earlier queries' records accumulated before an
+        // exception unwinds the formatter.
+        target.document.finish(writer)?;
+        return Err(error);
     }
     if target.finish {
         target.document.finish(writer)?;
@@ -271,7 +357,7 @@ pub(super) fn write_structured_xml(
     hit_lists: &[Option<BlastnHitList>],
     query_lengths: &[usize],
     unsearched: &[bool],
-    subject_title: &str,
+    subject_title: &[u8],
     writer: &mut crate::cli::NcbiOstream<'_>,
     format_warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -310,10 +396,13 @@ pub(super) fn write_structured_xml(
         })
         .collect();
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
+    let repeat_filter = report
+        .repeat_filter
+        .map(crate::utils::os_bytes::os_str_bytes);
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,
-        report.repeat_filter,
+        repeat_filter.as_deref(),
         report.window_masker,
         report.soft_masking,
     );
@@ -399,7 +488,7 @@ pub(super) fn write_structured_xml(
             } else {
                 crate::report::blast_xml::REFERENCE_GAPPED_BLAST
             },
-            db_name: if is_database { subject_title } else { "" },
+            db_name: if is_database { subject_title } else { b"" },
             matrix: None,
             expect: report.expect,
             gap_open: report.gap_open,
@@ -424,8 +513,10 @@ pub(super) fn write_structured_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         letters: report.subjects,
+        ungapped: report.ungapped,
         epilog: report.epilog,
         only_xml2: xml_only_xml2,
+        query_scopes: report.query_scopes,
     };
     match xml2_kind {
         None => crate::algorithm::blastn::blast_xml::write_blastn_xml(
@@ -456,6 +547,7 @@ pub(super) fn write_structured_xml(
                 cbs: 0,
                 query_gencode: None,
                 db_gencode: None,
+                program_type: None,
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);

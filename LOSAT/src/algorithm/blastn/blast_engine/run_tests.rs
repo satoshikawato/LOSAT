@@ -626,7 +626,7 @@ fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
     // chunk's starts before its overlap ends.
     let mut combined = vec![prelim_hit(0, 1, 900, 1050, 100, 250, 150)];
     let incoming = vec![prelim_hit(0, 1, 1000, 1200, 200, 400, 200)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 1);
     assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (900, 1200));
     // The score density of the two (350 / 350) over the merged 300 residues.
@@ -634,15 +634,58 @@ fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
     // Minus strand: the later chunk comes first on the strand, so the tests swap.
     let mut combined = vec![prelim_hit(1, -1, 4950, 5200, 1000, 1250, 150)];
     let incoming = vec![prelim_hit(1, -1, 4800, 5050, 850, 1100, 150)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 1);
     assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (4800, 5200));
     // The same pair on the plus strand is not in the strips (the earlier HSP does not
     // end after the split point): both stay.
     let mut combined = vec![prelim_hit(0, 1, 800, 950, 1000, 1150, 150)];
     let incoming = vec![prelim_hit(0, 1, 700, 850, 900, 1050, 150)];
-    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+    merge_prelim_hit_lists(&mut combined, incoming, split, 100, true).unwrap();
     assert_eq!(combined.len(), 2);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526,2991-2995
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.122 (rule 3): merging two HSPs whose density-scaled score leaves
+// `Int4` must return `ChunkMergeUndefined` (and a typed `ShortChunkSeedRefusal` naming the OID in
+// `merge_prelim_hit_list`) instead of panicking.
+#[test]
+fn merge_prelim_hit_lists_refuses_scaled_score_outside_int4() {
+    let mut combined = vec![prelim_hit(0, 1, 0, 1_100, 0, 1_100, 1_500_000_000)];
+    let incoming = vec![prelim_hit(0, 1, 1_000, 2_100, 1_000, 2_100, 1_500_000_000)];
+    let split = HspListSplit::Subject { offset: 1_000 };
+    assert!(matches!(
+        merge_prelim_hit_lists(&mut combined, incoming, split, 100, true),
+        Err(crate::core::blast_hits::ChunkMergeUndefined)
+    ));
+
+    // Query-chunk merge surfaces a typed `ShortChunkSeedRefusal` naming the mapped database OID
+    // rather than the internal ordinal id (`PrelimHspList::oid`).
+    let mut hitlist1 = HitList::new(3);
+    hitlist1.update(PrelimHspList {
+        oid: 42,
+        hsps: vec![prelim_hit(0, 1, 1_000, 2_100, 1_000, 2_100, 1_500_000_000)],
+        best_evalue: 0.0,
+    });
+    let mut combined_hl = HitList::new(3);
+    combined_hl.update(PrelimHspList {
+        oid: 42,
+        hsps: vec![prelim_hit(0, 1, 0, 1_100, 0, 1_100, 1_500_000_000)],
+        best_evalue: 0.0,
+    });
+    let mut combined_opt = Some(combined_hl);
+    let error = merge_prelim_hit_list(hitlist1, &mut combined_opt, [1_000, -1], 100, |ordinal| {
+        ordinal + 100
+    })
+    .expect_err("scaled score > Int4::MAX must be refused");
+    assert!(
+        error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+        "expected ShortChunkSeedRefusal, got {error:?}"
+    );
+    let text = error.to_string();
+    assert!(text.contains("BLASTN: sequence of OID 142"), "{text}");
+    assert!(!text.contains("OID 42"), "{text}");
+    assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1355
@@ -1070,7 +1113,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     combined.update(list(2, &[60]));
     combined.update(list(7, &[40]));
     let mut combined = Some(combined);
-    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100);
+    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100, |ordinal| ordinal).unwrap();
     let mut merged = combined.unwrap();
     assert_eq!(merged.hsplist_max, 3);
     merged.sort_by_evalue();
@@ -1081,7 +1124,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     let mut empty = None;
     let mut single = HitList::new(3);
     single.update(list(5, &[10]));
-    merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
+    merge_prelim_hit_list(single, &mut empty, [0, 0], 100, |ordinal| ordinal).unwrap();
     assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
 }
 
@@ -1185,7 +1228,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         custom("7 qaccver").fields,
         [crate::report::tabular::TabularField::QueryAccessionVersion]
     );
-    assert_eq!(custom("6 delim=, std").delimiter, ",");
+    assert_eq!(custom("6 delim=, std").delimiter, b",");
     assert_eq!(
         custom("20").kind,
         crate::report::tabular::TabularKind::CsvWithHeader
@@ -1200,7 +1243,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         cli_output_formats("7 delim=\t std", None, false).unwrap(),
         [BlastnOutputFormat::TabularWithComments]
     );
-    assert_eq!(custom(r"7 delim=\t").delimiter, r"\t");
+    assert_eq!(custom(r"7 delim=\t").delimiter, br"\t");
     assert_eq!(
         native(cli_output_formats("22", None, false).unwrap_err()),
         (
@@ -2198,4 +2241,87 @@ fn run_local_refuses_database_and_unresolved_filter_inputs() {
         rpt_msg,
         "filtering_db",
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+// `gap_align_setup_error` checks the statistics count 0 first, then the average subject length
+// (using the caller's `subject_error`, e.g. `Traceback failed` for the batch traceback set-up
+// after all split chunks were invalid), and only after that the greedy set-up refusals.
+#[test]
+fn gap_align_setup_error_orders_count_subject_and_greedy_checks() {
+    let parse = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
+        argv.extend_from_slice(words);
+        crate::cli::try_parse_from(argv).unwrap().blastn()
+    };
+    let prepared = PreparedSubjects {
+        records: &[],
+        stores: None,
+        metadata: SubjectMetadata {
+            db_len_total: 0,
+            db_num_seqs: 0,
+        },
+        packed: Vec::new(),
+    };
+    let subjects = SubjectSource::Prepared(&prepared);
+    let seq_data = |db_len_total: i64, db_num_seqs: i32| SequenceData {
+        queries: &[],
+        query_masks: Vec::new(),
+        db_len_total,
+        db_num_seqs,
+    };
+
+    // Count 0 beats both subject-length and greedy refusals.
+    let mo00 = parse(&[
+        "-task",
+        "megablast",
+        "-reward",
+        "0",
+        "-penalty",
+        "0",
+        "-gapopen",
+        "0",
+        "-gapextend",
+        "0",
+    ]);
+    let count0 = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(100, 0),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("count 0 refused");
+    assert!(count0
+        .to_string()
+        .starts_with(crate::algorithm::common::database::STATISTICS_COUNT_ZERO));
+
+    // Average subject length < 1 beats greedy refusals and uses the caller's engine message.
+    let short = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(1, 3),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("short average subject length fails");
+    let native = short
+        .downcast::<crate::cli::NativeError>()
+        .expect("engine error");
+    assert_eq!(native.exit, 3);
+    assert_eq!(native.message, b"LOSAT engine error: Traceback failed\n");
+
+    // When subjects pass, the greedy set-up refusal fires.
+    let greedy = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(1000, 10),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("matrix-only greedy refused");
+    assert!(greedy.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert!(greedy.to_string().contains("reward 0 and penalty 0"));
 }

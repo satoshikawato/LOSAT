@@ -2,7 +2,9 @@
 //! every program (line RG item E3), against NCBI BLAST+ 2.17.0, the official Linux x64 release and
 //! bioconda's build for rpstblastn, dustmasker and segmasker, and NCBI's rpsbproc 0.5.1 (probes of
 //! 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E3.md`, run with `env -i` in a fresh directory;
-//! convert2blastmask, which line RG item K3 added during E3, on the official release's binary):
+//! convert2blastmask, which line RG item K3 added during E3, blastdb_aliastool, row RG-D2a's
+//! probe of 2026-11-24, and blastdbcheck, row RG-D2b's probe of 2026-11-24, on the official
+//! release's binary):
 //! the application prints the first version word before `--` (in an option's value too, before
 //! the configuration is loaded and the arguments are read) and exits 0. The forms are NCBI's, the
 //! values LOSAT's (`ncbi_version::print`, RG DECISIONS E3-1; the Owner, 2026-11-21): LOSAT's first line
@@ -59,7 +61,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 /// NCBI's is `<program>: 2.17.0+` (rpsbproc
 /// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
 /// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 18] = [
+const PROGRAMS: [(&str, &str); 20] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -77,6 +79,8 @@ const PROGRAMS: [(&str, &str); 18] = [
     ("convert2blastmask", "-out"),
     ("makembindex", "-input"),
     ("makeprofiledb", "-out"),
+    ("blastdb_aliastool", "-out"),
+    ("blastdbcheck", "-db"),
     ("blast_formatter", "-out"),
 ];
 
@@ -358,7 +362,12 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                     );
                 } else if matches!(
                     program,
-                    "rpsblast" | "rpstblastn" | "rpsbproc" | "makeprofiledb"
+                    "rpsblast"
+                        | "rpstblastn"
+                        | "rpsbproc"
+                        | "makeprofiledb"
+                        | "blastdb_aliastool"
+                        | "blastdbcheck"
                 ) {
                     // Not in the library.
                 } else {

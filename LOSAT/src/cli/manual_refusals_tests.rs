@@ -41,18 +41,9 @@ const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tbla
 const FIVE_SECTION: &str = "All five search programs";
 
 /// The programs that `try_parse_from` reads, which answer the NCBI C++ Toolkit options.
-const TOOLKIT_PROGRAMS: [&str; 10] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "rpsblast",
-    "rpstblastn",
-    "rpsbproc",
-    "makeblastdb",
-];
+fn toolkit_programs() -> impl Iterator<Item = &'static str> {
+    super::reader::options_tests::programs()
+}
 
 /// The executables in the `bin` directory of NCBI BLAST+ 2.17.0 (`ncbi-blast-2.17.0+-x64-linux`,
 /// checked 2026-11-12).
@@ -185,7 +176,7 @@ fn every_run_refusal_is_in_the_manual_for_its_program() {
 // they are no refusal and the manual lists none of them (line RG item E3).
 #[test]
 fn the_versions_are_answered_by_every_program() {
-    for program in TOOLKIT_PROGRAMS {
+    for program in toolkit_programs() {
         for word in [
             "-version",
             "-version-full",

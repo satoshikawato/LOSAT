@@ -105,21 +105,23 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
         parse_formatting_string(" 6 ").unwrap(),
         FormatChoice {
             number: 6,
-            spec: String::new(),
-            delimiter: String::new(),
+            spec: Vec::new(),
+            delimiter: Vec::new(),
         }
     );
     assert_eq!(parse_formatting_string("+6").unwrap().number, 6);
-    assert_eq!(parse_formatting_string("06").unwrap().normalized(), "6");
+    assert_eq!(parse_formatting_string("06").unwrap().normalized(), b"6");
     assert!(parse_formatting_string("6 std").unwrap().custom());
     assert!(!parse_formatting_string("0 std").unwrap().custom());
-    assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), "0");
+    assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), b"0");
     let delimited = parse_formatting_string("7 delim=, qseqid  sseqid ").unwrap();
     assert_eq!(
-        (delimited.spec.as_str(), delimited.delimiter.as_str()),
-        ("qseqid  sseqid", ",")
+        (delimited.spec.as_slice(), delimited.delimiter.as_slice()),
+        (b"qseqid  sseqid".as_slice(), b",".as_slice())
     );
-    assert_eq!(delimited.normalized(), "7 qseqid  sseqid");
+    assert_eq!(delimited.normalized(), b"7 qseqid  sseqid");
+    let non_utf8 = parse_formatting_string(b"6 qseqid x\xe9").unwrap();
+    assert_eq!(non_utf8.normalized(), b"6 qseqid x\xe9");
     assert!(!parse_formatting_string("6 delim=").unwrap().custom());
     assert!(message(parse_formatting_string("6 delim").unwrap_err())
         .contains("Delimiter format is invalid"));
@@ -228,8 +230,8 @@ fn structured_formats_write_no_query_warnings() {
 fn report_formats_defer_ncbis_own_errors() {
     let choice = |number| FormatChoice {
         number,
-        spec: String::new(),
-        delimiter: String::new(),
+        spec: Vec::new(),
+        delimiter: Vec::new(),
     };
     let file = Some(Path::new("o.json"));
     for program in PROGRAMS {
@@ -301,8 +303,8 @@ fn report_formats_defer_ncbis_own_errors() {
 fn the_sam_check_of_a_cross_program_run_reads_the_running_application() {
     let sam = FormatChoice {
         number: SAM,
-        spec: String::new(),
-        delimiter: String::new(),
+        spec: Vec::new(),
+        delimiter: Vec::new(),
     };
     for app in PROGRAMS {
         for engine in PROGRAMS {
@@ -343,8 +345,8 @@ fn the_sam_check_of_a_cross_program_run_reads_the_running_application() {
 fn ncbis_later_format_errors_are_its_messages() {
     let choice = |number| FormatChoice {
         number,
-        spec: String::new(),
-        delimiter: String::new(),
+        spec: Vec::new(),
+        delimiter: Vec::new(),
     };
     let options =
         |text: &str| format!("1 LOSAT query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
@@ -529,17 +531,118 @@ fn the_reports_of_the_formats_0_to_4_read_the_html_links() {
         );
     }
     for formats in [&[18][..], &[6, 18], &[5], &[]] {
-        assert!(
-            html_links(true, Program::Blastp, Program::Blastp, None, formats)
-                .unwrap()
-                .is_none()
-        );
+        assert!(html_links(
+            true,
+            RequestKind::Blastp,
+            RequestKind::Blastp,
+            None,
+            formats
+        )
+        .unwrap()
+        .is_none());
     }
     for formats in [&[0][..], &[1], &[2], &[3], &[4]] {
+        assert!(html_links(
+            false,
+            RequestKind::Blastn,
+            RequestKind::Blastn,
+            Some(b"db"),
+            formats
+        )
+        .unwrap()
+        .is_none());
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:119
+// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:119
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:420
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:121
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+#[test]
+fn html_links_names_registry_posts_and_refusals_by_application() {
+    use crate::report::formatter_registry::{FormatterNcbirc, InitConfig};
+    let repeated = b"[FOO]\na=1\na=2\n";
+    for (kind, post_name, nucleotide) in [
+        (RequestKind::Blastn, "blastn", true),
+        (RequestKind::Blastp, "blastp", false),
+        (RequestKind::Blastx, "blastx", false),
+        (RequestKind::Tblastn, "tblastn", true),
+        (RequestKind::Tblastx, "tblastx", true),
+        (RequestKind::Psiblast, "psiblast", false),
+        (RequestKind::PsiTblastn, "tblastn", true),
+        (RequestKind::Rpsblast, "rpsblast", false),
+        (RequestKind::Rpstblastn, "rpstblastn", false),
+    ] {
+        let links = html_links_with(
+            true,
+            kind,
+            kind,
+            Some(b"db"),
+            &[0],
+            |prog| FormatterNcbirc::of(prog, Some(repeated.to_vec())),
+            |prog| InitConfig::of(prog, Some((".ncbirc".into(), repeated.to_vec())), false),
+        )
+        .unwrap()
+        .unwrap();
+        let expected = format!(
+            "Warning: (110.8) [{post_name}] Found multiple [FOO] a settings; using the one from line 3\n"
+        );
+        assert_eq!(links.ncbirc.posts(), expected.as_bytes(), "{kind:?}");
+        assert_eq!(
+            links.registry.call_posts(0).0,
+            expected.as_bytes(),
+            "{kind:?}"
+        );
+        assert_eq!(links.nucleotide, nucleotide, "{kind:?}");
+    }
+
+    // A read failing after some bytes is refused with the application's name in upper case.
+    let partial = "cannot be read after its first 4 bytes (io)";
+    for (kind, upper) in [
+        (RequestKind::Rpsblast, "RPSBLAST"),
+        (RequestKind::Rpstblastn, "RPSTBLASTN"),
+        (RequestKind::Psiblast, "PSIBLAST"),
+        (RequestKind::PsiTblastn, "TBLASTN"),
+    ] {
+        let ncbirc_err = html_links_with(
+            true,
+            kind,
+            kind,
+            Some(b"db"),
+            &[0],
+            |prog| FormatterNcbirc::of_read(prog, Err(partial.to_string())),
+            |prog| InitConfig::of(prog, None, false),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
-            html_links(false, Program::Blastn, Program::Blastn, Some("db"), formats)
-                .unwrap()
-                .is_none()
+            ncbirc_err.contains(partial)
+                && ncbirc_err.ends_with(&format!("not supported by LOSAT's {upper}")),
+            "{kind:?}: {ncbirc_err}"
+        );
+        let init_err = html_links_with(
+            true,
+            kind,
+            kind,
+            Some(b"db"),
+            &[0],
+            |prog| FormatterNcbirc::of(prog, None),
+            |prog| {
+                InitConfig::of_read(
+                    prog,
+                    Some(("bad.rc".into(), Err(partial.to_string()))),
+                    false,
+                )
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            init_err.contains(partial)
+                && init_err.ends_with(&format!("not supported by LOSAT's {upper}")),
+            "{kind:?}: {init_err}"
         );
     }
 }

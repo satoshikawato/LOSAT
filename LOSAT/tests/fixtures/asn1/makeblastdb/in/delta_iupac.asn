@@ -1,0 +1,2 @@
+Seq-entry ::= seq { id { local str "di" }, descr { title "delta iupacna" },
+  inst { repr delta, mol dna, length 4, ext delta { literal { length 4, seq-data iupacna "ACGT" } } } }

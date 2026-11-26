@@ -41,7 +41,7 @@ use crate::stats::tables::KarlinParams;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for BlastxArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -75,7 +75,10 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
     // `-xdrop_ungap` has no entry (NCBI records none).
     inputs.xdrop_gap = args.xdrop_gap;
@@ -104,7 +107,9 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.application = args.import.as_ref().map(|_| args.app_name());
     inputs.hitlist_size = hitlist_size;
-    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+    ));
     inputs
 }
 
@@ -120,10 +125,10 @@ pub(crate) fn handle_for(
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
+    let database = args.database_name();
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        database,
+        database.as_deref(),
         options,
     ))
 }
@@ -454,7 +459,7 @@ fn with_batch(
 /// the bytes that the archive's stream replaces go to `diagnostics` (`write_archive`).
 pub(crate) fn write_blastx_archive(
     call: &ArchiveCall<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
@@ -464,12 +469,7 @@ pub(crate) fn write_blastx_archive(
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
-        program_type: call
-            .batch
-            .options
-            .rpstblastn
-            .is_some()
-            .then_some(crate::report::record::ProgramType::RpsTblastn),
+        program_type: call.batch.options.program_type(),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject
@@ -598,7 +598,7 @@ impl import::StrategyArgs for BlastxArgs {
             Setter::WordSize(n) => self.word_size = Some(*n),
             Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
             Setter::WindowSize(n) => self.window_size = Some(*n),
-            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
             Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
             Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
             Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
@@ -628,10 +628,10 @@ impl import::StrategyArgs for BlastxArgs {
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;
         if let Some(value) = collected.seg.value() {
-            self.seg = value;
+            self.seg = value.into();
         }
         if let Some(value) = collected.composition_value(false, program)? {
-            self.comp_based_stats = value;
+            self.comp_based_stats = value.into();
         }
         Ok(())
     }

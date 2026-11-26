@@ -6,7 +6,6 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -40,7 +39,7 @@ use crate::utils::dust::MaskedInterval;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options (`-dust` as given), the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self, self.dust_filtering.as_deref()),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -55,7 +54,7 @@ impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
 
 /// The recorded options of a BLASTN run (`options::algorithm_options`'s inputs). `dust` is
 /// the `-dust` value as given (`BlastnArgs::resolve_dust` consumes it).
-pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
+pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&std::ffi::OsStr>) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastn, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -81,7 +80,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     });
     inputs.template_length = args.template_length.map(i32::from);
     inputs.dust = dust
-        .and_then(|value| parse_dust_filtering(value).ok())
+        .and_then(|value| parse_dust_filtering(crate::utils::os_bytes::os_str_bytes(value)).ok())
         .map(|spec| match spec {
             DustSpec::No => Filter::No,
             DustSpec::Yes => Filter::Yes,
@@ -96,8 +95,14 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
             },
         });
     inputs.soft_masking = Some(args.soft_masking());
-    inputs.filtering_db = args.filtering_db.clone();
-    inputs.window_masker_db = args.window_masker_db.clone();
+    inputs.filtering_db = args
+        .filtering_db
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
+    inputs.window_masker_db = args
+        .window_masker_db
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
     inputs.best_hit_overhang = args.best_hit_overhang;
@@ -110,9 +115,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
-    inputs.mb_index_name = args
-        .megablast_index_name()
-        .map(|(name, _)| name.to_string());
+    inputs.mb_index_name = args.megablast_index_name().map(|(name, _)| name);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
     inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = args
@@ -126,7 +129,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
 /// archive (`ArchiveHandle::for_program`, with BLASTN's recorded options).
 pub(crate) fn handle_for(
     args: &BlastnArgs,
-    dust: Option<&str>,
+    dust: Option<&std::ffi::OsStr>,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
 ) -> Option<ArchiveHandle> {
@@ -135,7 +138,7 @@ pub(crate) fn handle_for(
     }
     Some(ArchiveHandle::for_program(
         &option_inputs(args, dust),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }
@@ -492,7 +495,7 @@ pub(crate) fn write_blastn_archives(
     call: &ArchiveCall<'_>,
     warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
@@ -559,8 +562,8 @@ impl import::StrategyArgs for BlastnArgs {
             self.use_index,
             &self.task,
             self.subject.is_some(),
-            self.index_name.as_ref(),
-            self.db.as_ref(),
+            self.index_name.as_deref(),
+            self.db.as_deref(),
         );
         import::Kept {
             path: self.import_search_strategy.expect("an import"),
@@ -694,12 +697,12 @@ impl import::StrategyArgs for BlastnArgs {
         collected.no_seg(program)?;
         collected.no_composition(program)?;
         if let Some(value) = collected.dust.value() {
-            self.dust_filtering = Some(value);
+            self.dust_filtering = Some(value.into());
         }
         // The repeat filter's database is `-filtering_db`'s (`repeat_filter`): the run looks it
         // up as the command line's.
         if let Some(database) = collected.repeat {
-            self.filtering_db = database;
+            self.filtering_db = database.map(Into::into);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:701-704
         // `-no_greedy` sets both algorithms to dynamic programming; the greedy pair is

@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use super::stream::LineReader;
-use super::{FastaRecord, ReadError, ReaderConfig};
+use super::{FastaRecord, ReadError, ReaderConfig, UpperRecord};
 use crate::ncbi_str::{
     is_blank, is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end,
 };
@@ -156,12 +156,13 @@ enum CharType {
     Bad,
 }
 
-/// The character types of a data line for nucleotide (`fAssumeNuc`) or protein
-/// (`fAssumeProt`) input, without `fParseGaps` (no gap characters).
+/// The character types of a data line for nucleotide (`bIsNuc`) or protein
+/// parsing, without `fParseGaps` (no gap characters).
 ///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:854-935
-/// `bIsNuc` is `fAssumeNuc` (the molecule is not set before `AssembleSeq` with
-/// `fNoParseID`), `bAllowLetterGaps` and `bHyphensAreGaps` are false (no `fParseGaps`),
+/// `bIsNuc` comes from the molecule set by `xSetSeqMol` under `-parse_deflines`, else
+/// `fAssumeNuc`; `bAllowLetterGaps` and `bHyphensAreGaps` are false (no `fParseGaps`),
 /// `bHyphensIgnoreAndWarn` is true. LOSAT looks the type up in a table (speed only).
 const fn char_types(protein: bool) -> [CharType; 256] {
     let mut table = [CharType::Bad; 256];
@@ -452,6 +453,27 @@ impl<R: Read> FastaReader<R> {
     /// `UngetLine` on that path) and the local-ID counter has not moved, so a further call
     /// reads from the next line (oracle BI net2, net5).
     pub(crate) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+        self.read_one_seq_inner(None, warn)
+            .map(|(record, _)| record)
+    }
+
+    /// Reads one record (`read_one_seq`) keeping `sequence` in upper case and returning the
+    /// lowercase mask intervals directly (`self.mask`) when `keep_masks` is set (empty otherwise),
+    /// avoiding a lowercase-and-rescan round trip for callers whose record stores upper-case
+    /// letters with interval masks (`algorithm::blastx::input_source`).
+    pub(crate) fn read_one_seq_upper(
+        &mut self,
+        keep_masks: bool,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
+        self.read_one_seq_inner(Some(keep_masks), warn)
+    }
+
+    fn read_one_seq_inner(
+        &mut self,
+        upper: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         if self.config.data_loaders {
             let (program, role) = (self.config.program, self.config.role);
             let line = self.lines.next_line();
@@ -460,13 +482,17 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.unget_line();
         }
-        self.read_fasta_seq(warn)
+        self.read_fasta_seq(upper, warn)
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:312-440
     /// `FASTA_PROGRESS` posts to a listener only, and there is none. `CBadResiduesException`
     /// comes only with `fValidate`, which is not set.
-    fn read_fasta_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+    fn read_fasta_seq(
+        &mut self,
+        upper: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         self.seq_data.clear();
         self.gaps.clear();
         self.mask_range_start = None;
@@ -561,7 +587,7 @@ impl<R: Read> FastaReader<R> {
                 ),
             ));
         }
-        self.assemble_seq(warn)
+        self.assemble_seq(upper, warn)
     }
 
     /// The title of a defline (`ParseDefLine` with `fNoParseID`), and the generated local
@@ -691,7 +717,8 @@ impl<R: Read> FastaReader<R> {
         if let Some(refusal) = refusal {
             return Err(ReadError::Unsupported(refusal));
         }
-        let believed = BelievedIds::new(ids, self.config.strand);
+        let believed =
+            BelievedIds::new(ids, self.config.strand).with_named_molecule(self.believed_molecule);
         self.local_id = Some(believed.bare_id());
         self.believed = Some(std::sync::Arc::new(believed));
         Ok(())
@@ -705,9 +732,9 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:713-772
-    /// `bIsNuc` is false (no `fForceType`; the molecule is set in `AssembleSeq`), so no
-    /// letter counts as ambiguous, and the warning (an ignored problem) needs `good == 0`,
-    /// which the error before has already thrown.
+    /// `bIsNuc` only feeds `eProblem_TooManyAmbiguousResidues`, which `CBlastFastaInputSource`
+    /// ignores (`blast_fasta_input.cpp:360`), and the other warning needs `good == 0`, which
+    /// the format error before has already thrown.
     fn check_data_line(&self, s: &[u8]) -> Result<(), ReadError> {
         if !self.seq_data.is_empty() {
             return Ok(());
@@ -737,29 +764,17 @@ impl<R: Read> FastaReader<R> {
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-1016 (the
     /// character switch is cited at `char_types`)
     /// `CloseGap` does nothing (no gap characters without `fParseGaps`, and
-    /// `CCustomizedFastaReader::x_CloseGap` is empty); `x_NucOrProt()` is empty, because
-    /// the molecule is set only in `AssembleSeq`. The fast copy of `fSkipCheck` is not
-    /// taken (no `fSkipCheck`).
+    /// `CCustomizedFastaReader::x_CloseGap` is empty); `x_NucOrProt()` names the molecule set
+    /// by `xSetSeqMol` under `-parse_deflines` and is empty otherwise. The fast copy of
+    /// `fSkipCheck` is not taken (no `fSkipCheck`).
     fn parse_data_line(&mut self, s: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
         if s.starts_with(b">?") {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
-        if self
-            .believed_molecule
-            .is_some_and(|named| named != self.config.protein)
-            && !super::believed::reads_the_same_in_both(s)
-        {
-            return Err(ReadError::Unsupported(anyhow::anyhow!(
-                "the Seq-id of the {} on line {} names the other molecule under -parse_deflines \
-                 (NCBI BLAST+ reads its letters as that molecule); this is not supported by \
-                 LOSAT's {}",
-                self.config.role,
-                self.line_number(),
-                self.config.program
-            )));
-        }
-        let (types, residues, masked) = if self.config.protein {
+        let parse_protein =
+            DataLineAlphabet::new(self.believed_molecule, self.config.protein).is_protein();
+        let (types, residues, masked) = if parse_protein {
             (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
         } else {
             (
@@ -783,7 +798,7 @@ impl<R: Read> FastaReader<R> {
                     let rest = &s[pos + 1..];
                     let run = if !bulk {
                         0
-                    } else if self.config.protein {
+                    } else if parse_protein {
                         run_length(rest, residues, sure_protein)
                     } else {
                         run_length(rest, residues, sure_nucleotide)
@@ -797,7 +812,7 @@ impl<R: Read> FastaReader<R> {
                     let rest = &s[pos + 1..];
                     let run = if !bulk {
                         0
-                    } else if self.config.protein {
+                    } else if parse_protein {
                         run_length(rest, masked, sure_protein_masked)
                     } else {
                         run_length(rest, masked, sure_nucleotide_masked)
@@ -898,9 +913,15 @@ impl<R: Read> FastaReader<R> {
     /// after this point. Without `fNoSplit` (`BLASTINPUT_GEN_DELTA_SEQ` set) the gaps have
     /// already become residues, so the record is the same sequence in delta pieces.
     /// `CSeqportUtil::Pack` packs nucleotides into `ncbi2na`/`ncbi4na`, where `U` and `T`
-    /// are the same code, so LOSAT stores `U` as `T`. The residues in the lowercase mask
-    /// are returned in lower case (LOSAT's representation of the mask).
-    fn assemble_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+    /// are the same code and any non-IUPACna byte read under a protein Seq-id maps to `N`
+    /// (`CIupacnaTo4na::scm_Table`, `sequtil_tables.cpp:392-457`), so LOSAT stores `U` as `T`.
+    /// The residues in the lowercase mask are returned in lower case (LOSAT's representation of
+    /// the mask), or as mask intervals when `upper_masks` is `Some`.
+    fn assemble_seq(
+        &mut self,
+        upper_masks: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         // CloseMask at the end of the record: the interval ends at the last position.
         if let Some(start) = self.mask_range_start.take() {
             self.mask.push((start, self.current_pos_with_gaps() - 1));
@@ -910,6 +931,9 @@ impl<R: Read> FastaReader<R> {
             self.parse_title(title, warn)?;
         }
         self.titles = titles;
+        if !self.config.protein && self.believed_molecule == Some(true) {
+            pack_protein_read_nucleotide(&mut self.seq_data);
+        }
         self.add_to_id_scope()?;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
         // EXPERIMENT (LOSAT_X_BNQPACK): the letters the branches below would give, packed from the
@@ -965,29 +989,49 @@ impl<R: Read> FastaReader<R> {
                 *residue = if *residue == b'U' { b'T' } else { *residue };
             }
         }
-        // A packed record's mask is in its intervals.
-        if self.x_packed.is_none() {
-            for &(from, to) in &self.mask {
-                for residue in &mut sequence[from as usize..=to as usize] {
-                    *residue = residue.to_ascii_lowercase();
+        // A packed record's mask is in its intervals; callers asking for upper-case letters with
+        // mask intervals (`upper_masks`) take them straight from `self.mask`.
+        let masks = match upper_masks {
+            Some(keep_masks) => {
+                if keep_masks && !self.mask.is_empty() {
+                    // `check_length` enforces `<= i32::MAX`.
+                    self.mask
+                        .iter()
+                        .map(|&(from, to)| (from as i32, to as i32))
+                        .collect()
+                } else {
+                    Vec::new()
                 }
             }
-        }
-        Ok(FastaRecord {
-            local_id: self.local_id.take().unwrap_or_default(),
-            title: std::mem::take(&mut self.title),
-            sequence,
-            warnings: Vec::new(),
-            source: (self.config.keep_defline || self.believed.is_some()).then(|| {
-                Box::new(super::RecordSource {
-                    defline: std::mem::take(&mut self.defline),
-                    uncut: None,
-                    believed: self.believed.take(),
-                    cut_from: 0,
-                    uncut_length: 0,
-                })
-            }),
-        })
+            None => {
+                if self.x_packed.is_none() {
+                    for &(from, to) in &self.mask {
+                        for residue in &mut sequence[from as usize..=to as usize] {
+                            *residue = residue.to_ascii_lowercase();
+                        }
+                    }
+                }
+                Vec::new()
+            }
+        };
+        Ok((
+            FastaRecord {
+                local_id: self.local_id.take().unwrap_or_default(),
+                title: std::mem::take(&mut self.title),
+                sequence,
+                warnings: Vec::new(),
+                source: (self.config.keep_defline || self.believed.is_some()).then(|| {
+                    Box::new(super::RecordSource {
+                        defline: std::mem::take(&mut self.defline),
+                        uncut: None,
+                        believed: self.believed.take(),
+                        cut_from: 0,
+                        uncut_length: 0,
+                    })
+                }),
+            },
+            masks,
+        ))
     }
 
     /// `-parse_deflines` (`IdScope::add_record`): the record's letters are complete and its letters
@@ -1052,13 +1096,54 @@ impl<R: Read> FastaReader<R> {
     }
 }
 
+/// The alphabet molecule `CFastaReader::ParseDataLine` checks a line against: the Seq-id's
+/// named molecule when set (`xSetSeqMol`), otherwise the program's.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
+#[derive(Clone, Copy)]
+pub struct DataLineAlphabet {
+    parse_protein: bool,
+}
+
+impl DataLineAlphabet {
+    #[inline]
+    pub fn new(believed_molecule: Option<bool>, program_protein: bool) -> Self {
+        Self {
+            parse_protein: believed_molecule.unwrap_or(program_protein),
+        }
+    }
+
+    #[inline]
+    pub fn is_protein(self) -> bool {
+        self.parse_protein
+    }
+}
+
+/// How `CSeqportUtil::Pack` maps upper-case residues read under a protein Seq-id into a
+/// nucleotide sequence (`CIupacnaTo4na::scm_Table`): IUPACna letters stay, `U` becomes `T`,
+/// and every other byte (`E`, `F`, `I`, `J`, `L`, `O`, `P`, `Q`, `X`, `Z`, `*`) becomes `N`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-457
+#[inline]
+pub fn pack_protein_read_nucleotide(seq_data: &mut [u8]) {
+    for residue in seq_data.iter_mut() {
+        *residue = match *residue {
+            b'A' | b'B' | b'C' | b'D' | b'G' | b'H' | b'K' | b'M' | b'N' | b'R' | b'S' | b'T'
+            | b'V' | b'W' | b'Y' => *residue,
+            b'U' => b'T',
+            _ => b'N',
+        };
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
 /// The rest of the function (the modifiers, cited at `gap_mod_warnings`) only warns:
 /// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
 ///
 /// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
 /// its warnings: the reader of the four programs (`FastaReader::parse_gap_line`) and BLASTX's
-/// (`blastx::input`) read gap lines with it.
+/// (`blastx::input_source`) read gap lines with it.
 pub(crate) fn gap_line_size(
     line: &[u8],
     line_number: u64,

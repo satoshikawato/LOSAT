@@ -8,6 +8,7 @@ import {
   parseToolDescription,
   recordMismatch,
   type ProgramId,
+  type RecordKey,
   type RunOutput,
   type ToolDescription,
 } from 'losat/domain';
@@ -218,8 +219,12 @@ export class FakeEngine implements EngineGateway, ToolEngine {
    * inputs read together (a run of `-parse_deflines` reads its records as one without it), and no help
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
-  async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+  async start(argv: readonly string[] = []): Promise<StartResult> {
+    const database = argv.some((word) => word === '-db' || word.startsWith('-db='));
+    return {
+      ok: true,
+      start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database },
+    };
   }
 
   /**
@@ -243,17 +248,18 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       if (option === undefined) return { ok: false, message: unknownArgument(program as ProgramId, word) };
       if (option.takesValue && value === undefined) i++;
     }
-    // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
-    return { ok: true, dataLoaders: true };
+    // The fake reads no registry and parses no deflines: its runs have data loaders on and parseDeflines off.
+    return { ok: true, dataLoaders: true, parseDeflines: false };
   }
 
   async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     const { runId } = request;
+    let readRecords: RuntimeInfo['readRecords'];
     for (const phase of ['preparing', 'running', 'finalizing'] as const) {
       await this.pause();
       if (this.cancelled.delete(runId)) throw new RunCancelledError(runId);
       onPhase(phase);
-      if (phase === 'preparing') this.register(request);
+      if (phase === 'preparing') readRecords = this.register(request);
     }
     if (request.query.bytes.length === 0 || request.subject?.bytes.length === 0) {
       // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
@@ -278,7 +284,14 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     this.writeOutputs(request, writer);
     writer.end();
     // Its warning goes to the diagnostics (stream 3), as without -logfile.
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', messages: 'diagnostics', ...(windowMasker === undefined ? {} : { windowMasker }) };
+    return {
+      path: 'fake',
+      threads: 1,
+      engineBuild: 'fake-engine',
+      messages: 'diagnostics',
+      ...(windowMasker === undefined ? {} : { windowMasker }),
+      ...(readRecords === undefined ? {} : { readRecords }),
+    };
   }
 
   cancel(runId: string): void {
@@ -286,18 +299,30 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   /** Reads the inputs as the Engine worker's `register` does and checks the record tables. */
-  private register(request: EngineRunRequest): void {
+  private register(request: EngineRunRequest): RuntimeInfo['readRecords'] {
+    let query: readonly RecordKey[] | undefined;
+    let subject: readonly RecordKey[] | undefined;
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
       // A run of -db has no subject.
       if (input === undefined) continue;
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
-      if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
+      const actual = fakeRecordKeys(input.bytes, programOf(request), role);
+      const mismatch = recordMismatch(input.records, actual);
+      if (mismatch !== undefined) {
+        if (input.assembled === true) {
+          if (role === 'query') query = actual;
+          else subject = actual;
+        } else {
+          throw new InputMismatchError(role, mismatch);
+        }
+      }
     }
     // A reader's error ends the run, as the engine's run does after the query batches before it
     // (line WQA's D10, 2026-11-19): the fake writes nothing first.
     const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
     if (readerError !== undefined) throw new Error(readerError);
+    if (query === undefined && subject === undefined) return undefined;
+    return { ...(query === undefined ? {} : { query }), ...(subject === undefined ? {} : { subject }) };
   }
 
   /**
@@ -311,7 +336,13 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject?.bytes ?? new Uint8Array(0), programOf(request), 'subject').slice(0, 3);
+    const subjects =
+      request.subject !== undefined
+        ? fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3)
+        : [
+            { id: 'db_seq_1', length: 500 },
+            { id: 'db_seq_2', length: 320 },
+          ];
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;

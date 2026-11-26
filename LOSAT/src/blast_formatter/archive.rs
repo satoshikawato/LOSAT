@@ -25,7 +25,7 @@ use super::search_program::{blast_type, program_type};
 use super::{Options, PROGRAM};
 use crate::algorithm::common::database::{
     database_error, database_error_of, list_warning_line, open_search_database, pairwise_database,
-    refusal, DatabaseOpenError, TaxdbRun,
+    TaxdbRun,
 };
 use crate::blastinput::app::{
     engine_error, options_error_bytes, output_format, prefetch_seqs_limit, xinclude_check_for,
@@ -301,7 +301,8 @@ impl<'o> Output<'o> {
         buf: &mut Vec<u8>,
         diag: &mut Diag,
     ) -> anyhow::Result<()> {
-        let tied = diag.tied_to_cout();
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+        let tied = diag.is_cerr();
         let (stream, is_stdout) = self.opened();
         let tie = tied && is_stdout;
         let mut object = ObjectOStream::new(OStreamBuffer::new(stream), None);
@@ -434,7 +435,7 @@ impl<'r, 'o> Run<'r, 'o> {
             Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
             Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
         }
-        let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+        let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -704,7 +705,8 @@ fn post_line(output: &mut Output<'_>, diag: &mut Diag, text: &[u8]) {
     if text.is_empty() {
         return;
     }
-    output.before_diagnostic(diag.tied_to_cout());
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+    output.before_diagnostic(diag.is_cerr());
     diag.write_text(text);
 }
 
@@ -1140,11 +1142,8 @@ fn open_database(
     } else {
         SeqType::Nucleotide
     };
-    let mut db: SeqDb = match open_search_database(text, seqtype, settings) {
-        Ok(db) => db,
-        Err(DatabaseOpenError::Registry(reason)) => return Err(refusal(&reason, PROGRAM)),
-        Err(DatabaseOpenError::Reader(error)) => return Err(remote_database(&error, text)),
-    };
+    let mut db: SeqDb = open_search_database(name, seqtype, settings)
+        .map_err(|error| remote_database(&error, text))?;
     if let Some(taxids) = options
         .taxid_list
         .as_ref()
@@ -1163,7 +1162,7 @@ fn open_database(
     // `GetSearchOptions` keeps the filtering algorithm of the options only when it is not -1
     // (remote_blast.cpp:2056-2059).
     let filtering = options.db_filtering_algorithm_id.filter(|&id| id != -1);
-    db.read_name_records(text, filtering.is_some())
+    db.read_name_records(name, filtering.is_some())
         .map_err(|error| database_error(error, PROGRAM))?;
     if let Some(id) = filtering {
         db.name_mask_details(id)

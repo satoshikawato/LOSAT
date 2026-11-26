@@ -16,12 +16,13 @@
 //!   knows it: [`NcbiException::site`] is [`ThrowSite::generated`] otherwise) or LOSAT's refusal
 //!   (`Refused`, a noun phrase that the program completes).
 
+use crate::blastinput::ncbi_environment::DatabaseSettings;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_facts;
+use crate::report::defline::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
 use crate::seqdb::alias::SearchPath;
 use crate::seqdb::{NucleotideAmbiguity, SeqDb, SeqDbError, SeqType};
-use crate::seqid::ParsedSeqId;
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
 /// One sequence of the database (`CBioseq`).
 pub(crate) struct BdbRecord {
@@ -91,6 +92,8 @@ pub(crate) struct MaskBdbReader {
     /// for which NCBI posts its warning 803.10 (`take_utf8_header`): it met one, or it failed (the
     /// record is read again to see whether one came before the failure).
     utf8_header: bool,
+    /// Kept header-set buffers reused across sequential OID reads (`SeqDb::defline_set_in`).
+    kept_set: DeflineSet,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -99,27 +102,23 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 }
 
 impl MaskBdbReader {
-    /// A new `CSeqDB` of `name` and the molecule, on the search path of the environment and
-    /// `registry` (the `[BLAST] BLASTDB` of the configuration: `ApplicationSettings::blastdb`,
-    /// `Err` when LOSAT does not read the entry as NCBI does). `program` names LOSAT's program in a
-    /// refusal.
+    /// A new `CSeqDB` of `name` (the bytes of NCBI's `std::string`) and the molecule, on the
+    /// search path of the environment and the registry of `database` (the `[BLAST] BLASTDB` of
+    /// the configuration: `ApplicationSettings::blastdb`), whose definition lines are read under
+    /// the checks of `database` (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's
+    /// program in a refusal.
     pub(crate) fn open(
-        name: &str,
+        name: &[u8],
         molecule: SeqType,
-        registry: Result<Option<&str>, &str>,
+        database: DatabaseSettings<'_>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let registry = registry.map_err(|reason| {
-            BdbError::Refused(
-                crate::algorithm::common::database::refusal(reason, program).to_string(),
-            )
-        })?;
-        let path = SearchPath::from_environment(registry)
-            .map_err(|error| database_error(error, program))?;
+        let path = SearchPath::from_environment(database.registry);
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        let db = SeqDb::open_every_oid_in(name, molecule, &path)
+        let mut db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
+        db.refuse_unchecked_reads(database.read_verification);
         Ok(MaskBdbReader {
             db,
             molecule,
@@ -131,6 +130,7 @@ impl MaskBdbReader {
             path,
             get_title: false,
             utf8_header: false,
+            kept_set: DeflineSet::default(),
         })
     }
 
@@ -166,7 +166,7 @@ impl MaskBdbReader {
     /// `FindVolumePaths` (with its flag true) of the database opened as `name`: the paths of its
     /// volumes (without extension), each once, in NCBI's order.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
-    pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
+    pub(crate) fn volume_paths(&self, name: &[u8]) -> Result<Vec<Vec<u8>>, BdbError> {
         SeqDb::volume_and_alias_paths(name, self.molecule, &self.path)
             .map(|(volumes, _)| volumes)
             .map_err(|error| database_error(error, self.program))
@@ -200,6 +200,18 @@ impl MaskBdbReader {
         &mut self,
         letters: bool,
     ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
+        let mut set = std::mem::take(&mut self.kept_set);
+        let result = self.next_record_in(letters, &mut set);
+        self.kept_set = set;
+        result
+    }
+
+    /// [`MaskBdbReader::next_record_of`] reusing `set` as its header buffer.
+    fn next_record_in(
+        &mut self,
+        letters: bool,
+        set: &mut DeflineSet,
+    ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
         self.utf8_header = false;
         if self.oid >= self.db.num_seqs() {
             return Ok(None);
@@ -210,9 +222,9 @@ impl MaskBdbReader {
         let error = |error| database_error(error, program);
         // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
         self.db.build_oid_list().map_err(error)?;
-        let set = self.db.defline_set(oid);
-        self.utf8_header = set.as_ref().map_or(true, |set| set.utf8);
-        let set = set.map_err(error)?;
+        let read = self.db.defline_set_in(oid, set);
+        self.utf8_header = read.is_err() || set.utf8;
+        read.map_err(error)?;
         if set
             .deflines
             .iter()
@@ -255,14 +267,25 @@ impl MaskBdbReader {
                 Vec::new(),
                 Some(self.db.nucleotide_ambiguity(oid).map_err(error)?),
             ),
-            SeqType::Protein => (
-                self.db
-                    .read_sequence(oid)
-                    .map_err(error)?
-                    .protein(0)
-                    .to_vec(),
-                None,
-            ),
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+            // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:228-232
+            // `GetBioseq` returns no Bioseq when the signed 32-bit protein length is below 1
+            // (`0` or `>= 2^31` residues), after opening `.psq` via `x_GetSequence`.
+            SeqType::Protein => {
+                if self.db.protein_length_i32(oid).map_err(error)? < 1 {
+                    self.db.check_protein_range(oid).map_err(error)?;
+                    (Vec::new(), None)
+                } else {
+                    (
+                        self.db
+                            .read_sequence(oid)
+                            .map_err(error)?
+                            .protein(0)
+                            .to_vec(),
+                        None,
+                    )
+                }
+            }
         };
         let has_letters = ambiguity
             .as_ref()
@@ -274,7 +297,7 @@ impl MaskBdbReader {
         if has_letters {
             texts = self
                 .taxdb
-                .bioseq_texts(&self.db, oid, &set, None)
+                .bioseq_texts(&self.db, oid, set, None)
                 .map_err(|error| lookup_refusal(oid, error))?;
         }
         // NCBI makes the title of a sequence without one from its BioSource (the taxonomy
@@ -293,7 +316,7 @@ impl MaskBdbReader {
         let any_source = set.first_source_taxid(None).is_some();
         let has_source = source_shown && any_source;
         let taxname = if has_source {
-            self.source_taxname(oid, &set)?
+            self.source_taxname(oid, set)?
         } else {
             None
         };
@@ -304,7 +327,7 @@ impl MaskBdbReader {
                 &ids,
                 &title,
                 any_source,
-                || self.source_taxname(oid, &set),
+                || self.source_taxname(oid, set),
             )?)
         } else {
             None
@@ -361,7 +384,7 @@ fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
     ))
 }
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1818
 /// The `eCoding_Iupac` letters of a protein's NCBIstdaa codes (`CSeqVector`'s IUPACaa): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them (segmasker 2.17.0 writes
 /// them so with `-infmt blastdb -outfmt fasta`, fixture `db_ambig_fasta`).
@@ -371,7 +394,7 @@ pub(crate) fn iupacaa_letters(stdaa: &[u8]) -> Vec<u8> {
 
 /// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`, or the
 /// `CSeqDBException` of `SeqDbError::ncbi_message`, with its place where LOSAT knows it,
-/// `seqdb::throw_site`), or LOSAT's refusal.
+/// `SeqDbError::throw_site`), or LOSAT's refusal.
 fn database_error(error: SeqDbError, program: &str) -> BdbError {
     // An NCBI exception of the reader itself (an alias value that does not convert), reported
     // as the application reports it (blastdbcmd's `database_error`).
@@ -380,7 +403,8 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     }
     match error.ncbi_request_message() {
         Some(text) => {
-            let site = crate::seqdb::throw_site(&text)
+            let site = error
+                .throw_site()
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }

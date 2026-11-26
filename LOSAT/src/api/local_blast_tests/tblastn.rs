@@ -112,7 +112,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -147,7 +147,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1451
 // The saved NCBI outputs name the inputs by the paths NCBI read, so those paths are
 // passed as the display names.
 #[test]
@@ -358,12 +358,12 @@ fn unsupported_formats_fail_before_searching() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
@@ -410,7 +410,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })

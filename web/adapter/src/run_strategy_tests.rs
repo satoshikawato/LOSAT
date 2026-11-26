@@ -40,8 +40,8 @@ fn run_inputs_of(
     subject: &[u8],
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, false, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,
@@ -306,11 +306,12 @@ fn frozen_text(name: &str, ext: &str) -> String {
 
 /// A run that NCBI ends after its prolog and before its first request (`-query_loc` past the
 /// query's end: `Empty CBlastQueryVector`), with a name that LOSAT refuses at that request: each of
-/// the run's formats (the argv's, then outfmt 6, 7 and 0) holds its own bytes and gets them back at
-/// the run's end, so every stream is that of the run without the option, the argv's own output and
-/// its signals too (review 1 B1: one hold for every format put outfmt 0's prolog into the argv's
-/// tabular or XML output), for each program (review 2 N-c: BLASTX's report stream and the hold
-/// points of BLASTN, TBLASTN and TBLASTX had no test). The argv's outfmt 0 and the run's error are
+/// the run's formats (the argv's, then outfmt 6, 7 and 0) keeps the bytes written to it, as the
+/// command line's report stream keeps NCBI's writes (line RG T6a), so every stream is that of the
+/// run without the option, the argv's own output and its signals too (review 1 B1: one hold for
+/// every format put outfmt 0's prolog into the argv's tabular or XML output), for each program
+/// (review 2 N-c: BLASTX's report stream and the stops of BLASTN, TBLASTN and TBLASTX had no
+/// test). The argv's outfmt 0 and the run's error are
 /// NCBI's (`<program>.sub.qlocbig.stdout` of `cases.tsv`, whose argv names the inputs from
 /// `LOSAT/`, as the prolog shows the subject's name).
 #[test]
@@ -356,6 +357,61 @@ fn a_run_that_ends_before_its_first_request_keeps_each_formats_bytes() {
             }
         }
     }
+}
+
+/// A run that LOSAT refuses at NCBI's first request (`-`) writes to its outfmt 0 output what the
+/// command line's report stream writes before that refusal (line RG T6a,
+/// `strategy::check_report_stream`): NCBI's prolog, which NCBI writes before its request, and so
+/// the start of the run without the option up to its first query's report (`prolog_of`); the
+/// refusal is the run's error, for each program.
+#[test]
+fn a_refused_run_writes_outfmt_0s_prolog_before_the_refusal() {
+    for program in ["blastp", "blastn", "blastx", "tblastn", "tblastx"] {
+        let (query, subject) = program_inputs(program);
+        let (query_name, subject_name) = (
+            format!("tests/fasta/{query}"),
+            format!("tests/fasta/{subject}"),
+        );
+        let plain = [
+            program,
+            "-query",
+            query_name.as_str(),
+            "-subject",
+            subject_name.as_str(),
+            "-outfmt",
+            "0",
+        ];
+        let (plain_result, without) = run_files_of(&plain, query, subject);
+        plain_result.unwrap();
+        let mut words = plain.to_vec();
+        words.extend(["-export_search_strategy", "-"]);
+        let (result, streams) = run_files_of(&words, query, subject);
+        assert_eq!(
+            result.unwrap_err(),
+            format!(
+                "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {}; give a file name",
+                program.to_ascii_uppercase()
+            ),
+            "{program}"
+        );
+        assert!(files(&streams).is_empty(), "{program}");
+        assert_eq!(
+            String::from_utf8_lossy(&streams[&0]),
+            String::from_utf8_lossy(prolog_of(&without[&0])),
+            "{program}: NCBI's prolog"
+        );
+    }
+}
+
+/// The prolog of the outfmt 0 report `report`: its bytes before the two newlines that start the
+/// first query's report (`Query=`), which NCBI writes before its first request (the command line's
+/// run of the argv with `-export_search_strategy -` writes these bytes before the refusal).
+fn prolog_of(report: &[u8]) -> &[u8] {
+    let first_query = report
+        .windows(b"\n\nQuery=".len())
+        .position(|window| window == b"\n\nQuery=")
+        .expect("a query's report");
+    &report[..first_query]
 }
 
 /// A `-outfmt` value that does not parse, of an argv that names a search strategy file, is read
@@ -416,9 +472,10 @@ fn an_outfmt_that_does_not_parse_fails_where_the_command_line_fails() {
 /// refuses at NCBI's first request: each search has the export of the command line's run of its
 /// formats (decision F1w-5; the other search's receiver keeps nothing), so the other search, which
 /// runs first, stops at its own first request with its outputs holding nothing, and the run fails
-/// with the refusal of the argv's own search, no output holding a byte, as the CLI's run of the
-/// argv (`ROWS[1]`, whose run with a file the first test checks; without the other search's export
-/// the outcome here is the same, and the next test tells them apart).
+/// with the refusal of the argv's own search, its outfmt 0 output holding NCBI's prolog and the
+/// tabular outputs nothing, as the CLI's run of the argv writes NCBI's prolog before the refusal
+/// (line RG T6a; `ROWS[1]`, whose run with a file the first test checks; without the other
+/// search's export the outcome here is the same, and the next test tells them apart).
 #[test]
 fn a_two_search_run_refuses_a_name_as_the_command_line() {
     let (_, _, query, subject, _) = ROWS[1];
@@ -429,10 +486,17 @@ fn a_two_search_run_refuses_a_name_as_the_command_line() {
     };
     assert_eq!(groups.len(), 2, "two searches");
     assert_eq!(own_search(&groups), 1, "the argv's search is the second");
+    let (plain_result, without) = run_files_of(&words[..words.len() - 2], query, subject);
+    plain_result.unwrap();
     let (result, streams) = run_files_of(&words, query, subject);
     assert_eq!(result.unwrap_err(), BLASTP_STANDARD_OUTPUT);
     assert!(files(&streams).is_empty());
-    for stream in [0, 6, 7] {
+    assert_eq!(
+        String::from_utf8_lossy(&streams[&0]),
+        String::from_utf8_lossy(prolog_of(&without[&0])),
+        "NCBI's prolog"
+    );
+    for stream in [6, 7] {
         assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
     }
 }
@@ -443,8 +507,8 @@ const BLASTP_STANDARD_OUTPUT: &str = "-export_search_strategy - (the search stra
 /// The two-search run of `a_two_search_run_refuses_a_name_as_the_command_line` on 700 queries
 /// whose outfmt 7 report is longer than a chunk, which the adapter sends as the search writes it
 /// (`emit::CHUNK`): the run without the option sends that much of stream 7, and the run with `-`
-/// sends no byte of any output, as its other search, which runs first, stops at its first request
-/// (decision F1w-5). Without that search's export it would run to its end and send its chunks
+/// sends no byte of the other search's outputs and only NCBI's prolog of outfmt 0 (as the first
+/// test), as its other search, which runs first, stops at its first request (decision F1w-5). Without that search's export it would run to its end and send its chunks
 /// before the argv's own search fails (review 2 of line RG F1w, N-c, mutation M4).
 #[test]
 fn a_two_search_run_that_refuses_a_name_sends_nothing_of_the_other_search() {
@@ -454,9 +518,9 @@ fn a_two_search_run_that_refuses_a_name_sends_nothing_of_the_other_search() {
         .collect();
     let subject = fasta(ROWS[1].3);
     let refused = row_argv(&ROWS[1], "-");
-    let (result, streams) = run_inputs_of(&refused[..refused.len() - 2], &query, &subject);
+    let (result, without) = run_inputs_of(&refused[..refused.len() - 2], &query, &subject);
     result.unwrap();
-    let sent = streams.get(&7).map_or(0, Vec::len);
+    let sent = without.get(&7).map_or(0, Vec::len);
     assert!(
         sent > crate::emit::CHUNK,
         "stream 7 of the run without the option: {sent} bytes"
@@ -464,7 +528,12 @@ fn a_two_search_run_that_refuses_a_name_sends_nothing_of_the_other_search() {
     let (result, streams) = run_inputs_of(&refused, &query, &subject);
     assert_eq!(result.unwrap_err(), BLASTP_STANDARD_OUTPUT);
     assert!(files(&streams).is_empty());
-    for stream in [0, 6, 7] {
+    assert_eq!(
+        String::from_utf8_lossy(&streams[&0]),
+        String::from_utf8_lossy(prolog_of(&without[&0])),
+        "NCBI's prolog"
+    );
+    for stream in [6, 7] {
         assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
     }
 }
@@ -485,7 +554,7 @@ fn database_run(words: &[&str], query: &str) -> (Result<(), String>, BTreeMap<u3
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
     let bytes = std::fs::read(format!("{DB_ROOT}/{query}")).unwrap();
     let loaders = data_loaders(&words).unwrap();
-    let (handle, _) = crate::store::register(words[0], 0, loaders, &bytes).unwrap();
+    let (handle, _) = crate::store::register(words[0], 0, loaders, false, &bytes).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let program = Program::parse(words[0]).unwrap();
     let result = crate::store::with_inputs(

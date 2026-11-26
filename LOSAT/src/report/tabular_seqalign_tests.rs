@@ -18,8 +18,8 @@ fn value(text: &str) -> Value {
 fn spec(fields: &str) -> TabularSpec {
     TabularSpec::of_formatter(&FormatChoice {
         number: 6,
-        spec: fields.to_string(),
-        delimiter: String::new(),
+        spec: fields.as_bytes().to_vec(),
+        delimiter: Vec::new(),
     })
     .expect("a tabular format")
 }
@@ -108,7 +108,7 @@ fn qcovs_is_set_on_the_first_row_of_each_subject() {
         V::new(named::SEQ_ALIGN, &second),
     ];
     let read = read_set(&set, false);
-    let scores = subject_scores(&read, Some(20), &spec("qcovs"), "qcovs", false).unwrap();
+    let scores = subject_scores(&read, Some(20), &spec("qcovs"), b"qcovs", false).unwrap();
     assert_eq!(scores.len(), 2);
     // The union of the query's ranges, 0..=11 of 20 letters: 60 %.
     assert_eq!(scores[0].0, 60);

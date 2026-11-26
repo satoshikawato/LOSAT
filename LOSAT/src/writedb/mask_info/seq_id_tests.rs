@@ -8,9 +8,9 @@
 use super::reader::{seq_id_from_binary, seq_id_from_text};
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::asn_text_reader::{Reader as TextReader, SliceSource};
+use crate::report::serial::asn_text_reader::{Frame, Reader as TextReader, SliceSource};
 use crate::report::serial::encoder::Encoder;
-use crate::seqid::ber::{decode_seq_id, Reader};
+use crate::seqid::ber::{decode_seq_id, IdStrings, Reader};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -343,12 +343,12 @@ fn the_mask_reader_and_the_database_decoder_build_the_same_seq_id() {
             let data = writer.seq_id(&id);
             let from_mask = seq_id_from_binary(&data)
                 .unwrap_or_else(|fail| panic!("{id:?} (indefinite {indefinite}): {fail:?}"));
-            let mut replaced = 0;
+            let mut strings = IdStrings::default();
             let mut ber = Reader::new(&data);
-            let from_db = decode_seq_id(&mut ber, &mut replaced)
+            let from_db = decode_seq_id(&mut ber, &mut strings)
                 .unwrap_or_else(|error| panic!("{id:?} (indefinite {indefinite}): {error}"));
             assert!(ber.at_record_end(), "{id:?}");
-            assert_eq!(replaced, 0, "{id:?}");
+            assert_eq!(strings.replaced, 0, "{id:?}");
             assert_eq!(from_mask, from_db, "{id:?} (indefinite {indefinite})");
             assert_eq!(from_mask, id, "{id:?} (indefinite {indefinite})");
             compared += 1;
@@ -386,9 +386,11 @@ fn the_mask_reader_and_the_text_reader_build_the_same_seq_id() {
         let shown = String::from_utf8_lossy(&data).into_owned();
         let from_mask = seq_id_from_text(&data).unwrap_or_else(|fail| panic!("{shown}: {fail:?}"));
         let mut reader = TextReader::new(SliceSource::new(&data), "Seq-id", "test reader");
+        let mut posts: Vec<crate::report::serial::asn_types::read::Post> = Vec::new();
         let from_text = reader
-            .seq_id()
+            .seq_id(&Frame::ROOT, &mut posts)
             .unwrap_or_else(|error| panic!("{shown}: {error}"));
+        assert!(posts.is_empty(), "{shown}: {posts:?}");
         assert_eq!(from_mask, from_text, "{shown}");
         assert_eq!(from_mask, id, "{shown}");
         alternatives.insert(id.alternative());

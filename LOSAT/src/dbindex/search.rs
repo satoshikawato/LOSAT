@@ -122,32 +122,6 @@ impl VolumeSeeds {
     pub(crate) fn word_size(&self) -> u64 {
         self.word_size
     }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:248-259
-    /// The results after BLASTN's word finder has moved each list out (`BlastInitHitListMove`
-    /// leaves each list empty but in place): the same chunks have lists, of no seeds.
-    pub(crate) fn consumed(&self) -> VolumeSeeds {
-        VolumeSeeds {
-            word_size: self.word_size,
-            map: self.map.clone(),
-            results: self
-                .results
-                .iter()
-                .map(|list| list.as_ref().map(|_| Vec::new()))
-                .collect(),
-        }
-    }
-
-    /// The results of a volume of `sequences` sequences of one chunk each and no seeds, for the
-    /// tests of the search's users.
-    #[cfg(test)]
-    pub(crate) fn empty_for_tests(sequences: u32) -> VolumeSeeds {
-        VolumeSeeds {
-            word_size: 28,
-            map: (1..=sequences).collect(),
-            results: vec![None; sequences as usize],
-        }
-    }
 }
 
 /// A volume of a search (`SVolumeDescriptor`): its path, its first OID, its number of OIDs, and
@@ -155,19 +129,10 @@ impl VolumeSeeds {
 /// scans).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IndexedVolume {
-    pub(crate) path: String,
+    pub(crate) path: Vec<u8>,
     pub(crate) start_oid: u32,
     pub(crate) n_oids: u32,
     pub(crate) has_index: bool,
-}
-
-/// `SVolResults` of an index volume (`CIndexedDb_New::results_holder_`): how many search threads
-/// still need its results (`ref_count`), and the results that a search left for later ones (in
-/// the state the word finder left them: [`VolumeSeeds::consumed`]).
-#[derive(Debug, Default)]
-pub(crate) struct HeldResults {
-    pub(crate) ref_count: i64,
-    pub(crate) results: Option<std::sync::Arc<VolumeSeeds>>,
 }
 
 /// The MegaBLAST index that a BLASTN search uses: its volumes in OID order (`CIndexedDb_New`'s
@@ -180,8 +145,6 @@ pub(crate) struct LoadedIndex {
     /// The searches of the index so far (`DoPreSearch` calls: one a query batch or query chunk
     /// with a valid context).
     pub(crate) searches: AtomicU32,
-    /// `results_holder_` of a new-style index, one for each volume, across its searches.
-    pub(crate) held: std::sync::Mutex<Vec<HeldResults>>,
 }
 
 impl LoadedIndex {
@@ -190,7 +153,6 @@ impl LoadedIndex {
     pub(crate) fn new(old_style: bool, volumes: Vec<IndexedVolume>) -> Self {
         LoadedIndex {
             old_style,
-            held: std::sync::Mutex::new(volumes.iter().map(|_| HeldResults::default()).collect()),
             volumes,
             searches: AtomicU32::new(0),
         }

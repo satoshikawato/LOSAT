@@ -99,7 +99,7 @@ fn taxid_options_go_with_a_database_only() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2309-2314
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2211-2221,2287,2289,2302-2319,2364-2370
 // Line DI-8b: `-seqidlist` and `-negative_seqidlist` go with `-db` only, exclude each other,
 // every taxid list and `-no_taxid_expansion` (NCBI's argument reader's exclusions, exit status 1,
 // as the taxid lists' are).
@@ -252,8 +252,11 @@ fn makedb_takes_makeblastdb_s_option_names() {
     );
     assert_eq!(given.input, "x.faa");
     assert_eq!(given.dbtype, "prot");
-    assert_eq!(given.out.as_deref(), Some("db"));
-    assert_eq!(given.title.as_deref(), Some("a title"));
+    assert_eq!(given.out.as_deref(), Some(std::ffi::OsStr::new("db")));
+    assert_eq!(
+        given.title.as_deref(),
+        Some(std::ffi::OsStr::new("a title"))
+    );
     assert_eq!(given.max_file_sz, "1GB");
 
     // makeblastdb's defaults.
@@ -303,7 +306,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
         .unwrap(),
     );
     assert!(given.parse_seqids && given.hash_index);
-    assert_eq!(given.taxid_map.as_deref(), Some("map.txt"));
+    assert_eq!(
+        given.taxid_map.as_deref(),
+        Some(std::ffi::OsStr::new("map.txt"))
+    );
     let given = args(makedb(&["-dbtype", "prot", "-parse_seqids", "-taxid", "9606"]).unwrap());
     assert!(given.parse_seqids);
     assert_eq!(given.taxid, Some(9606));
@@ -379,9 +385,15 @@ fn makedb_takes_makeblastdb_s_option_names() {
         ])
         .unwrap(),
     );
-    assert_eq!(given.mask_data.as_deref(), Some("a.asnt,b.asnb"));
-    assert_eq!(given.mask_id.as_deref(), Some("x,y"));
-    assert_eq!(given.mask_desc.as_deref(), Some("d1,d2"));
+    assert_eq!(
+        given.mask_data.as_deref(),
+        Some(std::ffi::OsStr::new("a.asnt,b.asnb"))
+    );
+    assert_eq!(given.mask_id.as_deref(), Some(std::ffi::OsStr::new("x,y")));
+    assert_eq!(
+        given.mask_desc.as_deref(),
+        Some(std::ffi::OsStr::new("d1,d2"))
+    );
     for words in [
         &["-dbtype", "prot", "-mask_id", "x"][..],
         &["-dbtype", "prot", "-mask_data", "a", "-mask_desc", "d"],
@@ -414,7 +426,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
         .unwrap(),
     );
     assert!(given.gi_mask);
-    assert_eq!(given.gi_mask_name.as_deref(), Some("x,y"));
+    assert_eq!(
+        given.gi_mask_name.as_deref(),
+        Some(std::ffi::OsStr::new("x,y"))
+    );
     for words in [
         &["-dbtype", "nucl", "-gi_mask"][..],
         &[
@@ -1316,9 +1331,9 @@ fn numeric_values_are_validated_before_io() {
 
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
-    // Smith-Waterman redo with composition-based statistics (item X4) and rejects it without
-    // them (`-comp_based_stats 0`, `-task blastp-short`, IDENTITY) where the search starts.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806:
+    // `-use_sw_tback` is a flag; LOSAT's BLASTP runs the Smith-Waterman redo in modes 1 to 3
+    // (item X4) and in mode 0 (item X4-c0, including IDENTITY's reset and `-task blastp-short`).
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
         panic!()
     };
@@ -1330,23 +1345,16 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-use_sw_tback without composition-based statistics"));
-    // IDENTITY's reset of the default mode 2 (`identity_cbs_reset`); `-task blastp-short` keeps
-    // the default mode 2 (it changes the matrix, the gap costs, the threshold, the word size and the
-    // filter, `blast_options_handle.cpp:389-395`) and runs.
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a).is_ok());
+    // IDENTITY's reset of the default mode 2 (`identity_cbs_reset`): options are accepted and
+    // the search fails the first searched batch with Traceback failed (item X4-c0).
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-matrix", "IDENTITY"])
         .unwrap()
         .command
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("(-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them)"));
+    assert!(crate::algorithm::blastp::blast_engine::check_options(&a).is_ok());
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-task", "blastp-short"])
         .unwrap()
         .command
@@ -1624,7 +1632,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302,3338-3340
 // BLASTN, BLASTP and TBLASTN read `-culling_limit` as a non-negative integer (a hexadecimal
 // value too, as NCBI's argument parser does).
 #[test]
@@ -1698,35 +1706,43 @@ fn show_gis_is_a_flag_of_every_search_program() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+// `-html` is a flag of all eight search programs (items T4a2, T4c1 and T4c2 of line RG).
 #[test]
-fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
-        assert!(parse(program, &["-html"]).is_ok(), "{program}");
-        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
-        let given = match parse(program, &["-html"]).unwrap().command {
+fn html_is_a_flag_of_the_search_programs() {
+    for (program, target) in [
+        ("blastn", ["-subject", "s.fa"]),
+        ("blastp", ["-subject", "s.fa"]),
+        ("blastx", ["-subject", "s.fa"]),
+        ("tblastn", ["-subject", "s.fa"]),
+        ("tblastx", ["-subject", "s.fa"]),
+        ("psiblast", ["-subject", "s.fa"]),
+        ("rpsblast", ["-db", "d"]),
+        ("rpstblastn", ["-db", "d"]),
+    ] {
+        let parse_with = |extra: &[&str]| {
+            let mut argv = vec!["losat", program, "-query", "q.fa", target[0], target[1]];
+            argv.extend_from_slice(extra);
+            try_parse_from(argv)
+        };
+        assert!(parse_with(&["-html"]).is_ok(), "{program}");
+        assert!(parse_with(&["-html", "true"]).is_err(), "{program}");
+        let html_of = |command: Commands| match command {
             Commands::Blastn(args) => args.html,
             Commands::Blastp(args) => args.html,
             Commands::Blastx(args) => args.html,
             Commands::Tblastn(args) => args.html,
             Commands::Tblastx(args) => args.html,
+            Commands::Psiblast(args) => args.html,
+            Commands::Rpsblast(args) => args.html,
+            Commands::Rpstblastn(args) => args.html,
             _ => panic!("{program}"),
         };
-        let absent = match parse(program, &[]).unwrap().command {
-            Commands::Blastn(args) => args.html,
-            Commands::Blastp(args) => args.html,
-            Commands::Blastx(args) => args.html,
-            Commands::Tblastn(args) => args.html,
-            Commands::Tblastx(args) => args.html,
-            _ => panic!("{program}"),
-        };
-        assert!(given && !absent, "{program}");
+        assert!(
+            html_of(parse_with(&["-html"]).unwrap().command),
+            "{program}"
+        );
+        assert!(!html_of(parse_with(&[]).unwrap().command), "{program}");
     }
-    let error = parse("psiblast", &["-html"]).unwrap_err().to_string();
-    assert!(
-        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
-        "{error}"
-    );
 }
 
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
@@ -1734,11 +1750,11 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-gilist", "ids.gil"][..]),
-        ("tblastx", &["-gilist", "ids.gil"]),
-        ("blastp", &["-gilist", "ids.gil"]),
+        ("tblastn", &["-entrez_query", "human[orgn]", "-remote"][..]),
+        ("tblastx", &["-entrez_query", "human[orgn]", "-remote"]),
+        ("blastp", &["-entrez_query", "human[orgn]", "-remote"]),
     ] {
-        // With a database (`-gilist` excludes `-subject` in NCBI's reader).
+        // With a database (`-entrez_query` and `-remote` remain refused).
         let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
         argv.extend(words);
         let error = (parse_argv(argv).unwrap_err()).to_string();
@@ -1774,10 +1790,18 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     };
     for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         let found = masks(program, &["-db", "d", "-db_soft_mask", "+11"]).unwrap();
-        assert_eq!(found.db_soft_mask.as_deref(), Some("+11"), "{program}");
+        assert_eq!(
+            found.db_soft_mask.as_deref(),
+            Some(std::ffi::OsStr::new("+11")),
+            "{program}"
+        );
         assert_eq!(found.db_hard_mask, None, "{program}");
         let found = masks(program, &["-db", "d", "-db_hard_mask", "seg"]).unwrap();
-        assert_eq!(found.db_hard_mask.as_deref(), Some("seg"), "{program}");
+        assert_eq!(
+            found.db_hard_mask.as_deref(),
+            Some(std::ffi::OsStr::new("seg")),
+            "{program}"
+        );
         for words in [
             &["-db", "d", "-db_soft_mask", "11", "-db_hard_mask", "11"][..],
             &["-subject", "s.fa", "-db_soft_mask", "11"],
@@ -1839,15 +1863,21 @@ fn blastp_takes_a_database_and_its_size() {
         })
     };
     let args = blastp(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
     // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
     let resolved = args.resolve().unwrap();
-    assert_eq!(resolved.db.as_deref(), Some("dir/name"));
+    assert_eq!(resolved.db.as_deref(), Some(b"dir/name".as_slice()));
     assert_eq!(resolved.dbsize, 3_000_000_000);
     // An empty name is a name (NCBI's "Database name is required." comes from the open).
-    assert_eq!(blastp(&["-db", ""]).unwrap().db.as_deref(), Some(""));
+    assert_eq!(
+        blastp(&["-db", ""]).unwrap().db.as_deref(),
+        Some(std::ffi::OsStr::new(""))
+    );
     assert_eq!(
         blastp(&["-db", "  "])
             .unwrap()
@@ -1855,9 +1885,12 @@ fn blastp_takes_a_database_and_its_size() {
             .unwrap()
             .db
             .as_deref(),
-        Some("")
+        Some(b"".as_slice())
     );
-    assert_eq!(blastp(&["-db=a b"]).unwrap().db.as_deref(), Some("a b"));
+    assert_eq!(
+        blastp(&["-db=a b"]).unwrap().db.as_deref(),
+        Some(std::ffi::OsStr::new("a b"))
+    );
     // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
     for (word, value) in [
         ("0", 0),
@@ -1916,13 +1949,19 @@ fn blastn_takes_a_database_and_its_size() {
         })
     };
     let args = blastn(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
     // NCBI keeps the name without the white space at its ends (c++/src/algo/blast/blastinput/blast_args.cpp:2473).
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     assert_eq!(args.db_length(), 3_000_000_000);
-    assert_eq!(blastn(&["-db", "  "]).unwrap().database_name(), Some(""));
+    assert_eq!(
+        blastn(&["-db", "  "]).unwrap().database_name(),
+        Some(Vec::new())
+    );
     // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
     for (word, value) in [
         ("0", 0),
@@ -1969,10 +2008,13 @@ fn tblastn_takes_a_database_and_its_size() {
         })
     };
     let args = tblastn(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = tblastn(&["-subject", "s.fa", "-dbsize", word]).unwrap();
         assert_eq!(args.dbsize, Some(value), "{word}");
@@ -2013,10 +2055,13 @@ fn tblastx_takes_a_database_and_its_size() {
         })
     };
     let args = tblastx(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = tblastx(&["-subject", "s.fa", "-dbsize", word]).unwrap();
         assert_eq!(args.dbsize, Some(value), "{word}");
@@ -2180,16 +2225,16 @@ fn version_words_in_an_option_value_are_read_as_ncbi_reads_them() {
 // `argv[1]` names when it is one of `ENTRY_NAMES`, and runs a parsed command with that start
 // (`cli::main_entry`, which holds the start of every command it parses).
 #[test]
-fn every_command_is_an_entry_name() {
-    use clap::CommandFactory;
-    let command = Cli::command();
-    for sub in command.get_subcommands() {
-        for name in std::iter::once(sub.get_name()).chain(sub.get_all_aliases()) {
-            assert!(
-                crate::cli::ENTRY_NAMES.contains(&name),
-                "the command {name} is not one of ENTRY_NAMES"
-            );
-        }
+fn every_program_is_an_entry_name_on_the_reader() {
+    for (name, _) in crate::cli::PROGRAMS {
+        assert!(
+            crate::cli::ENTRY_NAMES.contains(&name),
+            "the program {name} is not one of ENTRY_NAMES"
+        );
+        assert!(
+            crate::cli::reader::tool(name).is_some(),
+            "the program {name} is not on the reader"
+        );
     }
 }
 
@@ -2397,10 +2442,13 @@ fn blastx_takes_a_database_and_its_size() {
         })
     };
     let args = blastx(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
-    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(
+        args.db.as_deref(),
+        Some(std::ffi::OsStr::new(" dir/name\t"))
+    );
     assert_eq!(args.subject, None);
     assert_eq!(args.dbsize, Some(3_000_000_000));
-    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.database_name(), Some(b"dir/name".to_vec()));
     assert_eq!(args.resolve().unwrap().db_length, 3_000_000_000);
     for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
         let args = blastx(&["-subject", "s.fa", "-dbsize", word]).unwrap();
@@ -2465,8 +2513,11 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         unreachable!("makeblastdb")
     };
     assert_eq!(
-        (args.input.as_str(), args.out.as_deref()),
-        ("x.faa", Some("db"))
+        (args.input.as_os_str(), args.out.as_deref()),
+        (
+            std::ffi::OsStr::new("x.faa"),
+            Some(std::ffi::OsStr::new("db"))
+        )
     );
     // The checks that name the command apply: makeblastdb's dependencies.
     let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
@@ -2727,4 +2778,28 @@ fn use_index_parses_as_an_ncbi_boolean() {
     assert!(parse("blastp", &["-use_index", "false"]).is_err());
     assert!(parse("blastp", &["-index_name", "x"]).is_err());
     assert!(parse("blastn", &["-index_name", "x"]).is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+#[test]
+fn native_error_exception_truncates_what_at_first_nul() {
+    let site = crate::ncbi_exception::ThrowSite {
+        file: "src/objects/seq/../seqloc/Seq_id.cpp",
+        line: 2501,
+        kind: "CSeqIdException::eFormat",
+        function: Some("ncbi::objects::CSeq_id::Set"),
+    };
+    let plain = crate::ncbi_exception::NcbiException::new(site, b"Malformatted ID foo".to_vec());
+    let plain_err = crate::cli::NativeError::exception(&plain);
+    assert_eq!(plain_err.exit, 255);
+    assert_eq!(plain_err.message, b"Error: Malformatted ID foo\n\n");
+
+    let with_nul = crate::ncbi_exception::NcbiException::new(
+        site,
+        b"Malformatted ID \x00=\x00\x00\x00".to_vec(),
+    );
+    let nul_err = crate::cli::NativeError::exception(&with_nul);
+    assert_eq!(nul_err.exit, 255);
+    assert_eq!(nul_err.message, b"Error: Malformatted ID \n");
 }

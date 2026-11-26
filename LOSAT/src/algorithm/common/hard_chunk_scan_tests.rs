@@ -203,6 +203,36 @@ fn short_chunk_refusals_name_the_oid_and_pass_as_is() {
         text.contains("which LOSAT's BLASTP does not do yet"),
         "{text}"
     );
+    let undefined_prefix = |program: &str, target: &str| {
+        format!(
+            "{program}: {target} has alignments across a chunk overlap whose \
+             merged score calculation is undefined in NCBI BLAST+"
+        )
+    };
+    for (error, prefix, suffix) in [
+        (
+            chunk_merge_undefined_refusal(17, None, "BLASTX"),
+            undefined_prefix("BLASTX", "sequence of OID 17"),
+            "LOSAT's BLASTX does not support it",
+        ),
+        (
+            chunk_merge_undefined_refusal(17, Some(-2), "TBLASTN"),
+            undefined_prefix("TBLASTN", "sequence of OID 17, frame -2"),
+            "LOSAT's TBLASTN does not support it",
+        ),
+        (
+            last_range_overlap_merge_refusal(17, "BLASTP"),
+            "-db_hard_mask: the sequence of OID 17 has alignments from an earlier range that meet \
+             the final part across an overlap NCBI BLAST+ 2.17.0 reads past its list of ranges"
+                .to_string(),
+            "LOSAT's BLASTP does not search such a database with -db_hard_mask",
+        ),
+    ] {
+        assert!(error.is::<ShortChunkSeedRefusal>());
+        let text = error.to_string();
+        assert!(text.starts_with(&prefix), "{text}");
+        assert!(text.ends_with(suffix), "{text}");
+    }
 }
 
 /// NCBI's merge after a chunk runs its joins where an HSP of the joined list ends past the
@@ -234,4 +264,83 @@ fn merges_that_join_a_chunk_with_the_list() {
     // No HSP on one side.
     assert!(!joins(chunk(100, false), &[], &[100]));
     assert!(!joins(chunk(100, false), &[101], &[]));
+}
+
+/// `DiagCell` and `x_test_hit` on `(i32, bool)` cells give the exact same result and cell state as
+/// on `DiagStruct` cells (flag set and clear, entries above and below the hit, and `OneWord` on a
+/// `(i32, bool)` `DiagTable`).
+#[test]
+fn diag_cell_x_test_hit_matches_between_diag_struct_and_pair() {
+    use crate::algorithm::common::diag_entry::{x_test_hit, DiagCell, DiagStruct, DiagTable};
+
+    struct PairRing<'a> {
+        entries: &'a mut [(i32, bool)],
+        mask: i32,
+    }
+
+    impl DiagTable for PairRing<'_> {
+        type Cell = (i32, bool);
+
+        fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut (i32, bool), i32) {
+            (
+                &mut self.entries[(q.wrapping_sub(s) & self.mask) as usize],
+                0,
+            )
+        }
+
+        fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut (i32, bool) {
+            &mut self.entries[(s.wrapping_sub(q) & self.mask) as usize]
+        }
+    }
+
+    // Test every combination of flag (0/1) and entry relative to subject_offset + diag_offset:
+    // entry above hit (diff < 0), overlap (0 <= diff < word), candidate (word <= diff < window),
+    // and too far (diff >= window).
+    for flag in [0u32, 1u32] {
+        for diff in [-50i32, -1, 0, 2, 3, 10, 39, 40, 100] {
+            let offset = 1000i32;
+            let s = 5i32;
+            let last_hit = s + offset - diff;
+            let mut diag = DiagStruct::default();
+            diag.set_last_hit(last_hit);
+            diag.set_flag(flag);
+            let mut pair = (last_hit, flag != 0);
+            let a = x_test_hit(&mut diag, s, offset, 40, 3);
+            let b = x_test_hit(&mut pair, s, offset, 40, 3);
+            assert_eq!(a, b, "flag={flag} diff={diff}");
+            assert_eq!(
+                (diag.last_hit(), diag.flag()),
+                (pair.last_hit(), pair.flag()),
+                "flag={flag} diff={diff}"
+            );
+        }
+    }
+
+    // `OneWord::test_on` on a `(i32, bool)` table matches `DiagStruct` on a candidate and a
+    // flagged entry ahead of the hit.
+    let query = query();
+    let letters = [ncbistdaa::W; 3];
+    let test = one_word(&query, &letters);
+    let mut diag_entries = vec![DiagStruct::default(); 64];
+    diag_entries[4] = entry_behind(10, 1000);
+    let mut pair_entries = vec![(0i32, false); 64];
+    pair_entries[4] = (990, false);
+
+    let mut diag_saved = Vec::new();
+    test.test(&[4], &mut diag_entries, 63, 1000, context(33), |q, seed| {
+        diag_saved.push((q, seed));
+    });
+    let mut pair_saved = Vec::new();
+    let mut ring = PairRing {
+        entries: &mut pair_entries,
+        mask: 63,
+    };
+    test.test_on(&mut ring, &[4], 1000, context(33), |q, seed| {
+        pair_saved.push((q, seed));
+    });
+    assert_eq!(pair_saved, diag_saved);
+    assert_eq!(
+        (pair_entries[4].last_hit(), pair_entries[4].flag()),
+        (diag_entries[4].last_hit(), diag_entries[4].flag())
+    );
 }

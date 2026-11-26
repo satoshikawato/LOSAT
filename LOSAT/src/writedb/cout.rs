@@ -1,7 +1,9 @@
 //! NCBI's `cout` as a stream with a state: the stream (`super::ofstream::BasicStream`) over
 //! standard output's buffer, for the serializer of blastdbcmd's `-metadata`
-//! (`super::metadata`), whose failures NCBI reports, and for makeblastdb's log
-//! (`super::makeblastdb`), whose failures it does not.
+//! (`super::metadata`), whose failures NCBI reports, for makeblastdb's log
+//! (`super::makeblastdb`), whose failures it does not, and for blast_formatter's `-out -`
+//! (`crate::blast_formatter::archive`), whose standard-output write failures abort as NCBI's C++
+//! runtime does (line RG-F3 C6; `blast_formatter_standard_output_failure_aborts`).
 //!
 //! When the bytes of an insertion reach standard output is `crate::cli::NcbiBuffer`'s rule (read
 //! from the writes of NCBI's programs, line LIB-O O1b). What a failed write leaves is read from

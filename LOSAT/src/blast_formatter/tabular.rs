@@ -550,7 +550,7 @@ impl BioseqRecords {
     /// The records of the Bioseqs that `sources` name, by subject index, of an object whose
     /// formatter's `-parse_deflines` is `believe` and that searched a database (`database`) or
     /// `-subject` sequences. The local id of a subject id is kept where `s_ReplaceLocalId`'s flag
-    /// (`!m_ParseSubjectDefline`) is set: always for a database object, with `-parse_deflines`
+    /// (`m_ParseSubjectDefline` unset) is set: always for a database object, with `-parse_deflines`
     /// for a `-subject` object (bl2seq's). Where the rows print the taxonomy (`taxonomy`), a
     /// Bioseq with a BioSource or an Org-ref of its own or of a set around it (`sets_taxon`, the
     /// queries') is refused: NCBI shows its taxid (`x_SetTaxInfo`'s `GetTaxId`), which LOSAT does
@@ -1079,7 +1079,7 @@ pub(super) fn print_object(
         )?,
         None => Vec::new(),
     };
-    if !load_texts.is_empty() && !(prefetched && subjects.sources.len() == prefetched_subjects) {
+    if !load_texts.is_empty() && (!prefetched || subjects.sources.len() != prefetched_subjects) {
         return Err(refused(
             "texts of the taxonomy database at the loads of the subjects, which the rows make \
              where the prefetch does not load them (PRE_FETCH_SEQS_LIMIT, or Seq-aligns that \
@@ -1321,7 +1321,7 @@ impl PrePass<'_, '_, '_> {
         let scores = row_scores(align, self.spec).map_err(end_of)?;
         let query_id = align.seq_id(0).map_err(|stop| end_of(ReadStop::Stop(stop)))?;
         let q_idx = match self.scope.queries_holding(query_id).as_slice() {
-            [at] if self.scope.subjects_holding(query_id).is_empty() => *at,
+            [at] => *at,
             _ => {
                 return Err(RowEnd::Refusal(refused(
                     "a query id that names no query Bioseq of the request, or several Bioseqs",

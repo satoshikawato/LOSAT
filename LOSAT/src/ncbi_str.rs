@@ -16,8 +16,8 @@
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10 (but 16 of
-//! `StringToInt8`, which the argument readers try, `ncbi_app::args` and
-//! `blastinput::value_parsers`), and the flags no caller passes (`fMandatorySign`,
+//! `StringToInt8`, which the argument readers try, `ncbi_app::args` and the frozen web ABI v1's
+//! `web_v1_argv`), and the flags no caller passes (`fMandatorySign`,
 //! `fAllowCommas`, `fAllowLeadingSymbols` beyond its spaces).
 //! Also here: `NStr::StringToNonNegativeInt`.
 //!
@@ -26,12 +26,16 @@
 
 mod data_size;
 mod double;
+pub(crate) mod mask;
 pub(crate) mod utf8;
 
+#[cfg(test)]
 pub use data_size::string_to_uint8_data_size;
+pub use data_size::string_to_uint8_data_size_bytes;
 pub(crate) use double::{
     string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
 };
+pub(crate) use mask::matches_mask;
 
 use std::borrow::Cow;
 
@@ -276,7 +280,8 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:684-712
 // `pos0` is set before the radix check: a `0x` with no digit after it is 0 (`pos != pos0`).
 /// `NStr::StringToInt8` with `flags` and a `base` of 10 or 16 (`s_StringToInt8` of the argument
-/// readers tries 16 after 10: `ncbi_app::args`, `blastinput::value_parsers::ncbi_int8`), `flags`
+/// readers tries 16 after 10: `ncbi_app::args::string_to_int8`, which LOSAT Web's ABI v1 reads
+/// its integers with too, `web_v1_argv::ncbi_int8`), `flags`
 /// as for [`string_to_int8`].
 pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i64, NcbiException> {
     debug_assert!(base == 10 || base == 16, "only bases 10 and 16 are ported");
@@ -624,6 +629,7 @@ pub(crate) fn truncate_spaces_end(str: &[u8]) -> &[u8] {
 
 /// [`truncate_spaces`] of a `str` (`NStr::TruncateSpaces` of a `string`): the spaces are ASCII
 /// bytes, so what is left starts and ends at characters.
+#[cfg(test)]
 pub(crate) fn truncate_spaces_str(str: &str) -> &str {
     let beg = str.len() - truncate_spaces_begin(str.as_bytes()).len();
     let end = truncate_spaces_end(str.as_bytes()).len().max(beg);

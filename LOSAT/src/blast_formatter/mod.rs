@@ -92,8 +92,8 @@ pub(crate) fn run_with(
 /// `-out` file (opened when the first object is formatted) and `-parse_deflines`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// `-outfmt` as given, or its default `0`.
-    pub(crate) outfmt: String,
+    /// `-outfmt` as given (raw bytes, preserving non-UTF-8 bytes as NCBI does), or its default `0`.
+    pub(crate) outfmt: Vec<u8>,
     pub(crate) show_gis: bool,
     pub(crate) num_descriptions: Option<usize>,
     pub(crate) num_alignments: Option<usize>,
@@ -122,7 +122,10 @@ impl Options {
                 .and_then(|number| u8::try_from(number).ok())
         };
         Options {
-            outfmt: args.value("outfmt").unwrap_or("0").to_string(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851
+            outfmt: args
+                .bytes("outfmt")
+                .map_or_else(|| b"0".to_vec(), std::borrow::Cow::into_owned),
             show_gis: args.flag("show_gis"),
             num_descriptions: count("num_descriptions"),
             num_alignments: count("num_alignments"),
@@ -151,7 +154,7 @@ fn run_body(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    if let Some(archive) = args.value("archive") {
+    if let Some(archive) = args.os_value("archive") {
         let mut archive = match files::open_input_file("archive", archive, input) {
             Ok(stream) => stream,
             Err(error) => {
@@ -170,7 +173,7 @@ fn run_body(
             diag,
         );
     }
-    let rid = match args.as_string("rid") {
+    let rid = match args.as_bytes("rid") {
         Ok(rid) => rid,
         Err(error) => {
             return catch_all(

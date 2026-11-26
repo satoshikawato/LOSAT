@@ -264,11 +264,14 @@ pub(super) struct Indexer<'p> {
 /// (`psiblast`, `tblastn`: the diagnostic prefix) joins the scope (`entry::Tse`: phase C, the
 /// attach of its Bioseq-sets' and Bioseqs' ids, phase I), or LOSAT's refusal. `ids_known`: no other
 /// sequence is in NCBI's scope before it (a search of `-db`), so the attach's messages name the
-/// entry's own Seq-ids.
+/// entry's own Seq-ids. `refusal` is LOSAT's refusal of an exception that a check of the data
+/// throws where the run's settings turn the check off (`ncbi_environment::ReadVerification`): the
+/// run stops there in LOSAT's words, as at a `Refusal`.
 pub(crate) fn index_entry(
     program: &str,
     entry: &SeqEntry,
     ids_known: bool,
+    refusal: &dyn Fn(&NcbiException) -> Option<String>,
 ) -> Result<AnnotOutcome, Refusal> {
     let tse = entry::Tse::of(entry);
     let mut ix = Indexer {
@@ -281,7 +284,10 @@ pub(crate) fn index_entry(
     let error = match ix.run(&tse, ids_known) {
         Ok(()) => None,
         Err(Stop::Refuse(refusal)) => return Err(refusal),
-        Err(Stop::Exception(e)) => Some(crate::cli::NativeError::exception(&e)),
+        Err(Stop::Exception(e)) => match refusal(&e) {
+            Some(text) => return Ok(AnnotOutcome::refused(text)),
+            None => Some(crate::cli::NativeError::exception(&e)),
+        },
         Err(Stop::Std(what)) => Some(crate::cli::NativeError::std_exception(what)),
         Err(Stop::NullPointer(_)) if ix.muted => Some(crate::cli::NativeError {
             exit: 255,
@@ -328,7 +334,7 @@ pub(crate) fn index_annots(
         inst: SeqInst::new(("raw", 2), ("aa", 3), None, None),
         annot: Some(annots.to_vec()),
     };
-    index_entry(program, &SeqEntry::Seq(Box::new(query)), true)
+    index_entry(program, &SeqEntry::Seq(Box::new(query)), true, &|_| None)
 }
 
 impl Indexer<'_> {

@@ -464,7 +464,7 @@ def _scan_manifest(manifest: Path, root: Path) -> list[Finding]:
 def _is_reviewed_wasi_crt(path: Path, root: Path) -> bool:
     return path.is_file() and _relative(path, root) == "LOSAT/build.rs" and hashlib.sha256(
         path.read_text(encoding="utf-8").encode("utf-8")
-    ).hexdigest() == "07a6b68624b1d84b589c5590017f1c74b4467fe94620caac1f738b14f5747561"
+    ).hexdigest() == "8c4040a56422cb6ad580ea29d84b9993852896fe3534153fb8c825a86db1dc51"
 
 
 def _scan_build_scripts(root: Path) -> list[Finding]:
@@ -482,7 +482,8 @@ def _scan_build_scripts(root: Path) -> list[Finding]:
         # Reviewed Rust WASI startup only: query the selected Rust sysroot and
         # link its bundled reactor CRT, with no NCBI or algorithm dependency; and
         # the argument tables of `ncbi_app::args`, written in Rust from the
-        # embedded `-xmlhelp` XML (`build/ncbi_args.rs`, std only, no native code).
+        # embedded `-xmlhelp` XML (`build/ncbi_args.rs`, std only, no native code); and two
+        # cfgs read from Cargo's environment (`losat_wasi_threads`, `losat_web_abi_v1`).
         # Pin the complete normalized source; every modification requires review.
         reviewed_wasi_crt = _is_reviewed_wasi_crt(path, root)
         if not reviewed_wasi_crt:

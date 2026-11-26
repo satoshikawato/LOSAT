@@ -3,7 +3,6 @@
 //! `tests/makeblastdb_app_cases.rs`. The tests run no NCBI program.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::bioseq::{Bioseq, SeqData};
 use super::build_db::BuildDatabase;
@@ -11,7 +10,9 @@ use super::makeblastdb::{run_with, MakedbArgs};
 use super::platform::Platform;
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
+use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::seqdb::SeqType;
+use crate::utils::test_dir::TempDir;
 
 mod makeblastdb_app_cases;
 use makeblastdb_app_cases::APP_CASES;
@@ -30,33 +31,9 @@ pub(super) fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
 }
 
-/// A directory of this test run, removed when the value is dropped.
-pub(super) struct TempDir(pub(super) PathBuf);
-
-impl TempDir {
-    pub(super) fn new(label: &str) -> Self {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.subsec_nanos());
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-writedb-{label}-{}-{}-{nanos}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-
-    pub(super) fn base(&self, name: &str) -> String {
-        self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// The path of the database `name` in `dir`, as the text the writer takes.
+pub(super) fn base_in(dir: &Path, name: &str) -> String {
+    dir.join(name).to_string_lossy().into_owned()
 }
 
 /// The creation date stored in an index file of makeblastdb.
@@ -182,7 +159,7 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
             // The reader hands over capital letters.
             seq_data: Some(SeqData::Ncbieaa(residues.to_ascii_uppercase())),
             parsed: None,
-            past_seq_pos: None,
+            delta_fix: None,
         })
         .collect()
 }
@@ -218,9 +195,9 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
     ];
     for (fixture, index_file, title, max_file_size, version) in cases {
         let date = stored_date(&fixtures.join("db").join(index_file), SeqType::Protein);
-        let tmp = TempDir::new(fixture);
+        let tmp = TempDir::unique(&format!("writedb-{fixture}"));
         let mut db = WriteDb::new(
-            &tmp.base(fixture),
+            base_in(&tmp, fixture).as_bytes(),
             true,
             title.as_bytes(),
             date.as_bytes(),
@@ -237,7 +214,7 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
         assert!(db.take_diagnostics().is_empty());
         // The alias file of several volumes names them, so the database is
         // built under the fixture's name.
-        assert_same_database(&tmp.0, fixture, &fixtures.join("db"), fixture);
+        assert_same_database(&tmp, fixture, &fixtures.join("db"), fixture);
     }
 }
 
@@ -252,9 +229,9 @@ fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
     let windows = ncbi_platform(NcbiOs::Windows, PageSize::Fixed(4096), 4, u64::MAX);
     let mut built = Vec::new();
     for platform in [LINUX, windows] {
-        let tmp = TempDir::new("platform");
+        let tmp = TempDir::unique("writedb-platform");
         let mut db = WriteDb::new(
-            &tmp.base("db"),
+            base_in(&tmp, "db").as_bytes(),
             true,
             b"prot.faa",
             b"Oct 12, 2026  9:00 PM",
@@ -268,7 +245,7 @@ fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
             db.add_sequence(bioseq).unwrap();
         }
         db.close().unwrap();
-        let read = |ext: &str| std::fs::read(tmp.0.join(format!("db.{ext}"))).unwrap();
+        let read = |ext: &str| std::fs::read(tmp.join(format!("db.{ext}"))).unwrap();
         built.push([
             read("pin"),
             read("psq"),
@@ -322,7 +299,7 @@ fn build_version(
     let mut messages = Vec::new();
     let result = (|| {
         let mut db = BuildDatabase::new(
-            out_base,
+            out_base.as_bytes(),
             title.as_bytes(),
             is_protein,
             &mut log,
@@ -410,14 +387,14 @@ fn fasta_files_become_makeblastdb_s_databases() {
             SeqType::Nucleotide
         };
         let date = stored_date(&fixtures.join("db").join(index_file), seqtype);
-        let tmp = TempDir::new(fixture);
+        let tmp = TempDir::unique(&format!("writedb-{fixture}"));
         let (result, log, messages) = build_version(
             &fixtures.join(fasta),
             is_protein,
             title,
             max_file_size,
             &date,
-            &tmp.base(fixture),
+            &base_in(&tmp, fixture),
             version,
         );
         result.unwrap();
@@ -428,7 +405,7 @@ fn fasta_files_become_makeblastdb_s_databases() {
         );
         // The alias file of several volumes names them, so the database is
         // built under the fixture's name.
-        assert_same_database(&tmp.0, fixture, &fixtures.join("db"), fixture);
+        assert_same_database(&tmp, fixture, &fixtures.join("db"), fixture);
         let mol_type = if is_protein { "Protein" } else { "Nucleotide" };
         assert!(
             log.starts_with("\n\nBuilding a new DB, current time: "),
@@ -449,15 +426,15 @@ fn fasta_files_become_makeblastdb_s_databases() {
 fn an_existing_database_of_the_same_name_is_removed() {
     let fixtures = seqdb_fixtures();
     let date = stored_date(&fixtures.join("db/prot_v4.pin"), SeqType::Protein);
-    let tmp = TempDir::new("replace");
-    let base = tmp.base("db");
+    let tmp = TempDir::unique("writedb-replace");
+    let base = base_in(&tmp, "db");
     let fasta = fixtures.join("prot.faa");
     let (result, _, _) = build(&fasta, true, "protein in volumes", 300, &date, &base);
     result.unwrap();
-    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
+    assert_eq!(files_named(&tmp, "db.").len(), 6 * 3 + 1);
     // A file makeblastdb would also remove, and one it would not.
-    std::fs::write(tmp.0.join("db.00.pjs"), b"{}").unwrap();
-    std::fs::write(tmp.0.join("db.txt"), b"keep").unwrap();
+    std::fs::write(tmp.join("db.00.pjs"), b"{}").unwrap();
+    std::fs::write(tmp.join("db.txt"), b"keep").unwrap();
     let (result, log, _) = build(
         &fasta,
         true,
@@ -472,11 +449,11 @@ fn an_existing_database_of_the_same_name_is_removed() {
         "{log:?}"
     );
     assert_eq!(
-        files_named(&tmp.0, "db."),
+        files_named(&tmp, "db."),
         ["db.phr", "db.pin", "db.psq", "db.txt"]
     );
-    std::fs::remove_file(tmp.0.join("db.txt")).unwrap();
-    assert_same_database(&tmp.0, "db", &fixtures.join("db"), "prot_v4");
+    std::fs::remove_file(tmp.join("db.txt")).unwrap();
+    assert_same_database(&tmp, "db", &fixtures.join("db"), "prot_v4");
 }
 
 /// The log with the markers of `makeblastdb_app_cases.rs` in place of the
@@ -521,20 +498,20 @@ pub(super) fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
 #[test]
 fn makedb_runs_as_makeblastdb_on_edge_inputs() {
     for case in APP_CASES {
-        let tmp = TempDir::new(case.name);
-        let input = tmp.base("in.fa");
+        let tmp = TempDir::unique(&format!("writedb-{}", case.name));
+        let input = base_in(&tmp, "in.fa");
         std::fs::write(&input, case.input).unwrap();
-        let out_dir = tmp.0.join("out");
+        let out_dir = tmp.join("out");
         std::fs::create_dir(&out_dir).unwrap();
         let base = out_dir.join("db").to_string_lossy().into_owned();
         let args = MakedbArgs {
-            input: input.clone(),
+            input: std::ffi::OsString::from(&input),
             input_type: "fasta".to_string(),
             dbtype: if case.protein { "prot" } else { "nucl" }.to_string(),
-            title: Some(case.title.to_string()),
-            out: Some(base.clone()),
+            title: Some(std::ffi::OsString::from(case.title)),
+            out: Some(std::ffi::OsString::from(&base)),
             blastdb_version: 4,
-            max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            max_file_sz: std::ffi::OsString::from(case.max_file_sz.unwrap_or("3GB")),
             metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
@@ -558,7 +535,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -632,13 +609,13 @@ fn makedb_version(
     version: i32,
 ) -> (i32, String, String) {
     let args = MakedbArgs {
-        input: input.to_string(),
+        input: std::ffi::OsString::from(input),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
-        title: Some("t".to_string()),
-        out: Some(out.to_string()),
+        title: Some(std::ffi::OsString::from("t")),
+        out: Some(std::ffi::OsString::from(out)),
         blastdb_version: version,
-        max_file_sz: max_file_sz.to_string(),
+        max_file_sz: std::ffi::OsString::from(max_file_sz),
         metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,
@@ -658,7 +635,7 @@ fn makedb_version(
     let mut stdin = stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -692,12 +669,12 @@ fn logged_db_name(log: &str) -> &str {
 #[test]
 fn an_output_name_with_a_space_is_refused() {
     let fasta = prot_fasta();
-    let tmp = TempDir::new("space");
+    let tmp = TempDir::unique("writedb-space");
     for out in [
-        format!("{} ", tmp.base("db")),
-        format!(" {}", tmp.base("db")),
-        format!("{}  b", tmp.base("a")),
-        format!("{} data/db", tmp.base("my")),
+        format!("{} ", base_in(&tmp, "db")),
+        format!(" {}", base_in(&tmp, "db")),
+        format!("{}  b", base_in(&tmp, "a")),
+        format!("{} data/db", base_in(&tmp, "my")),
         " ".to_string(),
     ] {
         let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
@@ -707,10 +684,7 @@ fn an_output_name_with_a_space_is_refused() {
             "{out:?}"
         );
         assert_eq!(log, "", "{out:?}");
-        assert!(
-            std::fs::read_dir(&tmp.0).unwrap().next().is_none(),
-            "{out:?}"
-        );
+        assert!(std::fs::read_dir(&tmp).unwrap().next().is_none(), "{out:?}");
     }
 }
 
@@ -729,8 +703,8 @@ fn a_database_in_a_directory_with_a_space_is_replaced() {
         names.push("q\"d");
     }
     for name in names {
-        let tmp = TempDir::new("spacedir");
-        let dir = tmp.0.join(name);
+        let tmp = TempDir::unique("writedb-spacedir");
+        let dir = tmp.join(name);
         std::fs::create_dir(&dir).unwrap();
         let base = dir.join("db").to_string_lossy().into_owned();
         let (result, _, _) = build(&fasta, true, "protein in volumes", 300, &date, &base);
@@ -783,30 +757,30 @@ fn metadata_files(path: &Path) -> Vec<String> {
 fn the_json_file_lists_the_files_of_the_database() {
     let fasta = prot_fasta();
     for second_size in ["3GB", "400"] {
-        let tmp = TempDir::new("json");
-        let base = tmp.base("db");
+        let tmp = TempDir::unique("writedb-json");
+        let base = base_in(&tmp, "db");
         let (status, _, messages) = makedb(&fasta, &base, "300", b"");
         assert_eq!((status, messages.as_str()), (0, ""));
-        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
-        let mut volumes: Vec<String> = files_named(&tmp.0, "db.");
+        assert_eq!(files_named(&tmp, "db.").len(), 6 * 3 + 2);
+        let mut volumes: Vec<String> = files_named(&tmp, "db.");
         volumes.retain(|file| file != "db.pjs");
-        assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
-        std::fs::write(tmp.0.join("db.njs"), b"{}").unwrap();
+        assert_eq!(metadata_files(&tmp.join("db.pjs")), volumes);
+        std::fs::write(tmp.join("db.njs"), b"{}").unwrap();
 
         let (status, _, messages) = makedb(&fasta, &base, second_size, b"");
         assert_eq!((status, messages.as_str()), (0, ""), "{second_size}");
-        let files = files_named(&tmp.0, "db.");
+        let files = files_named(&tmp, "db.");
         assert!(files.iter().any(|file| file == "db.njs"), "{files:?}");
         if second_size == "3GB" {
             assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.pjs", "db.psq"]);
             assert_eq!(
-                metadata_files(&tmp.0.join("db.pjs")),
+                metadata_files(&tmp.join("db.pjs")),
                 ["db.phr", "db.pin", "db.pjs", "db.psq"]
             );
         } else {
             let mut volumes = files.clone();
             volumes.retain(|file| file != "db.pjs" && file != "db.njs");
-            assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
+            assert_eq!(metadata_files(&tmp.join("db.pjs")), volumes);
         }
     }
 }
@@ -819,10 +793,10 @@ fn the_json_file_lists_the_files_of_the_database() {
 #[test]
 fn a_new_database_that_cannot_be_opened_is_an_error() {
     let fasta = prot_fasta();
-    let tmp = TempDir::new("stale-alias");
-    let base = tmp.base("db");
-    std::fs::write(tmp.0.join("db.pal"), b"TITLE x\nDBLIST db.00 db.01\n").unwrap();
-    std::fs::write(tmp.0.join("db.pjs"), b"{}").unwrap();
+    let tmp = TempDir::unique("writedb-stale-alias");
+    let base = base_in(&tmp, "db");
+    std::fs::write(tmp.join("db.pal"), b"TITLE x\nDBLIST db.00 db.01\n").unwrap();
+    std::fs::write(tmp.join("db.pjs"), b"{}").unwrap();
     let (status, log, messages) = makedb(&fasta, &base, "3GB", b"");
     assert_eq!(status, 2);
     assert_eq!(
@@ -836,7 +810,7 @@ fn a_new_database_that_cannot_be_opened_is_an_error() {
     assert!(!log.contains("Deleted existing"), "{log:?}");
     assert!(log.ends_with(" seconds.\n\n\n"), "{log:?}");
     assert_eq!(
-        files_named(&tmp.0, "db."),
+        files_named(&tmp, "db."),
         ["db.pal", "db.phr", "db.pin", "db.pjs", "db.psq"]
     );
 }
@@ -849,18 +823,18 @@ fn a_new_database_that_cannot_be_opened_is_an_error() {
 #[test]
 fn a_volume_file_that_cannot_be_created_is_left_out() {
     let fasta = prot_fasta();
-    let tmp = TempDir::new("planted");
-    let base = tmp.base("db");
-    std::fs::create_dir(tmp.0.join("db.00.phr")).unwrap();
+    let tmp = TempDir::unique("writedb-planted");
+    let base = base_in(&tmp, "db");
+    std::fs::create_dir(tmp.join("db.00.phr")).unwrap();
     let (status, log, messages) = makedb(&fasta, &base, "3GB", b"");
     assert_eq!((status, messages.as_str()), (0, ""));
     assert!(log.ends_with(" seconds.\n\n\n"), "{log:?}");
     assert_eq!(
-        files_named(&tmp.0, "db."),
+        files_named(&tmp, "db."),
         ["db.phr", "db.pin", "db.pjs", "db.psq"]
     );
-    assert!(tmp.0.join("db.phr").is_dir());
-    let metadata = std::fs::read_to_string(tmp.0.join("db.pjs")).unwrap();
+    assert!(tmp.join("db.phr").is_dir());
+    let metadata = std::fs::read_to_string(tmp.join("db.pjs")).unwrap();
     assert!(
         metadata.ends_with("  \"files\": [\n    \"db.pin\",\n    \"db.psq\"\n  ]\n}\n"),
         "{metadata}"
@@ -873,8 +847,8 @@ fn the_standard_input_gives_the_database_of_the_file() {
     let fasta = prot_fasta();
     let bytes = std::fs::read(&fasta).unwrap();
     for max_file_sz in ["3GB", "300"] {
-        let tmp = TempDir::new("stdin");
-        let (from_file, from_stdin) = (tmp.0.join("file"), tmp.0.join("stdin"));
+        let tmp = TempDir::unique("writedb-stdin");
+        let (from_file, from_stdin) = (tmp.join("file"), tmp.join("stdin"));
         for dir in [&from_file, &from_stdin] {
             std::fs::create_dir(dir).unwrap();
         }
@@ -913,19 +887,19 @@ fn the_standard_input_gives_the_database_of_the_file() {
 fn a_late_error_removes_the_volumes_already_written() {
     let mut input = std::fs::read(prot_fasta()).unwrap();
     // Without the last record the same input makes six volumes.
-    let tmp = TempDir::new("late");
-    let fasta = tmp.base("in.fa");
+    let tmp = TempDir::unique("writedb-late");
+    let fasta = base_in(&tmp, "in.fa");
     std::fs::write(&fasta, &input).unwrap();
-    let (status, _, _) = makedb(&fasta, &tmp.base("db"), "300", b"");
+    let (status, _, _) = makedb(&fasta, &base_in(&tmp, "db"), "300", b"");
     assert_eq!(status, 0);
-    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
-    for file in files_named(&tmp.0, "db.") {
-        std::fs::remove_file(tmp.0.join(file)).unwrap();
+    assert_eq!(files_named(&tmp, "db.").len(), 6 * 3 + 2);
+    for file in files_named(&tmp, "db.") {
+        std::fs::remove_file(tmp.join(file)).unwrap();
     }
 
     input.extend_from_slice(b">bad\nMK?V@L.\n");
     std::fs::write(&fasta, &input).unwrap();
-    let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "300", b"");
+    let (status, log, messages) = makedb(&fasta, &base_in(&tmp, "db"), "300", b"");
     assert_eq!(status, 1);
     assert_eq!(
         messages,
@@ -937,7 +911,7 @@ fn a_late_error_removes_the_volumes_already_written() {
         "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <OUT>\nNew DB title:  t\n\
          Sequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\n\n\n"
     );
-    assert_eq!(files_named(&tmp.0, "db."), [] as [&str; 0]);
+    assert_eq!(files_named(&tmp, "db."), [] as [&str; 0]);
 }
 
 /// `Error: ` and the exception's report, as makeblastdb's general handler prints it: the build
@@ -974,7 +948,7 @@ const LOG_HEAD: &str =
 #[test]
 fn other_errors_end_with_status_255() {
     let fasta = prot_fasta();
-    let tmp = TempDir::new("other");
+    let tmp = TempDir::unique("writedb-other");
     for (value, line, pos) in [
         ("abc", 1622, 0),
         ("", 1622, 0),
@@ -985,7 +959,7 @@ fn other_errors_end_with_status_255() {
         ("18446744073709551616", 1750, 19),
         ("18446744073709551615.5", 1757, 20),
     ] {
-        let (status, log, messages) = makedb(&fasta, &tmp.base("db"), value, b"");
+        let (status, log, messages) = makedb(&fasta, &base_in(&tmp, "db"), value, b"");
         assert_eq!(status, 255, "{value:?}");
         assert_eq!(
             messages,
@@ -1004,10 +978,10 @@ fn other_errors_end_with_status_255() {
             LOG_HEAD,
             "{value:?}"
         );
-        assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0], "{value:?}");
+        assert_eq!(files_named(&tmp, ""), [] as [&str; 0], "{value:?}");
     }
     // A value that is a size, but too large, is an error of the options, after the head too.
-    let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
+    let (status, log, messages) = makedb(&fasta, &base_in(&tmp, "db"), "4GiB", b"");
     assert_eq!(
         (status, messages.as_str()),
         (1, "LOSAT options error: max_file_sz must be < 4 GiB\n")
@@ -1015,10 +989,10 @@ fn other_errors_end_with_status_255() {
     assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
     // An existing database of the same name is removed before the value is read, as
     // makeblastdb removes it.
-    let (status, _, _) = makedb(&fasta, &tmp.base("db"), "3GB", b"");
+    let (status, _, _) = makedb(&fasta, &base_in(&tmp, "db"), "3GB", b"");
     assert_eq!(status, 0);
-    assert!(!files_named(&tmp.0, "db.").is_empty());
-    let (status, log, _) = makedb(&fasta, &tmp.base("db"), "abc", b"");
+    assert!(!files_named(&tmp, "db.").is_empty());
+    let (status, log, _) = makedb(&fasta, &base_in(&tmp, "db"), "abc", b"");
     assert_eq!(status, 255);
     assert_eq!(
         String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
@@ -1030,10 +1004,10 @@ fn other_errors_end_with_status_255() {
             )
         )
     );
-    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+    assert_eq!(files_named(&tmp, ""), [] as [&str; 0]);
     // The parent of the database is a file: the directory's error comes first.
-    std::fs::write(tmp.0.join("f"), b"").unwrap();
-    let out = tmp.0.join("f").join("db").to_string_lossy().into_owned();
+    std::fs::write(tmp.join("f"), b"").unwrap();
+    let out = tmp.join("f").join("db").to_string_lossy().into_owned();
     for value in ["3GB", "abc", "4GiB"] {
         let (status, log, messages) = makedb(&fasta, &out, value, b"");
         assert_eq!(
@@ -1046,11 +1020,7 @@ fn other_errors_end_with_status_255() {
             "{value}"
         );
     }
-    assert_eq!(
-        files_named(&tmp.0, ""),
-        ["f"],
-        "nothing but the planted file"
-    );
+    assert_eq!(files_named(&tmp, ""), ["f"], "nothing but the planted file");
 }
 
 /// `-in ""` names no input file: makeblastdb 2.17.0 reads the first name of the empty list
@@ -1062,8 +1032,8 @@ fn other_errors_end_with_status_255() {
 fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
     let refusal = "losat makeblastdb: -in names no input file; losat makeblastdb reads FASTA \
                    files or the standard input\n";
-    let tmp = TempDir::new("inempty");
-    let db = tmp.base("db");
+    let tmp = TempDir::unique("writedb-inempty");
+    let db = base_in(&tmp, "db");
     let (status, log, messages) = makedb("", &db, "3GB", b"");
     assert_eq!((status, messages.as_str()), (1, refusal));
     assert_eq!(
@@ -1086,7 +1056,7 @@ fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
     assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
     let (status, _, _) = makedb(&prot_fasta(), &db, "3GB", b"");
     assert_eq!(status, 0);
-    assert!(!files_named(&tmp.0, "db.").is_empty());
+    assert!(!files_named(&tmp, "db.").is_empty());
     let (status, log, messages) = makedb("", &db, "3GB", b"");
     assert_eq!((status, messages.as_str()), (1, refusal));
     assert_eq!(
@@ -1102,7 +1072,7 @@ fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
             )
         )
     );
-    assert_eq!(files_named(&tmp.0, ""), [] as [&str; 0]);
+    assert_eq!(files_named(&tmp, ""), [] as [&str; 0]);
 }
 
 /// An output name whose LMDB lock file (`NAME.pdb-lock`) passes the file system's limit of a
@@ -1114,9 +1084,9 @@ fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
 #[cfg(unix)]
 #[test]
 fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
-    let tmp = TempDir::new("lockname");
-    let one = tmp.0.join("one.fa");
-    let two = tmp.0.join("two.fa");
+    let tmp = TempDir::unique("writedb-lockname");
+    let one = tmp.join("one.fa");
+    let two = tmp.join("two.fa");
     std::fs::write(&one, ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n").unwrap();
     std::fs::write(
         &two,
@@ -1127,7 +1097,7 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
     let head = format!("{LOG_HEAD}Maximum file size: 3000000000B\n");
     let error = "LMDB runtime error: mdb_env_open: File name too long";
     for length in [247, 250] {
-        let out = tmp.base(&"e".repeat(length));
+        let out = base_in(&tmp, &"e".repeat(length));
         let (status, log, messages) = makedb_version(&two, &out, "3GB", b"", 5);
         assert_eq!(
             (status, messages),
@@ -1153,11 +1123,12 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
             ),
             "{length}"
         );
-        assert_eq!(files_named(&tmp.0, "e"), [] as [&str; 0], "{length}");
+        assert_eq!(files_named(&tmp, "e"), [] as [&str; 0], "{length}");
     }
-    let (status, _, messages) = makedb_version(&two, &tmp.base(&"e".repeat(246)), "3GB", b"", 5);
+    let (status, _, messages) =
+        makedb_version(&two, &base_in(&tmp, &"e".repeat(246)), "3GB", b"", 5);
     assert_eq!((status, messages.as_str()), (0, ""));
-    assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
+    assert!(files_named(&tmp, "e").contains(&format!("{}.pdb", "e".repeat(246))));
 }
 
 /// makeblastdb removes the names of an existing database with `Remove` of a `CFile`, which
@@ -1187,17 +1158,17 @@ fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
         cases.push(("db.pdb", true, true));
     }
     for (name, deleted, link) in cases {
-        let tmp = TempDir::new("dirname");
-        let two = tmp.0.join("two.fa");
+        let tmp = TempDir::unique("writedb-dirname");
+        let two = tmp.join("two.fa");
         std::fs::write(
             &two,
             ">seq1 first\nMKVLAAGIVGLLLAAPAQA\n>seq2 second\nMKKLLPTAAAGLLLLAAQPAMA\n",
         )
         .unwrap();
         let dir = if link {
-            tmp.0.join("target")
+            tmp.join("target")
         } else {
-            tmp.0.join(name)
+            tmp.join(name)
         };
         std::fs::create_dir_all(dir.join("inner").join("deeper")).unwrap();
         std::fs::write(dir.join("inner").join("deeper").join("f"), b"x").unwrap();
@@ -1209,7 +1180,7 @@ fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap()
             };
             if link {
-                std::os::unix::fs::symlink("target", tmp.0.join(name)).unwrap();
+                std::os::unix::fs::symlink("target", tmp.join(name)).unwrap();
             } else {
                 mode(dir.join("a"), 0o444);
                 mode(dir.join("inner"), 0o555);
@@ -1217,7 +1188,7 @@ fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
             }
         }
         let (status, log, messages) =
-            makedb_version(&two.to_string_lossy(), &tmp.base("db"), "3GB", b"", 5);
+            makedb_version(&two.to_string_lossy(), &base_in(&tmp, "db"), "3GB", b"", 5);
         assert_eq!((status, messages.as_str()), (0, ""), "{name}");
         let head = if deleted {
             LOG_HEAD.replace(
@@ -1235,9 +1206,9 @@ fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
             format!("{head}{tail}"),
             "{name}"
         );
-        assert_eq!(files_named(&tmp.0, "db"), built, "{name}");
+        assert_eq!(files_named(&tmp, "db"), built, "{name}");
         for file in built {
-            let meta = std::fs::symlink_metadata(tmp.0.join(file)).unwrap();
+            let meta = std::fs::symlink_metadata(tmp.join(file)).unwrap();
             assert!(meta.file_type().is_file(), "{name}: {file}");
         }
         if link {
@@ -1254,17 +1225,22 @@ fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
 #[test]
 fn directories_of_the_output_name() {
     let fasta = prot_fasta();
-    let tmp = TempDir::new("dirs");
+    let tmp = TempDir::unique("writedb-dirs");
     let sep = std::path::MAIN_SEPARATOR;
 
-    let (status, _, messages) = makedb(&fasta, &format!("{}{sep}", tmp.base("sub")), "3GB", b"");
+    let (status, _, messages) = makedb(
+        &fasta,
+        &format!("{}{sep}", base_in(&tmp, "sub")),
+        "3GB",
+        b"",
+    );
     assert_eq!((status, messages.as_str()), (0, ""));
     assert_eq!(
-        files_named(&tmp.0, "sub"),
+        files_named(&tmp, "sub"),
         ["sub.phr", "sub.pin", "sub.pjs", "sub.psq"]
     );
 
-    let nested = tmp.0.join("a").join("b");
+    let nested = tmp.join("a").join("b");
     let out = nested.join("db").to_string_lossy().into_owned();
     let (status, _, messages) = makedb(&fasta, &out, "3GB", b"");
     assert_eq!((status, messages.as_str()), (0, ""));
@@ -1276,7 +1252,7 @@ fn directories_of_the_output_name() {
     {
         // The directories get the mode rwxr-xr-x whatever the umask.
         use std::os::unix::fs::PermissionsExt;
-        for dir in [tmp.0.join("a"), nested.clone()] {
+        for dir in [tmp.join("a"), nested.clone()] {
             let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
             assert_eq!(mode & 0o7777, 0o755, "{}", dir.display());
         }
@@ -1289,7 +1265,7 @@ fn directories_of_the_output_name() {
             ("nodir/../db", "..", None, "nodir"),
             ("x/b/../c/db", "c", Some("x/c"), "x/b"),
         ] {
-            let out = format!("{}/{given}", tmp.0.display());
+            let out = format!("{}/{given}", tmp.display());
             let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
             assert_eq!(
                 (status, log.as_str(), messages),
@@ -1304,12 +1280,12 @@ fn directories_of_the_output_name() {
                 "{given}"
             );
             if let Some(made) = made {
-                assert!(tmp.0.join(made).is_dir(), "{given}");
-                assert!(files_named(&tmp.0.join(made), "").is_empty(), "{given}");
+                assert!(tmp.join(made).is_dir(), "{given}");
+                assert!(files_named(&tmp.join(made), "").is_empty(), "{given}");
             }
-            assert!(!tmp.0.join(not_made).exists(), "{given}");
+            assert!(!tmp.join(not_made).exists(), "{given}");
         }
-        assert!(files_named(&tmp.0, "db.").is_empty());
+        assert!(files_named(&tmp, "db.").is_empty());
     }
 }
 
@@ -1322,8 +1298,8 @@ fn directories_of_the_output_name() {
 fn an_existing_directory_without_write_permission_stops_the_build_before_the_log() {
     use std::os::unix::fs::PermissionsExt;
     let fasta = prot_fasta();
-    let tmp = TempDir::new("rodir");
-    let ro = tmp.0.join("ro");
+    let tmp = TempDir::unique("writedb-rodir");
+    let ro = tmp.join("ro");
     std::fs::create_dir(&ro).unwrap();
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
     // A process that can create a file in a 0555 directory (root, CAP_DAC_OVERRIDE) has
@@ -1361,9 +1337,9 @@ fn an_existing_directory_without_write_permission_stops_the_build_before_the_log
 /// digits behind two zeros, and those from 1,000 keep their name.
 #[test]
 fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
-    let tmp = TempDir::new("volumes");
+    let tmp = TempDir::unique("writedb-volumes");
     let mut db = WriteDb::new(
-        &tmp.base("db"),
+        base_in(&tmp, "db").as_bytes(),
         true,
         b"t",
         b"Oct 12, 2026  9:00 PM",
@@ -1380,13 +1356,13 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
             length: 2,
             seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
             parsed: None,
-            past_seq_pos: None,
+            delta_fix: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
     }
     db.close().unwrap();
-    let files = files_named(&tmp.0, "db.");
+    let files = files_named(&tmp, "db.");
     assert_eq!(files.len(), 3 * 1001 + 1);
     for name in [
         "db.0000.pin",
@@ -1398,7 +1374,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     ] {
         assert!(files.iter().any(|file| file == name), "{name}");
     }
-    let alias = std::fs::read_to_string(tmp.0.join("db.pal")).unwrap();
+    let alias = std::fs::read_to_string(tmp.join("db.pal")).unwrap();
     let list = alias
         .lines()
         .find_map(|line| line.strip_prefix("DBLIST "))
@@ -1408,6 +1384,138 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     assert_eq!(volumes[..2], ["db.0000", "db.0001"]);
     assert_eq!(volumes[99..101], ["db.0099", "db.00100"]);
     assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
+}
+
+/// A log whose pipe closes after `lines` lines (flushes): from then on every write and flush
+/// fails as on a pipe whose reader has closed.
+pub(super) struct ClosedAfter {
+    lines: usize,
+    /// The lines written (flushed).
+    pub(super) flushed: usize,
+    /// The bytes written.
+    pub(super) log: Vec<u8>,
+}
+
+impl ClosedAfter {
+    pub(super) fn new(lines: usize) -> Self {
+        Self {
+            lines,
+            flushed: 0,
+            log: Vec::new(),
+        }
+    }
+}
+
+impl std::io::Write for ClosedAfter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.flushed == self.lines {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        self.log.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.flushed == self.lines {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        self.flushed += 1;
+        Ok(())
+    }
+}
+
+/// One nucleotide build of `input` into `base` (version 5, title "t") whose log is `log`: the exit
+/// status and the standard error stream.
+fn makedb_logged(input: &str, base: &str, log: &mut dyn std::io::Write) -> (i32, Vec<u8>) {
+    let words: Vec<String> = ["-in", input, "-dbtype", "nucl", "-out", base, "-title", "t"]
+        .iter()
+        .map(|word| word.to_string())
+        .collect();
+    let args = parse_makedb_words(&words);
+    let now = time_of("Oct 12, 2026  9:00 PM");
+    let mut err = Vec::new();
+    let status = run_with(
+        &args,
+        &ApplicationSettings::default(),
+        Some(&now),
+        LINUX,
+        &mut std::io::empty(),
+        log,
+        &mut err,
+    );
+    (status, err)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1165-1177
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1440-1467
+/// A pipe whose reader has closed ends the build at the line of the log that meets it, with exit
+/// status 0 and nothing on the standard error stream (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10; NCBI BLAST+ 2.17.0 is ended there by SIGPIPE, probes of 2026-11-24). The lines of
+/// a build: four of the constructor, then (an existing database removed) "Keep MBits",
+/// "Maximum file size", "Adding sequences from FASTA" and the two of `EndBuild`. Up to "Maximum
+/// file size" no file of the build is made, as in NCBI; at "Adding sequences" the volume is still
+/// open (NCBI's ended process also leaves LMDB's lock files, and its file streams still hold the
+/// bytes of a small input); after the close of `EndBuild` the volume's files are complete and no
+/// metadata file is written, as in NCBI. An existing database of the name is removed after the
+/// fourth line.
+#[cfg(not(windows))]
+#[test]
+fn a_closed_pipe_ends_the_build_at_its_line() {
+    let tmp = TempDir::unique("closed-pipe");
+    let input = base_in(&tmp, "in.fa");
+    std::fs::write(
+        &input,
+        ">s1 one\nACGTACGTACGTAGCTAGCTAGCTAGCATCGATCG\n>s2 two\nTTGACCGGTTAACCGGTTAAGGCC\n",
+    )
+    .unwrap();
+    let complete = [
+        "db.ndb", "db.nhr", "db.nin", "db.not", "db.nsq", "db.ntf", "db.nto",
+    ];
+    let open_volume = ["db.00.nhr", "db.00.nin", "db.00.nsq", "db.ndb", "db.ntf"];
+    let cases: [&[&str]; 9] = [
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &open_volume,
+        &complete,
+        &complete,
+    ];
+    for (lines, files) in cases.iter().enumerate() {
+        let dir = tmp.join(format!("k{lines}"));
+        let base = dir.join("db").to_string_lossy().into_owned();
+        let mut log = ClosedAfter::new(lines);
+        let (status, err) = makedb_logged(&input, &base, &mut log);
+        assert_eq!(status, 0, "{lines} lines");
+        assert_eq!(String::from_utf8_lossy(&err), "", "{lines} lines");
+        assert_eq!(log.flushed, lines);
+        assert_eq!(files_named(&dir, "db"), *files, "{lines} lines");
+    }
+    // The ninth line is the last one: the build ends as with an open pipe, its metadata file
+    // written.
+    let dir = tmp.join("k9");
+    let base = dir.join("db").to_string_lossy().into_owned();
+    let mut log = ClosedAfter::new(9);
+    assert_eq!(makedb_logged(&input, &base, &mut log), (0, Vec::new()));
+    assert_eq!(log.flushed, 9);
+    assert!(log.log.ends_with(b"seconds.\n\n\n"));
+    assert!(files_named(&dir, "db").contains(&"db.njs".to_string()));
+
+    // An existing database: closed before "Sequence type" it stays, closed at the line that
+    // reports its removal it is gone and nothing new is made.
+    for (lines, kept) in [(3, true), (4, false)] {
+        let dir = tmp.join(format!("old{lines}"));
+        let base = dir.join("db").to_string_lossy().into_owned();
+        assert_eq!(makedb_logged(&input, &base, &mut Vec::new()).0, 0);
+        let old = files_named(&dir, "db");
+        let mut log = ClosedAfter::new(lines);
+        assert_eq!(makedb_logged(&input, &base, &mut log), (0, Vec::new()));
+        let left = files_named(&dir, "db");
+        assert_eq!(left == old, kept, "{lines} lines: {left:?}");
+        assert!(kept || left.is_empty(), "{lines} lines: {left:?}");
+    }
 }
 
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
@@ -1531,8 +1639,8 @@ fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
 /// makeblastdb's (the date of the database is the recorded one).
 fn run_v5_case(case: &V5Case) {
     let name = case.name;
-    let tmp = TempDir::new(&format!("v5-{name}"));
-    let dir = tmp.0.to_string_lossy().into_owned();
+    let tmp = TempDir::unique(&format!("writedb-v5-{name}"));
+    let dir = tmp.to_string_lossy().into_owned();
     let now = time_of(if case.date.is_empty() {
         "Oct 12, 2026  9:00 PM"
     } else {
@@ -1553,7 +1661,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1582,7 +1690,7 @@ fn run_v5_case(case: &V5Case) {
         );
         assert_eq!(status, run.status, "{name} run {k}: exit status");
     }
-    let log = std::fs::read(tmp.0.join("mk.log"))
+    let log = std::fs::read(tmp.join("mk.log"))
         .ok()
         .map(|log| v5_markers(&log, &dir));
     // NCBI's log in LOSAT's words (`crate::wording::losat_bytes`).
@@ -1593,7 +1701,7 @@ fn run_v5_case(case: &V5Case) {
         log.as_deref().map(show),
         case.log.map(show)
     );
-    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+    let mut written: Vec<String> = std::fs::read_dir(&tmp)
         .unwrap()
         .map(|entry| entry.unwrap())
         .filter(|entry| entry.file_type().unwrap().is_file())
@@ -1604,7 +1712,7 @@ fn run_v5_case(case: &V5Case) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = mask_column_date(file, std::fs::read(tmp.0.join(file)).unwrap());
+        let actual = mask_column_date(file, std::fs::read(tmp.join(file)).unwrap());
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -1761,9 +1869,9 @@ fn randomize_runs_as_makeblastdb() {
 #[test]
 fn input_files_that_cannot_be_opened_are_skipped() {
     use std::os::unix::fs::PermissionsExt;
-    let tmp = TempDir::new("unreadable");
-    let locked = tmp.base("locked.fa");
-    let locked_gz = tmp.base("locked.fa.gz");
+    let tmp = TempDir::unique("writedb-unreadable");
+    let locked = base_in(&tmp, "locked.fa");
+    let locked_gz = base_in(&tmp, "locked.fa.gz");
     for path in [&locked, &locked_gz] {
         std::fs::write(path, b">l\nMKV\n").unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -1786,7 +1894,7 @@ fn input_files_that_cannot_be_opened_are_skipped() {
             "-dbtype",
             "prot",
             "-out",
-            &dir.base("db"),
+            &base_in(dir, "db"),
             "-title",
             "t",
             "-blastdb_version",
@@ -1800,7 +1908,7 @@ fn input_files_that_cannot_be_opened_are_skipped() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1812,15 +1920,15 @@ fn input_files_that_cannot_be_opened_are_skipped() {
     };
     for version in ["4", "5"] {
         // Read after the readable file and before it: the database is that file's.
-        let alone = TempDir::new("unreadable-alone");
+        let alone = TempDir::unique("writedb-unreadable-alone");
         let (status, out, err) = build("tests/writedb_v5/a.fa", &alone, version);
         assert_eq!((status, err.as_str()), (0, ""), "v{version}");
-        let expected = files_named(&alone.0, "db.");
+        let expected = files_named(&alone, "db.");
         for (input, skipped) in [
             (format!("tests/writedb_v5/a.fa {locked}"), &locked),
             (format!("{locked_gz} tests/writedb_v5/a.fa"), &locked_gz),
         ] {
-            let dir = TempDir::new("unreadable-mixed");
+            let dir = TempDir::unique("writedb-unreadable-mixed");
             let (status, out_mixed, err) = build(&input, &dir, version);
             assert_eq!(status, 0, "v{version} {input}: {err}");
             assert_eq!(err, warning(skipped), "v{version} {input}");
@@ -1836,17 +1944,17 @@ fn input_files_that_cannot_be_opened_are_skipped() {
                 out.lines().count(),
                 "v{version} {input}"
             );
-            assert_eq!(files_named(&dir.0, "db."), expected, "v{version} {input}");
+            assert_eq!(files_named(&dir, "db."), expected, "v{version} {input}");
             for name in &expected {
                 assert!(
-                    std::fs::read(dir.0.join(name)).unwrap()
-                        == std::fs::read(alone.0.join(name)).unwrap(),
+                    std::fs::read(dir.join(name)).unwrap()
+                        == std::fs::read(alone.join(name)).unwrap(),
                     "v{version} {input}: {name}"
                 );
             }
         }
         // Only files that cannot be opened.
-        let dir = TempDir::new("unreadable-only");
+        let dir = TempDir::unique("writedb-unreadable-only");
         let (status, out, err) = build(&format!("{locked} {locked_gz}"), &dir, version);
         assert_eq!(status, 0, "v{version}: {err}");
         assert_eq!(err, warning(&locked) + &warning(&locked_gz), "v{version}");
@@ -1855,11 +1963,7 @@ fn input_files_that_cannot_be_opened_are_skipped() {
             "v{version}: {out}"
         );
         assert!(!out.contains("Adding sequences"), "v{version}: {out}");
-        assert_eq!(
-            files_named(&dir.0, "db."),
-            Vec::<String>::new(),
-            "v{version}"
-        );
+        assert_eq!(files_named(&dir, "db."), Vec::<String>::new(), "v{version}");
     }
 }
 
@@ -1868,11 +1972,11 @@ fn input_files_that_cannot_be_opened_are_skipped() {
 /// makeblastdb's (the date of the database is the recorded one).
 fn run_parse_case(case: &ParseCase) {
     let name = case.name;
-    let tmp = TempDir::new(&format!("parse-{name}"));
-    let dir = tmp.0.to_string_lossy().into_owned();
-    std::fs::write(tmp.0.join("in.fa"), case.input).unwrap();
+    let tmp = TempDir::unique(&format!("writedb-parse-{name}"));
+    let dir = tmp.to_string_lossy().into_owned();
+    std::fs::write(tmp.join("in.fa"), case.input).unwrap();
     if let Some(taxmap) = case.taxmap {
-        std::fs::write(tmp.0.join("in.taxmap"), taxmap).unwrap();
+        std::fs::write(tmp.join("in.taxmap"), taxmap).unwrap();
     }
     let mut words = vec!["-in".to_string(), format!("{dir}/in.fa")];
     words.extend(case.words.iter().map(|word| word.replace("{D}", &dir)));
@@ -1881,7 +1985,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1903,7 +2007,7 @@ fn run_parse_case(case: &ParseCase) {
         show(case.stdout)
     );
     assert_eq!(status, case.status, "{name}: exit status");
-    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+    let mut written: Vec<String> = std::fs::read_dir(&tmp)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .filter(|file| file != "in.fa" && file != "in.taxmap")
@@ -1912,7 +2016,7 @@ fn run_parse_case(case: &ParseCase) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        let actual = std::fs::read(tmp.join(file)).unwrap();
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -1969,11 +2073,11 @@ fn build_tree_masked(bytes: &[u8]) -> Vec<u8> {
 /// recorded one; the files left by a failed run are not compared, makedb-v5 DECISIONS 11).
 fn run_fix_case(case: &FixCase) {
     let name = case.name;
-    let tmp = TempDir::new(&format!("fix-{name}"));
-    let dir = tmp.0.to_string_lossy().into_owned();
-    std::fs::write(tmp.0.join("in.fa"), case.input).unwrap();
+    let tmp = TempDir::unique(&format!("writedb-fix-{name}"));
+    let dir = tmp.to_string_lossy().into_owned();
+    std::fs::write(tmp.join("in.fa"), case.input).unwrap();
     if case.mapdir {
-        std::fs::create_dir(tmp.0.join("mapdir")).unwrap();
+        std::fs::create_dir(tmp.join("mapdir")).unwrap();
     }
     let words: Vec<String> = case
         .words
@@ -1990,7 +2094,7 @@ fn run_fix_case(case: &FixCase) {
     let mut stdin = case.stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -2030,7 +2134,7 @@ fn run_fix_case(case: &FixCase) {
     if case.status != 0 {
         return;
     }
-    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+    let mut written: Vec<String> = std::fs::read_dir(&tmp)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .filter(|file| file != "in.fa" && file != "mapdir")
@@ -2039,7 +2143,7 @@ fn run_fix_case(case: &FixCase) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        let actual = std::fs::read(tmp.join(file)).unwrap();
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -2075,9 +2179,9 @@ fn review_fix_cases_are_makeblastdb_s() {
 /// One `losat makeblastdb -parse_seqids` run of `input` in a directory of its own, version 5:
 /// (exit status, standard output, standard error).
 fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String, String) {
-    let tmp = TempDir::new(label);
-    let dir = tmp.0.to_string_lossy().into_owned();
-    std::fs::write(tmp.0.join("in.fa"), input).unwrap();
+    let tmp = TempDir::unique(&format!("writedb-{label}"));
+    let dir = tmp.to_string_lossy().into_owned();
+    std::fs::write(tmp.join("in.fa"), input).unwrap();
     let mut words: Vec<String> = [
         "-in",
         &format!("{dir}/in.fa"),
@@ -2098,7 +2202,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -2197,7 +2301,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2240,7 +2344,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2284,7 +2388,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
-                        None,
+                        &ApplicationSettings::default(),
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

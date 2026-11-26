@@ -2267,10 +2267,10 @@ fn a_pssm_query_is_the_command_lines() {
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
     // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0, 5 to 11 and 20 (`in_pssm::check_in_pssm_options`; the others are item PS15b-2's),
-    // whatever the order of the formats.
+    // outfmt 0 to 12, 18 and 20 (`in_pssm::check_in_pssm_options`; the XML2 and JSON documents
+    // are the second part of item PS15b-2), whatever the order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
-    for formats in [&["6", "1"][..], &["1", "6"], &["0", "15"]] {
+    for formats in [&["6", "16"][..], &["16", "6"], &["0", "15"]] {
         let error =
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
@@ -3272,9 +3272,11 @@ fn search_of_files(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
 /// `run_to_file` to a file whose writes fail (`/dev/full`, through a link in a directory of the
 /// test, where outfmt 13 and 14 write their side files) ends as the command line's `-out` (line
-/// LIB E1, fix 1), in every program and every outfmt: where the report's stream throws (the outfmt
-/// 0 to 4 formatter's, the organism report's), NCBI's `BLAST failed to write output` and its
-/// newline (exit status 6), elsewhere the write's error as the command line writes it. The warning
+/// LIB E1, fix 1; line RG item T6a, the command line's stream), in every program and every outfmt:
+/// the call succeeds where the command line exits 0, with the posts that it writes in the
+/// diagnostics; where the command line exits 6, the message is NCBI's text of that end (the
+/// failed region's posts, `BLAST failed to write output` and its newline, and for outfmt 11 the
+/// error archive's write fault after it); where it aborts, `std::terminate`'s text. The warning
 /// of `-max_target_seqs 1`, which the command line writes before the failure, is in the
 /// diagnostics and not in the message.
 #[cfg(target_os = "linux")]
@@ -3346,9 +3348,17 @@ fn a_report_that_cannot_be_written_fails_as_the_command_lines_out() {
                 );
             }
             if cli.status.code() == Some(6) {
-                assert_eq!(
-                    error.message(),
-                    b"BLAST failed to write output\n",
+                // The posts of the failed region, NCBI's `BLAST failed to write output`, and for
+                // outfmt 11 the write fault of the error archive written on the failed stream.
+                const FAILED: &[u8] = b"BLAST failed to write output\n";
+                let message = error.message();
+                let end = message
+                    .windows(FAILED.len())
+                    .position(|window| window == FAILED)
+                    .map(|at| at + FAILED.len());
+                assert!(
+                    end.is_some_and(|end| end == message.len()
+                        || (number == 11 && message[end..].starts_with(b"Error: (802.5) "))),
                     "{context}: {error:?}"
                 );
             }
@@ -3770,5 +3780,78 @@ fn a_help_word_is_the_tools_output_and_the_searchs_error() {
             Err(Error::Argv(help)) => assert_eq!(help, cli.stdout, "blastp {word}"),
             other => panic!("blastp {word}: {other:?}"),
         }
+    }
+}
+
+/// A Smith-Waterman alignment of `-use_sw_tback` whose query row starts with 95 gaps (f101, 190
+/// letters of nest from its 96th, against nest; line RG item X4b-gap): the records' length, gap
+/// openings and gaps are the table's, which count only the columns in the query row's range
+/// (190, 0, 0), for `-subject` (BLASTX and TBLASTN map the HSP, BLASTP keeps its end gaps) and
+/// for `-db` (where every HSP keeps them), each report the command line's.
+#[test]
+fn a_query_row_that_starts_with_gaps_counts_as_the_table() {
+    let options: &[&str] = &["-use_sw_tback"];
+    let check = |context: &str, outcome: &Outcome, cli: Vec<u8>| {
+        let table = &outcome.reports[0].bytes;
+        assert!(*table == cli, "{context}: the report");
+        let rows = rows(table);
+        assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
+        for (hsp, row) in outcome.hsps.iter().zip(rows) {
+            check_columns(context, hsp, &table[row]);
+        }
+        assert!(
+            outcome
+                .hsps
+                .iter()
+                .any(|hsp| (hsp.length, hsp.gap_open, hsp.gaps) == (190, 0, 0)),
+            "{context}: the alignment of f101"
+        );
+    };
+    for (program, query, subject) in [
+        (Program::Blastp, "swgap/f101.faa", "rps/nest.faa"),
+        (Program::Blastx, "swgap/f101.fna", "rps/nest.faa"),
+        (Program::Tblastn, "swgap/f101.faa", "rps/nest_p.fna"),
+    ] {
+        let case = Case {
+            program,
+            query,
+            subject,
+            options,
+            formats: &[COLUMNS],
+        };
+        let context = format!("{program} -subject");
+        let (query, subject) = (fixture(query), fixture(subject));
+        let outcome = api(&case, &query, &subject, &[]);
+        check(&context, &outcome, cli(&case, &query, &subject, COLUMNS).0);
+    }
+    for (program, query, db) in [
+        (
+            Program::Blastp,
+            "fasta/swgap/f101.faa",
+            "db_search/swgap/nestaa",
+        ),
+        (
+            Program::Blastx,
+            "fasta/swgap/f101.fna",
+            "db_search/swgap/nestaa",
+        ),
+        (
+            Program::Tblastn,
+            "fasta/swgap/f101.faa",
+            "db_search/swgap/nestp",
+        ),
+    ] {
+        let case = DatabaseCase {
+            program,
+            query,
+            db,
+            options,
+        };
+        let context = format!("{program} -db");
+        let (_, records, search) = case.read();
+        let (db, query_name) = (engine_tests(db), engine_tests(query));
+        let inputs = Inputs::database(&records, &db).named(&query_name, "ignored");
+        let outcome = run_collect(&search, inputs, &[COLUMNS]).unwrap();
+        check(&context, &outcome, case.cli(COLUMNS));
     }
 }

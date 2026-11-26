@@ -22,24 +22,23 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    empty_row_scores, row_range, row_range_exception, rows_empty, std_seg_lengths_not_accurate,
-    subject_mapped_rows, tabular_empty_row, AlignQueryIds, EmptyRowsRefusal, MappedRows,
-    SubjectLoc, TabularEmptyRow,
+    empty_row_scores, reported_row_range, rows_empty, subject_mapped_rows, tabular_empty_row,
+    AlignQueryIds, MappedRows, SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
-use super::report::{
-    alignment, has_seqalign, query_endpoints, query_warning, tabular_io_error, ShownSubjects,
-    TabularFlushError,
-};
+use super::report::{alignment, has_seqalign, query_endpoints, query_warning, ShownSubjects};
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
+use crate::report::pairwise::EmptyRowsRefusal;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
-use crate::report::serial::seqalign::{AlignRow, RowRangeError};
+use crate::report::serial::seqalign::{
+    row_range_exception, std_seg_lengths_not_accurate, AlignRow,
+};
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, union_length, DeflineIds, QueryCoveragePerHsp, SubjectLookup, TabularField,
+    TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -68,9 +67,9 @@ fn write_taxdb_warning(
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -196,16 +195,40 @@ impl SubjectValues<'_> {
     }
 }
 
-/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`; `slen` is the
-/// length of the record, also with `-subject_loc`. The `sall*` of a record are made only for a
-/// report that shows them (`all_deflines`, `TabularNeeds::all_deflines`).
+/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`, in the
+/// report of the reader batch's query `query`; `slen` is the length of the record, also with
+/// `-subject_loc`. The `sall*` of a record are made only for a report that shows them
+/// (`all_deflines`, `TabularNeeds::all_deflines`). A database sequence that NCBI's scope finds as
+/// a query of its batch shows that query's Bioseq (`ReportedSubjects::seen_of`,
+/// `report::query_bioseq`): the query's ids, no title (`N/A`), the query record's length, no
+/// taxonomy.
 fn subject_values<'a>(
     shown: &'a ShownSubjects<'_>,
     subject: &'a FastaRecord,
-    oid: usize,
+    (oid, query): (usize, usize),
     no_taxonomy: &'a TabularTaxonomy,
     all_deflines: bool,
 ) -> SubjectValues<'a> {
+    if let ShownSubjects::Database { reported, .. } = shown {
+        if let Some(bioseq) = reported.seen_of(query, oid) {
+            let [id, accession, accession_version] = bioseq.tabular_ids();
+            return SubjectValues {
+                id: std::borrow::Cow::Borrowed(id.as_slice()),
+                accession: accession.as_slice(),
+                accession_version: accession_version.as_slice(),
+                gi: bioseq.gi(),
+                all_ids: if all_deflines {
+                    std::borrow::Cow::Borrowed(bioseq.all_ids())
+                } else {
+                    std::borrow::Cow::Borrowed(&[])
+                },
+                titles: None,
+                length: bioseq.length(),
+                taxonomy: no_taxonomy,
+                failed: None,
+            };
+        }
+    }
     match shown {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:560-565
         // A FASTA subject has no definition lines: its `sall*` are its own ids (the first
@@ -265,6 +288,7 @@ fn subject_values<'a>(
                         subject_id: true,
                         all_ids: false,
                         thrown: None,
+                        empty_handle: false,
                     }
                 }),
                 id,
@@ -332,6 +356,7 @@ fn subject_values<'a>(
                             subject_id: true,
                             all_ids: true,
                             thrown: None,
+                            empty_handle: false,
                         }
                     }),
                 },
@@ -346,7 +371,8 @@ fn subject_values<'a>(
 /// the rows. A database's refusals of the fields come before (`ReportedSubjects::read_tabular`,
 /// `native::run`); each row's texts of the taxonomy database's lookups follow the rows before
 /// it (`report::tabular::TabularNames::row_messages`). An error writing a query's report is the
-/// stream failure of NCBI's formatter (`report::TabularFlushError`).
+/// stream failure of NCBI's formatter (`ostream::ReportWriteFailure`), at the flush of each
+/// query's `CBlastTabularInfo` where its writes were held.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_tabular(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -379,10 +405,10 @@ pub(super) fn write_blastx_tabular(
     );
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1316
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1311
     let database: Vec<u8> = match shown {
         ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
-        ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
+        ShownSubjects::Database { name, .. } => name.to_vec(),
     };
     let names = match shown {
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
@@ -459,7 +485,7 @@ pub(super) fn write_blastx_tabular(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
                 // The length against which `hsp_percent_coverage` counts an HSP's residues in its
                 // frame (`qcovhsp`): a third of the searched letters in a gapped search, the
-                // searched letters in an ungapped one (blast_seqalign.cpp:1381-1384).
+                // searched letters in an ungapped one (blast_seqalign.cpp:1382-1383).
                 let coverage_length = if options.gapped {
                     searched_length as i32 / 3
                 } else {
@@ -473,35 +499,40 @@ pub(super) fn write_blastx_tabular(
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
                 // `qcovs` reads the query range of every HSP of the query before its first row
-                // (`GetMasterCoverage`, cited below): with `-db` a query row whose range it cannot
-                // take throws there, after outfmt 7's lines (`empty_rows::row_range`: the empty
-                // row of an HSP of length 0, a row that starts with a gap), and with `-subject` the
-                // mapped query row that wraps (`MappedRows::QueryRowWraps`) and the empty rows that
-                // the mapper leaves (`SubjectLoc::of_list`); `-subject`'s other mapped query rows
-                // are not empty.
+                // (`GetMasterCoverage`, cited below): a query row whose range it cannot take
+                // throws there, after outfmt 7's lines (`empty_rows::reported_row_range`: the
+                // empty row of an HSP of length 0 with `-db`, with `-subject` where the mapper
+                // leaves it or its mapped query row wraps (`MappedRows::QueryRowWraps`), and a
+                // leading gap left in a reported gapped edit script for `-db` and `-subject`
+                // alike).
                 let unranged = needs
                     .qcovs
                     .then(|| {
-                        listed
-                            .iter()
-                            .find_map(|list| match loc.of_list(list, options.gapped) {
-                                SubjectLoc::Whole => list.hsps.iter().find_map(|hsp| {
-                                    has_seqalign(hsp, options.gapped)
-                                        .then(|| row_range(hsp, AlignRow::Query))
-                                        .flatten()
-                                }),
-                                SubjectLoc::Interval => matches!(
+                        listed.iter().find_map(|list| {
+                            let list_loc = loc.of_list(list, options.gapped);
+                            let empty_query_rewritten = list_loc == SubjectLoc::Interval
+                                && !matches!(
                                     subject_mapped_rows(
-                                        loc,
+                                        list_loc,
                                         list,
                                         options.gapped,
                                         query,
                                         &subjects[list.oid]
                                     ),
                                     Some(MappedRows::QueryRowWraps)
-                                )
-                                .then_some(RowRangeError::Empty),
+                                );
+                            list.hsps.iter().find_map(|hsp| {
+                                has_seqalign(hsp, options.gapped)
+                                    .then(|| {
+                                        reported_row_range(
+                                            hsp,
+                                            AlignRow::Query,
+                                            empty_query_rewritten,
+                                        )
+                                    })
+                                    .flatten()
                             })
+                        })
                     })
                     .flatten();
                 if let Some(error) = unranged {
@@ -519,8 +550,13 @@ pub(super) fn write_blastx_tabular(
                         continue;
                     }
                     let subject = &subjects[list.oid];
-                    let values =
-                        subject_values(shown, subject, list.oid, &no_taxonomy, needs.all_deflines);
+                    let values = subject_values(
+                        shown,
+                        subject,
+                        (list.oid, batch.query_ordinal + qidx),
+                        &no_taxonomy,
+                        needs.all_deflines,
+                    );
                     // The subject's Seq-loc as its Seq-align shows it (`SubjectLoc::of_list`).
                     let loc = loc.of_list(list, options.gapped);
                     // The subject's `qcovhsp` rule: its rows only divide.
@@ -584,7 +620,7 @@ pub(super) fn write_blastx_tabular(
                         Some(kept) if table.fails(&tabular_subject) => Some(subject_values(
                             shown,
                             &subjects[kept],
-                            kept,
+                            (kept, batch.query_ordinal + qidx),
                             &no_taxonomy,
                             needs.all_deflines,
                         )),
@@ -677,7 +713,7 @@ pub(super) fn write_blastx_tabular(
                                 q_end: mapped.q_end,
                                 s_start: mapped.s_start,
                                 s_end: mapped.s_end,
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
                                 bit_score,
                                 score,
                                 length: mapped.length(),
@@ -689,9 +725,8 @@ pub(super) fn write_blastx_tabular(
                                 rows: Some(mapped.rows()).filter(|_| counts_by_fields),
                                 // The mapped row's `-` past the query's end is the gap character
                                 // inside its segment, not an end gap (alnvec.cpp:279-297,
-                                // `TabularHsp::end_gaps`).
-                                end_gaps: false,
-                                stored_gaps: [&[], &[]],
+                                // `TabularHsp::ops`): no script.
+                                ops: &[],
                                 qcovhsp: qcovhsp.of_hsp(0, mapped.length() as i32),
                             };
                             (row, tabular_query, tabular_subject)
@@ -703,7 +738,7 @@ pub(super) fn write_blastx_tabular(
                                 q_end: 0,
                                 s_start: 0,
                                 s_end: 0,
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
                                 bit_score,
                                 score,
                                 length: 0,
@@ -713,8 +748,7 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: 0,
                                 s_frame: 0,
                                 rows: None,
-                                end_gaps: true,
-                                stored_gaps: [&[], &[]],
+                                ops: &[],
                                 qcovhsp: -1,
                             };
                             catch_ids = AlignQueryIds::of(query);
@@ -749,7 +783,7 @@ pub(super) fn write_blastx_tabular(
                                 q_end: i64::from(a.qend),
                                 s_start: i64::from(a.sstart),
                                 s_end: i64::from(a.send),
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
                                 bit_score,
                                 score,
                                 length: a.qseq.len(),
@@ -759,12 +793,12 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: i32::from(a.frame),
                                 s_frame: 0,
                                 rows,
-                                end_gaps: true,
-                                stored_gaps: [&[], &[]],
+                                ops: &hsp.edit_script,
                                 qcovhsp: qcovhsp.of_hsp(
                                     // The HSP's own ends (`Blast_HSPGetQueryCoverage` of the
-                                    // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's.
-                                    raw.q_end - raw.q_start,
+                                    // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's,
+                                    // with the letters that `-subject`'s mapper left out.
+                                    raw.q_end - raw.q_start + hsp.query_left_out as i32,
                                     // The Seq-align's nucleotides; `-subject`'s mapped empty row
                                     // has one.
                                     if empty {
@@ -804,10 +838,9 @@ pub(super) fn write_blastx_tabular(
                     reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-                writer.flush().map_err(TabularFlushError)?;
+                crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
                 Ok(())
-            })()
-            .map_err(tabular_io_error)?;
+            })()?;
         }
     }
     Ok(())
@@ -919,6 +952,16 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => Some(reported.loads()),
         ShownSubjects::Fasta { .. } => None,
     };
+    // A database sequence that the scope finds as a query of its batch: the query's line
+    // (`ReportedSubjects::seen_of`, by the query of the reader batch).
+    let ordinals: Vec<usize> = batches
+        .iter()
+        .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.query_ordinal + qidx))
+        .collect();
+    let seen = |q_idx: usize, s_idx: usize| match shown {
+        ShownSubjects::Database { reported, .. } => reported.seen_of(*ordinals.get(q_idx)?, s_idx),
+        ShownSubjects::Fasta { .. } => None,
+    };
     let report = report_batch(
         &tax_queries,
         parsed,
@@ -929,6 +972,7 @@ fn write_blastx_tax_report(
         program,
         options.app_name,
         options.is_html,
+        Some(&seen),
     )?;
     let mut q_idx = 0;
     for batch in batches {

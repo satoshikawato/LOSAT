@@ -267,7 +267,7 @@ fn masked_reference<M: TbxScore>(
                 }
             }
         }
-        advance_tblastx_diag_offset(diag_offset, diag_array, window, subject.len());
+        advance_tblastx_diag_offset(diag_offset, diag_array, window, subject.len() as i32);
         sort_init_hsps_by_score_ncbi(&mut init_hsps);
         per_frame.push(init_hsps);
     }
@@ -283,6 +283,8 @@ fn unit_lists<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<Vec<Init
             offset: 0,
             length: s_frame.aa_len,
             overlap: 0,
+            ncbi_length: s_frame.aa_len as i32,
+            overlap_past_list: false,
         };
         let mut init_hsps = Vec::new();
         // The reference finds no hits in a frame shorter than a word.
@@ -477,6 +479,8 @@ fn a_walk_past_a_nullb_into_another_group_is_seen_by_its_units() {
             offset: 0,
             length: subject.len(),
             overlap: 0,
+            ncbi_length: subject.len() as i32,
+            overlap_past_list: false,
         };
         let units: Vec<XUnit> = (0..2).map(|g| pp.x_unit(&inp, 0, 0, chunk, g)).collect();
         // Each unit alone: the refusal and the P/P HSP the reference does not make.
@@ -759,7 +763,7 @@ fn random_cases_with_and_without_aliasing() {
 // earlier argument could not exclude. The units' lists are the masked reference's in every
 // case, also with the batched extensions of LOSAT_X_TBXEXTBATCH.
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-528,598-604
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-524,596-599
 #[test]
 fn units_equal_the_masked_reference_where_the_first_guard_fails() {
     let mut rng = Rng(0x7e57_ab1e_5eed_0001);
@@ -1014,6 +1018,8 @@ fn masked_unit_tables_give_the_unmasked_units() {
             offset: 0,
             length: s_len,
             overlap: 0,
+            ncbi_length: s_len as i32,
+            overlap_past_list: false,
         };
         let mut scratch = XScratch::new(false);
         let mut aliased = false;
@@ -1277,6 +1283,8 @@ fn unit_lists_batched<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<
             offset: 0,
             length: s_frame.aa_len,
             overlap: 0,
+            ncbi_length: s_frame.aa_len as i32,
+            overlap_past_list: false,
         };
         let mut init_hsps = Vec::new();
         // The reference finds no hits in a frame shorter than a word.
@@ -2703,7 +2711,7 @@ fn tbx_prefetch_rule_at_its_boundaries() {
     assert!(!x_prefetch_units(Some(2), [2047].into_iter()));
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
 // The unit functions with the prefetch of LOSAT_X_TBXPREFETCH (`PF`) on search pools of 1, 2
 // and 8 threads, in both list forms: the random cases of the compact tests (one and several
 // chunks per frame) and the large case of the unmap tests (batches far longer than
@@ -2998,6 +3006,8 @@ fn units_equal_the_masked_reference(
                 offset: 0,
                 length: s_frame.aa_len,
                 overlap: 0,
+                ncbi_length: s_frame.aa_len as i32,
+                overlap_past_list: false,
             };
             for g in 0..pp.groups.len() {
                 if pp.groups[g].lookup.longest_chain <= 0 {

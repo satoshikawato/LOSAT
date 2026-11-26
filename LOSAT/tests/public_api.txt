@@ -578,8 +578,8 @@ pub fn losat::api::read_input_file(losat::api::Role, &std::path::Path) -> core::
 pub fn losat::api::read_input_records(&losat::api::Search, &[u8], &[u8]) -> core::result::Result<losat::api::InputRecords, losat::api::Error>
 pub fn losat::api::read_inputs(&losat::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<losat::api::FastaRecord>, alloc::vec::Vec<losat::api::FastaRecord>), losat::api::Error>
 pub fn losat::api::run(&losat::api::Search, losat::api::Inputs<'_>, &mut [(&str, &mut (dyn std::io::Write + core::marker::Send))], &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
-pub fn losat::api::run_blast_formatter(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_batches<'a>(&'a losat::api::Search, losat::api::Inputs<'a>) -> core::result::Result<losat::api::Batches<'a>, losat::api::Error>
+pub fn losat::api::run_blast_formatter(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_blastdbcmd(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_collect(&losat::api::Search, losat::api::Inputs<'_>, &[&str]) -> core::result::Result<losat::api::Outcome, losat::api::Error>
 pub fn losat::api::run_convert2blastmask(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>

@@ -7,7 +7,7 @@
 use anyhow::Result;
 
 use super::call_setup::{self, CallSetup};
-use super::database::{BlastpDatabase, HeaderReadError, PreliminaryReadError};
+use super::database::{BlastpDatabase, PreliminaryReadError};
 use super::{blastp_query_frames, pssm_hooks, BlastpSubjectSource, ResolvedBlastpArgs};
 use crate::algorithm::blastn::query_split::{ChunkQuery, SplitSizes};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -17,6 +17,7 @@ use crate::algorithm::blastp::protein_query_split::{
     SplitBatchSteps, UnmetChecks,
 };
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::app::TRACEBACK_FAILED;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::BatchSetUp;
@@ -98,8 +99,8 @@ pub(super) fn subjects_in_hand(subject_source: BlastpSubjectSource<'_>) -> bool 
 
 /// The form of a stop of the query batch whose first searched query is `query`: NCBI stops in the
 /// search of the batch after it has printed the reports of the batches before (blastp_app.cpp:
-/// 257-276, cited in `search`), BLASTP's batch failure (`database::HeaderReadError`; TBLASTN's and
-/// TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches one query at a time
+/// 257-276, cited in `search`), the batch's failure (`ErrorAfterBatchReports::of_batch`, which
+/// names the batch for `search`). psiblast searches one query at a time
 /// and NCBI stops in the query's round 1 (it splits that round too), after the rounds of the
 /// queries before: every round of a query makes the same chunks, so a later round never reaches a
 /// stop, and the stop of the query's search is the plain error.
@@ -112,12 +113,7 @@ pub(super) fn batch_failure(
         error
     } else {
         // Before the batch's search: nothing of it read a header.
-        HeaderReadError {
-            query,
-            error,
-            utf8: None,
-        }
-        .into()
+        ErrorAfterBatchReports::of_batch(query, error).into()
     }
 }
 
@@ -143,7 +139,7 @@ fn setup_failure(error: anyhow::Error) -> anyhow::Error {
         Err(error) => error,
     };
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read) => crate::blastinput::app::engine_error(read.0),
+        Ok(read) => crate::blastinput::app::engine_error(read.as_bytes()),
         Err(error) => error,
     }
 }
@@ -172,7 +168,9 @@ impl SetupFailures {
         if database.is_some_and(BlastpDatabase::first_oid_read_fails) {
             return Self {
                 read_fails: Some(ReadFails::Setup),
-                read_error: Some(PreliminaryReadError("Database memory map file error").into()),
+                read_error: Some(
+                    PreliminaryReadError::from_static("Database memory map file error").into(),
+                ),
                 checks: Ok(()),
             };
         }
@@ -344,7 +342,7 @@ fn call_steps(
         match reaches {
             // A stop of the chunks (in its form).
             Err(error)
-                if error.is::<HeaderReadError>()
+                if error.is::<ErrorAfterBatchReports>()
                     || (args.psi_search.is_some() && !error.is::<SetupText>()) =>
             {
                 return Ok(CallSteps::Fails(error))
@@ -392,11 +390,11 @@ pub(super) fn first_batch_setup<'a>(
     (subject_source, subjects): (BlastpSubjectSource<'a>, &[EncodedProtein]),
     contexts: &[QueryContext],
     batches: CallBatches<'_>,
-    mut setup_error: impl FnMut(&str, &str) -> anyhow::Error,
+    mut setup_error: impl FnMut(&[u8], &str) -> anyhow::Error,
 ) -> Result<(bool, call_setup::BlastpDbExtent<'a>)> {
     let (args, database, skipped) = (call.args, subject_source.database(), batches.1);
     let reads = call_steps(call, subject_source, subjects, contexts, batches)?
-        .reads(|text| setup_error("", text))?;
+        .reads(|text| setup_error(b"", text))?;
     // A database without sequences (makeblastdb builds none; a volume whose index holds
     // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
     // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
@@ -423,7 +421,7 @@ pub(super) fn first_batch_setup<'a>(
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if call_setup::setup_fails(args, &extent, contexts)? {
         return Err(setup_error(
-            "",
+            b"",
             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
         ));
     }

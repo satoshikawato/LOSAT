@@ -95,7 +95,14 @@ const summaryParts = computed(() => {
   void state.value; // recompute with the draft
   // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
   const prints = props.draft.printsKind();
-  return prints === null ? searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)) : printSummaryParts(program.value, prints);
+  if (prints !== null) return printSummaryParts(program.value, prints);
+  const database =
+    state.value.subjectSource === 'database'
+      ? state.value.database.selected === undefined
+        ? {}
+        : { name: state.value.database.selected }
+      : undefined;
+  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database);
 });
 /**
  * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of
@@ -224,20 +231,22 @@ defineExpose({ focusRepeats });
         <!-- The screen wake lock, on unless turned off; the choice is shown on handheld devices, whose
              screens turn off by themselves and end the search (docs/web/ncbi_ui_mapping.md §4, DW-41). -->
         <template v-if="attentionState.wakeLock !== 'unsupported' && attentionState.handheld">
-          <label class="flag-label" :data-wake-lock="attentionState.wakeLock">
-            <input
-              type="checkbox"
-              :checked="attentionState.keepAwake"
-              data-testid="keep-awake"
-              @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+          <span class="control-tip">
+            <label class="flag-label" :data-wake-lock="attentionState.wakeLock">
+              <input
+                type="checkbox"
+                :checked="attentionState.keepAwake"
+                data-testid="keep-awake"
+                @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+              />
+              Keep searching while you're away
+            </label>
+            <HelpTip
+              id="keep-awake"
+              label="About keeping the search going"
+              text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
             />
-            Keep searching while you're away
-          </label>
-          <HelpTip
-            id="keep-awake"
-            label="About keeping the search going"
-            text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
-          />
+          </span>
           <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
             The browser did not keep the screen on: {{ attentionState.wakeLockError }}
           </span>

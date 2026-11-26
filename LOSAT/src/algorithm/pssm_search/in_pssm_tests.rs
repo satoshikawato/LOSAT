@@ -417,6 +417,7 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         archive: None,
         write_verification: None,
         out_pssm: false,
+        read_verification: None,
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -1053,8 +1054,9 @@ fn a_binary_query_whose_length_is_not_its_letters_is_refused() {
         };
         assert_eq!(
             error.to_string(),
-            "a PSSM query whose letters are missing or of another length than its Seq-inst is \
-             not supported by LOSAT's PSIBLAST"
+            "a PSSM query whose letters are missing or of another length than its Seq-inst \
+             (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one \
+             letter more than the Seq-inst's length) is not supported by LOSAT's PSIBLAST"
         );
     }
 }
@@ -1145,14 +1147,13 @@ fn a_binary_byte_block_past_the_end_is_reserved_as_ncbi_reserves_it() {
     assert_eq!(bit.result, base.result);
 }
 
-// Line RG D3c-3a: Karlin-Altschul values that are not finite numbers, in ASN.1 text and in its
-// binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY `09 01 41`,
-// NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each (probes
-// `D/d3/c3a/probe/realtext`, rows `db.ber.*.real_*`); LOSAT refuses where its search does not yet
-// compute NCBI's hits, E-values and bit scores, and searches where it does (gapped `kappa` and `h`
-// of PLUS-INFINITY; tblastn's `lambdaUngapped` of PLUS-INFINITY).
+// Line PS item PS7c: Karlin-Altschul values that are not finite numbers (or negative), in ASN.1 text
+// and in its binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY
+// `09 01 41`, NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each
+// (line RG D3c-3a probes, line PS `ps7c/` corpus) and so does LOSAT; the search itself is tested by
+// the fixtures (`*.ps7c.tsv`, `db.ber.*.real_*`).
 #[test]
-fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_compute_it() {
+fn a_karlin_altschul_value_that_is_not_finite_is_read_and_searched() {
     use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
     let tblastn = PssmReader {
         program: "TBLASTN",
@@ -1162,13 +1163,7 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         archive: None,
         write_verification: None,
         out_pssm: false,
-    };
-    let refusal = |kind: &str, name: &str, what: &str, program: &str| {
-        format!(
-            "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet \
-             compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) \
-             is not supported by LOSAT's {program}"
-        )
+        read_verification: None,
     };
     let search = |pssm: PssmWithParameters, reader: PssmReader<'static>| {
         psi_search_and_object(pssm, reader)
@@ -1187,84 +1182,160 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         let edited = format!("{}      {name} {value}{comma}{}", &base[..at], &base[end..]);
         read_pssm(edited.as_bytes()).result.unwrap()
     };
-    for (name, value, what) in [
-        ("lambda", "PLUS-INFINITY", "infinite"),
-        ("lambda", "NOT-A-NUMBER", "not a number"),
-        ("kappa", "NOT-A-NUMBER", "not a number"),
-        ("h", "NOT-A-NUMBER", "not a number"),
+    for name in [
+        "lambda",
+        "kappa",
+        "h",
+        "lambdaUngapped",
+        "kappaUngapped",
+        "hUngapped",
     ] {
-        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
-            assert_eq!(
-                search(text(name, value), reader),
-                Err(refusal("gapped", name, what, program)),
-                "{name} {value}"
-            );
+        for value in ["PLUS-INFINITY", "MINUS-INFINITY", "NOT-A-NUMBER", "-0.5"] {
+            for reader in [PssmReader::PSIBLAST, tblastn] {
+                assert_eq!(search(text(name, value), reader), Ok(()), "{name} {value}");
+            }
         }
     }
-    assert_eq!(
-        search(
-            text("lambdaUngapped", "PLUS-INFINITY"),
-            PssmReader::PSIBLAST
-        ),
-        Err(refusal(
-            "ungapped",
-            "lambdaUngapped",
-            "infinite",
-            "PSIBLAST"
-        ))
-    );
-    for (name, value) in [
-        ("kappa", "PLUS-INFINITY"),
-        ("h", "PLUS-INFINITY"),
-        ("kappaUngapped", "PLUS-INFINITY"),
-        ("hUngapped", "PLUS-INFINITY"),
-    ] {
-        assert_eq!(
-            search(text(name, value), PssmReader::PSIBLAST),
-            Ok(()),
-            "{name}"
-        );
-    }
-    assert_eq!(
-        search(text("lambdaUngapped", "PLUS-INFINITY"), tblastn),
-        Ok(())
-    );
-    // An ungapped value that is not a number makes NCBI's ungapped block invalid first: the
-    // engine's error of a query without Karlin-Altschul parameters, not this refusal.
-    let mut nan = text("lambda", "NOT-A-NUMBER");
-    let ungapped = text("lambdaUngapped", "NOT-A-NUMBER");
-    nan.pssm.final_data.as_mut().unwrap().lambda_ungapped =
-        ungapped.pssm.final_data.unwrap().lambda_ungapped;
-    assert_eq!(search(nan, PssmReader::PSIBLAST), Ok(()));
-    // The binary twins: the same values, the same answers; MINUS-INFINITY is negative.
     let binary = |name: &str| {
         read_pssm_binary(&fixture(&format!("pssm/ps9_ber_{name}.asnb")))
             .result
             .unwrap()
     };
-    for (name, what) in [
-        ("real_pinf", "infinite"),
-        ("real_inf_text", "infinite"),
-        ("real_nan", "not a number"),
+    for name in [
+        "real_pinf",
+        "real_inf_text",
+        "real_nan",
+        "real_ninf",
+        "real_negzero",
     ] {
-        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
-            assert_eq!(
-                search(binary(name), reader),
-                Err(refusal("gapped", "lambda", what, program)),
-                "{name}"
-            );
+        for reader in [PssmReader::PSIBLAST, tblastn] {
+            assert_eq!(search(binary(name), reader), Ok(()), "{name}");
         }
     }
+}
+
+// Line PS item PS7c: a query with one letter more than its Seq-inst's `length` is searched as its
+// first `length` letters (NCBI BLAST+ 2.17.0 sizes its buffer by the length: probe `ps7c/` s3,
+// valgrind clean); the PSSM object that the run writes keeps all the columns.
+#[test]
+fn a_query_with_one_letter_more_than_its_length_is_searched_as_its_first_letters() {
+    use crate::blastinput::pssm_text::read_pssm_binary;
+    let base = fixture("pssm/ps9_ber_base.asnb");
+    let length = b"\xa2\x80\x02\x01\x1e\x00\x00";
+    let at = base
+        .windows(length.len())
+        .position(|bytes| bytes == length)
+        .unwrap();
+    let bytes = [&base[..at + 2], b"\x02\x01\x1d", &base[at + 5..]].concat();
+    let read = read_pssm_binary(&bytes);
+    let (search, file) = psi_search_and_object(read.result.unwrap(), PssmReader::PSIBLAST)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(search.pssm.rows.len(), 29);
+    let full = read_pssm_binary(&base).result.unwrap();
+    assert_eq!(file.object.pssm.num_columns, full.pssm.num_columns);
+}
+
+// Line PS item PS7c (review S1, R3): a PSSM of frequency ratios only whose Seq-inst `length` is not
+// its letters. Without `length`, NCBI BLAST+ 2.17.0's `GetBlastSequence` stops with its query
+// set-up error (`Warning: Cannot get sequence length `, exit 3, valgrind clean) for both
+// ratios-only PSSMs (`scores_error`) and PSSMs with scores (`setup_error`). From one less than the
+// letters up (below 1 GiB) NCBI's PSSM engine stops with its error (probes s1: 29, 31, 32, 60,
+// 255, 1000 and 65,536 for 30 letters, valgrind clean for 29 and 1000); a shorter `length` writes
+// past NCBI's query buffer (valgrind: 27 and 28 of 30, 0 of 1; for 30 letters NCBI aborts on 0 and
+// 1), and a longer one asks for a buffer whose allocation depends on the host's memory: both
+// refused.
+#[test]
+fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_in_its_buffer() {
+    use crate::report::serial::pssm::{SeqData, SeqEntry};
+    let missing_length = crate::report::query_warnings::missing_length_error();
+    assert_eq!(missing_length, "Warning: Cannot get sequence length ");
+    let with_length = |length: Option<u32>| {
+        let mut pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps5_ratio30_noparams.asn.gz",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = pssm.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        assert_eq!(query.inst.length, Some(30));
+        query.inst.length = length;
+        psi_search_and_object(pssm, PssmReader::PSIBLAST)
+    };
+    let (search, file) = with_length(None).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(
-        search(binary("real_ninf"), PssmReader::PSIBLAST),
-        Err(
-            "a PSSM whose gapped Karlin-Altschul parameter lambda is negative (NCBI BLAST+ 2.17.0 \
-             goes on with a Karlin-Altschul block that it holds invalid) is not supported by \
-             LOSAT's PSIBLAST"
-                .to_string()
-        )
+        search.scores_error.as_deref(),
+        Some(missing_length.as_str())
     );
-    assert_eq!(search(binary("real_negzero"), PssmReader::PSIBLAST), Ok(()));
+    assert!(search.setup_error.is_none());
+    assert!(!file.valid);
+    for length in [29, 31, 32, 60, 255, 1000, 65_536] {
+        let (search, file) = with_length(Some(length)).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            search.scores_error.as_deref(),
+            Some(RATIOS_COLUMNS_ERROR),
+            "{length}"
+        );
+        assert!(!file.valid, "{length}");
+    }
+    for (length, words) in [
+        (Some(28), "at least two letters more"),
+        (Some(0), "at least two letters more"),
+        (Some(1 << 30), "depending on the host's memory"),
+        (Some(u32::MAX), "depending on the host's memory"),
+    ] {
+        let Err(error) = with_length(length) else {
+            panic!("{length:?}");
+        };
+        assert!(error.to_string().contains(words), "{length:?}: {error}");
+    }
+    // A 1-letter ratios-only PSSM with length 0 writes outside NCBI's query buffer under valgrind.
+    let mut one = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+        "pssm/ps5_ratio30_noparams.asn.gz",
+    ))
+    .unwrap();
+    one.pssm.num_columns = 1;
+    if let Some(data) = one.pssm.intermediate_data.as_mut() {
+        data.freq_ratios.truncate(one.pssm.num_rows as usize);
+    }
+    if let Some(SeqEntry::Seq(query)) = one.pssm.query.as_mut() {
+        query.inst.length = Some(0);
+        query.inst.seq_data = Some(SeqData::Ncbistdaa(vec![1]));
+    }
+    let Err(error) = psi_search_and_object(one, PssmReader::PSIBLAST) else {
+        panic!("1-letter ratios-only length 0");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("has length 0 (NCBI BLAST+ 2.17.0 writes outside its query buffer)"),
+        "{error}"
+    );
+    // A PSSM with scores whose Seq-inst has no length stops in query set-up (`setup_error`) in
+    // both psiblast and tblastn.
+    let tblastn = PssmReader {
+        program: "TBLASTN",
+        ..PssmReader::PSIBLAST
+    };
+    for reader in [PssmReader::PSIBLAST, tblastn] {
+        let mut scored = crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = scored.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        query.inst.length = None;
+        let (search, file) =
+            psi_search_and_object(scored, reader).unwrap_or_else(|error| panic!("{error}"));
+        assert!(search.scores_error.is_none(), "{}", reader.program);
+        assert_eq!(
+            search.setup_error.as_deref(),
+            Some(missing_length.as_str()),
+            "{}",
+            reader.program
+        );
+        assert!(file.valid, "{}", reader.program);
+    }
 }
 
 // D3c-3c review R1: under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off,

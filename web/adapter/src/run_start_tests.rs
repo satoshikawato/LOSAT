@@ -52,8 +52,8 @@ fn run_on(
     subject: &[u8],
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, false, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,
@@ -65,6 +65,37 @@ fn run_on(
     );
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
+    let mut streams = BTreeMap::new();
+    crate::emit::EMITTED.with(|emitted| {
+        for (stream, bytes) in emitted.borrow().iter() {
+            streams
+                .entry(*stream)
+                .or_insert_with(Vec::new)
+                .extend_from_slice(bytes);
+        }
+    });
+    (result.unwrap(), streams)
+}
+
+/// The result of `run` of a `-db` search `words` on the program's query fixture (`SEARCHES`,
+/// subject handle 0), and the bytes emitted on each stream.
+fn run_db_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
+    let (_, query, _) = SEARCHES
+        .iter()
+        .find(|(program, _, _)| *program == words[0])
+        .unwrap();
+    let program = Program::parse(words[0]).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, &input(query)).unwrap();
+    crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+    let result = crate::store::with_inputs(
+        program,
+        query,
+        0,
+        words,
+        Some(true),
+        |queries, end, subjects| run(words, queries, end, subjects),
+    );
+    crate::store::release(query).unwrap();
     let mut streams = BTreeMap::new();
     crate::emit::EMITTED.with(|emitted| {
         for (stream, bytes) in emitted.borrow().iter() {
@@ -255,23 +286,21 @@ fn the_logfile_is_a_file_of_the_run() {
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
         assert_eq!(run_of(&joined).1, logged, "{program}");
-        for name in [
-            "logs/run.log",
-            "./run.log",
-            "a/b/run.log",
-            "/tmp/run.log",
-            "/dev/stdout",
-            "logs/",
-            "run.log/",
-            "a/b/",
-            "/tmp/abs/run.log/",
-            " run.log",
-            "run.log ",
-            "/var/lock/run.log",
-            "/var/crash/run.log",
-            "/home/me/run.log",
-            "/etc/default/../../tmp/run.log",
-            "/run/user/1000/run.log",
+        for (name, expected_name) in [
+            ("./run.log", "run.log"),
+            ("/tmp/run.log", "/tmp/run.log"),
+            ("/dev/stdout", "/dev/stdout"),
+            ("logs/", "logs"),
+            ("run.log/", "run.log"),
+            ("/tmp/abs/run.log/", "/tmp/abs/run.log"),
+            (" run.log", "run.log"),
+            ("run.log ", "run.log"),
+            ("/var/lock/run.log", "/var/lock/run.log"),
+            ("/var/crash/run.log", "/var/crash/run.log"),
+            ("/home/me/run.log", "/home/me/run.log"),
+            ("/etc/default/../../tmp/run.log", "/tmp/run.log"),
+            ("/run/user/1000/run.log", "/run/user/1000/run.log"),
+            ("/proc/self/cwd/run.log", "run.log"),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -290,12 +319,23 @@ fn the_logfile_is_a_file_of_the_run() {
                     stream_text(&streams, STREAM_DIAGNOSTICS),
                     run_files(&streams)
                 ),
-                (stderr.clone(), Some(vec![(name.to_string(), file.clone())])),
+                (
+                    stderr.clone(),
+                    Some(vec![(expected_name.to_string(), file.clone())])
+                ),
                 "{program} {name}"
             );
             assert_eq!(messages_place(&streams), Some(place), "{program} {name}");
         }
+        // A relative name whose folder is absent in the run's directory (or is a directory of it)
+        // stays on stream 3 with no file (line WQA D19, cases 0 and 1).
         for (value, quiet) in [
+            ("logs/run.log", false),
+            ("a/b/run.log", false),
+            ("a/b/", false),
+            ("a/../run.log", false),
+            ("src", false),
+            ("src/", false),
             ("", to_log),
             ("/dev/null", to_log),
             ("//dev/null", to_log),
@@ -354,13 +394,24 @@ fn the_logfile_is_a_file_of_the_run() {
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
         // The command line opens the file of `-logfile` before it prints its help and its
-        // version: a name with a directory is that file, empty (line WQA's D14, 2026-11-21).
+        // version: a name in a folder present in the run's directory (`-query d/q.fa`) makes that
+        // file empty, while one in a missing folder makes none (line WQA's D14 and D19).
         for (word, kind) in [("-h", "help"), ("-version", "version")] {
-            let mut ending = argv(program, &[]);
-            ending.extend(["-logfile", "d/run.log", word]);
-            assert_eq!(prints(&ending), Some(kind), "{program} {word}");
-            validate(&ending).unwrap();
-            let (result, streams) = run_of(&ending);
+            let mut with_folder = vec![
+                program,
+                "-query",
+                "d/q.fa",
+                "-subject",
+                "s.fa",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d/run.log",
+                word,
+            ];
+            assert_eq!(prints(&with_folder), Some(kind), "{program} {word}");
+            validate(&with_folder).unwrap();
+            let (result, streams) = run_of(&with_folder);
             result.unwrap();
             assert!(
                 streams.contains_key(&crate::emit::STREAM_PRINTED),
@@ -371,6 +422,11 @@ fn the_logfile_is_a_file_of_the_run() {
                 Some(vec![("d/run.log".to_string(), String::new())]),
                 "{program} {word}"
             );
+            with_folder[2] = "q.fa";
+            validate(&with_folder).unwrap();
+            let (result, streams) = run_of(&with_folder);
+            result.unwrap();
+            assert_eq!(run_files(&streams), None, "{program} {word} missing folder");
         }
     }
 }
@@ -425,6 +481,1235 @@ fn an_argument_error_posts_to_the_runs_logfile() {
             "{program}: validate"
         );
     }
+}
+
+/// Registers the WindowMasker counts fixture `mg1655_u9.obinary` as kind 1 under `name`.
+fn register_counts(name: &str) -> u32 {
+    let counts_bytes = std::fs::read(format!(
+        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let handle = crate::files::begin(
+        crate::files::KIND_WINDOW_MASKER_COUNTS,
+        name,
+        counts_bytes.len(),
+    )
+    .unwrap();
+    crate::files::chunk(handle, &counts_bytes).unwrap();
+    crate::files::end(handle).unwrap();
+    handle
+}
+
+/// The search's file receiver sees `-query`, `-subject` (unless `-`), registered kind-2 registry
+/// files read by the run's start (`.ncbirc`, `-conffile`, `<program>.ini`), and registered kind-1
+/// `-window_masker_db` counts files (line WQA D19): their parent folders allow `-logfile`, the
+/// folders themselves stay on stream 3, and the files themselves are refused at both `validate`
+/// and `run`.
+#[test]
+fn the_search_receiver_reads_logfile_against_registered_files() {
+    let refusal = |program: &str, name: &str| {
+        format!(
+            "a -logfile file '{name}' that is a file of the run's directory (LOSAT Web reads the \
+             run's files and writes none of them) is not supported by LOSAT's {}",
+            program.to_ascii_uppercase()
+        )
+    };
+    // `-query in/q.fa` creates folder `in` and file `in/q.fa`; `-subject s.fa` creates `s.fa`.
+    let base = [
+        "tblastx",
+        "-query",
+        "in/q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    let warning = "Warning: [tblastx] Examining 5 or more matches is recommended\n";
+    let with_log = |name: &'static str| {
+        let mut w = base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    // Case 0 (folder present via `-query in/q.fa`): makes `in/run.log`.
+    validate(&with_log("in/run.log")).unwrap();
+    let (res, streams) = run_of(&with_log("in/run.log"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "");
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("in/run.log".to_string(), warning.to_string())])
+    );
+    // Case 1 (folder `in` itself): stays on stream 3, no file.
+    validate(&with_log("in")).unwrap();
+    let (res, streams) = run_of(&with_log("in"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), warning, "in");
+    assert_eq!(run_files(&streams), None);
+    // Case 2 (`in/q.fa`, `s.fa`, `./s.fa`, `in/../s.fa`): refused at validate and run.
+    for existing in ["in/q.fa", "s.fa", "./s.fa", "in/../s.fa"] {
+        let words = with_log(existing);
+        assert_eq!(validate(&words).unwrap_err(), refusal("tblastx", existing));
+        assert_eq!(run_of(&words).0.unwrap_err(), refusal("tblastx", existing));
+    }
+    // `-query -` is stdin, not a file of the run's folder.
+    validate(&[
+        "tblastx",
+        "-query",
+        "-",
+        "-subject",
+        "s.fa",
+        "-logfile",
+        "-",
+        "-num_threads",
+        "1",
+    ])
+    .unwrap();
+    // `-conffile sub/d19_conf.ini` (kind 2): creates folder `sub` and file `sub/d19_conf.ini`.
+    let _conf = Registered::new("sub/d19_conf.ini", b"[BLAST]\n");
+    let conf_base = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-conffile",
+        "sub/d19_conf.ini",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    let with_conf_log = |name: &'static str| {
+        let mut w = conf_base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    validate(&with_conf_log("sub/run.log")).unwrap();
+    let (res, streams) = run_of(&with_conf_log("sub/run.log"));
+    res.unwrap();
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("sub/run.log".to_string(), warning.to_string())])
+    );
+    let (res, streams) = run_of(&with_conf_log("sub"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), warning);
+    assert_eq!(run_files(&streams), None);
+    assert_eq!(
+        validate(&with_conf_log("sub/d19_conf.ini")).unwrap_err(),
+        refusal("tblastx", "sub/d19_conf.ini")
+    );
+    // BLASTN `-window_masker_db wm/d19.obinary` (kind 1): creates folder `wm` and file `wm/d19.obinary`.
+    let wm_handle = register_counts("wm/d19.obinary");
+    let wm_base = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_db",
+        "wm/d19.obinary",
+        "-num_threads",
+        "1",
+    ];
+    let with_wm_log = |name: &'static str| {
+        let mut w = wm_base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    validate(&with_wm_log("wm/run.log")).unwrap();
+    let (res, streams) = run_of(&with_wm_log("wm/run.log"));
+    res.unwrap();
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("wm/run.log".to_string(), String::new())])
+    );
+    let (res, streams) = run_of(&with_wm_log("wm"));
+    res.unwrap();
+    assert_eq!(run_files(&streams), None);
+    assert_eq!(
+        validate(&with_wm_log("wm/d19.obinary")).unwrap_err(),
+        refusal("blastn", "wm/d19.obinary")
+    );
+    crate::files::release(wm_handle).unwrap();
+
+    // Outside-cwd registered files (line WQA D19 round R1): every registered input whose resolved
+    // path `-logfile` opens is refused at both `validate` and `run`.
+    let outside_base = |q: &'static str, s: &'static str, log: &'static str| {
+        vec![
+            "tblastx",
+            "-query",
+            q,
+            "-subject",
+            s,
+            "-max_target_seqs",
+            "1",
+            "-num_threads",
+            "1",
+            "-logfile",
+            log,
+        ]
+    };
+    let assert_refused = |label: &str, program: &str, words: &[&str], named: &str| {
+        let want = refusal(program, named);
+        assert_eq!(validate(words).unwrap_err(), want, "{label}: validate");
+        assert_eq!(run_of(words).0.unwrap_err(), want, "{label}: run");
+    };
+    for (label, words, named) in [
+        (
+            "abs query",
+            outside_base("/tmp/q.fa", "s.fa", "/tmp/q.fa"),
+            "/tmp/q.fa",
+        ),
+        (
+            "up query",
+            outside_base("../q.fa", "s.fa", "../q.fa"),
+            "../q.fa",
+        ),
+        (
+            "up query normalized",
+            outside_base("../q.fa", "s.fa", "./../q.fa"),
+            "./../q.fa",
+        ),
+        (
+            "proc cwd up query",
+            outside_base("/proc/self/cwd/../q.fa", "s.fa", "../q.fa"),
+            "../q.fa",
+        ),
+        (
+            "abs subject",
+            outside_base("q.fa", "/tmp/s.fa", "/tmp/s.fa"),
+            "/tmp/s.fa",
+        ),
+        (
+            "home query",
+            outside_base("/home/me/q.fa", "s.fa", "/home/me/q.fa"),
+            "/home/me/q.fa",
+        ),
+        (
+            "tmp dotdot query",
+            outside_base("/tmp/q.fa", "s.fa", "/tmp/x/../q.fa"),
+            "/tmp/x/../q.fa",
+        ),
+        (
+            "data query",
+            outside_base("/data/q.fa", "s.fa", "/data/q.fa"),
+            "/data/q.fa",
+        ),
+    ] {
+        assert_refused(label, "tblastx", &words, named);
+    }
+    // Absolute registered `-conffile` (kind 2).
+    let _abs_conf = Registered::new("/tmp/d19_r1_abs.ini", b"[BLAST]\n");
+    let abs_conf_words = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-conffile",
+        "/tmp/d19_r1_abs.ini",
+        "-logfile",
+        "/tmp/d19_r1_abs.ini",
+    ];
+    assert_refused(
+        "abs conffile",
+        "tblastx",
+        &abs_conf_words,
+        "/tmp/d19_r1_abs.ini",
+    );
+    // Absolute registered `-window_masker_db` (kind 1).
+    let abs_wm_handle = register_counts("/tmp/d19_r1_abs.obinary");
+    let abs_wm_words = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_db",
+        "/tmp/d19_r1_abs.obinary",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "/tmp/d19_r1_abs.obinary",
+    ];
+    assert_refused(
+        "abs wmdb",
+        "blastn",
+        &abs_wm_words,
+        "/tmp/d19_r1_abs.obinary",
+    );
+    crate::files::release(abs_wm_handle).unwrap();
+    // Controls that must keep their present result:
+    // - `/tmp/run.log` with `-query /tmp/q.fa` and `../run.log` with `-query ../q.fa` make files;
+    // - `/data/run.log` with `-query /data/q.fa` stays on stream 3 (`/data` is outside
+    //   `user_makes`);
+    // - `/proc/self/cwd/../q.fa` with `-query ../q.fa` stays on stream 3 because NCBI's
+    //   `CDirEntry::ConvertToOSPath` lexically normalizes it to `/proc/self/q.fa` without
+    //   following symlinks, which fails to open in procfs.
+    for (q, log, want_file, want_diag) in [
+        ("/tmp/q.fa", "/tmp/run.log", Some("/tmp/run.log"), ""),
+        ("../q.fa", "../run.log", Some("../run.log"), ""),
+        ("/data/q.fa", "/data/run.log", None, warning),
+        ("../q.fa", "/proc/self/cwd/../q.fa", None, warning),
+    ] {
+        let ctrl = outside_base(q, "s.fa", log);
+        validate(&ctrl).unwrap();
+        let (res, streams) = run_of(&ctrl);
+        res.unwrap();
+        assert_eq!(
+            stream_text(&streams, STREAM_DIAGNOSTICS),
+            want_diag,
+            "{log}"
+        );
+        assert_eq!(
+            run_files(&streams),
+            want_file.map(|name| vec![(name.to_string(), warning.to_string())]),
+            "{log}"
+        );
+    }
+
+    // Round R2 finding 1: an option that takes a value (`-export_search_strategy`) whose value
+    // starts with `-` (`-query`, `-subject`) must not hide the real `-query`/`-subject` input.
+    let strat_query_log = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "q.fa",
+    ];
+    assert_refused(
+        "strategy=-query -logfile q.fa",
+        "tblastx",
+        &strat_query_log,
+        "q.fa",
+    );
+    let strat_subject_log = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-export_search_strategy",
+        "-subject",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "s.fa",
+    ];
+    assert_refused(
+        "strategy=-subject -logfile s.fa",
+        "tblastx",
+        &strat_subject_log,
+        "s.fa",
+    );
+    // Control (no `-logfile`): `-export_search_strategy -query` still runs and writes `-query`.
+    let strat_query_ctrl = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    validate(&strat_query_ctrl).unwrap();
+    let (res, streams) = run_of(&strat_query_ctrl);
+    res.unwrap();
+    let strat_files = run_files(&streams).expect("strategy file on stream 8");
+    assert_eq!(strat_files.len(), 1);
+    assert_eq!(strat_files[0].0, "-query");
+    assert!(strat_files[0].1.contains("Blast4-request"));
+
+    // Round R2 finding 2: `-db` list files accepted by LOSAT Web (`-gilist`, `-ipglist`,
+    // `-seqidlist`, `-taxidlist` and their negatives) are created and read back by the CLI when
+    // named by `-logfile` while missing, so LOSAT Web refuses them at `validate` and `run`,
+    // without making missing parent folders present.
+    let db_path = format!(
+        "{}/../../LOSAT/tests/windowmasker/db/wm",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    for (opt, missing) in [
+        ("-seqidlist", "d19-r2-miss-sl.txt"),
+        ("-negative_seqidlist", "d19-r2-miss-nsl.txt"),
+        ("-taxidlist", "d19-r2-miss-tl.txt"),
+        ("-negative_taxidlist", "d19-r2-miss-ntl.txt"),
+        ("-gilist", "d19-r2-miss-gl.txt"),
+        ("-negative_gilist", "d19-r2-miss-ngl.txt"),
+    ] {
+        let words = [
+            "blastn",
+            "-query",
+            "q.fa",
+            "-db",
+            &db_path,
+            opt,
+            missing,
+            "-num_threads",
+            "1",
+            "-logfile",
+            missing,
+        ];
+        let want = refusal("blastn", missing);
+        assert_eq!(validate(&words).unwrap_err(), want, "{opt}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{opt}: run");
+    }
+    // `-ipglist` and `-negative_ipglist` are options of the protein searches.
+    let protein_db = format!(
+        "{}/../../LOSAT/tests/db_search/acbs",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    for (opt, missing) in [
+        ("-ipglist", "d19-r2-miss-il.txt"),
+        ("-negative_ipglist", "d19-r2-miss-nil.txt"),
+    ] {
+        let words = [
+            "blastp",
+            "-query",
+            "q.fa",
+            "-db",
+            &protein_db,
+            opt,
+            missing,
+            "-num_threads",
+            "1",
+            "-logfile",
+            missing,
+        ];
+        let want = refusal("blastp", missing);
+        assert_eq!(validate(&words).unwrap_err(), want, "{opt}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{opt}: run");
+    }
+    // Missing parent folder of a missing list file must NOT become present.
+    let missing_list_dir = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        &db_path,
+        "-seqidlist",
+        "d19-r2-nosub/miss.txt",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "d19-r2-nosub/run.log",
+    ];
+    validate(&missing_list_dir).unwrap();
+    let (res, streams) = run_db_of(&missing_list_dir);
+    assert!(res.is_err(), "missing seqidlist fails search");
+    assert_eq!(run_files(&streams), None, "no log file in missing folder");
+
+    // D19b (item 2): database lookup files (`.nal`/`.nin`, `.pal`/`.pin`, `index.alx`,
+    // `-filtering_db`, multi-name `-db`, `taxdb.bti`) are refused at both `validate` and `run`
+    // without making missing parent folders present; control `-logfile run.log` returns hits.
+    let nucl_db = "../../LOSAT/tests/db_search/arch_tbx_snucl";
+    let nucl_nal = format!("{nucl_db}.nal");
+    let prot_db = "../../LOSAT/tests/db_search/arch_sprot";
+    let prot_pal = format!("{prot_db}.pal");
+    let multi_db = format!("{nucl_db} d19b-second-db");
+    for (label, program, words, named, is_db) in [
+        (
+            "nucl db -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-task",
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                nucl_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &nucl_nal,
+            ],
+            nucl_nal.as_str(),
+            true,
+        ),
+        (
+            "prot db -logfile .pal",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &prot_pal,
+            ],
+            prot_pal.as_str(),
+            true,
+        ),
+        (
+            "missing prot db -logfile .pin",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                "d19b-miss-prot",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d19b-miss-prot.pin",
+            ],
+            "d19b-miss-prot.pin",
+            true,
+        ),
+        (
+            "filtering_db -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-subject",
+                "s.fa",
+                "-filtering_db",
+                nucl_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &nucl_nal,
+            ],
+            nucl_nal.as_str(),
+            false,
+        ),
+        (
+            "multi -db second -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                &multi_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d19b-second-db.nal",
+            ],
+            "d19b-second-db.nal",
+            true,
+        ),
+        (
+            "db -logfile index.alx",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                "d19b-miss-nucl",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "index.alx",
+            ],
+            "index.alx",
+            true,
+        ),
+        (
+            "db -outfmt sscinames -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6 qseqid sseqid sscinames",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+        (
+            "db -outfmt 15 -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "15",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+        (
+            "db -outfmt 16 -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "16",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+        (
+            "db -outfmt 13 -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "13",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+        (
+            "db -outfmt 14 -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "14",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+        (
+            "subject -outfmt sscinames -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-subject",
+                "s.fa",
+                "-outfmt",
+                "6 qseqid sseqid sscinames",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            false,
+        ),
+    ] {
+        let want = refusal(program, named);
+        assert_eq!(validate(&words).unwrap_err(), want, "{label}: validate");
+        let run_err = if is_db {
+            run_db_of(&words).0.unwrap_err()
+        } else {
+            run_of(&words).0.unwrap_err()
+        };
+        assert_eq!(run_err, want, "{label}: run");
+    }
+    // Finding 1: formats that do not read `taxdb.bti` when absent (`-outfmt 6`, `0`, `5`,
+    // `6 ... staxids`, `6 ... ssciname`, `18`) pass `validate` and `run` with `-logfile taxdb.bti`
+    // and return the exact same hits as `-logfile run.log`.
+    let prot_ctrl = [
+        "blastp",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "run.log",
+    ];
+    let (ctrl_res, ctrl_streams) = run_db_of(&prot_ctrl);
+    ctrl_res.unwrap();
+    let prot_ctrl_hits = stream_text(&ctrl_streams, 6);
+    assert!(!prot_ctrl_hits.is_empty(), "prot db control returns hits");
+    for fmt in [
+        "6",
+        "0",
+        "5",
+        "6 qseqid sseqid staxids",
+        "6 qseqid sseqid ssciname",
+        "18",
+    ] {
+        let words = [
+            "blastp",
+            "-query",
+            "q.fa",
+            "-db",
+            prot_db,
+            "-outfmt",
+            fmt,
+            "-num_threads",
+            "1",
+            "-logfile",
+            "taxdb.bti",
+        ];
+        validate(&words).unwrap_or_else(|e| panic!("outfmt {fmt} validate: {e}"));
+        let (res, streams) = run_db_of(&words);
+        res.unwrap_or_else(|e| panic!("outfmt {fmt} run: {e}"));
+        assert_eq!(
+            stream_text(&streams, 6),
+            prot_ctrl_hits,
+            "outfmt {fmt} with -logfile taxdb.bti returns the same hits as CLI"
+        );
+    }
+    // Control: `-db` with `-logfile run.log` succeeds and returns hits.
+    let db_ctrl = [
+        "blastn",
+        "-task",
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        nucl_db,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "run.log",
+    ];
+    validate(&db_ctrl).unwrap();
+    let (res, streams) = run_db_of(&db_ctrl);
+    res.unwrap();
+    assert!(
+        !stream_text(&streams, 6).is_empty(),
+        "db control returns hits on outfmt 6"
+    );
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("run.log".to_string(), String::new())])
+    );
+    // Controls that CLI does NOT read back when the companion file is absent:
+    // `-logfile taxdb.btd` without `taxdb.bti`, and `-logfile taxonomy4blast.sqlite3` without one
+    // on the search path.
+    for (label, words) in [
+        (
+            "taxdb.btd without taxdb.bti",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6 qseqid sseqid sscinames",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.btd",
+            ],
+        ),
+        (
+            "taxonomy4blast.sqlite3 when absent",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-taxids",
+                "9606",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxonomy4blast.sqlite3",
+            ],
+        ),
+    ] {
+        validate(&words).unwrap();
+        let (res, _) = run_db_of(&words);
+        res.unwrap_or_else(|e| panic!("{label}: {e}"));
+    }
+    // Missing parent folder of a missing `-db` must NOT become present.
+    let missing_db_dir = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        "d19b-nosub/x",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "d19b-nosub/run.log",
+    ];
+    validate(&missing_db_dir).unwrap();
+    let (res, streams) = run_db_of(&missing_db_dir);
+    assert!(res.is_err(), "missing db fails search");
+    assert_eq!(run_files(&streams), None, "no log file in missing folder");
+
+    // Existing alias file (`DBLIST v1`) refuses `-logfile v1.nal`; existing `taxdb.bti` in a
+    // registry `BLASTDB` folder refuses its paired `taxdb.btd`; existing `taxonomy4blast.sqlite3`
+    // in a registry `BLASTDB` folder refuses `-logfile taxonomy4blast.sqlite3` when `-taxids`
+    // expands descendants.
+    struct CleanDir(std::path::PathBuf);
+    impl Drop for CleanDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let tmp_dir = std::env::temp_dir().join(format!("losat-d19b-search-{}", std::process::id()));
+    let _clean = CleanDir(tmp_dir.clone());
+    if tmp_dir.exists() {
+        std::fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    std::fs::write(tmp_dir.join("x.nal"), b"TITLE t\nDBLIST v1\n").unwrap();
+    std::fs::write(tmp_dir.join("taxdb.bti"), [0u8; 32]).unwrap();
+    let sqlite_fixture = format!(
+        "{}/../../LOSAT/tests/db_search/taxfilter/taxonomy4blast.sqlite3",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::copy(&sqlite_fixture, tmp_dir.join("taxonomy4blast.sqlite3")).unwrap();
+    let alias_db = tmp_dir.join("x");
+    let v1_nal = tmp_dir.join("v1.nal");
+    let alias_db_str = alias_db.to_str().unwrap();
+    let v1_nal_str = v1_nal.to_str().unwrap();
+    let alias_words = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        alias_db_str,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        v1_nal_str,
+    ];
+    assert_eq!(
+        validate(&alias_words).unwrap_err(),
+        refusal("blastn", v1_nal_str),
+        "alias sub-entry v1.nal: validate"
+    );
+    let blastdb_ini = format!("[BLAST]\nBLASTDB={}\n", tmp_dir.display());
+    let _tax_conf = Registered::new("d19b_tax_conf.ini", blastdb_ini.as_bytes());
+    let btd_path = tmp_dir.join("taxdb.btd");
+    let btd_str = btd_path.to_str().unwrap();
+    let btd_words = [
+        "blastp",
+        "-conffile",
+        "d19b_tax_conf.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-outfmt",
+        "6 qseqid sseqid sscinames",
+        "-num_threads",
+        "1",
+        "-logfile",
+        btd_str,
+    ];
+    assert_eq!(
+        validate(&btd_words).unwrap_err(),
+        refusal("blastp", btd_str),
+        "paired taxdb.btd when taxdb.bti exists: validate"
+    );
+    let sqlite_shadow_words = [
+        "blastp",
+        "-conffile",
+        "d19b_tax_conf.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-taxids",
+        "9605",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "taxonomy4blast.sqlite3",
+    ];
+    assert_eq!(
+        validate(&sqlite_shadow_words).unwrap_err(),
+        refusal("blastp", "taxonomy4blast.sqlite3"),
+        "taxonomy4blast.sqlite3 shadowing BLASTDB: validate"
+    );
+    // When `taxdb.bti` exists in BLASTDB, `-outfmt 18`, singular `-outfmt "6 ... ssciname"`, and
+    // default `-outfmt 6` (whose `saccver` column uses `GenerateDefline` on databases without
+    // `-parse_seqids`) refuse `-logfile taxdb.bti` (which would shadow BLASTDB's file), while a
+    // tabular format without subject id or taxonomy-name columns (`-outfmt "6 qseqid pident"`)
+    // passes.
+    for fmt in ["18", "6 qseqid sseqid ssciname", "6"] {
+        let shadow_bti = [
+            "blastp",
+            "-conffile",
+            "d19b_tax_conf.ini",
+            "-query",
+            "q.fa",
+            "-db",
+            prot_db,
+            "-outfmt",
+            fmt,
+            "-num_threads",
+            "1",
+            "-logfile",
+            "taxdb.bti",
+        ];
+        assert_eq!(
+            validate(&shadow_bti).unwrap_err(),
+            refusal("blastp", "taxdb.bti"),
+            "shadow taxdb.bti under BLASTDB for outfmt {fmt}: validate"
+        );
+        assert_eq!(
+            run_db_of(&shadow_bti).0.unwrap_err(),
+            refusal("blastp", "taxdb.bti"),
+            "shadow taxdb.bti under BLASTDB for outfmt {fmt}: run"
+        );
+    }
+    let no_tax_under_blastdb = [
+        "blastp",
+        "-conffile",
+        "d19b_tax_conf.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-outfmt",
+        "6 qseqid pident",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "taxdb.bti",
+    ];
+    validate(&no_tax_under_blastdb).unwrap();
+    run_db_of(&no_tax_under_blastdb)
+        .0
+        .expect("outfmt without subject id or tax names passes with taxdb in BLASTDB");
+
+    // Finding 2 (GXR R1 cases B and C):
+    // - Case B: alias in BLASTDB (`B/dbs/a.pal` with `DBLIST v1`, volume `B/dbs/v1.pin`),
+    //   `-db a -logfile v1.pin` is refused because `Resolver::expand` checks local copy `./v1.pin`
+    //   in cwd whenever `!skip_local`, regardless of whether the DBLIST entry has a directory.
+    // - Case C: alias `C/a.pal` with `DBLIST v1`, volume `C/dbs/v1.pin` found via BLASTDB,
+    //   `-db C/a -logfile C/dbs/v1.pal` is refused because `Resolver::expand` re-searches `v1`
+    //   through `SearchPath::find` (`.pal` before `.pin`).
+    std::fs::create_dir_all(tmp_dir.join("B/dbs")).unwrap();
+    std::fs::create_dir_all(tmp_dir.join("C/dbs")).unwrap();
+    std::fs::write(tmp_dir.join("B/dbs/a.pal"), b"TITLE a\nDBLIST v1\n").unwrap();
+    std::fs::write(tmp_dir.join("B/dbs/v1.pin"), b"x").unwrap();
+    std::fs::write(tmp_dir.join("C/a.pal"), b"TITLE a\nDBLIST v1\n").unwrap();
+    std::fs::write(tmp_dir.join("C/dbs/v1.pin"), b"x").unwrap();
+    let ini_b = format!("[BLAST]\nBLASTDB={}\n", tmp_dir.join("B/dbs").display());
+    let ini_c = format!("[BLAST]\nBLASTDB={}\n", tmp_dir.join("C/dbs").display());
+    let _rb = Registered::new("d19b_case_b.ini", ini_b.as_bytes());
+    let _rc = Registered::new("d19b_case_c.ini", ini_c.as_bytes());
+    let case_b_words = [
+        "blastp",
+        "-conffile",
+        "d19b_case_b.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        "a",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "v1.pin",
+    ];
+    assert_eq!(
+        validate(&case_b_words).unwrap_err(),
+        refusal("blastp", "v1.pin"),
+        "case B local copy v1.pin: validate"
+    );
+    assert_eq!(
+        run_db_of(&case_b_words).0.unwrap_err(),
+        refusal("blastp", "v1.pin"),
+        "case B local copy v1.pin: run"
+    );
+    let c_db = tmp_dir.join("C/a");
+    let c_log = tmp_dir.join("C/dbs/v1.pal");
+    let c_db_str = c_db.to_str().unwrap();
+    let c_log_str = c_log.to_str().unwrap();
+    let case_c_words = [
+        "blastp",
+        "-conffile",
+        "d19b_case_c.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        c_db_str,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        c_log_str,
+    ];
+    assert_eq!(
+        validate(&case_c_words).unwrap_err(),
+        refusal("blastp", c_log_str),
+        "case C search-path re-lookup C/dbs/v1.pal: validate"
+    );
+    assert_eq!(
+        run_db_of(&case_c_words).0.unwrap_err(),
+        refusal("blastp", c_log_str),
+        "case C search-path re-lookup C/dbs/v1.pal: run"
+    );
+}
+
+/// `registered_run_files` uses one reader regardless of whether the argv parses (line WQA D19
+/// round R1): the same argv with and without an unknown option and with `-h` yields the same
+/// registered names for blastn (with `-window_masker_taxid`), tblastx, and psiblast.
+#[test]
+fn registered_run_files_uses_one_reader_regardless_of_parse() {
+    let taxid_path = format!("{}/9606/wmasker.obinary", crate::files::WINDOW_MASKER_PATH);
+    let handle = register_counts(&taxid_path);
+    let registry = crate::files::registry_files();
+
+    let blastn_base = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+    ];
+    let blastn_bad = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+        "-no_such_option",
+    ];
+    let blastn_help = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+        "-h",
+    ];
+    let want_blastn = vec![
+        b"q.fa".to_vec(),
+        b"s.fa".to_vec(),
+        taxid_path.as_bytes().to_vec(),
+    ];
+    assert_eq!(registered_run_files(&blastn_base, &registry), want_blastn);
+    assert_eq!(registered_run_files(&blastn_bad, &registry), want_blastn);
+    assert_eq!(registered_run_files(&blastn_help, &registry), want_blastn);
+
+    let tblastx_base = ["tblastx", "-query", "q.fa", "-subject", "s.fa"];
+    let tblastx_bad = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let tblastx_help = ["tblastx", "-query", "q.fa", "-subject", "s.fa", "-h"];
+    let want_tblastx = vec![b"q.fa".to_vec(), b"s.fa".to_vec()];
+    assert_eq!(registered_run_files(&tblastx_base, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&tblastx_bad, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&tblastx_help, &registry), want_tblastx);
+
+    // Round R2 finding 1: value of `-export_search_strategy` named `-query` is skipped as its
+    // value, yielding `q.fa` and `s.fa` with and without an unknown option and with `-h`.
+    let strat_base = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+    ];
+    let strat_bad = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let strat_help = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-h",
+    ];
+    assert_eq!(registered_run_files(&strat_base, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&strat_bad, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&strat_help, &registry), want_tblastx);
+
+    let psiblast_base = ["psiblast", "-query", "q.fa", "-subject", "s.fa"];
+    let psiblast_bad = [
+        "psiblast",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let psiblast_help = ["psiblast", "-query", "q.fa", "-subject", "s.fa", "-h"];
+    let want_psiblast: Vec<Vec<u8>> = Vec::new();
+    assert_eq!(
+        registered_run_files(&psiblast_base, &registry),
+        want_psiblast
+    );
+    assert_eq!(
+        registered_run_files(&psiblast_bad, &registry),
+        want_psiblast
+    );
+    assert_eq!(
+        registered_run_files(&psiblast_help, &registry),
+        want_psiblast
+    );
+
+    crate::files::release(handle).unwrap();
+}
+
+/// `-logfile out/x.asn -export_search_strategy out/x.asn` without folder `out` (line WQA D19 round
+/// R1): `-logfile` stays on stderr (`Unopened`), so `-export_search_strategy out/x.asn` is not
+/// refused as the file of `-logfile` and writes the strategy file on stream 8; with folder `out`
+/// present, `-logfile` opens `out/x.asn` and the strategy is refused.
+#[test]
+fn strategy_target_sees_runs_files_for_logfile() {
+    let words = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "out/x.asn",
+        "-export_search_strategy",
+        "out/x.asn",
+    ];
+    validate(&words).unwrap();
+    let (res, streams) = run_of(&words);
+    res.unwrap();
+    let diag = stream_text(&streams, STREAM_DIAGNOSTICS);
+    assert_eq!(
+        diag,
+        "Warning: [tblastx] Examining 5 or more matches is recommended\n"
+    );
+    let files = run_files(&streams).expect("strategy file on stream 8");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, "out/x.asn");
+    assert!(files[0].1.contains("Blast4-request"), "{}", files[0].1);
+
+    // With folder `out` present via a registered `-conffile out/d19_r1_strat.ini`, `-logfile
+    // out/x.asn` opens a file, so `-export_search_strategy out/x.asn` is refused.
+    let _conf = Registered::new("out/d19_r1_strat.ini", b"[BLAST]\n");
+    let with_folder = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-conffile",
+        "out/d19_r1_strat.ini",
+        "-logfile",
+        "out/x.asn",
+        "-export_search_strategy",
+        "out/x.asn",
+    ];
+    validate(&with_folder).unwrap();
+    let (res, _streams) = run_of(&with_folder);
+    assert_eq!(
+        res.unwrap_err(),
+        "-export_search_strategy out/x.asn (the file of -logfile too, whose bytes the command \
+         line's strategy file replaces or mixes with its own) is not supported in the browser; \
+         give a file name of the run's own"
+    );
 }
 
 /// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after
@@ -562,7 +1847,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -575,7 +1860,25 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","log_file_name":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    // `log_file` keeps NCBI's scan of the argv; `log_file_name` is the normalized host file name
+    // under which a run gives the file on stream 8 (line WQA D19, case 4).
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "logs/"]).unwrap(),
+        r#"{"conffile":null,"log_file":"logs/","log_file_name":"logs","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "./run.log"]).unwrap(),
+        r#"{"conffile":null,"log_file":"./run.log","log_file_name":"run.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "-"]).unwrap(),
+        r#"{"conffile":null,"log_file":"-","log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "/dev/stdout"]).unwrap(),
+        r#"{"conffile":null,"log_file":"/dev/stdout","log_file_name":"/dev/stdout","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // The name of the search strategy file, under which a run gives it (line RG item F1w).
     assert_eq!(
@@ -587,12 +1890,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "run.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"run.log","log_file_name":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // A run that prints the command line's text (line WQA's D14, 2026-11-20): a version word, read
     // before the arguments and the configuration (no `-conffile` to register, not a dry run), or a
@@ -608,20 +1911,20 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "v.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
+        r#"{"conffile":null,"log_file":"v.log","log_file_name":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
     );
     assert_eq!(
         start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
-        r#"{"conffile":"c.ini","log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":"c.ini","log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     assert_eq!(
         start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     // The words before a help word are read first: an error there is the run's.
     assert_eq!(
         start_json(&["blastp", "-evalue", "x", "-help"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&["psiblast"]).unwrap_err(),

@@ -38,7 +38,7 @@ fn search_masked(
     two_hits: u64,
     masks: &[(u32, Vec<(u32, u32)>)],
 ) -> VolumeSeeds {
-    let path = test_volume(&format!("search{word_size}-{two_hits}"), fasta, options);
+    let (_dir, path) = test_volume(&format!("search{word_size}-{two_hits}"), fasta, options);
     let volume = IndexVolume::open(&path).unwrap();
     let query = blastna(query);
     search(
@@ -288,7 +288,7 @@ fn an_empty_sequence_checks_every_chunk_as_ncbi() {
 #[test]
 fn an_oid_is_located_in_its_volume() {
     let volume = |start_oid, n_oids| IndexedVolume {
-        path: String::new(),
+        path: Vec::new(),
         start_oid,
         n_oids,
         has_index: true,
@@ -403,7 +403,7 @@ fn any_round_limit_and_thread_count_give_the_same_seeds() {
         .enumerate()
         .map(|(k, s)| format!(">s{k}\n{s}\n"))
         .collect();
-    let path = test_volume("rounds", &fasta, &options);
+    let (_dir, path) = test_volume("rounds", &fasta, &options);
     let volume = IndexVolume::open(&path).unwrap();
     assert!(volume.lid_map().len() / 4 >= 3);
     let mut letters = String::new();

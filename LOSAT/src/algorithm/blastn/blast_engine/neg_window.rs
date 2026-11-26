@@ -85,7 +85,7 @@ enum Body {
 
 /// Where the steps of a batch of offset pairs of a two-stage table go
 /// (`pair_extend::extend_offset_pairs`), as the search chose once for its word finder
-/// (`prelim_subject::prelim_chunk_hits`' `NEG`): `()` for a window of 0 or more, whose steps are
+/// (`prelim_subject::SpecialFinders::neg_window`): `()` for a window of 0 or more, whose steps are
 /// `pair_extend`'s own with nothing tested (the default path's code), or the table of a window
 /// below 0 (`&mut NegTable`), whose steps are this module's.
 pub(super) trait NegSteps {
@@ -519,9 +519,14 @@ fn scan_na_lookup(
 /// a chunk shorter than the word, which has no scan). The chunk's HSP list is the other word
 /// finders' (`prelim_subject::chunk_hsp_list`).
 ///
+/// Kept out of its one caller, `prelim_chunk_hits`, whose other chunks run the default word
+/// finders: a window below 0 is only an imported search strategy's.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`) and
 /// c++/src/algo/blast/core/na_ungapped.c:1597-1695
+#[cold]
+#[inline(never)]
 pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
@@ -614,9 +619,6 @@ pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500,560-563
-    if let Some(index) = batch.mb_index {
-        index.note_scanned_hits(subject.s_idx as u32, subject_scratch.ungapped_hits.len());
-    }
     let chunk_prelim_hits = chunk_hsp_list::<UNGAPPED>(
         batch,
         subject,

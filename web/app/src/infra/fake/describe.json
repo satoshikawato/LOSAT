@@ -41,8 +41,18 @@
     "takes_value": true
    },
    {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
     "flag": "-seqidlist",
     "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
     "takes_value": true
    },
    {
@@ -496,8 +506,18 @@
     "takes_value": true
    },
    {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
     "flag": "-seqidlist",
     "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
     "takes_value": true
    },
    {
@@ -529,6 +549,16 @@
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
     "takes_value": false
+   },
+   {
+    "flag": "-ipglist",
+    "help": "Restrict search of database to list of IPGs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_ipglist",
+    "help": "Restrict search of database to everything except the specified IPGs",
+    "takes_value": true
    },
    {
     "flag": "-db_soft_mask",
@@ -1110,8 +1140,18 @@
     "takes_value": true
    },
    {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
     "flag": "-seqidlist",
     "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
     "takes_value": true
    },
    {
@@ -1143,6 +1183,16 @@
     "flag": "-no_taxid_expansion",
     "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
     "takes_value": false
+   },
+   {
+    "flag": "-ipglist",
+    "help": "Restrict search of database to list of IPGs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_ipglist",
+    "help": "Restrict search of database to everything except the specified IPGs",
+    "takes_value": true
    },
    {
     "flag": "-db_soft_mask",
@@ -1672,8 +1722,18 @@
     "takes_value": true
    },
    {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
     "flag": "-seqidlist",
     "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
     "takes_value": true
    },
    {
@@ -2230,8 +2290,18 @@
     "takes_value": true
    },
    {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
     "flag": "-seqidlist",
     "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
     "takes_value": true
    },
    {

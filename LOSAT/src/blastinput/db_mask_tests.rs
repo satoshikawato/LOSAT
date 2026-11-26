@@ -24,14 +24,14 @@ fn open(names: &[PathBuf]) -> (SeqDb, String) {
         .collect::<Vec<_>>()
         .join(" ");
     let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
-    db.read_name_records(&name, true).unwrap();
+    db.read_name_records(name.as_bytes(), true).unwrap();
     (db, name)
 }
 
 fn soft(text: &str) -> DbMaskOption {
     DbMaskOption {
         kind: MaskKind::Soft,
-        algorithm: FilteringAlgorithm::parse(text),
+        algorithm: FilteringAlgorithm::parse(text.as_bytes()),
     }
 }
 
@@ -54,7 +54,7 @@ fn resolve(
     name: &str,
 ) -> (Result<Option<ResolvedMask>>, String) {
     let mut warnings = Vec::new();
-    let resolved = option.resolve(db, name, "BLASTN", "blastn", &mut |text| {
+    let resolved = option.resolve(db, name.as_bytes(), "BLASTN", "blastn", &mut |text| {
         warnings.extend_from_slice(text);
         Ok(())
     });
@@ -74,15 +74,15 @@ fn an_int4_in_ncbi_s_form_is_an_id_and_any_other_text_a_name() {
         ("-5", -5),
     ] {
         assert_eq!(
-            FilteringAlgorithm::parse(text),
+            FilteringAlgorithm::parse(text.as_bytes()),
             FilteringAlgorithm::Id(id),
             "{text:?}"
         );
     }
     for text in [" 11", "11 ", "11x", "", "2147483648", "dust", "-"] {
         assert_eq!(
-            FilteringAlgorithm::parse(text),
-            FilteringAlgorithm::Name(text.to_string()),
+            FilteringAlgorithm::parse(text.as_bytes()),
+            FilteringAlgorithm::Name(text.as_bytes().to_vec()),
             "{text:?}"
         );
     }
@@ -92,19 +92,19 @@ fn an_int4_in_ncbi_s_form_is_an_id_and_any_other_text_a_name() {
 #[test]
 fn the_soft_option_comes_first() {
     let args = DbMaskArgs {
-        db_soft_mask: Some("dust".to_string()),
-        db_hard_mask: Some("11".to_string()),
+        db_soft_mask: Some(std::ffi::OsString::from("dust")),
+        db_hard_mask: Some(std::ffi::OsString::from("11")),
     };
     assert_eq!(
         args.option(),
         Some(DbMaskOption {
             kind: MaskKind::Soft,
-            algorithm: FilteringAlgorithm::Name("dust".to_string()),
+            algorithm: FilteringAlgorithm::Name(b"dust".to_vec()),
         })
     );
     let args = DbMaskArgs {
         db_soft_mask: None,
-        db_hard_mask: Some("+30".to_string()),
+        db_hard_mask: Some(std::ffi::OsString::from("+30")),
     };
     assert_eq!(
         args.option(),
@@ -123,12 +123,12 @@ fn an_id_above_0_must_be_the_database_s() {
     let (a5, a5_name) = open(&[dbmask("a5")]);
     for text in ["11", "+12", "30", "dust", "0", "-1", "-5", "99x"] {
         soft(text)
-            .validate_at_open(&a5, &a5_name, true, "BLASTN")
+            .validate_at_open(&a5, a5_name.as_bytes(), true, "BLASTN")
             .unwrap_or_else(|error| panic!("{text}: {error:#}"));
     }
     for (text, id) in [("99", 99), ("10", 10)] {
         assert_eq!(
-            native(soft(text).validate_at_open(&a5, "db/a5", true, "BLASTN")),
+            native(soft(text).validate_at_open(&a5, b"db/a5", true, "BLASTN")),
             (
                 1,
                 format!("LOSAT options error: Masking algorithm ID {id} is not supported in nucleotide 'db/a5' BLAST database\n")
@@ -137,7 +137,7 @@ fn an_id_above_0_must_be_the_database_s() {
     }
     let (nm5, _) = open(&[dbmask("nm5")]);
     assert_eq!(
-        native(soft("11").validate_at_open(&nm5, "db/nm5", true, "BLASTN")),
+        native(soft("11").validate_at_open(&nm5, b"db/nm5", true, "BLASTN")),
         (
             1,
             "LOSAT options error: Masking algorithm ID 11 is not supported in nucleotide 'db/nm5' BLAST database\n"
@@ -166,7 +166,7 @@ fn a_name_is_the_stored_description_or_the_mask_id() {
     assert_eq!(warning, "");
     assert_eq!(
         (resolved.id, resolved.key.as_deref()),
-        (11, Some("10:window=64; level=20; linker=1"))
+        (11, Some(b"10:window=64; level=20; linker=1".as_slice()))
     );
     assert_eq!(resolved.shown.len(), 1);
     assert_eq!(
@@ -189,9 +189,9 @@ fn a_name_is_the_stored_description_or_the_mask_id() {
 
     let (k5, k5_name) = open(&[dbmask("k5")]);
     for (text, id, key) in [
-        ("mydust", 100, Some("mydust")),
+        ("mydust", 100, Some(b"mydust".as_slice())),
         ("100", 100, None),
-        ("mywm", 101, Some("mywm")),
+        ("mywm", 101, Some(b"mywm".as_slice())),
     ] {
         let (resolved, warning) = resolve(&soft(text), &k5, &k5_name);
         let resolved = resolved.unwrap().unwrap();
@@ -325,14 +325,14 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
             ("SubjectMaskingType", ParamValue::Integer(1)),
         ]
     );
-    mask.key = Some("mydust".to_string());
+    mask.key = Some(b"mydust".to_vec());
     mask.kind = MaskKind::Hard;
     assert_eq!(
         params(&mask),
         [
             (
                 "DbFilteringAlgorithmKey",
-                ParamValue::Str("mydust".to_string())
+                ParamValue::Str(b"mydust".to_vec())
             ),
             ("SubjectMaskingType", ParamValue::Integer(2)),
         ]
@@ -613,7 +613,7 @@ fn open_listed(names: &[PathBuf], ids: &[&str]) -> (SeqDb, String) {
     });
     let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
     db.restrict(&list, &mut Vec::new()).unwrap();
-    db.read_name_records(&name, true).unwrap();
+    db.read_name_records(name.as_bytes(), true).unwrap();
     (db, name)
 }
 
@@ -699,7 +699,7 @@ fn each_name_s_masked_using_line_comes_from_its_own_record() {
     );
     // Records read without the tables (another program's search) have none to give.
     let mut plain = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
-    plain.read_name_records(&name, false).unwrap();
+    plain.read_name_records(name.as_bytes(), false).unwrap();
     assert!(matches!(
         plain.name_mask_details(11),
         Err(crate::seqdb::NameMaskError::NotRead)
@@ -754,7 +754,11 @@ fn shape_of(
 #[test]
 fn translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;
-    let scan = HardScan::Translated { min_length: 17 };
+    let scan = HardScan::Translated {
+        word: 5,
+        window: 40,
+        zero_words: false,
+    };
     let shape = |masks: &[(u32, u32)], length: usize| {
         HardMaskShape::of_scan(masks, None, &|| Some(length), scan, None).unwrap()
     };
@@ -904,20 +908,10 @@ fn protein_shapes_of_the_hard_masks() {
             length: 100
         })
     );
-    // A hard range longer than NCBI's chunks.
+    // A hard range longer than NCBI's chunks (MAX_DBSEQ_LEN): searched in overlapping chunks and
+    // merged across their overlap (series NP, M4b-3d).
     let long = crate::core::subject_split::MAX_DBSEQ_LEN + 100;
-    let shape = of(&[(10, 20)], long, protein);
-    assert_eq!(
-        shape,
-        Some(HardMaskShape::LongRange {
-            left: 20,
-            right: long as i32
-        })
-    );
-    assert!(shape
-        .unwrap()
-        .text()
-        .contains("longer than the 5,000,000 letters"));
+    assert_eq!(of(&[(10, 20)], long, protein), None);
     // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
     assert_eq!(
         of(
@@ -930,13 +924,13 @@ fn protein_shapes_of_the_hard_masks() {
 }
 
 /// `HardMaskShape::of_scan` of the protein programs on masks that overlap or nest, or are out of
-/// the order of their start (series NP, M4b-3b; the masks of probe 2 of M/m4b3b/NOTES_M4B3B.md, a
-/// sequence of 240 letters, word 3): searched also where the walk of the chunks' diagonal offsets
-/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 29: the search's
-/// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
-/// change a result; `PartsOutOfOrder` where a chunk that can hold
-/// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
-/// starts; in the other programs `Unsorted` for every overlap, as before.
+/// the order of their start (series NP, M4b-3b/M4b-3d; the masks of probe 2 of
+/// M/m4b3b/NOTES_M4B3B.md, a sequence of 240 letters, word 3): searched also where the walk of
+/// the chunks' diagonal offsets leaves the sequence (each sequence on its own,
+/// PD-LOSAT-NCBI-DEFECTS exception 29: the search's `DiagonalWalk::start`), `WordPastEnd` where a
+/// short chunk's one word read past the sentinel can change a result, and `Inverted` for a mask
+/// that ends before it starts; overlapping out-of-order parts are searched and merged across
+/// their overlap; in BLASTN `Unsorted` for every overlap, as before.
 #[test]
 fn protein_shapes_of_overlapping_masks() {
     let two_hit = HardScan::Protein {
@@ -1000,26 +994,45 @@ fn protein_shapes_of_overlapping_masks() {
     let short = [(50, 100), (102, 200), (60, 101)];
     assert_eq!(of(&short, 300, two_hit), None);
     assert_eq!(of(&short, 300, one_hit), None);
-    // A chunk that can hold alignments before the end of an earlier one: the part after
-    // [100, 130) starts before the end of the part before [250, 280) (the chunk between them is
-    // inverted, so the masks name both); an empty mask at 0 after a mask, whose chunk then starts
-    // at 0.
-    let parts = |before, mask| Some(HardMaskShape::PartsOutOfOrder { before, mask });
-    let shape = of(&[(250, 280), (100, 130)], 300, two_hit);
-    assert_eq!(shape, parts((250, 280), (100, 130)));
+    // Masks out of order whose final range starts before an earlier range's end: NCBI reads the
+    // merge overlap one slot past `hard_ranges` (blast_engine.c:579-580), so LOSAT refuses it
+    // (`LastRangeOverlap`, matching BLASTN's B-d boundary). Out-of-order merges in middle ranges
+    // and merges within a final range longer than `MAX_DBSEQ_LEN` are searched.
+    let last_overlap = HardMaskShape::LastRangeOverlap {
+        before: (250, 280),
+        mask: (100, 130),
+    };
     assert_eq!(
-        shape.unwrap().text(),
-        "has masks out of order ([100, 130) after [250, 280)): its part after [100, 130) starts \
-         before the end of its part before [250, 280), and NCBI BLAST+ 2.17.0 joins the two parts' \
-         alignments by a merge across that overlap, which LOSAT does not do yet"
+        of(&[(250, 280), (100, 130)], 300, two_hit),
+        Some(last_overlap)
     );
     assert_eq!(
         of(&[(250, 280), (100, 130)], 300, one_hit),
-        parts((250, 280), (100, 130))
+        Some(last_overlap)
+    );
+    assert!(last_overlap
+        .text()
+        .contains("merges alignments across an overlap read past its list of ranges"));
+    // Middle-range out-of-order merge (final mask at [260, 270) starts past earlier ends): allowed.
+    assert_eq!(
+        of(&[(250, 280), (100, 130), (260, 270)], 300, two_hit),
+        None
     );
     assert_eq!(
-        of(&[(50, 60), (0, 0), (100, 300)], 300, two_hit),
-        parts((50, 60), (0, 0))
+        of(&[(250, 280), (100, 130), (260, 270)], 300, one_hit),
+        None
+    );
+    assert_eq!(of(&[(50, 60), (0, 0), (100, 300)], 300, two_hit), None);
+    // Final range longer than MAX_DBSEQ_LEN merges within its own range with DBSEQ_CHUNK_OVERLAP.
+    assert_eq!(of(&[(10, 20)], 5_000_300, two_hit), None);
+    assert_eq!(of(&[(10, 20)], 5_000_300, one_hit), None);
+    // Final chunk of a >5M final range that still overlaps an earlier range: refused.
+    assert_eq!(
+        of(&[(5_500_000, 5_500_100), (10, 20)], 6_000_000, two_hit),
+        Some(HardMaskShape::LastRangeOverlap {
+            before: (5_500_000, 5_500_100),
+            mask: (10, 20),
+        })
     );
     // A mask that ends before it starts.
     let inverted = of(&[(50, 40)], 300, one_hit);
@@ -1031,20 +1044,28 @@ fn protein_shapes_of_overlapping_masks() {
         inverted.unwrap().text(),
         "has a mask, [50, 40), that ends before it starts, which makeblastdb does not write"
     );
-    // BLASTN and the translated programs refuse every overlap and every mask out of order.
+    // BLASTN refuses every overlap and every mask out of order; translated programs search
+    // overlapping masks in start order and keep refusing masks out of start order or inverted.
     let unsorted = |before, mask| Some(HardMaskShape::Unsorted { before, mask });
     let blastn = HardScan::Nucleotide { scanned_word: 11 };
-    let translated = HardScan::Translated { min_length: 11 };
-    for scan in [blastn, translated] {
-        assert_eq!(
-            of(&[(40, 60), (55, 70)], 240, scan),
-            unsorted((40, 60), (55, 70))
-        );
-        assert_eq!(
-            of(&[(250, 280), (100, 130)], 300, scan),
-            unsorted((250, 280), (100, 130))
-        );
-    }
+    let translated = HardScan::Translated {
+        word: 3,
+        window: 40,
+        zero_words: false,
+    };
+    assert_eq!(
+        of(&[(40, 60), (55, 70)], 240, blastn),
+        unsorted((40, 60), (55, 70))
+    );
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, blastn),
+        unsorted((250, 280), (100, 130))
+    );
+    assert_eq!(of(&[(40, 60), (55, 70)], 240, translated), None);
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, translated),
+        unsorted((250, 280), (100, 130))
+    );
 }
 
 /// The start of a sequence among the searched ones (`NcbiStart`, `None`: after the others): a
@@ -1139,7 +1160,7 @@ fn protein_shapes_of_random_masks() {
         HardMaskShape::of_scan(masks, Some((length, length)), &|| None, scan, None).unwrap()
     };
     let (mut cases, mut refused) = (0, 0);
-    let (mut out_of_order, mut searched, mut parts) = (0, 0, 0);
+    let (mut out_of_order, mut searched) = (0, 0);
     for _ in 0..20_000 {
         let window = [0, 1, 40, 100][next(4) as usize];
         let scan = HardScan::Protein {
@@ -1184,12 +1205,113 @@ fn protein_shapes_of_random_masks() {
         if masks.windows(2).any(|pair| pair[1].0 < pair[0].0) {
             out_of_order += 1;
             searched += usize::from(found.is_none());
-            parts += usize::from(matches!(found, Some(HardMaskShape::PartsOutOfOrder { .. })));
         }
     }
     assert!(cases == 20_000 && refused > 50, "{cases} {refused}");
     assert!(
-        out_of_order > 1_000 && searched > 500 && parts > 100,
-        "{out_of_order} {searched} {parts}"
+        out_of_order > 1_000 && searched > 500,
+        "{out_of_order} {searched}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 805-830
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
+/// `HardMaskShape::of_scan`, `translated_walked`, and the new refusal shape for
+/// `HardScan::Translated` (series NP, M4b-3c part 2): masks that overlap or nest in start order
+/// (and equal starts) are accepted, out-of-start-order and inverted masks stay refused as
+/// `Unsorted`, `PastEnd` checks every mask's end (not only the last), BLASTN still refuses every
+/// overlap, and `translated_walked` marks sequences with a negative frame chunk.
+#[test]
+fn translated_overlapping_masks_narrowed_and_walked() {
+    let translated = HardScan::Translated {
+        word: 3,
+        window: 40,
+        zero_words: false,
+    };
+    let blastn = HardScan::Nucleotide { scanned_word: 11 };
+    let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
+        HardMaskShape::of_scan(masks, None, &|| Some(length), scan, None).unwrap()
+    };
+
+    // Overlapping, nested, and equal-start masks in start order are accepted for translated scans.
+    assert_eq!(of(&[(120, 180), (165, 240)], 720, translated), None);
+    assert_eq!(of(&[(120, 600), (180, 300)], 720, translated), None);
+    assert_eq!(of(&[(120, 300), (120, 200)], 720, translated), None);
+    assert_eq!(of(&[(120, 200), (120, 300)], 720, translated), None);
+
+    // BLASTN keeps refusing every overlap.
+    assert_eq!(
+        of(&[(120, 180), (165, 240)], 720, blastn),
+        Some(HardMaskShape::Unsorted {
+            before: (120, 180),
+            mask: (165, 240),
+        })
+    );
+
+    // Out-of-start-order and inverted masks stay refused as `Unsorted`.
+    assert_eq!(
+        of(&[(300, 360), (120, 180)], 720, translated),
+        Some(HardMaskShape::Unsorted {
+            before: (300, 360),
+            mask: (120, 180),
+        })
+    );
+    assert_eq!(
+        of(&[(180, 120)], 720, translated),
+        Some(HardMaskShape::Unsorted {
+            before: (180, 120),
+            mask: (180, 120),
+        })
+    );
+
+    // `PastEnd` checks every mask's end (not only the last, which may nest inside an earlier one).
+    assert_eq!(
+        of(&[(120, 800), (180, 300)], 720, translated),
+        Some(HardMaskShape::PastEnd {
+            start: 120,
+            end: 800,
+            length: 720,
+        })
+    );
+    let reads = std::cell::Cell::new(0);
+    let read_len = || {
+        reads.set(reads.get() + 1);
+        Some(720)
+    };
+    assert_eq!(
+        HardMaskShape::of_scan(
+            &[(120, 800), (180, 300)],
+            Some((717, 720)),
+            &read_len,
+            translated,
+            None,
+        ),
+        Ok(Some(HardMaskShape::PastEnd {
+            start: 120,
+            end: 800,
+            length: 720,
+        }))
+    );
+    assert_eq!(reads.get(), 1);
+
+    // `translated_walked` marks negative frame chunks (previous mask end / 3 above next start / 3).
+    assert!(!translated_walked(&[]));
+    assert!(!translated_walked(&[(120, 180)]));
+    assert!(!translated_walked(&[(120, 180), (180, 240)]));
+    assert!(!translated_walked(&[(120, 182), (180, 240)]));
+    assert!(translated_walked(&[(120, 183), (180, 240)]));
+    assert!(translated_walked(&[(120, 600), (180, 300)]));
+
+    // Refusal message for `NoChunkingWithOverlaps`.
+    let no_chunking = HardMaskShape::NoChunkingWithOverlaps {
+        frame: 2,
+        start: 3,
+        end: 717,
+    };
+    assert_eq!(
+        no_chunking.text(),
+        "has masks that overlap and reading frame 2's part from its start running to the frame's \
+         end at the mask [3, 717), which NCBI BLAST+ 2.17.0 searches as the whole frame past the \
+         later masks"
     );
 }

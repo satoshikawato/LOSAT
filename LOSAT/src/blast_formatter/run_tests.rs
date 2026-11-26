@@ -76,7 +76,7 @@ fn the_arguments_are_read_into_the_options() {
     assert_eq!(
         Options::of(&args),
         Options {
-            outfmt: "6 qseqid".to_string(),
+            outfmt: b"6 qseqid".to_vec(),
             show_gis: true,
             num_descriptions: Some(3),
             num_alignments: Some(0),
@@ -94,8 +94,8 @@ fn the_arguments_are_read_into_the_options() {
             .unwrap();
     let options = Options::of(&args);
     assert_eq!(
-        (options.outfmt.as_str(), options.out.as_os_str()),
-        ("0", OsStr::new("-"))
+        (options.outfmt.as_slice(), options.out.as_os_str()),
+        (&b"0"[..], OsStr::new("-"))
     );
     assert_eq!(options.max_target_seqs, Some(7));
     assert!(!options.show_gis && !options.html && !options.parse_deflines);

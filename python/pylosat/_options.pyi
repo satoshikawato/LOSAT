@@ -8,8 +8,12 @@ class BlastnOptions(TypedDict, total=False):
     """Task to execute"""
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -138,8 +142,12 @@ class BlastpOptions(TypedDict, total=False):
     """Task to execute"""
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -156,6 +164,10 @@ class BlastpOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
     db_soft_mask: str
     """Filtering algorithm ID to apply to the BLAST database as soft masking"""
     db_hard_mask: str
@@ -251,8 +263,12 @@ class BlastxOptions(TypedDict, total=False):
     """Task to execute"""
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -269,6 +285,10 @@ class BlastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
     db_soft_mask: str
     """Filtering algorithm ID to apply to the BLAST database as soft masking"""
     db_hard_mask: str
@@ -375,8 +395,12 @@ class TblastnOptions(TypedDict, total=False):
     """Task to execute"""
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -493,8 +517,12 @@ class TblastnOptions(TypedDict, total=False):
 class TblastxOptions(TypedDict, total=False):
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -596,8 +624,12 @@ class TblastxOptions(TypedDict, total=False):
 class PsiblastOptions(TypedDict, total=False):
     dbsize: int
     """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
@@ -614,6 +646,10 @@ class PsiblastOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
     evalue: float
@@ -673,6 +709,8 @@ class PsiblastOptions(TypedDict, total=False):
     """Number of database sequences to show alignments for Default = `250'"""
     line_length: int
     """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
     sorthits: int
     """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
     score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not

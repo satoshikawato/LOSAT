@@ -9,7 +9,7 @@ use super::{
     query_setup::{unit_ranges, PreparedQueryBatch},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{BxLookup, Diagonals},
-    split::{split_queries, split_sizes, QueryChunk},
+    split::{self, split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
 use anyhow::{ensure, Result};
@@ -106,7 +106,15 @@ pub(crate) fn search_preliminary(
     options: &ResolvedOptions,
 ) -> Result<()> {
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects.into(), options, &mut Discard, pool, None)
+        search_core(
+            records,
+            subjects.into(),
+            options,
+            &mut Discard,
+            pool,
+            None,
+            None,
+        )
     })
 }
 
@@ -145,9 +153,13 @@ pub(crate) fn search_core(
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
 ) -> Result<()> {
     let past_head = std::cell::Cell::new(false);
-    x_search_core(records, subjects, options, sink, pool, prep, &past_head).map_err(|error| {
+    x_search_core(
+        records, subjects, options, sink, pool, prep, scan_end, &past_head,
+    )
+    .map_err(|error| {
         if past_head.get() {
             subjects.x_past_head(error)
         } else {
@@ -165,6 +177,7 @@ fn x_search_core(
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
     past_head: &std::cell::Cell<bool>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -241,6 +254,13 @@ fn x_search_core(
             sink.unsearched_batch(range.start, &full, &full_params)?;
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:232-236
+        // NCBI's search of a batch that it splits stops at its chunks first (`split::chunk_stops`:
+        // chunks left without a query, a first chunk that would be split again), before the
+        // database's errors and the setup's below (2.17.0 probe of line RG item X-short-bat-2:
+        // also on a database whose sequences cannot be read), after the reports of the batches
+        // before.
+        split::chunk_stops(queries, &full, options, sizes)?;
         // NCBI reads the database's sequences in the preliminary search of the first batch
         // with a valid context (batches without one are not searched, above). The subjects are
         // checked there too, after the split sizes and the setup of the queries, whose errors
@@ -252,8 +272,11 @@ fn x_search_core(
             "BLASTX preliminary requires a protein subject"
         );
         // The refusal of a database sequence (`database::too_long`): the `-subject` record is
-        // named by its number in the file (`Subject_N`).
-        if longest_subject > super::database::MAX_DBSEQ_LEN {
+        // named by its number in the file (`Subject_N`). With `-db_hard_mask`, the hard-chunk loop
+        // splits and merges subjects longer than `MAX_DBSEQ_LEN`.
+        if longest_subject > super::database::MAX_DBSEQ_LEN
+            && !options.db_mask.as_ref().is_some_and(|mask| mask.is_hard())
+        {
             return Err(match &subjects {
                 Subjects::Fasta(records) => {
                     let (index, length) = records
@@ -300,6 +323,14 @@ fn x_search_core(
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-222
         sink.batch_start(range.start, &full, &full_params)?;
         let mut chunks = split_queries(queries, &full, options, sizes)?;
+        // An overlap that is not a multiple of 3 moves the HSPs of the chunks after the first onto
+        // other frames: refused where the search would read the subjects, with a subject in hand
+        // and sequences that can be read (else NCBI's report or its read error stays).
+        if let Some(refusal) = split::out_of_frame(&chunks, sizes, options) {
+            if !subjects.is_empty() && subjects.sequence_file_read_error().is_none() {
+                return Err(refusal);
+            }
+        }
         // The statistics of each subject read the options' spaces of the whole query by each
         // chunk's context index (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697).
         if subjects.per_subject() {
@@ -733,6 +764,14 @@ fn x_search_core(
             sink.chunk_end(&chunk, is_split)?;
             super::x_timing::batch(XBatch::ChunkEnd, x_t);
         }
+        // No NCBI counterpart (scheduling only): the scan of the batch has ended. The chunk loop's
+        // lookup tables and diagonal tables are dropped (a thread's kept table,
+        // `x_bx_mem::XDiagSlot`, waits in that thread for its next scan), so the batch end below
+        // (the redo and the traceback) holds the batch's matches and no table of its letters. The
+        // batch flow gives back the unit's places here (`native.rs`, `x_flow`).
+        if let Some(scan_end) = scan_end {
+            scan_end();
+        }
         // full preparation retains full DNA lengths, masked/nomask bytes and ordinal.
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:292-301
         let x_t = super::x_timing::lap();
@@ -1133,6 +1172,20 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
     // database read in blocks then looks the subject up once).
     let subject_length = encoded.len() - 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+    // A subject with no searchable letters (`BlastSeqSrcGetSequence` returns <= 0, including
+    // empty proteins and proteins of `>= 2^31` residues) is skipped without scanning or advancing
+    // the diagonal table.
+    if subject_length == 0 && piece.is_none() {
+        #[cfg(feature = "blastx-worker-probe")]
+        worker_probe("finish", oid);
+        return Ok(SubjectComputation {
+            raw: Vec::new(),
+            purged: Vec::new(),
+            containment,
+            prepared_link: None,
+        });
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // Worker-local cutoff preparation precedes WordFinder as in NCBI; only
     // adoption/observer notification is replayed on the serial OID collector.

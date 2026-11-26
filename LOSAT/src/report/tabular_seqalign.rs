@@ -287,8 +287,7 @@ fn empty_hsp<'r>() -> TabularHsp<'r> {
         q_frame: 0,
         s_frame: 0,
         rows: None,
-        end_gaps: false,
-        stored_gaps: [&[], &[]],
+        ops: &[],
         qcovhsp: 0,
     }
 }
@@ -350,7 +349,7 @@ pub(crate) fn subject_scores(
     aligns: &[ReadAlign<'_>],
     query_length: Option<i64>,
     spec: &TabularSpec,
-    spec_text: &str,
+    spec_text: &[u8],
     blastn: bool,
 ) -> Result<SubjectScores, ReadStop> {
     let names = ["seq_percent_coverage", "uniq_seq_percent_coverage"];
@@ -367,8 +366,8 @@ pub(crate) fn subject_scores(
         }
     };
     let mut compute = [
-        spec_text.contains("qcovs"),
-        spec_text.contains("qcovus") && blastn,
+        spec_text.windows(5).any(|w| w == b"qcovs"),
+        spec_text.windows(6).any(|w| w == b"qcovus") && blastn,
     ];
     // `InsertSubjectScores` reads both scores of the first Seq-align once it runs.
     if let (true, Some(first)) = (compute.iter().any(|&kind| kind), aligns.first()) {

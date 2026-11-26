@@ -5,14 +5,11 @@
 
 use super::*;
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
+fn temp_dir(tag: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::new(&format!(
         "losat-gi-mask-{tag}-{}",
         crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    ))
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -71,8 +68,8 @@ fn every_gi_of_ncbi_files_finds_its_record() {
         ("bigmax", 4),
     ] {
         let dir = fixture(name);
-        let search = SearchPath::new(&dir, None, None).unwrap();
-        let files = GiMaskFiles::open("big", &search).unwrap();
+        let search = SearchPath::new(&dir, None, None);
+        let files = GiMaskFiles::open(b"big", &search).unwrap();
         assert_eq!(files.data.len(), volumes, "{name}");
         let index = std::fs::read(dir.join("big.gmi")).unwrap();
         let num_gis = be(&index, 24) as usize;
@@ -87,24 +84,26 @@ fn every_gi_of_ncbi_files_finds_its_record() {
             }
         };
         let gis: std::collections::BTreeSet<u32> = big_endian.iter().map(|e| e.0).collect();
-        // One window for every lookup (in the order of the offset file, not of the data file),
-        // and a new one for each.
+        // One lookup and one window for every lookup (in the order of the offset file, not of
+        // the data file), and a new lookup and window for each.
+        let mut lookup = files.lookup();
         let mut window = DataWindow::default();
         for &(gi, vol, off) in &big_endian {
             let data = std::fs::read(dir.join(data_name(vol))).unwrap();
             let mut got = Vec::new();
-            files.ranges_into(gi, &mut got, &mut window).unwrap();
+            lookup.ranges_into(gi, &mut got, &mut window).unwrap();
             assert_eq!(got, record(&data, off as usize, be), "{name} gi {gi}");
             assert!(!got.is_empty(), "{name} gi {gi}");
             let mut alone = Vec::new();
             files
+                .lookup()
                 .ranges_into(gi, &mut alone, &mut DataWindow::default())
                 .unwrap();
             assert_eq!(alone, got, "{name} gi {gi}");
             for other in [gi.wrapping_sub(1), gi.wrapping_add(1)] {
                 if !gis.contains(&other) {
                     let mut none = Vec::new();
-                    files.ranges_into(other, &mut none, &mut window).unwrap();
+                    lookup.ranges_into(other, &mut none, &mut window).unwrap();
                     assert!(none.is_empty(), "{name} gi {other}");
                 }
             }
@@ -137,13 +136,13 @@ fn binary_search_is_ncbi_s() {
 fn damaged_index_files() {
     let dir = temp_dir("damaged");
     let good = std::fs::read(fixture("big1100").join("big.gni")).unwrap();
-    let search = SearchPath::new(&dir, None, None).unwrap();
+    let search = SearchPath::new(&dir, None, None);
     let open = |index: &[u8]| {
         for (from, to) in [("big.gno", "x.gno"), ("big.gnd", "x.gnd")] {
             std::fs::copy(fixture("big1100").join(from), dir.join(to)).unwrap();
         }
         std::fs::write(dir.join("x.gni"), index).unwrap();
-        GiMaskFiles::open("x", &search).map(|_| ()).unwrap_err()
+        GiMaskFiles::open(b"x", &search).map(|_| ()).unwrap_err()
     };
     let mut version = good.clone();
     version[3] = 2;
@@ -165,7 +164,7 @@ fn damaged_index_files() {
     std::fs::remove_file(dir.join("x.gno")).unwrap();
     std::fs::write(dir.join("x.gni"), &good).unwrap();
     assert_eq!(
-        GiMaskFiles::open("x", &search)
+        GiMaskFiles::open(b"x", &search)
             .map(|_| ())
             .unwrap_err()
             .ncbi_message()
@@ -188,8 +187,8 @@ fn missing_data_volume_is_the_memory_map_error() {
     ] {
         std::fs::copy(fixture("bigmax").join(file), dir.join(file)).unwrap();
     }
-    let search = SearchPath::new(&dir, None, None).unwrap();
-    let error = GiMaskFiles::open("big", &search).map(|_| ()).unwrap_err();
+    let search = SearchPath::new(&dir, None, None);
+    let error = GiMaskFiles::open(b"big", &search).map(|_| ()).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::MemoryMap(text) if text == b"To be memory mapped the file must exist: ''"),
         "{error}"
@@ -221,26 +220,41 @@ fn reads_across_chunks_and_windows_are_the_file_s_bytes() {
             assert_eq!(out, bytes[start..start + len], "{start} {len}");
         }
     }
-    // The numbers of the arrays: in one chunk, across a chunk's end, the last ones, outside.
+    // The numbers of the arrays through one view (the chunk it holds, another chunk, back) and
+    // through a view each: in one chunk, across a chunk's end, the last ones, outside.
+    let mut view = file.view();
     for start in (c - 6..c + 2)
         .chain(2 * c - 6..2 * c + 2)
+        .chain([10, 2 * c + 8, c + 8, 11])
         .chain(bytes.len() - 6..bytes.len() - 3)
     {
         let want: [u8; 4] = bytes[start..start + 4].try_into().unwrap();
         assert_eq!(
-            file.u32_at(start as i64).unwrap(),
+            view.u32(start as i64).unwrap(),
             u32::from_ne_bytes(want),
             "{start}"
         );
         assert_eq!(
-            file.mapped::<4>(start as i64).unwrap(),
+            file.view().u32(start as i64).unwrap(),
+            u32::from_ne_bytes(want),
+            "{start}"
+        );
+        assert_eq!(
+            view.mapped::<4>(start as i64).unwrap(),
+            Some(want),
+            "{start}"
+        );
+        assert_eq!(
+            file.view().mapped::<4>(start as i64).unwrap(),
             Some(want),
             "{start}"
         );
     }
-    for start in [bytes.len() as i64 - 3, -1] {
-        let error = file.u32_at(start).unwrap_err();
-        assert!(matches!(&error, SeqDbError::Format { .. }), "{error}");
+    for start in [bytes.len() as i64 - 3, -1, -(CHUNK as i64), i64::MIN] {
+        for error in [view.u32(start), file.view().u32(start)] {
+            let error = error.unwrap_err();
+            assert!(matches!(&error, SeqDbError::Format { .. }), "{error}");
+        }
     }
     // One read over three chunks, the last bytes, and reads outside the file.
     let mut out = vec![0u8; c + 40];
@@ -300,8 +314,8 @@ fn nog_masks(
         std::fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
     }
     edit(&dir.join("db.nog"));
-    let search = SearchPath::new(&dir, None, None).unwrap();
-    let db = super::super::SeqDb::open_in("db", SeqType::Nucleotide, &search).unwrap();
+    let search = SearchPath::new(&dir, None, None);
+    let db = super::super::SeqDb::open_in(b"db", SeqType::Nucleotide, &search).unwrap();
     let all: Vec<u32> = (0..db.num_oids()).collect();
     oids.unwrap_or(&all)
         .iter()

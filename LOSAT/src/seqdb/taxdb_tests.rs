@@ -5,39 +5,11 @@
 
 use super::super::file::MAP_PAGE;
 use super::*;
+use crate::utils::test_dir::TempDir;
 use std::path::Path;
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb")
-}
-
-/// A directory made for one test, removed (with what is in it) when it is dropped: a test
-/// drops it after the `TaxDb` and the `SearchPath` that read it.
-struct TempDir(PathBuf);
-
-impl std::ops::Deref for TempDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn temp_dir(tag: &str) -> TempDir {
-    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-taxdb-{tag}-{}-{}",
-        crate::utils::test_dir::process_id(),
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    TempDir(dir)
 }
 
 /// A search path with the empty current directory it was made with, which is removed with it.
@@ -56,8 +28,8 @@ impl std::ops::Deref for Searching {
 
 /// A search path whose only useful directory is `dir` (`BLASTDB`), run from an empty current directory.
 fn path_of(dir: &Path) -> Searching {
-    let cwd = temp_dir("cwd");
-    let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None).unwrap();
+    let cwd = TempDir::unique("taxdb-cwd");
+    let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None);
     Searching { search, _cwd: cwd }
 }
 
@@ -85,7 +57,7 @@ fn build(rows: &[(i32, &[u8])]) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn write_db(index: &[u8], data: &[u8]) -> TempDir {
-    let dir = temp_dir("db");
+    let dir = TempDir::unique("taxdb-db");
     std::fs::write(dir.join("taxdb.bti"), index).unwrap();
     std::fs::write(dir.join("taxdb.btd"), data).unwrap();
     dir
@@ -332,22 +304,26 @@ fn the_index_path_decides_and_the_data_file_is_its_sibling() {
     let good = fixture_dir().join("good");
     let nobtd = fixture_dir().join("no_btd");
     let joined = joined_paths([&nobtd, &good]);
-    let cwd = temp_dir("cwd");
-    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
+    let cwd = TempDir::unique("taxdb-cwd");
+    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None);
     assert!(TaxDb::open(&search).unwrap().is_missing());
     let joined = joined_paths([&fixture_dir().join("no_bti"), &good]);
-    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(joined.as_os_str()), None);
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // The current directory comes before BLASTDB.
-    let search = SearchPath::new(&good, Some(nobtd.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&good, Some(nobtd.as_os_str()), None);
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // The registry value comes after BLASTDB.
-    let search = SearchPath::new(&cwd, Some(nobtd.as_os_str()), good.to_str()).unwrap();
+    let search = SearchPath::new(
+        &cwd,
+        Some(nobtd.as_os_str()),
+        good.to_str().map(str::as_bytes),
+    );
     assert!(TaxDb::open(&search).unwrap().is_missing());
-    let search = SearchPath::new(&cwd, None, good.to_str()).unwrap();
+    let search = SearchPath::new(&cwd, None, good.to_str().map(str::as_bytes));
     assert!(!TaxDb::open(&search).unwrap().is_missing());
     // No directory at all.
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     assert!(TaxDb::open(&search).unwrap().is_missing());
 }
 
@@ -846,7 +822,7 @@ fn the_pass_counts_entries_and_reads_past_one_index_block() {
     damaged[n as usize - 2] = past;
     damaged[n as usize - 1] = past;
     for (tag, offsets, refuses) in [("walk", &offsets, false), ("walkpast", &damaged, true)] {
-        let dir = temp_dir(tag);
+        let dir = TempDir::unique(&format!("taxdb-{tag}"));
         let mut index = Vec::new();
         index.extend(MAGIC.to_be_bytes());
         index.extend(n.to_be_bytes());
@@ -963,7 +939,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     };
     let good = fixture_dir().join("good");
     for file in ["taxdb.bti", "taxdb.btd"] {
-        let dir = temp_dir("unopened");
+        let dir = TempDir::unique("taxdb-unopened");
         for name in ["taxdb.bti", "taxdb.btd"] {
             std::fs::copy(good.join(name), dir.join(name)).unwrap();
         }
@@ -1025,7 +1001,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
         mode(&path, 0o644);
     }
     // An index too short for one entry: missing, though it does not open.
-    let dir = temp_dir("short-unopened");
+    let dir = TempDir::unique("taxdb-short-unopened");
     std::fs::write(dir.join("taxdb.bti"), [0u8; 8]).unwrap();
     std::fs::copy(good.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
     mode(&dir.join("taxdb.bti"), 0o000);
@@ -1033,7 +1009,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     assert!(db.is_missing());
     mode(&dir.join("taxdb.bti"), 0o644);
     // An index of a wrong magic number: missing with NCBI's text, the data file never opened.
-    let dir = temp_dir("bad-magic-unopened");
+    let dir = TempDir::unique("taxdb-bad-magic-unopened");
     let bad = fixture_dir().join("bad_magic");
     std::fs::copy(bad.join("taxdb.bti"), dir.join("taxdb.bti")).unwrap();
     std::fs::copy(bad.join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
@@ -1042,4 +1018,45 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     assert!(db.is_missing());
     assert_eq!(db.open_messages(), [MSG_WRONG_MAGIC]);
     mode(&dir.join("taxdb.btd"), 0o644);
+}
+
+#[test]
+fn lookup_files_includes_bti_and_paired_btd_when_bti_exists() {
+    use crate::algorithm::common::database::OutfmtTaxdbUse;
+    let dir = TempDir::unique("taxdb-lookup-files");
+    let dir_bytes = dir.as_os_str().as_encoded_bytes();
+    let has_path = |list: &[Vec<u8>], path: &std::path::Path| {
+        let want = path.as_os_str().as_encoded_bytes();
+        list.iter().any(|p| p.as_slice() == want)
+    };
+    let lookup = |u, btd| super::lookup_files_for_use(Some(dir_bytes), u, btd);
+    // Without taxdb.bti in `dir`, Always lists taxdb.bti (not taxdb.btd), while WhenPresent and
+    // None return empty (when no taxdb exists on disk).
+    let without = super::lookup_files(Some(dir_bytes));
+    let dir_bti = dir.join("taxdb.bti");
+    let dir_btd = dir.join("taxdb.btd");
+    assert!(without.iter().any(|p| p == b"taxdb.bti"));
+    assert!(has_path(&without, &dir_bti));
+    assert!(!has_path(&without, &dir_btd));
+    assert!(lookup(OutfmtTaxdbUse::WhenPresent, true).is_empty());
+    assert!(lookup(OutfmtTaxdbUse::None, true).is_empty());
+    // When only taxdb.btd exists in `dir`, prefetch / WhenPresent lists its paired taxdb.bti.
+    std::fs::write(&dir_btd, [0u8; 32]).unwrap();
+    let with_btd_only = lookup(OutfmtTaxdbUse::None, true);
+    assert!(has_path(&with_btd_only, &dir_bti));
+    assert!(!with_btd_only.iter().any(|p| p == b"taxdb.bti"));
+    assert!(lookup(OutfmtTaxdbUse::None, false).is_empty());
+    std::fs::remove_file(&dir_btd).unwrap();
+    // Once taxdb.bti exists in `dir`, both Always and WhenPresent list cwd taxdb.bti (shadow) and
+    // dir's paired taxdb.btd, while None remains empty.
+    std::fs::write(&dir_bti, [0u8; 32]).unwrap();
+    let with = super::lookup_files(Some(dir_bytes));
+    assert!(has_path(&with, &dir_btd));
+    let when_present = lookup(OutfmtTaxdbUse::WhenPresent, false);
+    assert!(when_present.iter().any(|p| p == b"taxdb.bti"));
+    assert!(has_path(&when_present, &dir_btd));
+    assert!(
+        lookup(OutfmtTaxdbUse::None, true).is_empty(),
+        "None stays empty when taxdb.bti exists"
+    );
 }

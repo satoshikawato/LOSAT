@@ -131,8 +131,8 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const started = abi.start(argv);
   // A run with -parse_deflines reads its inputs together for its argv (line WQA's sweep, D7, 2026-11-19), as the app's runs do.
   const together = started.ok && started.start.registerInputs ? abi.registerInputs(argv, queryBytes, subjectBytes) : undefined;
-  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, queryBytes);
-  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, subjectBytes);
+  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, false, queryBytes);
+  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, false, subjectBytes);
   try {
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => parts.set(stream, [...(parts.get(stream) ?? []), bytes.slice()]));
   } finally {

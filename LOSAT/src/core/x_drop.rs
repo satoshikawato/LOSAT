@@ -69,6 +69,26 @@ pub(crate) fn gapped_x_dropoffs(gap_bits: f64, final_bits: f64, min_lambda: f64)
     (gapped, finale)
 }
 
+/// The Lambda that the gapped X-drops read from one gapped block (`s_BlastFindSmallestLambda`
+/// over the query's one context): the search starts at `INT4_MAX` and takes the block's Lambda
+/// where the block is valid (Lambda, K and H above 0) and its Lambda is below that start. A PSSM
+/// whose gapped values are not valid (negative, NaN, zero) or whose Lambda is 2^31 - 1 or more
+/// (infinite too) gets the X-drops of a Lambda of 2^31 - 1, 0 raw score.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:92-114
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:455-458
+#[inline]
+pub(crate) fn extension_lambda(block: &crate::stats::tables::KarlinParams) -> f64 {
+    let start = f64::from(i32::MAX);
+    let valid = block.lambda > 0.0 && block.k > 0.0 && block.h > 0.0;
+    if valid && start > block.lambda {
+        block.lambda
+    } else {
+        start
+    }
+}
+
 /// The X-drop of the composition-based redo (`gapping_params->x_dropoff`) from the final X-drop in
 /// bits, the smallest gapped Lambda of the scaled score block and the search's final raw X-drop.
 ///
@@ -126,7 +146,7 @@ pub(crate) fn kernel_x_drop_value_error(program: &str, option: &str, value: &str
 /// with its own X-drop (`redo_x_dropoff`) and the gap costs scaled by 32, under which every `Int4`
 /// X-drop fits (the quotient stays below 2^26), as rpsblast's engine checks it.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1496
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1499
 pub(crate) fn check_gapped_x_dropoffs(
     program: &str,
     (gap_bits, final_bits): (f64, f64),

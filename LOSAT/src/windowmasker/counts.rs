@@ -136,14 +136,14 @@ fn finalize(
 /// open or read gives no more names.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
-fn file_list(input: &str, fa_list: bool) -> Vec<Vec<u8>> {
+pub(crate) fn file_list(input: &OsStr, fa_list: bool) -> Vec<Vec<u8>> {
     if !fa_list {
         if input.is_empty() {
             return Vec::new();
         }
-        return input
-            .split(',')
-            .map(|name| name.as_bytes().to_vec())
+        return crate::utils::os_bytes::os_str_bytes(input)
+            .split(|&byte| byte == b',')
+            .map(<[u8]>::to_vec)
             .collect();
     }
     let mut bytes = Vec::new();
@@ -186,7 +186,8 @@ pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
     files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
-    registry: Result<Option<&'r str>, &'r str>,
+    /// The settings of the database reader (`ApplicationSettings::database`).
+    reader_settings: crate::blastinput::ncbi_environment::DatabaseSettings<'r>,
     /// The standard output, which comes out before each post.
     out: &'d mut Ostream<'o>,
     diag: &'d mut Diag<'w>,
@@ -227,8 +228,7 @@ impl GenomeInput<'_, '_, '_, '_> {
     fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
-                // Names that are not UTF-8 were refused before (`make_counts`).
-                database_source(&String::from_utf8_lossy(name), self.registry, false)?
+                database_source(name, self.reader_settings, false)?
             } else {
                 let file = File::open(path_from_bytes(name.as_slice()))
                     .map_err(|_| Failure::Ncbi(read_error()))?;
@@ -370,28 +370,19 @@ fn make_counts(
     stdout: &mut Ostream<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
-    let input = args.value("in").expect("-in has a default");
+    let input = args.os_value("in").expect("-in has a default");
     let files = file_list(input, args.boolean("fa_list").unwrap_or(false));
     let database = infmt == "blastdb";
-    // NCBI's CSeqDB opens a database by the bytes of its name; LOSAT's database reader takes
-    // names of text, so a -fa_list line that is not UTF-8 is refused before anything is written.
-    if database && files.iter().any(|name| std::str::from_utf8(name).is_err()) {
-        return Err(Failure::Refused(unsupported(
-            "-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text",
-        )));
-    }
     let output = args.os_value("out").expect("-out has a default");
     let format = counts_format(args);
     let mut sink = open_sink(output, format, stdout, args.files())?;
-    let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
+    let meta = args.bytes("meta").unwrap_or_default();
+    let mut writer = CountsWriter::new(format, &meta);
     let mut source = GenomeInput {
         files,
         database,
         lists,
-        registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        reader_settings: settings.database(),
         out: &mut *stdout,
         diag: &mut *diag,
         posts: Vec::new(),
@@ -468,7 +459,7 @@ fn convert_failure(file: &str, error: WinMaskError) -> Failure {
 /// The exception of `-convert` before it reads its counts (LOSAT Web's validation too,
 /// `app::check`): `-in -`, which the converter's constructors refuse.
 pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
-    if args.value("in") == Some("-") {
+    if args.os_value("in") == Some(OsStr::new("-")) {
         let line = if args.os_value("out") == Some(OsStr::new("-")) {
             77
         } else {
@@ -482,10 +473,10 @@ pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
 /// `CWinMaskCountsConverter` of `-in` to `-out`.
 fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
     check_convert(args)?;
-    let input = args.value("in").expect("-in has a default");
+    let input = args.os_value("in").expect("-in has a default");
     let output = args.os_value("out").expect("-out has a default");
     diag.post("reading counts...");
-    let file = format!("-in {input}");
+    let file = format!("-in {}", input.to_string_lossy());
     let istat = open_counts(
         input,
         &file,
@@ -496,12 +487,8 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     let count_map = istat
         .count_map()
         .map_err(|error| convert_failure(&file, error))?;
-    let meta = args.value("meta").unwrap_or_default();
-    let metadata = if meta.is_empty() {
-        istat.note()
-    } else {
-        meta.as_bytes()
-    };
+    let meta = args.bytes("meta").unwrap_or_default();
+    let metadata = if meta.is_empty() { istat.note() } else { &meta };
     let format = counts_format(args);
     let mut writer = CountsWriter::new(format, metadata);
     let mut sink = open_sink(output, format, stdout, args.files())?;

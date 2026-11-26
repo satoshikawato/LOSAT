@@ -165,20 +165,31 @@ fn outfmt7_query_lines_follow_the_ncbi_oracle() {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-994
 // glibc's `printf` of the reals that no finite comparison takes: a NaN (a negative one from NCBI's
 // reader of `NOT-A-NUMBER`, frozen tests/blast_formatter/ncbi/of7_real_nan.out and of6_bit_nan.out)
-// gets each branch's last form, plus infinity the bit score's `%5.3le` (of6_bit_pinf.out).
+// gets each branch's last form in the raw `GetScoreString` writers, while the search readers'
+// wrappers turn an absent NaN into -1 (`0.0`); plus infinity takes the bit score's `%5.3le`
+// (of6_bit_pinf.out).
 #[test]
 fn non_finite_scores_take_glibc_forms() {
+    let raw_tab = |v: f64| formatted(|out| write_evalue_ncbi_tabular_raw(out, v));
+    let raw_base = |v: f64| formatted(|out| write_evalue_ncbi_base_raw(out, v));
     let negative_nan = -f64::NAN;
     assert!(negative_nan.is_sign_negative());
     assert_eq!(format_bitscore_ncbi(negative_nan), "-nan");
     assert_eq!(format_bitscore_ncbi(f64::NAN), " nan");
     assert_eq!(format_bitscore_ncbi(f64::INFINITY), "  inf");
     assert_eq!(format_bitscore_ncbi(f64::NEG_INFINITY), "-inf");
-    assert_eq!(format_evalue_ncbi_tabular(negative_nan), "-nan");
-    assert_eq!(format_evalue_ncbi_tabular(f64::NAN), "nan");
+    assert_eq!(raw_tab(negative_nan), "-nan");
+    assert_eq!(raw_tab(f64::NAN), "nan");
+    assert_eq!(raw_tab(f64::INFINITY), "inf");
+    assert_eq!(raw_tab(f64::NEG_INFINITY), "0.0");
+    assert_eq!(raw_base(negative_nan), "-nan");
+    assert_eq!(raw_base(f64::INFINITY), "inf");
+    // Search-reader wrappers treat NaN as an absent Seq-align E-value (-1 -> "0.0").
+    assert_eq!(format_evalue_ncbi_tabular(negative_nan), "0.0");
+    assert_eq!(format_evalue_ncbi_tabular(f64::NAN), "0.0");
+    assert_eq!(format_evalue_ncbi(negative_nan), "0.0");
     assert_eq!(format_evalue_ncbi_tabular(f64::INFINITY), "inf");
     assert_eq!(format_evalue_ncbi_tabular(f64::NEG_INFINITY), "0.0");
-    assert_eq!(format_evalue_ncbi(negative_nan), "-nan");
     assert_eq!(format_evalue_ncbi(f64::INFINITY), "inf");
     // The finite forms at the turned-around bounds.
     assert_eq!(format_bitscore_ncbi(99.9), "99.9");
@@ -186,4 +197,15 @@ fn non_finite_scores_take_glibc_forms() {
     assert_eq!(format_bitscore_ncbi(99999.5), "1.000e+05");
     assert_eq!(format_evalue_ncbi(10.0), "10");
     assert_eq!(format_evalue_ncbi(9.95), "9.9");
+}
+
+// Line PS item PS7c: an infinite bit score (a PSSM whose gapped Lambda is `PLUS-INFINITY`) is
+// printed by C's `%5.3le` as `inf` in the field of 5, in both writers.
+#[test]
+fn an_infinite_bit_score_fills_a_field_of_five() {
+    assert_eq!(format_bitscore_ncbi(f64::INFINITY), "  inf");
+    let mut out = Vec::new();
+    write_bitscore_ncbi(&mut out, f64::INFINITY).unwrap();
+    assert_eq!(out, b"  inf");
+    assert_eq!(format_bitscore_ncbi(123456.0), "1.235e+05");
 }

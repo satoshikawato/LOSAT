@@ -10,13 +10,14 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
+import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
-import { fromText, inputLabel, leavesOut } from '../domain/input-parts';
+import { fromText, inputLabel, leavesOut, readDifferenceText } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
-import { isTerminal } from '../domain/run';
+import { isTerminal, runInputRecords } from '../domain/run';
 import { windowMaskerStageById } from '../domain/tools';
 import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
@@ -43,15 +44,17 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[]; counts?: CountsLoader | undefined }>();
 /** "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts"). */
 const emit = defineEmits<{
   search: [];
   'use-in-blastn': [file: File];
+  'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
+const toolSection = ref<'outputs' | 'details'>('outputs');
 const state = useStore(props.results.state);
 const heading = ref<HTMLElement>();
 const alignments = ref<InstanceType<typeof AlignmentsView>>();
@@ -180,6 +183,12 @@ watch([() => state.value.runId, () => state.value.phase], () => {
   downloadsOpen.value = false;
   saver.reset();
 });
+watch(
+  () => state.value.runId,
+  () => {
+    toolSection.value = 'outputs';
+  },
+);
 
 // With no run chosen, show the newest completed run (or failed tool run that wrote outputs).
 watch(
@@ -204,11 +213,12 @@ function runLabel(run: AnyRunView): string {
           : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
     return `Run ${number} · WindowMasker · ${windowMaskerStageById(stage).label}${status}`;
   }
-  const { number, program, query, subject, prints } = run.snapshot;
+  const { number, program, query, subject, database, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
   // The inputs are named as the user gave them (a compressed file by its own name), a file that LOSAT made by what it is made of. A run that prints the command line's help
   // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
-  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${inputLabel(subject)}` : '';
+  const target = database !== undefined ? `${database.name} (database)` : inputLabel(subject);
+  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${target}` : '';
   return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 
@@ -234,8 +244,12 @@ const units = computed(() => {
   return program === undefined ? { query: '', subject: '' } : { query: residueUnit(program.query), subject: residueUnit(program.subject) };
 });
 const plural = (count: number, one: string) => `${formatCount(count)} ${count === 1 ? one : `${one}s`}`;
+const queryRecords = computed(() => (selectedSearch.value === undefined ? [] : runInputRecords(selectedSearch.value, 'query')));
+const subjectRecords = computed(() => (selectedSearch.value === undefined ? [] : runInputRecords(selectedSearch.value, 'subject')));
+const readDiffOf = (run: RunView, role: 'query' | 'subject'): string | undefined =>
+  readDifferenceText(run.snapshot[role].records, run.record.readRecords?.[role], run.snapshot[role].from?.length ?? 1);
 /** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
-const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
+const multiQuery = computed(() => (loaded.value === undefined ? 0 : runInputRecords(loaded.value.run, 'query').length) > 1);
 
 /** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments, with the HSP's Range in view. */
 async function toAlignments(id: HspId): Promise<void> {
@@ -304,6 +318,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <dt>Tool</dt>
             <dd class="results-program">
               <span data-testid="results-program">WindowMasker · {{ windowMaskerStageById(selectedTool.snapshot.stage).label }}</span>
+              <VerificationBadge v-if="state.toolBadge" :badge="state.toolBadge" compact @details="toolSection = 'details'" />
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
@@ -327,31 +342,41 @@ async function toAlignments(id: HspId): Promise<void> {
                 · group run {{ selectedSearch.snapshot.group.position }} of {{ selectedSearch.snapshot.group.size }}
               </template>
             </dd>
-            <!-- Records that the run's file leaves out, which its command and its name say no more of (line WQA's D22, 2026-11-23). -->
+            <!-- Records that the run's file leaves out, or where reading the assembled input as one file differed from the per-file tables (D22, D17). -->
             <template v-for="role in ['query', 'subject'] as const" :key="role">
-              <template v-if="leavesOut(selectedSearch.snapshot[role].from)">
+              <template v-if="leavesOut(selectedSearch.snapshot[role].from) || readDiffOf(selectedSearch, role) !== undefined">
                 <dt>{{ role === 'query' ? 'Query' : 'Subject' }} from</dt>
-                <dd :data-testid="`results-${role}-from`">{{ fromText(selectedSearch.snapshot[role].from!) }}</dd>
+                <dd>
+                  <template v-if="selectedSearch.snapshot[role].from !== undefined">
+                    <span :data-testid="`results-${role}-from`">{{ fromText(selectedSearch.snapshot[role].from!) }}</span>
+                    <br v-if="readDiffOf(selectedSearch, role) !== undefined" />
+                  </template>
+                  <span v-if="readDiffOf(selectedSearch, role) !== undefined" :data-testid="`results-${role}-read-diff`">{{ readDiffOf(selectedSearch, role) }}</span>
+                </dd>
               </template>
             </template>
             <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
             <template v-if="selectedSearch.snapshot.prints === undefined">
-              <template v-if="selectedSearch.snapshot.query.records.length === 1">
+              <template v-if="queryRecords.length === 1">
                 <dt>Query ID</dt>
-                <dd data-testid="results-query-id">{{ recordName(selectedSearch.snapshot.query.records[0]!.id, 'query', 0, selectedSearch.record.shownIds) }}</dd>
+                <dd data-testid="results-query-id">{{ recordName(queryRecords[0]!.id, 'query', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Query Length</dt>
-                <dd data-testid="results-query-length">{{ withUnit(formatCount(selectedSearch.snapshot.query.records[0]!.length), units.query) }}</dd>
+                <dd data-testid="results-query-length">{{ withUnit(formatCount(queryRecords[0]!.length), units.query) }}</dd>
               </template>
-              <template v-if="selectedSearch.snapshot.subject.records.length === 1">
+              <template v-if="selectedSearch.snapshot.database">
+                <dt>Database</dt>
+                <dd data-testid="results-database">{{ selectedSearch.snapshot.database.name }}</dd>
+              </template>
+              <template v-else-if="subjectRecords.length === 1">
                 <dt>Subject ID</dt>
-                <dd data-testid="results-subject-id">{{ recordName(selectedSearch.snapshot.subject.records[0]!.id, 'subject', 0, selectedSearch.record.shownIds) }}</dd>
+                <dd data-testid="results-subject-id">{{ recordName(subjectRecords[0]!.id, 'subject', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Subject Length</dt>
-                <dd data-testid="results-subject-length">{{ withUnit(formatCount(selectedSearch.snapshot.subject.records[0]!.length), units.subject) }}</dd>
+                <dd data-testid="results-subject-length">{{ withUnit(formatCount(subjectRecords[0]!.length), units.subject) }}</dd>
               </template>
               <template v-else>
                 <dt>Subjects</dt>
                 <dd data-testid="results-subjects">
-                  {{ inputLabel(selectedSearch.snapshot.subject) }}, {{ plural(selectedSearch.snapshot.subject.records.length, 'record') }}
+                  {{ inputLabel(selectedSearch.snapshot.subject) }}, {{ plural(subjectRecords.length, 'record') }}
                 </dd>
               </template>
             </template>
@@ -410,10 +435,14 @@ async function toAlignments(id: HspId): Promise<void> {
       <ToolRunView
         v-if="state.phase === 'ready' && state.toolRun"
         :key="state.toolRun.snapshot.runId"
+        v-model:section="toolSection"
         :coordinator="coordinator"
         :run="state.toolRun"
+        :counts="counts"
+        :badge="state.toolBadge"
         :takes-value="state.grammar?.takesValue"
         @use-in-blastn="emit('use-in-blastn', $event)"
+        @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"
         @mask-with-counts="emit('mask-with-counts', $event)"
       />
 

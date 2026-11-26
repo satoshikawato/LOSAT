@@ -43,15 +43,17 @@
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
 //!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: a statistics
-//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, an ungapped
-//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
-//!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
-//!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
-//!   the re-evaluation's fetch of a subject whose header cannot be read under a negative seqid list,
-//!   `subject_loop::x_fetch_keeps`). Any other error that LOSAT raises where NCBI would
-//!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
-//!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
-//!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
+//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, a
+//!   search space that overflows NCBI's `Int8`, `context_cutoffs::search_space_overflow`, an
+//!   ungapped extension that scores higher past the end of its query frame,
+//!   `extension::query_batch`, a one-hit merge of lengths that add up to 0, the ungapped
+//!   re-evaluation of HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases,
+//!   `SubjectEmit::refuse_untranslated_frame`, and the re-evaluation's fetch of a subject whose
+//!   header cannot be read under a negative seqid list, `subject_loop::x_fetch_keeps`). Any other
+//!   error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written without the
+//!   reports of the batches before; so the stream acts only where no such refusal can come after
+//!   the first batch (`check`): a query batch whose concatenated query is too long for the diag
+//!   table (`check_diag_table_window`),
 //!   a `-db` whose sequences could not be read before the search (some of those read errors are
 //!   LOSAT's refusals, raised by the first batch with a valid context, `Off::Unreadable`),
 //!   and the refusals of the reports: a `-subject` record without a tabular id
@@ -129,8 +131,6 @@ pub(super) enum Off {
     Debug,
     /// A concatenated query of a batch that the diag table could refuse.
     Window,
-    /// A search space that could overflow.
-    SearchSpace,
     /// A `-subject` record without a tabular id.
     SubjectIds,
     /// A `-db` whose sequences could not be read before the search: LOSAT refuses some of those
@@ -162,7 +162,6 @@ impl Off {
             Off::CustomTabular => "custom_tabular",
             Off::Debug => "debug",
             Off::Window => "window",
-            Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Unreadable => "unreadable",
             Off::LargeParsed => "large_parsed",
@@ -215,7 +214,7 @@ pub(super) fn check(
     // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
     // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
     // a `-db` sequence whose generated id is that of a query of its batch
-    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // (`anchored::refuse_pairwise_reports`) before that batch's first byte, after the batches
     // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
     // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
     // the stream off for a sequence with the id of a query of the run (`database_check`), whose
@@ -243,20 +242,6 @@ pub(super) fn check(
     let concatenated: i128 = lengths().map(|letters| 2 * letters + 7).sum::<i128>() + 1;
     if concatenated + i128::from(args.window()) > 1 << 30 {
         return Err(Off::Window);
-    }
-    // The search space of a context (`context_cutoffs`, `try_compute_eff_lengths_tblastx`):
-    // the effective database length `db - n a`, at least 1, times the context's length minus
-    // the length adjustment `a`. The adjustment is between 0 and the smaller root of
-    // `n a^2 - (q n + db) a + c`, at most `2 c / (q n + db) <= 2 q` with `c <= q db`
-    // (`compute_length_adjustment_ncbi`; the bound of blastn's `x_rpt_stream::check`), and a
-    // context has at most a third of its query's letters, plus one. A negative `n` (an alias
-    // file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length: the bound takes `|n|`.
-    let db_length = i128::from(subjects.numbers.effective_length() / 3);
-    let factor = 2 * (lengths().max().unwrap_or(0) / 3 + 1) + 1;
-    if (db_length.abs() + i128::from(subjects.numbers.count.unsigned_abs()) * factor) * factor
-        > i128::from(i64::MAX)
-    {
-        return Err(Off::SearchSpace);
     }
     // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
     // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences
@@ -310,23 +295,8 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let pairwise = format.is_pairwise();
-    let shown = crate::algorithm::common::database::ParsedShown {
-        tabular: format.tabular_reads_subject(),
-        pairwise,
-        structured: format.is_structured_xml(),
-        joined: pairwise || format.tabular_joins_subjects(),
-        sam: matches!(format, report::TblastxOutputFormat::Sam(_)),
-        taxonomy: format.writes_taxonomy(),
-        words: format.printed_ids(),
-        stops_at_failed_lookup: format.is_tabular()
-            && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
-        prefetched: format.prefetches_subjects()
-            && !crate::algorithm::common::database::prefetch_always_off(format.prefetch_format()),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
-            format.prefetch_format(),
-        ),
-    };
+    let shown =
+        crate::algorithm::tblastx::database::parsed_shown(&[format], format.prefetch_format());
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();
     if prefetch && database.cache_may_refuse() {

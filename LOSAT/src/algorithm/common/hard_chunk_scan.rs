@@ -1,18 +1,21 @@
 //! The one word that NCBI's two-hit scan reads in a hard chunk shorter than the word, in a
-//! protein database sequence with `-db_hard_mask` whose masks overlap or nest (BLASTP and BLASTX;
-//! series NP, M4b-3b; the walk of the chunks' diagonal offsets is
-//! `algorithm::common::hard_chunk_walk::DiagonalWalk`). Here is what both programs share:
+//! database sequence with `-db_hard_mask` whose masks overlap or nest (BLASTP and BLASTX, series
+//! NP M4b-3b; TBLASTN and TBLASTX, M4b-3c part 2; the walk of the chunks' diagonal offsets is
+//! `algorithm::common::hard_chunk_walk::DiagonalWalk`). Here is what those programs share:
 //!
 //! - [`OneWord`]: the two-hit test of that word, which saves its seeds as NCBI's word finder does
 //!   (the chunk's ungapped hits, from the stored letters past the chunk), which then go through
 //!   the chunk's gapped stage, or are its HSPs in an ungapped search, as any chunk's seeds;
 //! - [`merge_joins`]: whether NCBI's merge of a chunk's HSPs into the sequence's list joins
-//!   them, which only such a chunk's HSPs can meet;
-//! - [`short_chunk_tree_refusal`] and [`short_chunk_merge_refusal`]: LOSAT's refusals of a
-//!   sequence where NCBI's gapped stage of such a chunk never ends, and where its merge would
-//!   join such a chunk's HSPs with another's (not yet ported).
+//!   them (used by TBLASTN and TBLASTX where the merge overlap is read past the list of ranges);
+//! - [`short_chunk_tree_refusal`], [`short_chunk_merge_refusal`], and
+//!   [`chunk_merge_undefined_refusal`]: LOSAT's refusals of a sequence where NCBI's gapped stage
+//!   of such a chunk never ends, where TBLASTN/TBLASTX's merge would join across an overlap read
+//!   past the list, or where an ungapped one-hit chunk merge divides by zero.
 
-use super::diag_entry::{batch_context_distance, x_test_hit, DiagRing, DiagStruct, DiagTable};
+use super::diag_entry::{
+    batch_context_distance, x_test_hit, DiagCell, DiagRing, DiagStruct, DiagTable,
+};
 use crate::utils::matrix::ScoreRows;
 
 /// The scores and the cutoffs of the context of a hit's query offset, which the two-hit test of
@@ -95,6 +98,32 @@ impl OneWord<'_> {
         hits: &[i32],
         offset: i32,
         context: impl Fn(i32) -> WordContext,
+        save: impl FnMut(i32, OneWordSeed),
+    ) {
+        self.test_on_with(
+            table,
+            hits,
+            offset,
+            self.query.len() as i32,
+            |q, s| self.scores.score(self.query[q as usize], s),
+            context,
+            save,
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 519-606
+    /// [`OneWord::test_on`] where `score_at` scores concatenated query offset `q`
+    /// (bounded by `query_len`) against a subject residue: used where the query is held
+    /// per context (TBLASTX) or scored from a PSSM's rows (TBLASTN `-in_pssm`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn test_on_with(
+        &self,
+        table: &mut impl DiagTable,
+        hits: &[i32],
+        offset: i32,
+        query_len: i32,
+        score_at: impl Fn(i32, u8) -> i32,
+        context: impl Fn(i32) -> WordContext,
         mut save: impl FnMut(i32, OneWordSeed),
     ) {
         for &q in hits {
@@ -109,7 +138,13 @@ impl OneWord<'_> {
                 entry.set_last_hit(offset);
                 continue;
             }
-            let seed = self.extend(last_hit.wrapping_add(self.word), q, found.x_drop);
+            let seed = self.extend_with(
+                last_hit.wrapping_add(self.word),
+                q,
+                found.x_drop,
+                query_len,
+                &score_at,
+            );
             if seed.score >= found.cutoff {
                 save(q, seed);
             }
@@ -138,11 +173,29 @@ impl OneWord<'_> {
     /// The two-hit extension (`s_BlastAaExtendTwoHit`) of the hit at query offset `q_right_off`
     /// and subject offset 0 whose first hit ends at `s_left_off` (signed), with the X-drop
     /// `x_drop`.
+    #[cfg(test)]
     pub(crate) fn extend(&self, s_left_off: i32, q_right_off: i32, x_drop: i32) -> OneWordSeed {
-        let score_at = |q: i32, s: i32| {
-            self.scores
-                .score(self.query[q as usize], self.letters[s as usize])
-        };
+        self.extend_with(
+            s_left_off,
+            q_right_off,
+            x_drop,
+            self.query.len() as i32,
+            &|q, s| self.scores.score(self.query[q as usize], s),
+        )
+    }
+
+    /// The two-hit extension (`s_BlastAaExtendTwoHit`) of the hit at query offset `q_right_off`
+    /// and subject offset 0 whose first hit ends at `s_left_off` (signed), with the X-drop
+    /// `x_drop`, the query's length `query_len` and the residue scorer `score_at`.
+    fn extend_with(
+        &self,
+        s_left_off: i32,
+        q_right_off: i32,
+        x_drop: i32,
+        query_len: i32,
+        score_at: &impl Fn(i32, u8) -> i32,
+    ) -> OneWordSeed {
+        let score_at = |q: i32, s: i32| score_at(q, self.letters[s as usize]);
         let (mut left_score, mut right_d, mut score) = (0, 0, 0);
         for i in 0..self.word {
             score += score_at(q_right_off + i, i);
@@ -172,7 +225,7 @@ impl OneWord<'_> {
         let (mut right_score, mut s_last_off, mut right_len) = (0, s_right_off, 0);
         let right_extend = left_d >= s_right_off - s_left_off;
         if right_extend {
-            let n = (self.length - s_right_off).min(self.query.len() as i32 - q_right_off);
+            let n = (self.length - s_right_off).min(query_len - q_right_off);
             let (mut walk, mut best, mut best_i) = (left_score, left_score, -1);
             let mut i = 0;
             while i < n {
@@ -250,10 +303,10 @@ pub(crate) fn short_chunk_tree_refusal(
 // After each chunk with HSPs NCBI merges them into the sequence's list with the subject split at
 // the chunk's offset: the joined list's HSPs that end past the offset and the chunk's that start
 // before the offset plus the overlap (0 where the chunk starts at the left of the range after its
-// own, else 100; after the last range NCBI reads it past its list) go to its loop of joins, which
-// LOSAT's protein programs do not port (with `HardMaskShape::LongRange` and
-// `HardMaskShape::PartsOutOfOrder`, item M4b-3d of series NP). Where no HSP of one side is there,
-// the merge appends the chunk's HSPs, which LOSAT does.
+// own, else 100; after the last range NCBI reads it past its list) go to its loop of joins.
+// BLASTP and BLASTX perform this merge directly (`core::blast_hits::merge_subject_chunk_hsps`,
+// item M4b-3d of series NP); TBLASTN and TBLASTX call `merge_joins` when the overlap is read past
+// the list of ranges (`overlap_past_list`).
 /// Whether NCBI's merge of the HSPs of hard chunk `chunk` into a sequence's list runs its loop of
 /// joins: an HSP of the list ends past the chunk's offset (`earlier_ends`, the ends of the list's
 /// HSPs in the sequence) and one of the chunk's starts before its offset plus the overlap
@@ -276,7 +329,7 @@ pub(crate) fn merge_joins(
 
 /// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where the HSPs of a
 /// part shorter than the word after overlapping masks meet those of another part in NCBI's merge
-/// across their overlap ([`merge_joins`]), which LOSAT does not do yet.
+/// across an overlap read past its list of ranges ([`merge_joins`]).
 pub(crate) fn short_chunk_merge_refusal(
     oid: impl std::fmt::Display,
     program: &str,
@@ -287,6 +340,55 @@ pub(crate) fn short_chunk_merge_refusal(
          that part meet those of another part in its merge across their overlap, which LOSAT's \
          {program} does not do yet; LOSAT's {program} does not search such a database with \
          -db_hard_mask"
+    ))
+    .into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:579-584
+// On a hard-masked sequence's final chunk (`overlap_past_list`), NCBI reads
+// `backup.hard_ranges[num_hard_ranges].left` one slot past its list to choose overlap 0 vs 100.
+// When an HSP from an earlier hard range (such as a short `OneWord` chunk) ends past the final
+// chunk's offset and an HSP of the final chunk starts within `DBSEQ_CHUNK_OVERLAP`, that
+// out-of-bounds read decides whether the two merge across the mask.
+/// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where alignments
+/// from an earlier hard range meet alignments of the final chunk across an overlap that NCBI reads
+/// past its list of ranges (`HardChunk::overlap_past_list`).
+#[cold]
+#[inline(never)]
+pub(crate) fn last_range_overlap_merge_refusal(
+    oid: impl std::fmt::Display,
+    program: &str,
+) -> anyhow::Error {
+    ShortChunkSeedRefusal(format!(
+        "-db_hard_mask: the sequence of OID {oid} has alignments from an earlier range that meet \
+         the final part across an overlap NCBI BLAST+ 2.17.0 reads past its list of ranges; \
+         LOSAT's {program} does not search such a database with -db_hard_mask"
+    ))
+    .into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515, 1526
+// Merging two HSPs across a chunk overlap whose query lengths sum to 0 divides by zero
+// (`score_density`), or whose density-scaled score leaves `Int4` invokes undefined float-to-int
+// conversion in NCBI BLAST+.
+/// LOSAT's refusal (in `program`'s name) of a sequence of OID `oid` (and optional translated
+/// reading `frame`), where merging two alignments across a chunk overlap produces a zero
+/// query-length sum or an out-of-range scaled score (`core::blast_hits::ChunkMergeUndefined`).
+#[cold]
+#[inline(never)]
+pub(crate) fn chunk_merge_undefined_refusal(
+    oid: impl std::fmt::Display,
+    frame: Option<i8>,
+    program: &str,
+) -> anyhow::Error {
+    let target = match frame {
+        Some(frame) => format!("sequence of OID {oid}, frame {frame}"),
+        None => format!("sequence of OID {oid}"),
+    };
+    ShortChunkSeedRefusal(format!(
+        "{program}: {target} has alignments across a chunk overlap whose merged score calculation \
+         is undefined in NCBI BLAST+ (zero query-length sum or out-of-range scaled score); \
+         LOSAT's {program} does not support it"
     ))
     .into()
 }

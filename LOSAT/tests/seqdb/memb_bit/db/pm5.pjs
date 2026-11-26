@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "pm5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pm5",
+  "number-of-letters": 360,
+  "number-of-sequences": 6,
+  "last-updated": "2026-11-26T02:40:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50917,
+  "bytes-to-cache": 495,
+  "files": [
+    "pm5.pdb",
+    "pm5.phr",
+    "pm5.pin",
+    "pm5.pnd",
+    "pm5.pni",
+    "pm5.pog",
+    "pm5.pos",
+    "pm5.pot",
+    "pm5.psq",
+    "pm5.ptf",
+    "pm5.pto"
+  ]
+}

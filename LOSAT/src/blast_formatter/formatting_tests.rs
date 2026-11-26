@@ -3,9 +3,9 @@
 
 use super::*;
 
-fn options(outfmt: &str) -> Options {
+fn options(outfmt: impl AsRef<[u8]>) -> Options {
     Options {
-        outfmt: outfmt.to_string(),
+        outfmt: outfmt.as_ref().to_vec(),
         show_gis: false,
         num_descriptions: None,
         num_alignments: None,
@@ -19,29 +19,30 @@ fn options(outfmt: &str) -> Options {
     }
 }
 
-/// The exit status and text of `CATCH_ALL` for an error of `extract_formatting`.
-fn caught(error: anyhow::Error) -> (i32, String) {
+/// The exit status and raw message bytes of `CATCH_ALL` for an error of `extract_formatting`.
+fn caught(error: anyhow::Error) -> (i32, Vec<u8>) {
     let native = error
         .downcast_ref::<crate::cli::NativeError>()
         .expect("NCBI's error");
-    (
-        native.exit,
-        String::from_utf8(native.message.clone()).unwrap(),
-    )
+    (native.exit, native.message.clone())
 }
 
-fn error_of(outfmt: &str) -> (i32, String) {
+fn error_of(outfmt: impl AsRef<[u8]>) -> (i32, Vec<u8>) {
     caught(extract_formatting(&options(outfmt), 500).unwrap_err())
 }
 
-fn options_error_text(message: &str) -> (i32, String) {
-    caught(crate::blastinput::app::options_error(message))
+fn options_error_bytes(message: &[u8]) -> (i32, Vec<u8>) {
+    caught(crate::blastinput::app::options_error_bytes(message))
+}
+
+fn options_error_text(message: &str) -> (i32, Vec<u8>) {
+    options_error_bytes(message.as_bytes())
 }
 
 #[test]
 fn every_format_of_ncbi_s_list_is_read() {
     for number in (0..=18).chain([20]) {
-        let formatting = extract_formatting(&options(&number.to_string()), 500).unwrap();
+        let formatting = extract_formatting(&options(number.to_string()), 500).unwrap();
         assert_eq!(formatting.choice.number, number);
         assert!(!formatting.choice.custom(), "{number}");
         assert!(formatting.warnings.is_empty(), "{number}");
@@ -73,10 +74,7 @@ fn the_errors_of_outfmt_are_ncbi_s() {
     for text in ["-1", "22", "100"] {
         assert_eq!(
             error_of(text),
-            (
-                255,
-                "Error: Formatting choice is out of range\n".to_string()
-            ),
+            (255, b"Error: Formatting choice is out of range\n".to_vec()),
             "{text:?}"
         );
     }
@@ -115,23 +113,26 @@ fn the_custom_specifications_are_the_search_programs() {
     let choice = |text: &str| extract_formatting(&options(text), 500).unwrap().choice;
     // P2.161, P2.175, P2.177, P2.179.
     let custom = choice("6 delim=");
-    assert_eq!((custom.spec.as_str(), custom.delimiter.as_str()), ("", ""));
-    assert_eq!(choice("6 qseqid foo").spec, "qseqid foo");
+    assert_eq!(
+        (custom.spec.as_slice(), custom.delimiter.as_slice()),
+        (&b""[..], &b""[..])
+    );
+    assert_eq!(choice("6 qseqid foo").spec, b"qseqid foo");
     let custom = choice("7 delim=, qseqid");
     assert_eq!(
         (
             custom.number,
-            custom.spec.as_str(),
-            custom.delimiter.as_str()
+            custom.spec.as_slice(),
+            custom.delimiter.as_slice()
         ),
-        (7, "qseqid", ",")
+        (7, &b"qseqid"[..], &b","[..])
     );
-    assert_eq!(choice("6 delim=: qseqid sseqid").delimiter, ":");
+    assert_eq!(choice("6 delim=: qseqid sseqid").delimiter, b":");
     // P2.169: a format that takes no fields drops them.
     assert!(!choice("0 qseqid").custom());
     // SAM (eIsSAM) keeps its words (P2.193, P2.195).
     assert_eq!(choice("17").number, 17);
-    assert_eq!(choice("17 SQ").spec, "SQ");
+    assert_eq!(choice("17 SQ").spec, b"SQ");
 }
 
 // blast_formatter.cpp:350-355: SAM for blastn's archives only (P2.197, P2.199: blastp).
@@ -234,14 +235,14 @@ fn the_formatting_options_are_kept_where_ncbi_reads_them() {
         }
     );
     assert!(formatting.warnings.is_empty());
-    given.outfmt = "1".to_string();
+    given.outfmt = b"1".to_vec();
     let formatting = extract_formatting(&given, 500).unwrap();
     assert_eq!(formatting.formatting.sort_hsps, None);
     assert_eq!(
         String::from_utf8(formatting.warnings).unwrap(),
         "Warning: The parameter -sorthsps is ignored for output formats != 0.\n"
     );
-    given.outfmt = "7".to_string();
+    given.outfmt = b"7".to_vec();
     given.num_descriptions = Some(3);
     let formatting = extract_formatting(&given, 500).unwrap();
     assert_eq!(formatting.formatting, FormattingArgs::default());
@@ -258,4 +259,13 @@ fn the_formatting_options_are_kept_where_ncbi_reads_them() {
     flags.html = true;
     let formatting = extract_formatting(&flags, 500).unwrap();
     assert!(formatting.show_gis && formatting.html);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851
+#[test]
+fn non_utf8_outfmt_bytes_are_preserved() {
+    for bad in [&b"8\xff"[..], &b"\xff"[..]] {
+        let expected = [b"'", bad, b"' is not a valid output format"].concat();
+        assert_eq!(error_of(bad), options_error_bytes(&expected), "{bad:?}");
+    }
 }

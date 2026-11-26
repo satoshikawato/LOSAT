@@ -144,7 +144,7 @@ impl TextMatchIds {
 /// a `\r` stays in the line, so a CRLF list matches nothing as text, as NCBI's Linux build), and
 /// the empty ones are skipped. A line that starts with a space or a tab gives an empty id; one
 /// whose first space comes at 0 after `>` (`> x`) too.
-pub(super) fn fill_id_list(name: &str, mut insert: impl FnMut(&[u8])) {
+pub(super) fn fill_id_list(name: &std::ffi::OsStr, mut insert: impl FnMut(&[u8])) {
     let Ok(bytes) = std::fs::read(name) else {
         return;
     };

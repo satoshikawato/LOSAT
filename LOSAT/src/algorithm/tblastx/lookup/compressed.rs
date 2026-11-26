@@ -666,7 +666,7 @@ impl BlastCompressedAaLookupTable {
                             );
                             totalhits += numhits;
                         } else {
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:403-404
                             s_range[1] = i32::try_from(s)
                                 .expect("NCBI BLAST compressed subject offset fits Int4");
                             return totalhits;
@@ -956,14 +956,15 @@ fn build_blosum62_compressed_lookup_with_capacity(
 /// are the lookup segments of all queries in query order, and `tables` the ranges of
 /// `locations` (in order) of each table that NCBI builds (BLASTP's query batches). The
 /// table has no limit on its overflow cells, and its cells hold their offsets in NCBI's
-/// order. `Some(Err(()))` when the words of one of NCBI's tables fill its overflow banks.
+/// order. `Some(Err(BanksFilled(i)))` when the words of one of NCBI's tables fill its overflow
+/// banks, `i` the first such table (in the order of `tables`).
 pub fn try_build_blosum62_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+) -> Option<Result<BlastCompressedAaLookupTable, BanksFilled>> {
     try_build_compressed_lookup_with_capacity(
         Blosum62Compressed,
         word_size,
@@ -984,7 +985,7 @@ pub fn try_build_compressed_lookup(
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+) -> Option<Result<BlastCompressedAaLookupTable, BanksFilled>> {
     try_build_compressed_lookup_with_capacity(
         matrix,
         word_size,
@@ -995,6 +996,16 @@ pub fn try_build_compressed_lookup(
         NCBI_OVERFLOW_CELL_CAPACITY,
     )
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
+/// The outcome of a build of the tables of several of NCBI's query batches (`tables`) whose words
+/// fill the overflow banks of one of them, where NCBI writes past its banks: the index (in
+/// `tables`) of the first such table. NCBI builds the table of a batch when it searches that
+/// batch, after it has printed the reports of the batches before, so the refusal is that batch's
+/// (BLASTP's `blastp_compressed_lookup`). The three builders give the same index (the reference
+/// below, `x_clut_direct`'s and `x_clut_par`'s `XFlatBuild::Refused`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BanksFilled(pub usize);
 
 /// The search matrix whose compressed score matrix scores a table's words: BLOSUM62
 /// (`Blosum62Compressed`, `build_blosum62_compressed_score_matrix`) or another `ScoringMatrix`
@@ -1043,14 +1054,14 @@ fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     overflow_cell_capacity: usize,
-) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+) -> Option<Result<BlastCompressedAaLookupTable, BanksFilled>> {
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, 0.0)?;
     lookup.threshold = scaled_threshold;
     lookup.overflow_cell_capacity = usize::MAX;
     let matrix = scores.score_matrix(lookup.compressed_alphabet_size as usize)?;
     let info = CompressedNeighborInfo::new(&matrix, lookup.compressed_alphabet_size as usize);
     let mut next = 0usize;
-    for table in tables {
+    for (index, table) in tables.iter().enumerate() {
         // The words between NCBI's tables (a split query batch, whose chunks have tables
         // of their own) are added without a test.
         lookup.add_location_words(&info, &matrix, query, &locations[next..table.start], |_| {
@@ -1076,7 +1087,7 @@ fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
                 )
         });
         if !fits {
-            return Some(Err(()));
+            return Some(Err(BanksFilled(index)));
         }
         next = table.end;
     }
@@ -1443,13 +1454,13 @@ pub(crate) fn compute_compressed_index_u8(
     (index, skip)
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
 #[inline(always)]
 pub fn compressed_pv_test(pv: &[u32], index: usize, pv_array_bts: usize) -> bool {
     (pv[index >> pv_array_bts] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
 #[inline(always)]
 pub fn compressed_pv_set(pv: &mut [u32], index: usize, pv_array_bts: usize) {
     pv[index >> pv_array_bts] |= 1u32 << (index & PV_ARRAY_MASK);

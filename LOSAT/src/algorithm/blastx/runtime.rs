@@ -68,6 +68,10 @@ fn prelim_stream(options: &ResolvedOptions, queries: &PreparedQueryBatch) -> Hsp
 pub struct BatchResults {
     pub query_ordinal: usize,
     pub queries: Vec<Vec<HspList>>,
+    /// Whether `queries` are in the order of the reports: sorted and, for `-subject`'s records,
+    /// mapped (`BatchResults::put_in_report_order`, which sets it once); false as the search made
+    /// them.
+    pub(crate) in_report_order: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
     pub prepared: PreparedQueryBatch,
     pub parameters: Vec<ContextParameters>,
@@ -360,24 +364,26 @@ impl Drop for XInnerSerial {
 // side by side.
 /// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
 /// several of these side by side; each takes the serial path of every stage (the Web's, `web.rs`).
-#[cfg(all(feature = "parallel", any(target_arch = "wasm32", test)))]
+#[cfg(all(feature = "parallel", any(losat_web_abi_v1, test)))]
 pub(crate) fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
-    x_search_unit_serial(records, subjects, options, None)
+    x_search_unit_serial(records, subjects, options, None, None)
 }
 
 /// `x_search_internal_serial` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
-/// Its callers are the several-batches-at-a-time paths, which need a pool (`parallel`).
+/// `scan_end` as in `x_search_unit_in_pool`. Its callers are the several-batches-at-a-time paths,
+/// which need a pool (`parallel`).
 #[cfg(feature = "parallel")]
 pub(crate) fn x_search_unit_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
 ) -> Result<Vec<BatchResults>> {
     let _serial = XInnerSerial::enter();
     x_search_unit_in_pool(
@@ -386,6 +392,7 @@ pub(crate) fn x_search_unit_serial<'a>(
         options,
         &crate::utils::threading::SearchPool::x_serial(),
         prep,
+        scan_end,
     )
 }
 
@@ -399,17 +406,22 @@ pub(crate) fn x_search_internal_in_pool<'a>(
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BatchResults>> {
-    x_search_unit_in_pool(records, subjects, options, pool, None)
+    x_search_unit_in_pool(records, subjects, options, pool, None, None)
 }
 
 /// `x_search_internal_in_pool` for one unit of a reader batch of several, prepared in phase 1
 /// (`reader_batch.rs`); `None`: `records` are the reader batch (or the whole batch is one unit).
+/// `scan_end` is called on this thread when the scan of the unit's batch has ended, before its
+/// batch end (the redo and the traceback), which holds no lookup or diagonal table of its letters
+/// (`search::search_core`): the batch flow gives back the unit's places there (`native.rs`,
+/// `x_flow`).
 pub(crate) fn x_search_unit_in_pool<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
+    scan_end: Option<&dyn Fn()>,
 ) -> Result<Vec<BatchResults>> {
     let subjects = subjects.into();
     let mut observer = Noop;
@@ -427,7 +439,15 @@ pub(crate) fn x_search_unit_in_pool<'a>(
         chunk: None,
         output: Vec::new(),
     };
-    search_core(records, subjects, options, &mut pipeline, pool, prep)?;
+    search_core(
+        records,
+        subjects,
+        options,
+        &mut pipeline,
+        pool,
+        prep,
+        scan_end,
+    )?;
     Ok(pipeline.output)
 }
 
@@ -454,7 +474,7 @@ pub(crate) fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, &mut pipeline, pool, None)
+        search_core(records, subjects, options, &mut pipeline, pool, None, None)
     })?;
     Ok(pipeline.output)
 }
@@ -530,6 +550,7 @@ impl Runtime<'_> {
                 positive: 0,
                 edit_script: Vec::new(),
                 composition_method: 0,
+                query_left_out: 0,
             })
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
@@ -631,6 +652,7 @@ impl Runtime<'_> {
                         positive,
                         edit_script: Vec::new(),
                         composition_method: 0,
+                        query_left_out: 0,
                     })
                 })
                 .collect();
@@ -747,6 +769,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         self.output.push(BatchResults {
             query_ordinal: ordinal,
+            in_report_order: false,
             queries: vec![Vec::new(); batch.original_lengths.len()],
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
@@ -1171,6 +1194,7 @@ impl PreliminarySink for Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
         self.output.push(BatchResults {
             query_ordinal: self.ordinal,
+            in_report_order: false,
             queries: queries.into_iter().map(|q| q.lists).collect(),
             prepared: batch.x_for_results(),
             parameters: full,
@@ -1244,6 +1268,7 @@ fn finalize_redone(
                 positive,
                 edit_script: r.edit_script.clone(),
                 composition_method: r.composition_method,
+                query_left_out: 0,
             }
         })
         .collect();

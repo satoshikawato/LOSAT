@@ -294,7 +294,14 @@ pub fn run_makeblastdb(
     };
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let mut diag = crate::ncbi_app::Diag::new(&opened.target, &mut recorded, tool);
-    let read = crate::ncbi_app::read(tool, &words, output, &mut diag, None);
+    let read = crate::ncbi_app::read(
+        tool,
+        &words,
+        output,
+        &mut diag,
+        None,
+        &crate::report::run_files::OpenFiles::disk(),
+    );
     drop(diag);
     let args = match read {
         Ok(args) => args,
@@ -314,7 +321,7 @@ pub fn run_makeblastdb(
     }
     let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(reason) => Err(reason),
-        None => crate::cli::reader::convert(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args),
     };
     let args = match converted {
         Ok(Commands::Makedb(args)) => args,
@@ -342,7 +349,7 @@ pub fn run_makeblastdb(
     let now = LocalTime::now();
     let status = makeblastdb::run_with(
         &args,
-        makeblastdb::registry_blastdb(&settings),
+        &settings,
         now.as_ref(),
         Platform::host(),
         input,

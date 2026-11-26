@@ -133,12 +133,12 @@ fn unsupported_formats_fail_before_searching() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
@@ -183,7 +183,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -256,7 +256,7 @@ fn run_local_outputs(
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -278,7 +278,7 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
-// The command line's `-word_size` is at least 2 (clap's `protein_word_size`); a caller of
+// The command line's `-word_size` is at least 2 (NCBI's argument reader); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core. A word size of 0 with
 // `-lcase_masking` and a lowercase subject took the reference scan, whose loop over the first
 // `word_length - 1` letters wrapped and read past the subject.
@@ -314,7 +314,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt: "6",
+                outfmt: b"6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
@@ -378,7 +378,7 @@ fn a_word_size_of_one_searches() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],

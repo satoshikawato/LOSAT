@@ -25,27 +25,31 @@ use super::{database_error, refusal, Diag};
 /// status.
 pub(super) fn metadata(
     db: &SeqDb,
-    name: &str,
+    name: &[u8],
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
     out: OutputFile<'_>,
 ) -> i32 {
-    let prefix = metadata_user_path(args.value("metadata_output_prefix"));
-    let dbname: Vec<&str> = name
-        .split(' ')
+    let prefix = metadata_user_path(args.bytes("metadata_output_prefix").as_deref());
+    let separator = std::path::MAIN_SEPARATOR as u8;
+    let dbname: Vec<&[u8]> = name
+        .split(|&byte| byte == b' ')
         .filter(|piece| !piece.is_empty())
-        .map(|piece| match piece.rfind(std::path::MAIN_SEPARATOR) {
-            Some(off) => &piece[off + 1..],
-            None => piece,
-        })
+        .map(
+            |piece| match piece.iter().rposition(|&byte| byte == separator) {
+                Some(off) => &piece[off + 1..],
+                None => piece,
+            },
+        )
         .collect();
     let last_updated = match iso8601_date_time(db.date()) {
         Ok(text) => text,
         Err(reason) => {
             return diag.refuse(&refusal(&format!(
-                "{name}: NCBI does not read the date of the database ({reason}) and ends with \
-                 an exception that names its source files (exit status 255)"
+                "{}: NCBI does not read the date of the database ({reason}) and ends with \
+                 an exception that names its source files (exit status 255)",
+                String::from_utf8_lossy(name)
             )))
         }
     };
@@ -72,7 +76,7 @@ pub(super) fn metadata(
         None
     };
     let metadata = DbMetadata {
-        dbname: dbname.join(" ").into_bytes(),
+        dbname: dbname.join(&b' '),
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
         db_version: if db.is_version5() { 5 } else { 4 },
         description: db.title().to_vec(),

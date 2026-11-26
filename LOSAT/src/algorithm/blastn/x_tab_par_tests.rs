@@ -1,5 +1,6 @@
 use super::super::hsp::{BlastnHsp, BlastnHspList};
 use super::*;
+use std::io::Write;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
 struct Rng(u64);
@@ -137,6 +138,8 @@ struct Side {
     sink: bool,
 }
 
+impl crate::report::ostream::ReportWrite for Side {}
+
 impl Write for Side {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if buf.is_empty() {
@@ -195,7 +198,7 @@ fn run(
             args.2,
             format,
             args.3,
-            "User specified sequence set (Input: subject.fa)",
+            b"User specified sequence set (Input: subject.fa)",
             args.4,
             epilog,
             Some(&mut warnings),
@@ -208,11 +211,12 @@ fn run(
             &crate::report::db_subject::HitLoads::default(),
             format,
             args.3,
-            "User specified sequence set (Input: subject.fa)",
+            b"User specified sequence set (Input: subject.fa)",
             args.4,
             epilog,
             None,
             Some(&mut warnings),
+            None,
         ),
     }
     .unwrap();
@@ -405,10 +409,11 @@ fn a_format_observer_keeps_the_serial_writer() {
             &crate::report::db_subject::HitLoads::default(),
             BlastnOutputFormat::Tabular,
             &case.query_titles,
-            "subject",
+            b"subject",
             &case.unsearched,
             None,
             probe.as_mut(),
+            None,
             None,
         )
         .unwrap();

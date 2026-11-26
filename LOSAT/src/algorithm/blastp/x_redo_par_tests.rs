@@ -81,12 +81,12 @@ fn failed(message: &str) -> Option<XComputed> {
 }
 
 /// The text of an error of the redo: the batch that the error of a batch's search names
-/// (`HeaderReadError`, as `redo_run::sw_batch_failed` and `redo_run::sw_endless` make it), and the
+/// (`ErrorAfterBatchReports`, as `redo_run::sw_batch_failed` and `redo_run::sw_endless` make it), and the
 /// message.
 fn error_text(result: &Result<()>) -> Option<String> {
     result.as_ref().err().map(|error| {
-        match error.downcast_ref::<crate::algorithm::common::database::HeaderReadError>() {
-            Some(batch) => format!("batch {}: {:#}", batch.query, batch.error),
+        match error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>() {
+            Some(batch) => format!("batch {:?}: {:#}", batch.query, batch.error),
             None => format!("{error:#}"),
         }
     })
@@ -2215,6 +2215,7 @@ fn an_excluded_list_after_a_failed_redo_clears_the_failure_unless_the_redo_ends_
     let mark = |query, position, best_evalue| FetchExcludedMatch {
         query,
         position,
+        ordinal: 0,
         best_evalue,
     };
     let run = |lists: &[Option<BlastpHitList>],
@@ -2400,6 +2401,7 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
                 excluded.extend(places.into_iter().map(|position| FetchExcludedMatch {
                     query: q_idx,
                     position,
+                    ordinal: 0,
                     best_evalue: prelim[mark_rng.below(prelim.len())],
                 }));
             }
@@ -2815,6 +2817,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                         query_raw(&fixture.contexts[q_idx]),
                         subject.residues(),
                         ScoringMatrix::Blosum62,
+                        None,
                         &fixture.gapped_params,
                         Some(&fixture.gapped_gumbel),
                         &build(q_idx).expect("parameters"),

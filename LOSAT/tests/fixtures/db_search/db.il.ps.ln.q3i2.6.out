@@ -1,0 +1,6 @@
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	6.17e-118	317
+q3	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	1.2	15.8
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	2.47e-115	311
+q3	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	7.8	13.4
+
+Search has CONVERGED!

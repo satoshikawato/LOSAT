@@ -207,7 +207,8 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
 
   const crFinalFile = { name: 'eol_cr.q.nuc.fa', text: crFinal };
 
-  const expectQueryDetails = async (recordLabel: string, readDiff?: string, fromLine?: string) => {
+  const expectQueryDetails = async (recordLabel: string, queryCount: string, readDiff?: string, fromLine?: string) => {
+    await expect(page.getByTestId('query-count')).toHaveText(queryCount);
     const resultsDiff = page.getByTestId('results-query-read-diff');
     if (readDiff === undefined) await expect(resultsDiff).toHaveCount(0);
     else await expect(resultsDiff).toHaveText(readDiff);
@@ -229,7 +230,7 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
       },
       checkOffered: async (offered) => {
         // All 6 records stay intact (180 nt each) because pure-CR stays in CR mode: no diff notice.
-        await expectQueryDetails('6 records');
+        await expectQueryDetails('6 records', '6 of 6 queries');
         expect(offered.bytes.equals(Buffer.concat([crNoFinal, Buffer.from('\r'), crFinal]))).toBe(true);
       },
     },
@@ -246,6 +247,7 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
       checkOffered: async () => {
         await expectQueryDetails(
           '6 records',
+          '6 of 6 queries',
           'Read as one file, as the command line reads it, these give 6 records (5 when each file is read alone).',
           'From eol_cr.q.nuc.fa (3 records) and eol_mixed_lf_crlf_cr.q.nuc.fa (2 records)',
         );
@@ -274,6 +276,7 @@ test('D17: combined inputs with mixed CR/CRLF/LF line endings complete and match
       checkOffered: async () => {
         await expectQueryDetails(
           '2 records',
+          '2 of 2 queries',
           'Read as one file, as the command line reads it, 1 record differs from the record table (record 2 (q3): length 120 instead of 180).',
         );
       },

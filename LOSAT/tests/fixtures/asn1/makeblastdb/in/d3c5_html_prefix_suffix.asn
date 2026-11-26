@@ -1,0 +1,40 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { local str "h_est" },
+      descr {
+        title "abc mRNA sequ&#101;nce",
+        molinfo { biomol mRNA, tech est },
+        source { org { taxname "Escherichia coli" } }
+      },
+      inst { repr raw, mol rna, length 8, seq-data iupacna "ACGTACGT" }
+    },
+    seq {
+      id { local str "h_sts" },
+      descr {
+        title "abc sequence tagged sit&#101;",
+        molinfo { biomol genomic, tech sts },
+        source { org { taxname "Escherichia coli" } }
+      },
+      inst { repr raw, mol dna, length 8, seq-data iupacna "ACGTACGT" }
+    },
+    seq {
+      id { local str "h_gss" },
+      descr {
+        title "abc genomic survey sequence",
+        molinfo { biomol genomic, tech survey },
+        source { org { taxname "Escherichia coli" } }
+      },
+      inst { repr raw, mol dna, length 8, seq-data iupacna "ACGTACGT" }
+    },
+    seq {
+      id { local str "h_unver" },
+      descr {
+        title "UNVERIF&#73;ED sample title",
+        user { type str "Unverified", data { { label str "Type", data str "Features" } } },
+        source { org { taxname "Escherichia coli" } }
+      },
+      inst { repr raw, mol dna, length 8, seq-data iupacna "ACGTACGT" }
+    }
+  }
+}

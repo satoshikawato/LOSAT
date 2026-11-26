@@ -355,8 +355,10 @@ struct LocPiece {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CompactLoc {
     pieces: Vec<LocPiece>,
-    /// `sequence::GetStrand` value for `s_GetCdregionLabel` ORF formatting.
+    /// `sequence::GetStrand` value for `s_GetCdregionLabel` ORF formatting and overlap checks.
     strand: i32,
+    /// Whether the top-level `Seq-loc` is `mix` or `packed-int` (`CAnnotObjectType_Less`).
+    is_complex: bool,
     /// FASTA string of the first Seq-id (for `cannot find sequence` error on missing product).
     first_id_fasta: Option<Vec<u8>>,
 }
@@ -459,6 +461,7 @@ struct CdsFeature {
     product: Option<CompactLoc>,
     partial_is_set: bool,
     low_quality_except: bool,
+    trans_splicing: bool,
     orf: bool,
     frame: i32,
     xref_prot_label: Option<Vec<u8>>,
@@ -473,6 +476,7 @@ struct BiosrcFeature {
     loc: CompactLoc,
     taxname: Option<Vec<u8>>,
     has_clone: bool,
+    qual_comment_fallback: Vec<u8>,
 }
 
 /// Sorted interval index per Bioseq enabling `O(log N + k)` covering-feature lookup
@@ -541,7 +545,7 @@ pub(crate) struct TseFeatureIndex {
     cds_by_bioseq: HashMap<usize, Vec<usize>>,
     cds_by_product: HashMap<usize, Vec<usize>>,
     biosrcs_by_bioseq: HashMap<usize, SpanIndex>,
-    gene_by_feat_id: HashMap<i32, usize>,
+    gene_by_feat_id: HashMap<i32, Vec<usize>>,
 }
 
 impl TseFeatureIndex {
@@ -687,11 +691,13 @@ impl TseFeatureIndex {
                 .map(|p| extract_loc(p, &mut self.interner));
             let partial_is_set = feat.member(s.seq_feat_partial).is_some();
             let is_except = matches!(feat.member(s.seq_feat_except), Some(Value::Bool(true)));
-            let low_quality_except = is_except
-                && match feat.member(s.seq_feat_except_text) {
-                    Some(Value::Str(t)) => cds_except_is_low_quality(t),
-                    _ => false,
-                };
+            let except_text = match feat.member(s.seq_feat_except_text) {
+                Some(Value::Str(t)) => Some(t.as_slice()),
+                _ => None,
+            };
+            let low_quality_except =
+                is_except && except_text.is_some_and(cds_except_is_low_quality);
+            let trans_splicing = except_text.is_some_and(|t| contains_bytes(t, b"trans-splicing"));
             let orf = matches!(fval.member(s.cdregion_orf), Some(Value::Bool(true)));
             let frame = match fval.member(s.cdregion_frame) {
                 Some(Value::Enum(v)) => *v,
@@ -725,6 +731,7 @@ impl TseFeatureIndex {
                 product,
                 partial_is_set,
                 low_quality_except,
+                trans_splicing,
                 orf,
                 frame,
                 xref_prot_label,
@@ -751,11 +758,13 @@ impl TseFeatureIndex {
                         ) && sbs.member(s.subsrc_name).is_some()
                     })
                 });
+            let qual_comment_fallback = extract_qual_comment_fallback(feat);
             self.biosrcs.push(BiosrcFeature {
                 seq_order,
                 loc,
                 taxname,
                 has_clone,
+                qual_comment_fallback,
             });
         }
     }
@@ -780,7 +789,7 @@ impl TseFeatureIndex {
         let mut raw_genes: HashMap<usize, Vec<usize>> = HashMap::new();
         for (idx, feat) in self.genes.iter().enumerate() {
             if let Some(fid) = feat.feat_id {
-                self.gene_by_feat_id.entry(fid).or_insert(idx);
+                self.gene_by_feat_id.entry(fid).or_default().push(idx);
             }
             index_loc_bioseqs(&feat.loc, &self.id_to_bioseq, &mut raw_genes, idx);
         }
@@ -896,7 +905,21 @@ impl TseFeatureIndex {
         any.then_some((min_from, max_to))
     }
 
-    fn loc_ranges(&self, loc: &CompactLoc, flip_strand: bool) -> Vec<(usize, bool, u64, u64)> {
+    fn loc_single_bioseq(&self, loc: &CompactLoc) -> Option<usize> {
+        let mut bio = None;
+        for p in &loc.pieces {
+            let key = p.id_key.as_ref()?;
+            let &bi = self.id_to_bioseq.get(key)?;
+            match bio {
+                None => bio = Some(bi),
+                Some(prev) if prev != bi => return None,
+                _ => {}
+            }
+        }
+        bio
+    }
+
+    fn loc_ranges_by_rev(&self, loc: &CompactLoc) -> Vec<(usize, bool, u64, u64)> {
         let mut out = Vec::with_capacity(loc.pieces.len());
         for p in &loc.pieces {
             let Some(key) = &p.id_key else { continue };
@@ -909,13 +932,151 @@ impl TseFeatureIndex {
             } else {
                 (p.from, p.to_open)
             };
-            let mut is_minus = p.strand == 2;
-            if flip_strand {
-                is_minus = !is_minus;
-            }
-            out.push((bi, is_minus, from, to_open));
+            out.push((bi, is_reverse_strand(p.strand), from, to_open));
         }
         out
+    }
+
+    /// `s_SeqLocToTotalRangesInfoMapByStrand`: collapses consecutive same-Bioseq, same-orientation,
+    /// properly-ordered pieces into total ranges per `(bio_idx, is_reverse)`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1385-1476
+    fn total_ranges_by_rev(&self, loc: &CompactLoc) -> Vec<(usize, bool, u64, u64)> {
+        let pieces = self.loc_ranges_by_rev(loc);
+        if pieces.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let (mut last_bi, mut last_rev, mut cur_from, mut cur_to) = pieces[0];
+        let mut last_from = cur_from;
+        for &(bi, rev, from, to_open) in &pieces[1..] {
+            let break_range = bi != last_bi || rev != last_rev;
+            let bad_order = !break_range
+                && if rev {
+                    from > last_from
+                } else {
+                    from < last_from
+                };
+            if break_range || bad_order {
+                out.push((last_bi, last_rev, cur_from, cur_to));
+                last_bi = bi;
+                last_rev = rev;
+                cur_from = from;
+                cur_to = to_open;
+            } else {
+                cur_from = cur_from.min(from);
+                cur_to = cur_to.max(to_open);
+            }
+            last_from = from;
+        }
+        out.push((last_bi, last_rev, cur_from, cur_to));
+        out.sort_unstable();
+        out
+    }
+
+    /// Single-Bioseq strand shortcut of `s_TestForOverlapEx`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1874-1891
+    fn single_seq_strand_incompatible(&self, outer: &CompactLoc, inner: &CompactLoc) -> bool {
+        let single_seq =
+            self.loc_single_bioseq(outer).is_some() && self.loc_single_bioseq(inner).is_some();
+        single_seq
+            && !test_strands(outer.strand, inner.strand)
+            && outer.strand != 255
+            && inner.strand != 255
+    }
+
+    /// `TestForOverlap64` under `eOverlap_Subset` (also used by `eOverlap_SubsetRev` after
+    /// swapping arguments).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1535-1589,1874-1909
+    fn test_for_overlap_subset(&self, outer: &CompactLoc, inner: &CompactLoc) -> Option<u64> {
+        if self.single_seq_strand_incompatible(outer, inner) {
+            return None;
+        }
+        let o_ranges = self.loc_ranges_by_rev(outer);
+        let i_ranges = self.loc_ranges_by_rev(inner);
+        if !ranges_contain_all(&o_ranges, &i_ranges) {
+            return None;
+        }
+        Some(coverage_len(&o_ranges).saturating_sub(coverage_len(&i_ranges)))
+    }
+
+    /// `TestForOverlap64` under `eOverlap_Contained` plus the `Compare` (`fCompareOverlapping`)
+    /// guard in `GetOverlappingFeatures`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1036-1150,1655-1755,1874-1902
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:1144-1189
+    fn test_for_overlap_contained(&self, outer: &CompactLoc, inner: &CompactLoc) -> Option<u64> {
+        if self.single_seq_strand_incompatible(outer, inner) {
+            return None;
+        }
+        let o_tot = self.total_ranges_by_rev(outer);
+        let i_tot = self.total_ranges_by_rev(inner);
+        if !ranges_contain_all(&o_tot, &i_tot) {
+            return None;
+        }
+        // `Compare` with `fCompareOverlapping` requires `eContains` or `eSame`: every individual
+        // interval of `inner` must be contained in some interval of `outer` on the same Bioseq.
+        let o_int = self.loc_ranges_by_rev(outer);
+        let i_int = self.loc_ranges_by_rev(inner);
+        for &(bi, _, from, to_open) in &i_int {
+            let contained = o_int
+                .iter()
+                .any(|&(obi, _, ofrom, oto)| obi == bi && ofrom <= from && oto >= to_open);
+            if !contained {
+                return None;
+            }
+        }
+        Some(uncovered_len_by_rev(&o_tot, &i_tot))
+    }
+
+    fn sorted_bioseq_intervals(&self, loc: &CompactLoc) -> Vec<(usize, u64, u64)> {
+        let mut out: Vec<(usize, u64, u64)> = self
+            .loc_ranges_by_rev(loc)
+            .into_iter()
+            .map(|(bi, _, from, to)| (bi, from, to))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// Whether `sequence::Compare` with `fCompareOverlapping` returns `eSame`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1045-1072
+    fn locs_same_intervals(&self, a: &CompactLoc, b: &CompactLoc) -> bool {
+        self.sorted_bioseq_intervals(a) == self.sorted_bioseq_intervals(b)
+    }
+
+    /// Whether `CFeat_CI` with `SetOverlapTotalRange` collects `cand_loc` into
+    /// `CFeatTree`'s `m_InfoMap` (shared Bioseq with intersecting total range and intersecting
+    /// `CHandleRange::GetStrandsFlag`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:2737-2740
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:2124-2130,3171-3207
+    fn total_range_and_strand_intersects(
+        &self,
+        cds_loc: &CompactLoc,
+        cand_loc: &CompactLoc,
+    ) -> bool {
+        if (handle_range_strands_flag(cds_loc) & handle_range_strands_flag(cand_loc)) == 0 {
+            return false;
+        }
+        for p in &cds_loc.pieces {
+            let Some(key) = &p.id_key else { continue };
+            let Some(&bi) = self.id_to_bioseq.get(key) else {
+                continue;
+            };
+            if let (Some((cf, ct)), Some((gf, gt))) = (
+                self.loc_total_range_on(cds_loc, bi),
+                self.loc_total_range_on(cand_loc, bi),
+            ) {
+                if gf < ct && cf < gt {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// `s_GetCdregionLabel` + `feature::GetLabel` (`fFGL_Content`) for a `Cdregion` feature.
@@ -983,99 +1144,418 @@ impl TseFeatureIndex {
         b"CDS".to_vec()
     }
 
-    /// `CFeatTree::GetBestGene` for a `Cdregion` feature.
+    /// `CFeatTree::GetBestGene` for a `Cdregion` feature (`AddGenesForCds` + `x_LookupParentByRef`
+    /// + `s_CollectBestOverlaps` with `PLessByEnd` and `CAnnotObject_Less` tie-breaking).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:2731-2920,3127-3143
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:1749-1759,2106-2142,2234-2250,2601-2700,3127-3143,3250-3256,3321-3337
+    /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2737-2740
     fn best_gene_for_cds(&self, cds: &CdsFeature) -> Option<&GeneFeature> {
-        // Check explicit Feat-id xref first.
+        // Explicit Feat-id xref only matches a gene that `AddGenesForCds` collected into `m_InfoMap`.
         for &fid in &cds.feat_id_xrefs {
-            if let Some(&gi) = self.gene_by_feat_id.get(&fid) {
-                return Some(&self.genes[gi]);
+            if let Some(gis) = self.gene_by_feat_id.get(&fid) {
+                for &gi in gis {
+                    let g = &self.genes[gi];
+                    if self.total_range_and_strand_intersects(&cds.loc, &g.loc) {
+                        return Some(g);
+                    }
+                }
             }
         }
-        let cds_ranges = self.loc_ranges(&cds.loc, false);
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
         let cds_bio = cds_ranges.first().map(|r| r.0)?;
         let gene_index = self.genes_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
+        let cds_sflag = handle_range_strands_flag(&cds.loc);
 
-        let mut cds_rev: Option<Vec<(usize, bool, u64, u64)>> = None;
-        let mut best: Option<(i32, u64, usize, usize)> = None; // (neg_quality, diff, order, gi)
+        let mut best: Option<(i8, u64, u64, u64, GeneAnnotTieKey, usize)> = None;
         gene_index.for_each_covering(cds_from, cds_to, |gi| {
             let g = &self.genes[gi];
-            let g_ranges = self.loc_ranges(&g.loc, false);
-            if let Some(diff) = subset_uncovered_len(&g_ranges, &cds_ranges) {
-                let cand = (-2, diff, g.seq_order, gi);
-                if best.is_none_or(|b| cand < b) {
-                    best = Some(cand);
-                }
+            if (cds_sflag & handle_range_strands_flag(&g.loc)) == 0 {
                 return;
             }
-            let rev = cds_rev.get_or_insert_with(|| self.loc_ranges(&cds.loc, true));
-            if let Some(diff) = subset_uncovered_len(&g_ranges, rev) {
-                let cand = (-1, diff, g.seq_order, gi);
-                if best.is_none_or(|b| cand < b) {
-                    best = Some(cand);
+            let (neg_quality, diff) =
+                if let Some(d) = self.test_for_overlap_subset(&g.loc, &cds.loc) {
+                    (0i8, d)
+                } else if cds.trans_splicing && cds.loc.strand == 255 && g.loc.strand != 255 {
+                    let pstrand = if g.loc.strand == 0 { 1 } else { g.loc.strand };
+                    let forced = force_loc_strand(&cds.loc, pstrand);
+                    let Some(d) = self.test_for_overlap_subset(&g.loc, &forced) else {
+                        return;
+                    };
+                    (1i8, d)
+                } else {
+                    return;
+                };
+            let (g_from, g_to) = self.loc_total_range_on(&g.loc, cds_bio).unwrap_or((0, 0));
+            let tie = gene_annot_tie_key(g);
+            let is_better = match &best {
+                None => true,
+                Some((bq, bd, bto, bfrom, btie, _)) => {
+                    (neg_quality, diff, g_to, g_from, &tie) < (*bq, *bd, *bto, *bfrom, btie)
                 }
+            };
+            if is_better {
+                best = Some((neg_quality, diff, g_to, g_from, tie, gi));
             }
         });
-        best.map(|(_, _, _, gi)| &self.genes[gi])
+        best.map(|(_, _, _, _, _, gi)| &self.genes[gi])
     }
 
     /// Best overlapping `Biosrc` feature under `eOverlap_SubsetRev` with reverse-strand fallback
     /// (`GetBestOverlappingFeat`, `x_GetSourceFeatViaCDS`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2044-2096
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:908-943,964-974,1092,1158-1205
+    /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2700-2735
     fn best_biosrc_for_cds(&self, cds: &CdsFeature) -> Option<&BiosrcFeature> {
-        let cds_ranges = self.loc_ranges(&cds.loc, false);
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
         let cds_bio = cds_ranges.first().map(|r| r.0)?;
         let src_index = self.biosrcs_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
 
-        let find_for = |target: &[(usize, bool, u64, u64)]| -> Option<&BiosrcFeature> {
-            let mut best: Option<(u64, usize, usize)> = None;
+        let find_for = |target: &CompactLoc| -> Option<&BiosrcFeature> {
+            let mut best: Option<(u64, u64, std::cmp::Reverse<u64>, BiosrcAnnotTieKey, usize)> =
+                None;
             src_index.for_each_covering(cds_from, cds_to, |si| {
                 let src = &self.biosrcs[si];
-                let s_ranges = self.loc_ranges(&src.loc, false);
-                if let Some(diff) = subset_uncovered_len(&s_ranges, target) {
-                    let cand = (diff, src.seq_order, si);
-                    if best.is_none_or(|b| cand < b) {
-                        best = Some(cand);
+                if !cfeat_ci_intervals_strand_match(target, &src.loc) {
+                    return;
+                }
+                let Some(diff) = self.test_for_overlap_subset(&src.loc, target) else {
+                    return;
+                };
+                let (s_from, s_to) = self.loc_total_range_on(&src.loc, cds_bio).unwrap_or((0, 0));
+                let tie = biosrc_annot_tie_key(src);
+                let is_better = match &best {
+                    None => true,
+                    Some((bd, bfrom, bto, btie, _)) => {
+                        (diff, s_from, std::cmp::Reverse(s_to), &tie) < (*bd, *bfrom, *bto, btie)
                     }
+                };
+                if is_better {
+                    best = Some((diff, s_from, std::cmp::Reverse(s_to), tie, si));
                 }
             });
-            best.map(|(_, _, si)| &self.biosrcs[si])
+            best.map(|(_, _, _, _, si)| &self.biosrcs[si])
         };
 
-        if let Some(found) = find_for(&cds_ranges) {
+        if let Some(found) = find_for(&cds.loc) {
             return Some(found);
         }
-        let rev_ranges = self.loc_ranges(&cds.loc, true);
-        find_for(&rev_ranges)
+        let rev_loc = reverse_loc(&cds.loc);
+        find_for(&rev_loc)
     }
 
     /// Best overlapping `Gene` feature under `eOverlap_Contained` (`GetBestOverlappingFeat`,
     /// `x_GetSegSeqInfoViaCDS`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2621-2638
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:908-943,958-962,1144-1205
+    /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2737-2740
     fn best_contained_gene(&self, cds: &CdsFeature) -> Option<&GeneFeature> {
-        let cds_ranges = self.loc_ranges(&cds.loc, false);
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
         let cds_bio = cds_ranges.first().map(|r| r.0)?;
         let gene_index = self.genes_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
+        let cds_sflag = handle_range_strands_flag(&cds.loc);
 
-        let mut best: Option<(u64, usize, usize)> = None;
+        let mut cands: Vec<(u64, u64, std::cmp::Reverse<u64>, GeneAnnotTieKey, usize)> = Vec::new();
         gene_index.for_each_covering(cds_from, cds_to, |gi| {
             let g = &self.genes[gi];
-            let g_ranges = self.loc_ranges(&g.loc, false);
-            if let Some(diff) = subset_uncovered_len(&g_ranges, &cds_ranges) {
-                let cand = (diff, g.seq_order, gi);
-                if best.is_none_or(|b| cand < b) {
-                    best = Some(cand);
-                }
+            if (cds_sflag & handle_range_strands_flag(&g.loc)) == 0 {
+                return;
             }
+            let Some(diff) = self.test_for_overlap_contained(&g.loc, &cds.loc) else {
+                return;
+            };
+            let (g_from, g_to) = self.loc_total_range_on(&g.loc, cds_bio).unwrap_or((0, 0));
+            cands.push((
+                diff,
+                g_from,
+                std::cmp::Reverse(g_to),
+                gene_annot_tie_key(g),
+                gi,
+            ));
         });
-        best.map(|(_, _, gi)| &self.genes[gi])
+        if cands.is_empty() {
+            return None;
+        }
+        // Order into `CFeat_CI` (`CAnnotObject_Less`) order first, then stable-sort by
+        // `COverlapPairLess` (diff ASC, and `CGene_ref::GetLabel` ASC on `eSame` locations).
+        cands.sort_by(|a, b| (&a.1, &a.2, &a.3).cmp(&(&b.1, &b.2, &b.3)));
+        cands.sort_by(|a, b| {
+            if a.0 != b.0 {
+                return a.0.cmp(&b.0);
+            }
+            let ga = &self.genes[a.4];
+            let gb = &self.genes[b.4];
+            if self.locs_same_intervals(&ga.loc, &gb.loc) {
+                return ga.gene.get_label().cmp(&gb.gene.get_label());
+            }
+            std::cmp::Ordering::Equal
+        });
+        cands.first().map(|c| &self.genes[c.4])
     }
+}
+
+/// `CAnnotObjectType_Less` tie-break key for `Gene` features with equal `(from, to_open)`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct GeneAnnotTieKey {
+    is_rev: bool,
+    complex_tie: bool,
+    locus_lower: Vec<u8>,
+    desc_lower: Vec<u8>,
+    has_qc: bool,
+    qc_lower: Vec<u8>,
+    seq_order: usize,
+}
+
+fn gene_annot_tie_key(g: &GeneFeature) -> GeneAnnotTieKey {
+    let is_rev = is_reverse_strand(g.loc.strand);
+    GeneAnnotTieKey {
+        is_rev,
+        complex_tie: g.loc.is_complex ^ is_rev,
+        locus_lower: g
+            .gene
+            .locus
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
+        desc_lower: g
+            .gene
+            .desc
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
+        has_qc: !g.qual_comment_fallback.is_empty(),
+        qc_lower: g.qual_comment_fallback.to_ascii_lowercase(),
+        seq_order: g.seq_order,
+    }
+}
+
+/// `CAnnotObjectType_Less` tie-break key for `Biosrc` features with equal `(from, to_open)`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1091,1153-1183
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct BiosrcAnnotTieKey {
+    is_rev: bool,
+    complex_tie: bool,
+    has_qc: bool,
+    qc_lower: Vec<u8>,
+    seq_order: usize,
+}
+
+fn biosrc_annot_tie_key(s: &BiosrcFeature) -> BiosrcAnnotTieKey {
+    let is_rev = is_reverse_strand(s.loc.strand);
+    BiosrcAnnotTieKey {
+        is_rev,
+        complex_tie: s.loc.is_complex ^ is_rev,
+        has_qc: !s.qual_comment_fallback.is_empty(),
+        qc_lower: s.qual_comment_fallback.to_ascii_lowercase(),
+        seq_order: s.seq_order,
+    }
+}
+
+/// `IsReverse` for `ENa_strand`: true for `minus` (2) and `both-rev` (4).
+///
+/// NCBI reference (598d8ae6): c++/include/objects/seqloc/Na_strand.hpp:75-79
+fn is_reverse_strand(s: i32) -> bool {
+    matches!(s, 2 | 4)
+}
+
+/// `Reverse` for `ENa_strand` used by `SeqLocRevCmpl`.
+///
+/// NCBI reference (598d8ae6): c++/include/objects/seqloc/Na_strand.hpp:90-105
+fn reverse_strand(s: i32) -> i32 {
+    match s {
+        0 | 1 => 2,
+        2 => 1,
+        3 => 4,
+        4 => 3,
+        other => other,
+    }
+}
+
+/// `s_Test_Strands` in `TestForOverlap64`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1246-1261
+fn test_strands(s1: i32, s2: i32) -> bool {
+    if s1 == 255 || s2 == 255 {
+        return false;
+    }
+    s1 == s2 || s1 == 3 || s2 == 3 || (s1 == 0 && s2 != 2) || (s2 == 0 && s1 != 2)
+}
+
+/// `CHandleRange::GetStrandsFlag`: bit 1 (`eStrandPlus`) when any piece is not `minus`,
+/// bit 2 (`eStrandMinus`) when any piece is `unknown`/`minus`/`both`/`both-rev`.
+///
+/// NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range.hpp:185-199
+/// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:81-106
+fn handle_range_strands_flag(loc: &CompactLoc) -> u8 {
+    let mut flags = 0u8;
+    for p in &loc.pieces {
+        if p.strand != 2 {
+            flags |= 1;
+        }
+        if matches!(p.strand, 0 | 2 | 3 | 4) {
+            flags |= 2;
+        }
+    }
+    flags
+}
+
+/// `CAnnot_Collector::x_MatchRange` strand check for `eOverlap_Intervals` (`GetBestOverlappingFeat`
+/// with `eOverlap_SubsetRev`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:2700-2735
+/// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:219-228
+fn cfeat_ci_intervals_strand_match(query: &CompactLoc, cand: &CompactLoc) -> bool {
+    let q_strand = query.strand;
+    if cand.pieces.len() <= 1 {
+        let cand_s = match handle_range_strands_flag(cand) {
+            1 => 1,
+            2 => 2,
+            _ => 0,
+        };
+        return q_strand == 0 || cand_s == 0 || q_strand == cand_s;
+    }
+    cand.pieces
+        .iter()
+        .any(|p| q_strand == 0 || p.strand == 0 || q_strand == p.strand)
+}
+
+/// `SeqLocRevCmpl` on a `CompactLoc`: flips every piece's strand via `Reverse` and reverses order.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:970-974
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval.cpp:244-251
+fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
+    let mut pieces: Vec<LocPiece> = loc
+        .pieces
+        .iter()
+        .rev()
+        .map(|p| {
+            let mut q = p.clone();
+            if !q.is_whole {
+                q.strand = reverse_strand(q.strand);
+            }
+            q
+        })
+        .collect();
+    // Preserve `whole` strand (`both` -> `both`, `FlipStrand` does not alter `whole`).
+    let strand = if loc.pieces.len() == 1 && loc.pieces[0].is_whole {
+        loc.strand
+    } else {
+        reverse_strand(loc.strand)
+    };
+    if pieces.is_empty() {
+        pieces = Vec::new();
+    }
+    CompactLoc {
+        pieces,
+        strand,
+        is_complex: loc.is_complex,
+        first_id_fasta: loc.first_id_fasta.clone(),
+    }
+}
+
+/// Forces all pieces and top strand of `loc` to `strand` (matching `SetStrand` on the cloned
+/// child location for trans-spliced features).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:2676-2684
+fn force_loc_strand(loc: &CompactLoc, strand: i32) -> CompactLoc {
+    let pieces = loc
+        .pieces
+        .iter()
+        .map(|p| {
+            let mut q = p.clone();
+            q.strand = strand;
+            q
+        })
+        .collect();
+    CompactLoc {
+        pieces,
+        strand,
+        is_complex: loc.is_complex,
+        first_id_fasta: loc.first_id_fasta.clone(),
+    }
+}
+
+/// `sequence::GetCoverage`: total union length of intervals per Bioseq (ignoring strand).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1908-1909
+fn coverage_len(ranges: &[(usize, bool, u64, u64)]) -> u64 {
+    let mut sorted: Vec<(usize, u64, u64)> = ranges
+        .iter()
+        .map(|&(bi, _, from, to_open)| (bi, from, to_open))
+        .collect();
+    sorted.sort_unstable();
+    let mut total = 0u64;
+    let mut cur: Option<(usize, u64, u64)> = None;
+    for (bi, from, to_open) in sorted {
+        match cur {
+            Some((cbi, cf, ct)) if cbi == bi && from <= ct => {
+                cur = Some((cbi, cf, ct.max(to_open)));
+            }
+            Some((_, cf, ct)) => {
+                total = total.saturating_add(ct.saturating_sub(cf));
+                cur = Some((bi, from, to_open));
+            }
+            None => cur = Some((bi, from, to_open)),
+        }
+    }
+    if let Some((_, cf, ct)) = cur {
+        total = total.saturating_add(ct.saturating_sub(cf));
+    }
+    total
+}
+
+/// `s_GetUncoveredLength`: sum of subranges of `outer` not covered by `inner` on the same
+/// `(bio_idx, is_reverse)`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1479-1532
+fn uncovered_len_by_rev(
+    outer: &[(usize, bool, u64, u64)],
+    inner: &[(usize, bool, u64, u64)],
+) -> u64 {
+    let mut diff = 0u64;
+    for &(bi, rev, mut from, to_open) in outer {
+        for &(ibi, irev, ifrom, ito) in inner {
+            if ibi != bi || irev != rev || ito <= from {
+                continue;
+            }
+            if ifrom >= to_open {
+                break;
+            }
+            if ifrom > from {
+                diff = diff.saturating_add(ifrom - from);
+            }
+            if ito < to_open {
+                from = ito;
+            } else {
+                from = to_open;
+                break;
+            }
+        }
+        diff = diff.saturating_add(to_open.saturating_sub(from));
+    }
+    diff
+}
+
+/// Checks that `outer` and `inner` are non-empty and every `(bio, rev, from, to_open)` in `inner`
+/// lies inside some range in `outer` on the same Bioseq and strand orientation.
+fn ranges_contain_all(
+    outer: &[(usize, bool, u64, u64)],
+    inner: &[(usize, bool, u64, u64)],
+) -> bool {
+    !outer.is_empty()
+        && !inner.is_empty()
+        && inner.iter().all(|&(bi, rev, from, to_open)| {
+            outer.iter().any(|&(obi, orev, ofrom, oto)| {
+                obi == bi && orev == rev && ofrom <= from && oto >= to_open
+            })
+        })
 }
 
 fn ranges_span_on(ranges: &[(usize, bool, u64, u64)], bio_idx: usize) -> Option<(u64, u64)> {
@@ -1090,32 +1570,6 @@ fn ranges_span_on(ranges: &[(usize, bool, u64, u64)], bio_idx: usize) -> Option<
         }
     }
     any.then_some((min_from, max_to))
-}
-
-/// Checks whether every interval in `inner` is contained within some interval of `outer` on the
-/// same Bioseq and strand, returning `total_len(outer) - total_len(inner)` when so.
-fn subset_uncovered_len(
-    outer: &[(usize, bool, u64, u64)],
-    inner: &[(usize, bool, u64, u64)],
-) -> Option<u64> {
-    if inner.is_empty() || outer.is_empty() {
-        return None;
-    }
-    let mut inner_len = 0u64;
-    for &(bi, strand, from, to_open) in inner {
-        let covered = outer.iter().any(|&(obi, os, ofrom, oto)| {
-            obi == bi && os == strand && ofrom <= from && oto >= to_open
-        });
-        if !covered {
-            return None;
-        }
-        inner_len = inner_len.saturating_add(to_open.saturating_sub(from));
-    }
-    let outer_len: u64 = outer
-        .iter()
-        .map(|&(_, _, ofrom, oto)| oto.saturating_sub(ofrom))
-        .fold(0u64, u64::saturating_add);
-    Some(outer_len.saturating_sub(inner_len))
 }
 
 fn index_loc_bioseqs(
@@ -1256,8 +1710,8 @@ fn extract_qual_comment_fallback(feat: &Value) -> Vec<u8> {
 fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
     let s = dschema();
     let mut out = CompactLoc::default();
-    let top_strand = compute_top_strand(root);
-    out.strand = top_strand;
+    out.is_complex =
+        matches!(as_choice(root), Some((c, _)) if c == s.seqloc_mix || c == s.seqloc_packed_int);
 
     let mut stack = vec![root];
     while let Some(loc) = stack.pop() {
@@ -1361,6 +1815,7 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
             }
         }
     }
+    out.strand = compute_top_strand(root, &out.pieces);
     out
 }
 
@@ -1426,10 +1881,10 @@ fn push_seq_pnt(pt: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) 
     });
 }
 
-/// `sequence::GetStrand` for ORF CDS labels.
+/// `sequence::GetStrand` + `s_GetStrand` for ORF CDS labels and `TestForOverlap64`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:481-513
-fn compute_top_strand(loc: &Value) -> i32 {
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
+fn compute_top_strand(loc: &Value, pieces: &[LocPiece]) -> i32 {
     let s = dschema();
     let Some((choice, inner)) = as_choice(loc) else {
         return 0;
@@ -1455,45 +1910,156 @@ fn compute_top_strand(loc: &Value) -> i32 {
             _ => 0,
         };
     }
-    // For mix / packed-int: combine strands across pieces.
-    let mut combined: Option<i32> = None;
-    let mut stack = vec![loc];
-    while let Some(cur) = stack.pop() {
-        let Some((c, v)) = as_choice(cur) else {
-            continue;
-        };
-        if c == s.seqloc_mix || c == s.seqloc_equiv {
-            if let Some(items) = as_list(v) {
-                for item in items.iter().rev() {
-                    stack.push(item);
-                }
-            }
-        } else if c == s.seqloc_packed_int {
-            if let Some(ints) = as_list(v) {
-                for iv in ints {
-                    let st = match iv.member(s.seqint_strand) {
-                        Some(Value::Enum(x)) => *x,
-                        _ => 0,
-                    };
-                    combined = Some(merge_strand(combined, st));
-                }
-            }
-        } else if c != s.seqloc_null && c != s.seqloc_empty {
-            let st = compute_top_strand(cur);
-            combined = Some(merge_strand(combined, st));
-        }
+    // `GetStrand` checks `IsOneBioseq` before calling `s_GetStrand`.
+    if !pieces_are_one_id(pieces) {
+        return 0;
     }
-    combined.unwrap_or(0)
+    eval_s_get_strand(loc)
 }
 
-fn merge_strand(prev: Option<i32>, next: i32) -> i32 {
-    match prev {
-        None => next,
-        Some(p) if p == next => p,
-        Some(0) => next,
-        Some(p) if next == 0 => p,
-        _ => 255, // eNa_strand_other
+fn pieces_are_one_id(pieces: &[LocPiece]) -> bool {
+    let mut first: Option<&HandleKey> = None;
+    for p in pieces {
+        let Some(k) = p.id_key.as_ref() else {
+            return false;
+        };
+        match first {
+            None => first = Some(k),
+            Some(prev) if prev != k => return false,
+            _ => {}
+        }
     }
+    first.is_some()
+}
+
+/// Iterative evaluation of `s_GetStrand` (`seq_loc_util.cpp:393-477`).
+fn eval_s_get_strand(root: &Value) -> i32 {
+    let s = dschema();
+    let mut stack: Vec<(&[Value], usize, i32, bool)> = Vec::new();
+    let mut cur = root;
+    loop {
+        let result = match as_choice(cur) {
+            Some((c, inner)) if c == s.seqloc_int => match inner.member(s.seqint_strand) {
+                Some(Value::Enum(v)) => *v,
+                _ => 0,
+            },
+            Some((c, _)) if c == s.seqloc_whole => 3,
+            Some((c, inner)) if c == s.seqloc_pnt => match inner.member(s.seqpnt_strand) {
+                Some(Value::Enum(v)) => *v,
+                _ => 0,
+            },
+            Some((c, inner)) if c == s.seqloc_packed_pnt => {
+                match inner.member(s.packed_pnt_strand) {
+                    Some(Value::Enum(v)) => *v,
+                    _ => 0,
+                }
+            }
+            Some((c, inner)) if c == s.seqloc_bond => {
+                let mut a_strand = inner
+                    .member(s.seqbond_a)
+                    .and_then(|a| a.member(s.seqpnt_strand))
+                    .and_then(|v| match v {
+                        Value::Enum(x) => Some(*x),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let mut b_strand = inner
+                    .member(s.seqbond_b)
+                    .and_then(|b| b.member(s.seqpnt_strand))
+                    .and_then(|v| match v {
+                        Value::Enum(x) => Some(*x),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                if a_strand == 0 && b_strand != 0 {
+                    a_strand = b_strand;
+                } else if a_strand != 0 && b_strand == 0 {
+                    b_strand = a_strand;
+                }
+                if a_strand != b_strand {
+                    255
+                } else {
+                    a_strand
+                }
+            }
+            Some((c, inner)) if c == s.seqloc_packed_int => {
+                let mut strand = 0i32;
+                let mut strand_set = false;
+                if let Some(ints) = as_list(inner) {
+                    for iv in ints {
+                        let istrand = match iv.member(s.seqint_strand) {
+                            Some(Value::Enum(x)) => *x,
+                            _ => 0,
+                        };
+                        if !advance_strand_state(&mut strand, &mut strand_set, istrand) {
+                            strand = 255;
+                            break;
+                        }
+                    }
+                }
+                strand
+            }
+            Some((c, inner)) if c == s.seqloc_mix => {
+                if let Some(items) = as_list(inner) {
+                    if let Some((next_idx, next_val)) = next_non_empty_mix_item(items, 0, s) {
+                        stack.push((items, next_idx + 1, 0, false));
+                        cur = next_val;
+                        continue;
+                    }
+                }
+                0
+            }
+            _ => 0,
+        };
+
+        let mut val = result;
+        loop {
+            let Some((items, next_idx, mut strand, mut strand_set)) = stack.pop() else {
+                return val;
+            };
+            if !advance_strand_state(&mut strand, &mut strand_set, val) {
+                val = 255;
+                continue;
+            }
+            if let Some((idx, next_val)) = next_non_empty_mix_item(items, next_idx, s) {
+                stack.push((items, idx + 1, strand, strand_set));
+                cur = next_val;
+                break;
+            }
+            val = strand;
+        }
+    }
+}
+
+fn next_non_empty_mix_item<'a>(
+    items: &'a [Value],
+    start: usize,
+    s: &DeflineSchema,
+) -> Option<(usize, &'a Value)> {
+    for (offset, item) in items[start..].iter().enumerate() {
+        if matches!(as_choice(item), Some((c, _)) if c == s.seqloc_null || c == s.seqloc_empty) {
+            continue;
+        }
+        return Some((start + offset, item));
+    }
+    None
+}
+
+/// Exact `s_GetStrand` state transition (`seq_loc_util.cpp:435-446, 459-470`).
+/// Returns `false` when the strand becomes `eNa_strand_other` (255).
+fn advance_strand_state(strand: &mut i32, strand_set: &mut bool, istrand: i32) -> bool {
+    if *strand == 0 && istrand == 1 {
+        *strand = 1;
+        *strand_set = true;
+    } else if *strand == 1 && istrand == 0 {
+        *strand_set = true;
+    } else if !*strand_set {
+        *strand = istrand;
+        *strand_set = true;
+    } else if istrand != *strand {
+        return false;
+    }
+    true
 }
 
 /// Counts `CSeqMap::eSeqGap` segments in `Seq-inst` (`CSeqMap_CI` with `fFindGap`).

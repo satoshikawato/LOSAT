@@ -1071,3 +1071,26 @@ fn a_title_whose_first_word_needs_no_source_gives_it_with_any_source() {
     }
     assert!(!protein_title_word_needs_source(b"no bracket"));
 }
+
+#[test]
+fn prefix_and_suffix_inspect_pre_decoded_main_title() {
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2799-3047,4066-4093
+    let inp_est = super::flags::DeflineInput {
+        is_na: true,
+        mi_tech: super::flags::mol_info::TECH_EST,
+        main_title: b"abc mRNA sequ&#101;nce",
+        ..super::flags::DeflineInput::default()
+    };
+    let out_est = super::generate_defline_core(&inp_est, None).unwrap();
+    assert_eq!(out_est.text, b"abc mRNA sequence, mRNA sequence");
+
+    let inp_unver = super::flags::DeflineInput {
+        is_na: true,
+        is_unverified: true,
+        unverified_prefix: b"UNVERIFIED: ",
+        main_title: b"UNVERIF&#73;ED test sequence",
+        ..super::flags::DeflineInput::default()
+    };
+    let out_unver = super::generate_defline_core(&inp_unver, None).unwrap();
+    assert_eq!(out_unver.text, b"UNVERIFIED: UNVERIFIED test sequence");
+}

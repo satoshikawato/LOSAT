@@ -1,0 +1,452 @@
+Bioseq-set ::= {
+  seq-set {
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "m4a" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp4a" } } },
+        set { class parts, seq-set { seq { id { local str "sp4a" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "SplitGene" }, location mix { int { from 5, to 15, id local str "sp4a" }, int { from 35, to 55, id local str "sp4a" } } },
+        { data cdregion {}, location mix { int { from 10, to 20, id local str "sp4a" }, int { from 40, to 50, id local str "sp4a" } }, xref { { data prot { name { "kinase A" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "m4b" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp4b" } } },
+        set { class parts, seq-set { seq { id { local str "sp4b" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "SplitGene" }, location mix { int { from 5, to 25, id local str "sp4b" }, int { from 35, to 55, id local str "sp4b" } } },
+        { data cdregion {}, location mix { int { from 10, to 20, id local str "sp4b" }, int { from 40, to 50, id local str "sp4b" } }, xref { { data prot { name { "kinase B" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "m4c" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp4c" } } },
+        set { class parts, seq-set { seq { id { local str "sp4c" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "SplitGene" }, location int { from 5, to 58, id local str "sp4c" } },
+        { data cdregion {}, location mix { int { from 10, to 20, id local str "sp4c" }, int { from 40, to 50, id local str "sp4c" } }, xref { { data prot { name { "kinase C" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gplus_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_1" } } },
+        set { class parts, seq-set { seq { id { local str "sp_1" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_plus" }, location int { from 0, to 59, strand plus, id local str "sp_1" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_1" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gplus_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_2" } } },
+        set { class parts, seq-set { seq { id { local str "sp_2" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_plus" }, location int { from 0, to 59, strand plus, id local str "sp_2" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_2" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gplus_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_3" } } },
+        set { class parts, seq-set { seq { id { local str "sp_3" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_plus" }, location int { from 0, to 59, strand plus, id local str "sp_3" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_3" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gplus_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_4" } } },
+        set { class parts, seq-set { seq { id { local str "sp_4" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_plus" }, location int { from 0, to 59, strand plus, id local str "sp_4" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_4" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gplus_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_5" } } },
+        set { class parts, seq-set { seq { id { local str "sp_5" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_plus" }, location int { from 0, to 59, strand plus, id local str "sp_5" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_5" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gminus_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_6" } } },
+        set { class parts, seq-set { seq { id { local str "sp_6" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_minus" }, location int { from 0, to 59, strand minus, id local str "sp_6" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_6" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gminus_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_7" } } },
+        set { class parts, seq-set { seq { id { local str "sp_7" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_minus" }, location int { from 0, to 59, strand minus, id local str "sp_7" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_7" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gminus_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_8" } } },
+        set { class parts, seq-set { seq { id { local str "sp_8" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_minus" }, location int { from 0, to 59, strand minus, id local str "sp_8" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_8" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gminus_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_9" } } },
+        set { class parts, seq-set { seq { id { local str "sp_9" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_minus" }, location int { from 0, to 59, strand minus, id local str "sp_9" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_9" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gminus_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_10" } } },
+        set { class parts, seq-set { seq { id { local str "sp_10" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_minus" }, location int { from 0, to 59, strand minus, id local str "sp_10" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_10" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gboth_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_11" } } },
+        set { class parts, seq-set { seq { id { local str "sp_11" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_both" }, location int { from 0, to 59, strand both, id local str "sp_11" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_11" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gboth_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_12" } } },
+        set { class parts, seq-set { seq { id { local str "sp_12" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_both" }, location int { from 0, to 59, strand both, id local str "sp_12" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_12" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gboth_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_13" } } },
+        set { class parts, seq-set { seq { id { local str "sp_13" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_both" }, location int { from 0, to 59, strand both, id local str "sp_13" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_13" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gboth_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_14" } } },
+        set { class parts, seq-set { seq { id { local str "sp_14" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_both" }, location int { from 0, to 59, strand both, id local str "sp_14" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_14" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gboth_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_15" } } },
+        set { class parts, seq-set { seq { id { local str "sp_15" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_both" }, location int { from 0, to 59, strand both, id local str "sp_15" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_15" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gbothrev_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_16" } } },
+        set { class parts, seq-set { seq { id { local str "sp_16" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_bothrev" }, location int { from 0, to 59, strand both-rev, id local str "sp_16" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_16" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gbothrev_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_17" } } },
+        set { class parts, seq-set { seq { id { local str "sp_17" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_bothrev" }, location int { from 0, to 59, strand both-rev, id local str "sp_17" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_17" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gbothrev_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_18" } } },
+        set { class parts, seq-set { seq { id { local str "sp_18" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_bothrev" }, location int { from 0, to 59, strand both-rev, id local str "sp_18" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_18" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gbothrev_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_19" } } },
+        set { class parts, seq-set { seq { id { local str "sp_19" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_bothrev" }, location int { from 0, to 59, strand both-rev, id local str "sp_19" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_19" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gbothrev_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_20" } } },
+        set { class parts, seq-set { seq { id { local str "sp_20" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_bothrev" }, location int { from 0, to 59, strand both-rev, id local str "sp_20" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_20" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunset_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_21" } } },
+        set { class parts, seq-set { seq { id { local str "sp_21" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unset" }, location int { from 0, to 59, id local str "sp_21" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_21" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunset_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_22" } } },
+        set { class parts, seq-set { seq { id { local str "sp_22" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unset" }, location int { from 0, to 59, id local str "sp_22" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_22" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunset_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_23" } } },
+        set { class parts, seq-set { seq { id { local str "sp_23" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unset" }, location int { from 0, to 59, id local str "sp_23" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_23" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunset_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_24" } } },
+        set { class parts, seq-set { seq { id { local str "sp_24" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unset" }, location int { from 0, to 59, id local str "sp_24" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_24" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunset_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_25" } } },
+        set { class parts, seq-set { seq { id { local str "sp_25" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unset" }, location int { from 0, to 59, id local str "sp_25" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_25" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunknown_cplus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_26" } } },
+        set { class parts, seq-set { seq { id { local str "sp_26" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unknown" }, location int { from 0, to 59, strand unknown, id local str "sp_26" } },
+        { data cdregion {}, location int { from 3, to 26, strand plus, id local str "sp_26" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunknown_cminus" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_27" } } },
+        set { class parts, seq-set { seq { id { local str "sp_27" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unknown" }, location int { from 0, to 59, strand unknown, id local str "sp_27" } },
+        { data cdregion {}, location int { from 3, to 26, strand minus, id local str "sp_27" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunknown_cunset" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_28" } } },
+        set { class parts, seq-set { seq { id { local str "sp_28" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unknown" }, location int { from 0, to 59, strand unknown, id local str "sp_28" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_28" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunknown_cboth" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_29" } } },
+        set { class parts, seq-set { seq { id { local str "sp_29" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unknown" }, location int { from 0, to 59, strand unknown, id local str "sp_29" } },
+        { data cdregion {}, location int { from 3, to 26, strand both, id local str "sp_29" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_gunknown_cbothrev" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_30" } } },
+        set { class parts, seq-set { seq { id { local str "sp_30" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "G_unknown" }, location int { from 0, to 59, strand unknown, id local str "sp_30" } },
+        { data cdregion {}, location int { from 3, to 26, strand both-rev, id local str "sp_30" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_tie_plus" }, inst { repr seg, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT", ext seg { whole local str "sp_seg_tie_plus" } } },
+        set { class parts, seq-set { seq { id { local str "sp_seg_tie_plus" }, inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "GeneB" }, location int { from 200, to 600, strand plus, id local str "sp_seg_tie_plus" } },
+        { data gene { locus "GeneA" }, location int { from 100, to 500, strand plus, id local str "sp_seg_tie_plus" } },
+        { data cdregion {}, location int { from 250, to 450, strand plus, id local str "sp_seg_tie_plus" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_tie_minus" }, inst { repr seg, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT", ext seg { whole local str "sp_seg_tie_minus" } } },
+        set { class parts, seq-set { seq { id { local str "sp_seg_tie_minus" }, inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "GeneB" }, location int { from 200, to 600, strand minus, id local str "sp_seg_tie_minus" } },
+        { data gene { locus "GeneA" }, location int { from 100, to 500, strand minus, id local str "sp_seg_tie_minus" } },
+        { data cdregion {}, location int { from 250, to 450, strand minus, id local str "sp_seg_tie_minus" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_tie_same_za" }, inst { repr seg, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG", ext seg { whole local str "sp_za" } } },
+        set { class parts, seq-set { seq { id { local str "sp_za" }, inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "ZGene" }, location int { from 0, to 59, id local str "sp_za" } },
+        { data gene { locus "AGene" }, location int { from 0, to 59, id local str "sp_za" } },
+        { data cdregion {}, location int { from 3, to 26, id local str "sp_za" }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq { id { local str "seg_tie_span_vs_cov" }, inst { repr seg, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT", ext seg { whole local str "sp_sc" } } },
+        set { class parts, seq-set { seq { id { local str "sp_sc" }, inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" } } } }
+      },
+      annot { { data ftable {
+        { data gene { locus "MultiGene" }, location mix { int { from 100, to 200, id local str "sp_sc" }, int { from 240, to 280, id local str "sp_sc" }, int { from 320, to 360, id local str "sp_sc" }, int { from 500, to 577, id local str "sp_sc" } } },
+        { data gene { locus "SingleGene" }, location int { from 200, to 499, id local str "sp_sc" } },
+        { data cdregion {}, location mix { int { from 250, to 270, id local str "sp_sc" }, int { from 330, to 350, id local str "sp_sc" } }, xref { { data prot { name { "kinase" } } } } }
+      } } }
+    }
+  }
+}

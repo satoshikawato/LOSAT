@@ -468,10 +468,12 @@ pub(crate) fn generate_defline_core(
     let (mut decoded, _) = html_decode(&main_title)?;
     trim_end_of(&mut decoded, b",;~ ");
 
-    let mut penult = Vec::with_capacity(decoded.len() + 32);
-    if !inp.leave_prefix_suffix {
-        let prefix = set_prefix(inp, &decoded, multispecies);
-        let suffix = set_suffix(inp, &decoded, organelle, append_complete);
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4066-4093
+    // `x_SetPrefix` and `x_SetSuffix` inspect pre-decoded `m_MainTitle`, while `decoded` is used
+    // only to assemble `penult`. Avoid cloning `decoded` when no prefix/suffix/MAG applies.
+    let penult = if !inp.leave_prefix_suffix {
+        let prefix = set_prefix(inp, &main_title, multispecies);
+        let suffix = set_suffix(inp, &main_title, organelle, append_complete);
         let mag: &[u8] = if !inp.metagenome_source.is_empty() {
             if prefix.is_empty() {
                 b"MAG: "
@@ -481,13 +483,20 @@ pub(crate) fn generate_defline_core(
         } else {
             b""
         };
-        penult.extend_from_slice(mag);
-        penult.extend_from_slice(prefix);
-        penult.extend_from_slice(&decoded);
-        penult.extend_from_slice(&suffix);
+        if mag.is_empty() && prefix.is_empty() && suffix.is_empty() {
+            decoded
+        } else {
+            let mut out =
+                Vec::with_capacity(mag.len() + prefix.len() + decoded.len() + suffix.len());
+            out.extend_from_slice(mag);
+            out.extend_from_slice(prefix);
+            out.extend_from_slice(&decoded);
+            out.extend_from_slice(&suffix);
+            out
+        }
     } else {
-        penult = decoded;
-    }
+        decoded
+    };
 
     let (mut text, reads_past_end) = clean_and_compress(&penult, inp.is_aa);
 

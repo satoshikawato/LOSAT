@@ -52,23 +52,25 @@
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). Search space overflows
-//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) follow the same path, so
-//!   both stream on and stream off write the reports of the batches before and then the refusal.
-//!   Any other error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written
-//!   without the reports of the batches before by the off path, and after them with the switch
-//!   (drop-in DECISIONS 44: as NCBI reads them, the stored data
-//!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
-//!   before the search). These are the refusals of a reported subject: with `-db` a definition
-//!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
-//!   tabular subject id (`database::reported_subjects`), with parsed Seq-ids a header that the
-//!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
-//!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
-//!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
-//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`), ambiguity data that the
-//!   traceback cannot decode (`traceback_listed`), a taxid or a lookup of the taxonomy database
-//!   that the prefetch refuses (`batch_prefetch`), and what a custom
-//!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
-//!   a subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
+//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) and tabular failed-lookup
+//!   refusals (`FailedLookupRefusal`, including a subject set's refused tabular id from
+//!   `tabular_subject_ids`) follow the same path, so both stream on and stream off write the
+//!   reports of the batches before and then the refusal, matching NCBI. Any other error that LOSAT
+//!   raises where NCBI would not stop (LOSAT's other refusals: stored title, ambiguity data,
+//!   prefetch, parsed Seq-id, taxonomy record, and the like) is written without the reports of the
+//!   batches before by the off path, and after them with the switch (drop-in DECISIONS 44: as NCBI
+//!   reads them, the stored data and the report ids of a batch's reported subjects are checked in
+//!   that batch, nothing is read before the search). These are the refusals of a reported subject:
+//!   with `-db` a definition line that does not read as the reports read it, holds a byte outside
+//!   ' ' ..= '~' or gives no tabular subject id (`database::reported_subjects`), with parsed
+//!   Seq-ids a header that the reports refuse and two sequences that outfmt 0 would join
+//!   (`check_reported_parsed`, `refuse_joined_hits`), one that the batches' prefetch reads where
+//!   no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields
+//!   that read nothing of the subject) and cannot read as NCBI does (`check_prefetched_parsed`),
+//!   ambiguity data that the traceback cannot decode (`traceback_listed`), a taxid or a lookup of
+//!   the taxonomy database that the prefetch refuses (`batch_prefetch`), and what a custom tabular
+//!   report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with a
+//!   subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
 //!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report
 //!   shows. Each is made by the report call (or the search) of the batch before that batch writes
 //!   a byte, so the output is the reports of the batches before (without the epilog) and their
@@ -156,8 +158,8 @@ use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 
 use super::{
-    check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
-    BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
+    configure_task, record_title, x_debug_output, BlastnArgs, BlastnOutputFormat, QueryBatching,
+    SubjectLetters, SubjectRanges, SubjectSource,
 };
 use crate::algorithm::blastn::scoring::check_greedy_matrix_only;
 
@@ -479,8 +481,8 @@ fn check(
     }
     // The scoring of `search_query_batch` (`context_blocks`, called in
     // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
-    // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
-    // the queries.
+    // where `check_gaps` does, for every context) and its matrix-only greedy refusal:
+    // neither depends on the queries.
     let config = configure_task(args);
     let spec = NuclScoringSpec {
         reward: config.score_reward,
@@ -491,7 +493,6 @@ fn check(
     if NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
         .is_err()
-        || check_greedy_gap_costs(args).is_err()
         || check_greedy_matrix_only(args, args.ungapped).is_err()
     {
         return Err(Off::Scoring);

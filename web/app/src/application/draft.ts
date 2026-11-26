@@ -51,15 +51,23 @@ import {
   ALL_DB_FILTER_FIELDS,
   ALL_DB_FILTER_FLAGS,
   DB_FILE_FILTER_FIELDS,
+  DB_HARD_MASK_FLAG,
+  DB_SOFT_MASK_FLAG,
   FILTERING_DB_FLAG,
+  NO_TAXID_EXPANSION_FLAG,
+  NO_TAXID_EXPANSION_WM_CONFLICT,
   assembleSearchDirectory,
   databaseTaxonomy,
+  dbMaskMissingMessage,
+  dbMaskState,
   discoverBlastDatabases,
+  isWindowMaskerTaxidActive,
   matchingDatabases,
   noMatchingDatabaseMessage,
   normalizeRunPath,
   type AssembledSearchDirectory,
   type BlastDbDiscovery,
+  type DbMaskMode,
 } from '../domain/blast-db';
 import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart } from '../domain/run';
 import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
@@ -636,7 +644,36 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
-  /** Sets or clears a text or boolean database filter (`-taxids`, `-negative_taxids`, `-no_taxid_expansion`, `-db_soft_mask`, `-db_hard_mask`). */
+  /**
+   * Selects database masking mode (`none`, `soft` -> `-db_soft_mask`, or `hard` -> `-db_hard_mask`).
+   * Enforces NCBI mutual exclusion between `-db_soft_mask` and `-db_hard_mask` and preserves any
+   * entered algorithm ID/name when toggling between soft and hard masking.
+   */
+  setDatabaseMask(mode: DbMaskMode, algorithm?: string): void {
+    const { database } = this.state.get();
+    const current = dbMaskState(database.filterValues);
+    const next: Record<string, string | boolean> = { ...database.filterValues };
+    delete next[DB_SOFT_MASK_FLAG];
+    delete next[DB_HARD_MASK_FLAG];
+    if (mode !== 'none') {
+      const flag = mode === 'soft' ? DB_SOFT_MASK_FLAG : DB_HARD_MASK_FLAG;
+      next[flag] = algorithm !== undefined ? algorithm : current.value;
+    }
+    this.set({
+      database: Object.freeze({ ...database, filterValues: Object.freeze(next) }),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  /** Edits the algorithm ID or name of the active database masking mode (keeps the mode selected while empty). */
+  setDatabaseMaskAlgorithm(text: string): void {
+    const current = dbMaskState(this.state.get().database.filterValues);
+    if (current.mode === 'none') return;
+    this.setDatabaseMask(current.mode, text);
+  }
+
+  /** Sets or clears a text or boolean database filter (`-taxids`, `-negative_taxids`, `-no_taxid_expansion`). */
   setDatabaseFilter(flag: string, value: string | boolean): void {
     const { database } = this.state.get();
     const next: Record<string, string | boolean> = { ...database.filterValues };
@@ -1239,7 +1276,7 @@ export class SearchDraft {
     for (const word of words) {
       const flag = word.split('=', 1)[0]!;
       if (subjectSource === 'database' && ALL_DB_FILTER_FLAGS.has(flag) && (described === undefined || described.has(flag))) {
-        throw new Error(`${flag} is set in the form: Database filters`);
+        throw new Error(`${flag} is set in the form: Database masking and filters`);
       }
       const role = ROLES.find((r) => REGION_FLAG[r] === flag);
       const control =
@@ -1544,7 +1581,14 @@ export class SearchDraft {
    */
   private fileProblem(): string | undefined {
     const state = this.state.get();
-    const { program, values, description, counts, filteringDb } = state;
+    const { program, values, description, counts, filteringDb, subjectSource, database, validation } = state;
+    const noTaxidExpansion = subjectSource === 'database' && database.filterValues[NO_TAXID_EXPANSION_FLAG] === true;
+    const wmTaxidConflict = noTaxidExpansion && isWindowMaskerTaxidActive(program, values[program]);
+    if (subjectSource === 'database') {
+      const mask = dbMaskState(database.filterValues);
+      if (mask.mode !== 'none' && mask.value.trim() === '') return dbMaskMissingMessage(mask.mode);
+    }
+    if (wmTaxidConflict && validation.state !== 'invalid') return NO_TAXID_EXPANSION_WM_CONFLICT;
     for (const section of describedSections(programById(program), description?.parameters)) {
       for (const field of section.fields) {
         if (field.kind === 'database') {
@@ -1561,6 +1605,9 @@ export class SearchDraft {
         if (field.kind !== 'file') continue;
         if (values[program][field.flag] === true) return field.file?.missing ?? `Choose the file for ${field.label}`;
         // The taxonomy ID of the same row: typed, and its counts downloaded.
+        // Skip prompting to download counts when the real engine already rejected `-window_masker_taxid`
+        // as incompatible with `-no_taxid_expansion`, so submit reports the engine's exact refusal.
+        if (wmTaxidConflict) continue;
         const taxid = field.file?.taxid;
         const typed = taxid === undefined ? undefined : values[program][taxid.flag];
         if (taxid === undefined || (typed !== true && (typeof typed !== 'string' || typed.trim() === ''))) continue;

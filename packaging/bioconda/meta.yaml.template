@@ -27,6 +27,7 @@ test:
     - losat tblastn -help
     - losat tblastx -help
     - losat psiblast -help
+    - losat deltablast -help
     - losat rpsblast -help
     - losat rpstblastn -help
     - blastn -version
@@ -35,6 +36,7 @@ test:
     - tblastn -version
     - tblastx -version
     - psiblast -version
+    - deltablast -version
     - rpsblast -version
     - rpstblastn -version
     - makeblastdb -version
@@ -48,6 +50,7 @@ test:
     - rpsbproc -version
     - blastdb_aliastool -version
     - blastdbcheck -version
+    - cleanup-blastdb-volumes.py -version
 
 about:
   home: https://github.com/satoshikawato/LOSAT
@@ -61,11 +64,11 @@ about:
   description: |
     LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ 2.17.0 local
     sequence search. It runs NCBI's command lines for blastn, blastp, blastx,
-    tblastn, tblastx and psiblast against FASTA subjects (-subject) or BLAST
+    tblastn, tblastx, psiblast and deltablast against FASTA subjects (-subject) or BLAST
     databases (-db), rpsblast and rpstblastn against profile databases (-db),
     and provides makeblastdb, blastdbcmd,
     dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,
-    makeprofiledb, rpsbproc, blastdb_aliastool and blastdbcheck. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
+    makeprofiledb, rpsbproc, blastdb_aliastool, blastdbcheck and cleanup-blastdb-volumes.py. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
     scores, coordinates and every output format byte for byte), and it needs no
     BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT

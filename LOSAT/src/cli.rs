@@ -152,6 +152,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         "blastdb_aliastool" => "Application to create BLAST database aliases",
         "blastdbcheck" => "BLAST database integrity and validity checking application",
+        "cleanup-blastdb-volumes.py" => "Remove needless BLAST database volumes.",
         _ => "",
     }
 }

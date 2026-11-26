@@ -244,6 +244,22 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) ops: Option<&'a [GapEditOp]>,
 }
 
+/// The E-value that the PSSM reads of an HSP (`GetLowestEvalue`: the lowest `e_value` or `sum_e`
+/// score of the Seq-align, at most `BLAST_EXPECT_VALUE` 10, and 10 where it has none,
+/// `seqalign_evalue_absent`); any other value of 1e-180 or less, a negative one of a database
+/// with a negative size too, is 0 in it. The one owner of the inclusion test of a round
+/// (`psi_round::included`) and of the PSSM's multiple alignment (`input_msa`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
+pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
+    const BLAST_EXPECT_VALUE: f64 = 10.0;
+    if crate::report::serial::seqalign::seqalign_evalue_absent(e_value) {
+        return BLAST_EXPECT_VALUE;
+    }
+    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
+}
+
 impl<'a> PssmAlignment<'a> {
     /// The Seq-align of the BLASTP HSP `hsp` (1-based ends), whose query starts `q_shift` letters
     /// into the query's record (`-query_loc`).
@@ -724,18 +740,9 @@ fn input_msa(
     unread: &mut Vec<u32>,
     app: BlastpApp,
 ) -> Result<PsiMsa> {
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
-    let lowest_evalue = |e_value: f64| {
-        if e_value < BLAST_EXPECT_VALUE {
-            e_value
-        } else {
-            BLAST_EXPECT_VALUE
-        }
-    };
     let qualifying: std::collections::BTreeSet<SetKey> = alignments
         .iter()
-        .filter(|alignment| lowest_evalue(alignment.e_value) < inclusion_ethresh)
+        .filter(|alignment| seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh)
         .map(|alignment| key(alignment.subject))
         .collect();
     let mut msa = PsiMsa::new(query.len(), qualifying.len());
@@ -749,7 +756,7 @@ fn input_msa(
     let mut last_sid: Option<SetKey> = None;
     for alignment in alignments {
         let current_sid = key(alignment.subject);
-        if lowest_evalue(alignment.e_value) < inclusion_ethresh {
+        if seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh {
             if last_sid
                 .as_ref()
                 .is_some_and(|last| !current_sid.matches(last))
@@ -912,19 +919,25 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
                 .as_ref()
                 .expect(REQUESTED),
         }),
-        &ancillary_blocks(ancillary),
+        &ancillary_blocks(&ancillary),
     )
 }
 
-/// The Karlin-Altschul blocks that `PrintAsciiPssm` prints of a search's ancillary data, with
-/// their labels, in its order.
-pub(crate) fn ancillary_blocks(ancillary: PssmAncillary) -> [(&'static str, KarlinBlk); 4] {
+/// The blocks that the footer of a computed PSSM prints: each of the round's ancillary blocks that
+/// the results keep (`stats::tables::ancillary_kept`, for all four). The input PSSM's footer of
+/// round 1 (`in_pssm_files`) prints its two PSI blocks as the file holds them: NCBI makes that
+/// ancillary data from the PSSM's values without the check (`ExtractPssmAncillaryData`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:296-326
+pub(crate) fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
     [
         ("Standard Ungapped    ", ancillary.ungapped),
         ("Standard Gapped      ", ancillary.gapped),
         ("PSI Ungapped         ", ancillary.psi_ungapped),
         ("PSI Gapped           ", ancillary.psi_gapped),
     ]
+    .into_iter()
+    .filter(|(_, block)| crate::stats::tables::ancillary_kept(block.lambda))
+    .collect()
 }
 
 /// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information

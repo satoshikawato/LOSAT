@@ -37,7 +37,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `deltablast` writes `0`, `6` and `7`, with `6` and `7` taking a custom field list. Its report shows each round, as `psiblast`'s does.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool` and `blastdbcheck` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 

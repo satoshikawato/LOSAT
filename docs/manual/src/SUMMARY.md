@@ -32,6 +32,7 @@
 - [makeprofiledb](programs/makeprofiledb.md)
 - [blastdb_aliastool](programs/blastdb_aliastool.md)
 - [blastdbcheck](programs/blastdbcheck.md)
+- [cleanup-blastdb-volumes.py](programs/cleanup-blastdb-volumes.md)
 
 # Libraries and WebAssembly
 

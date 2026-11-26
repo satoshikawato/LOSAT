@@ -3130,13 +3130,20 @@ fn psiblast_pssms(
             psi_gapped: gapped,
         };
         let mut unread = Vec::new();
+        let query_letters = [
+            record.seq(),
+            args.psi_search
+                .as_deref()
+                .map_or(&[][..], |psi| psi.query_tail.as_slice()),
+        ]
+        .concat();
         let made = query_pssm(
             request,
             scoring,
             gapped,
             args.inclusion_ethresh,
             PssmQueryRecord {
-                letters: record.seq(),
+                letters: &query_letters,
                 id: &id,
                 title: record.title(),
             },
@@ -9621,6 +9628,16 @@ fn query_xml_stats(
             // An ungapped search has no `kbp_gap`: the XML statistics are the query's own
             // `kbp_std` (probe 1: kappa 0.12756, lambda 0.314758 of query 1).
             let block = call_setup::context_block(args, &gapped, &contexts[q_idx]);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
+            // A gapped block that the ancillary data does not keep (a PSSM file's,
+            // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
+            let block = if args.psi_search.is_some()
+                && !crate::stats::tables::ancillary_kept(gapped.lambda)
+            {
+                &contexts[q_idx].karlin_params
+            } else {
+                block
+            };
             crate::report::blast_xml::XmlStats {
                 hsp_len: search_spaces[q_idx].length_adjustment as i32,
                 eff_space: exact_search_spaces[q_idx]

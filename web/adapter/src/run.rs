@@ -3200,6 +3200,30 @@ mod tests {
                 ],
                 "tests/db_search/taxfilter/q.faa",
             ),
+            (
+                "db.mb.bp.mb1.6",
+                &[
+                    "blastp",
+                    "-db",
+                    "tests/seqdb/memb_bit/db/mb_1",
+                    "-query",
+                    "q",
+                ],
+                "tests/seqdb/memb_bit/in/qp.fa",
+            ),
+            (
+                "db.mb.bn.mb1.6",
+                &[
+                    "blastn",
+                    "-db",
+                    "tests/seqdb/memb_bit/db/nmb_gm_1",
+                    "-query",
+                    "q",
+                    "-dust",
+                    "no",
+                ],
+                "tests/seqdb/memb_bit/in/qn.fa",
+            ),
         ] {
             validate(words).unwrap_or_else(|error| panic!("{row}: {error}"));
             assert!(searches_database(words), "{row}");

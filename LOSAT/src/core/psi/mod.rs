@@ -89,8 +89,13 @@ impl PsiScoreBlk {
     /// scaling computes again before anything reads it (`_PSIUpdateLambdaK` at every factor of
     /// `_PSIScaleMatrix`), so it is not kept.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509
+    ///
+    /// A block that the ancillary data does not keep (`stats::tables::ancillary_kept`) leaves the
+    /// engine's own block.
     pub(crate) fn set_ungapped_statistical_params(&mut self, psi_gapped: KarlinBlk) {
-        self.gap_psi = psi_gapped;
+        if crate::stats::tables::ancillary_kept(psi_gapped.lambda) {
+            self.gap_psi = psi_gapped;
+        }
     }
 }
 

@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 20] = [
+const PROGRAMS: [&str; 21] = [
     "blastn",
     "blastp",
     "blastx",
@@ -67,6 +67,7 @@ const PROGRAMS: [&str; 20] = [
     "rpsbproc",
     "blastdb_aliastool",
     "blastdbcheck",
+    "cleanup-blastdb-volumes.py",
 ];
 
 /// The program names that `losat --install-shims` listed on standard output (one path per
@@ -104,7 +105,11 @@ fn a_shim_prints_what_the_subcommand_prints() {
         // `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
-        let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
+        let first_line = if name == "cleanup-blastdb-volumes.py" {
+            format!("{name} LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        } else {
+            format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        };
         assert!(
             version.stdout.starts_with(first_line.as_bytes()),
             "{name}: {version:?}"
@@ -297,6 +302,7 @@ fn top_level_help_names_every_program() {
             "makeprofiledb",
             "blastdb_aliastool",
             "blastdbcheck",
+            "cleanup-blastdb-volumes.py",
         ] {
             let line = text
                 .lines()

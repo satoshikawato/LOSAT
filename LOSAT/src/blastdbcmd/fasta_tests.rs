@@ -179,6 +179,16 @@ impl std::io::Write for WriteLog {
         Ok(buf.len())
     }
 
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let mut combined = Vec::new();
+        for buf in bufs {
+            combined.extend_from_slice(buf);
+        }
+        let len = combined.len();
+        self.0.lock().unwrap().push(combined);
+        Ok(len)
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }

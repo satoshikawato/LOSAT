@@ -971,6 +971,10 @@ impl TabularSpec {
             ])
         {
             Some(FailedStage::SubjectId)
+        } else if failure.length {
+            // The subject block stops at `GetBioseqLength`, before it sets the other members,
+            // which stay as the rows before left them (as where the load throws).
+            self.reads_subject_bioseq().then_some(FailedStage::Bioseq)
         } else if failure.all_ids
             && self.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions])
         {
@@ -993,6 +997,55 @@ impl TabularSpec {
                 SubjectTaxId,
                 SubjectAllAccessions,
             ])
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-878,900-908,973-986
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:93-103
+    /// Whether a row whose subject has an empty Bioseq handle (`LookupFailure::empty_handle`)
+    /// throws `CAlnException::eInvalidSeqId` in `program` when reading the subject's sequence:
+    /// when no field of the subject block (`reads_subject_bioseq`) is requested, `SetFields` skips
+    /// the `try` at `tabular.cpp:833` and enters the alignment block, where
+    /// `CAlnVec::GetWholeAlnSeqString` on the subject row throws on the sequence-reading fields.
+    pub fn empty_handle_reads_letters(&self, program: crate::blastinput::app::Program) -> bool {
+        use crate::blastinput::app::Program;
+        if !self.writes_rows() || self.reads_subject_bioseq() {
+            return false;
+        }
+        self.has_any(&[QuerySeq, SubjectSeq, Positives, PercentPositives, Btop])
+            || (program != Program::Blastn
+                && self.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-878,1071-1085
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+    /// Whether a minus-strand subject row whose subject has an empty Bioseq handle
+    /// (`LookupFailure::empty_handle`) throws `CCoreException::eNullPtr` in `program` inside
+    /// `CAlignFormatUtil::GetFrame` (`handle.GetBioseqLength()`): in TBLASTN and TBLASTX, when no
+    /// field of the subject block (`reads_subject_bioseq`) is requested, `SetFields` enters the
+    /// alignment block (`opens_counts`) and calls `GetFrame` for `sframe` or `frames`. Plus-strand
+    /// rows compute `(start % 3) + 1` without touching the handle.
+    pub fn empty_handle_reads_minus_frame(&self, program: crate::blastinput::app::Program) -> bool {
+        use crate::blastinput::app::Program;
+        if !self.writes_rows() || self.reads_subject_bioseq() {
+            return false;
+        }
+        matches!(program, Program::Tblastn | Program::Tblastx)
+            && self.opens_counts(&1)
+            && self.has_any(&[SubjectFrame, Frames])
+    }
+
+    /// Whether a row whose subject has an empty Bioseq handle (`LookupFailure::empty_handle`) can
+    /// throw in `program` (`empty_handle_reads_letters` or, for a minus-strand subject row,
+    /// `empty_handle_reads_minus_frame`).
+    pub fn empty_handle_throws(&self, program: crate::blastinput::app::Program) -> bool {
+        self.empty_handle_reads_letters(program) || self.empty_handle_reads_minus_frame(program)
+    }
+
+    /// `may_stop_at_failed_lookup` for `program`, including rows whose empty Bioseq handle throws
+    /// in the alignment block (`empty_handle_throws`).
+    pub fn may_stop_at_failed_lookup_for(&self, program: crate::blastinput::app::Program) -> bool {
+        self.may_stop_at_failed_lookup() || self.empty_handle_throws(program)
     }
 
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
@@ -1037,10 +1090,39 @@ pub fn failed_lookup_stop(
     failure: LookupFailure,
     first: bool,
 ) -> Option<&'static str> {
+    failed_lookup_stop_for(
+        spec,
+        failure,
+        first,
+        crate::blastinput::app::Program::Blastp,
+        false,
+    )
+}
+
+/// `failed_lookup_stop` for `program`: also stops where a row with an empty Bioseq handle
+/// (`failure.length`, `LookupFailure::empty_handle`) skips the subject block and throws in
+/// `CAlnVec::GetBioseqHandle` (`TabularSpec::empty_handle_reads_letters`) or, when
+/// `minus_subject_frame` is true, in `CAlignFormatUtil::GetFrame`
+/// (`TabularSpec::empty_handle_reads_minus_frame`).
+pub fn failed_lookup_stop_for(
+    spec: Option<&TabularSpec>,
+    failure: LookupFailure,
+    first: bool,
+    program: crate::blastinput::app::Program,
+    minus_subject_frame: bool,
+) -> Option<&'static str> {
     let Some(spec) = spec else {
         return (failure.subject_id || (failure.bioseq && first))
             .then_some(FAILED_LOOKUP_NULL_POINTER);
     };
+    if failure.length {
+        if spec.empty_handle_reads_letters(program) {
+            return Some(FAILED_LOOKUP_EMPTY_HANDLE_SEQ);
+        }
+        if minus_subject_frame && spec.empty_handle_reads_minus_frame(program) {
+            return Some(FAILED_LOOKUP_EMPTY_HANDLE_FRAME);
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:174-185
     if failure.lineless
         && !failure.bioseq
@@ -1070,9 +1152,33 @@ pub fn failed_lookup_stop(
 
 const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row, which reads the accession of the subject's Bioseq that its load did not give (the default fields of outfmt 6, 7, 10 and 20 print saccver), and reports the addresses of its own binary";
 
+const FAILED_LOOKUP_EMPTY_HANDLE_SEQ: &str = "NCBI BLAST+ stops with an alignment exception (exit 255) when reading the subject's sequence in its row";
+
+const FAILED_LOOKUP_EMPTY_HANDLE_FRAME: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) when reading the minus-strand subject frame in its row";
+
 /// The reason of `failed_lookup_stop` for the `sallacc` of a subject with a definition line
 /// without a Seq-id (`LookupFailure::lineless`).
 pub const LINELESS_ACCESSION_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sallacc of each row of such a sequence";
+
+/// One row (or subject's run of rows) checked by [`check_failed_lookups`].
+#[derive(Clone, Copy, Debug)]
+pub struct CheckedRow {
+    /// Subject index (`SEEN_ROW` where NCBI's scope finds a query Bioseq).
+    pub subject: usize,
+    /// Whether this row (or any HSP of the subject in this query's result set) is on the minus
+    /// strand of a translated subject (`CAlignFormatUtil::GetFrame` reads the Bioseq handle only
+    /// on the minus strand).
+    pub minus_subject_frame: bool,
+}
+
+impl From<usize> for CheckedRow {
+    fn from(subject: usize) -> Self {
+        Self {
+            subject,
+            minus_subject_frame: false,
+        }
+    }
+}
 
 /// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
 /// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
@@ -1085,17 +1191,31 @@ pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
 /// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
 /// result (`TabularSpec::may_stop_at_failed_lookup`), so that its rows are checked
 /// (`check_failed_lookups`) before it is written.
+#[cfg(test)]
 pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
-/// Whether a tabular report of `spec` (`None`: the default fields) can stop at a row whose
-/// subject lookup throws (`sacc`, `saccver`, default fields, or `staxid`), apart from a
-/// lineless-only definition line (`stops_at_lineless_accession`).
-pub fn stops_at_lookup_failure(spec: Option<&TabularSpec>) -> bool {
+/// `may_stop_at_failed_lookup` for `program` (`TabularSpec::may_stop_at_failed_lookup_for`).
+pub fn may_stop_at_failed_lookup_for(
+    spec: Option<&TabularSpec>,
+    program: crate::blastinput::app::Program,
+) -> bool {
+    spec.is_none_or(|spec| spec.may_stop_at_failed_lookup_for(program))
+}
+
+/// Whether a tabular report of `spec` (`None`: the default fields) for `program` can stop at a row
+/// whose subject lookup throws (`sacc`, `saccver`, default fields, `staxid`, or empty-handle
+/// sequence/frame fields), apart from a lineless-only definition line
+/// (`stops_at_lineless_accession`).
+pub fn stops_at_lookup_failure_for(
+    spec: Option<&TabularSpec>,
+    program: crate::blastinput::app::Program,
+) -> bool {
     spec.is_none_or(|spec| {
         spec.writes_rows()
-            && spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+            && (spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+                || spec.empty_handle_throws(program))
     })
 }
 
@@ -1106,44 +1226,51 @@ pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
 }
 
 /// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
-/// `result_sets` (each the indices of its subjects in row order, a subject's run of rows once,
-/// one set per query or psiblast round), that NCBI has a result for each row whose subject
-/// lookups fail (`failure`, `None` where they do not): `failed_lookup_stop`'s cases are LOSAT's
-/// refusals, which name the subject (`describe` of its index and failure: what its title or
-/// definition line is) and the program (upper case; its formatter's warning, `taxdb_found` as
+/// `result_sets` (each the checked rows of its subjects in row order, one set per query or
+/// psiblast round), that NCBI has a result for each row whose subject lookups fail (`failure`,
+/// `None` where they do not): `failed_lookup_stop_for`'s cases are LOSAT's refusals, which name
+/// the subject (`describe` of its index and failure: what its title or definition line is) and
+/// the program (`program_name`, upper case; its formatter's warning, `taxdb_found` as
 /// `TabularSpec::formatter_warning` reads it, names it in lower case).
-pub fn check_failed_lookups<S>(
+pub fn check_failed_lookups<S, R>(
     spec: Option<&TabularSpec>,
     result_sets: impl IntoIterator<Item = S>,
     failure: impl Fn(usize) -> Option<LookupFailure>,
     describe: impl Fn(usize, LookupFailure) -> String,
-    program: &str,
+    program: crate::blastinput::app::Program,
+    program_name: &str,
     taxdb_found: bool,
 ) -> anyhow::Result<()>
 where
-    S: IntoIterator<Item = usize>,
+    S: IntoIterator<Item = R>,
+    R: Into<CheckedRow>,
 {
-    if !may_stop_at_failed_lookup(spec) {
+    if !may_stop_at_failed_lookup_for(spec, program) {
         return Ok(());
     }
     let mut rows = Vec::new();
     for (index, set) in result_sets.into_iter().enumerate() {
         rows.clear();
-        for (row, s_idx) in set.into_iter().enumerate() {
-            rows.push(s_idx);
-            let Some(failure) = failure(s_idx) else {
+        for (row, entry) in set.into_iter().enumerate() {
+            let entry = entry.into();
+            if entry.subject != crate::report::query_bioseq::SEEN_ROW {
+                rows.push(entry.subject);
+            }
+            let Some(failure) = failure(entry.subject) else {
                 continue;
             };
-            if let Some(reason) = failed_lookup_stop(spec, failure, row == 0) {
+            if let Some(reason) =
+                failed_lookup_stop_for(spec, failure, row == 0, program, entry.minus_subject_frame)
+            {
                 return Err(FailedLookupRefusal {
                     message: format!(
-                        "{}; {reason}, which is not supported by LOSAT's {program}",
-                        describe(s_idx, failure)
+                        "{}; {reason}, which is not supported by LOSAT's {program_name}",
+                        describe(entry.subject, failure)
                     ),
                     set: index,
                     rows,
                     formatter_warning: spec.and_then(|spec| {
-                        spec.formatter_warning(taxdb_found, &program.to_ascii_lowercase())
+                        spec.formatter_warning(taxdb_found, &program_name.to_ascii_lowercase())
                     }),
                 }
                 .into());
@@ -1246,17 +1373,22 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
 pub fn failed_database_subject(
     oid: impl std::fmt::Display,
     thrown: Option<&crate::ncbi_exception::NcbiException>,
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
     failure: LookupFailure,
 ) -> String {
-    match thrown {
-        Some(exception) => format!(
+    match (thrown, parsed) {
+        (Some(exception), _) => format!(
             "database sequence {oid} has a Seq-align id whose lookup throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
             String::from_utf8_lossy(exception.get_msg())
         ),
-        None if failure.lineless && !failure.subject_id && !failure.all_ids => format!(
+        (None, Some(subject)) if subject.scope_finds_none() => format!(
+            "database sequence {oid} has the Seq-align id {}, by which NCBI BLAST+'s scope gets no Bioseq (its data loader looks up the id with the PDB chain of the id's handle, which no stored id holds)",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        ),
+        (None, _) if failure.lineless && !failure.subject_id && !failure.all_ids => format!(
             "database sequence {oid} has a definition line without a Seq-id (a hand-edited database)"
         ),
-        None => failed_database_title(oid),
+        (None, _) => failed_database_title(oid),
     }
 }
 
@@ -1614,15 +1746,21 @@ pub struct FailedLookup<'a> {
     /// after the ids of the definition lines before the first whose `GetSeqIdList` throws
     /// (tabular.cpp:546-556: each line's list is pushed as it is made).
     pub all_ids: Option<&'a [DeflineIds]>,
+    /// Whether the scope's Bioseq handle of the subject is empty (a database sequence whose
+    /// Bioseq NCBI's scope does not get, `report::db_subject::ParsedSubject::scope_finds_none`):
+    /// `SetSubjectId` throws (`subject_id`), and `GetBioseqLength` where no field of it is asked
+    /// (`LookupFailure::length`).
+    pub empty_handle: bool,
 }
 
 impl FailedLookup<'_> {
-    /// Which of NCBI's two lookups throw.
+    /// Which of NCBI's lookups throw.
     pub fn failure(&self) -> LookupFailure {
         LookupFailure {
             subject_id: self.subject_id,
             all_ids: self.all_ids.is_some(),
             bioseq: false,
+            length: self.empty_handle,
             lineless: false,
         }
     }
@@ -1654,6 +1792,10 @@ pub struct LookupFailure {
     /// Whether the load of the subject's Bioseq by its Seq-align id throws, before both
     /// (`SubjectLookup::Throws`: a lookup that fails on a file where the batch's prefetch is off).
     pub bioseq: bool,
+    /// Whether `GetBioseqLength` throws, after `SetSubjectId` and before `x_SetSubjectIds`: the
+    /// scope's Bioseq handle is empty (`FailedLookup::empty_handle`), on which `SetSubjectId`
+    /// throws too (`subject_id`).
+    pub length: bool,
     /// Whether a definition line of the subject has no Seq-id
     /// (`db_subject::ParsedSubject::has_lineless_line`): no lookup fails, but `sallacc` prints the
     /// label of that line's best id, which is null (`failed_lookup_stop`).
@@ -1677,6 +1819,15 @@ impl LookupFailure {
     pub fn thrown() -> Self {
         Self {
             bioseq: true,
+            ..Self::default()
+        }
+    }
+
+    /// The failure of a subject whose Bioseq handle is empty (`FailedLookup::empty_handle`).
+    pub fn empty_handle() -> Self {
+        Self {
+            subject_id: true,
+            length: true,
             ..Self::default()
         }
     }

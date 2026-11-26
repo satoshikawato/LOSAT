@@ -113,6 +113,9 @@ pub(super) mod x_subject_meta;
 mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
+// `-comp_based_stats 0 -use_sw_tback` (item X4-c0): the OID-ordered Smith-Waterman redo without
+// composition adjustment (one-thread loop and windowed parallel path).
+mod sw_c0;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
@@ -2086,26 +2089,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
-    // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
-    // statistics 1 to 3 (`kappa::smith_waterman`). Without them (`-comp_based_stats 0`, and
-    // IDENTITY's reset, `identity_cbs_reset`) NCBI runs the redo too,
-    // without an adjustment, on the preliminary lists in subject order (the stream is not sorted
-    // by score), which LOSAT's redo loop does not read yet (the next item, X4-c0). psiblast's redo
-    // of a PSSM keeps its refusal (the position-based Smith-Waterman redo).
-    if args.use_sw_tback {
-        if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
-            bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
-        }
-        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
-        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
-        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
-        // batches before, which have no valid context. A run without such a batch ends as NCBI's
-        // does.
-        if !args.ungapped && !args.comp_based_stats.is_enabled() {
-            bail!(
-                "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
-            );
-        }
+    // `-use_sw_tback` (items X4 and X4-c0): BLASTP runs NCBI's Smith-Waterman redo in modes 1 to 3
+    // (`kappa::smith_waterman`) and in mode 0 (`sw_c0`, including `-matrix IDENTITY`'s reset,
+    // `identity_cbs_reset`). With `-ungapped` (allowed only in mode 0), NCBI crashes at the redo's
+    // set-up of every searched batch, and LOSAT refuses there (`redo_run::sw_ungapped_check`).
+    // psiblast keeps its refusal (the position-based Smith-Waterman redo).
+    if args.use_sw_tback && (args.app != BlastpApp::Blastp || args.psi_search.is_some()) {
+        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // The compressed lookup table runs at each of its word sizes, 5 to 7
@@ -2271,6 +2261,65 @@ impl BlastpReport {
             | BlastpReport::Xml
             | BlastpReport::Xml2(_) => true,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:409-445
+    /// Whether the call's reports `formats` resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`common::database::ParsedShown::resolves_subject`), where a query of the batch that holds
+    /// such an id takes the subject's place (`ListedTitles::refuse_ids_of_queries`): a report
+    /// reads their Bioseqs, or the batches' prefetch loads them (the first format's, unless
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off for every batch). psiblast's rounds read the aligned
+    /// letters of the subjects from that scope for a PSSM, whatever the format, where the call
+    /// can make one (`psi_reads`, `psi_reads_scope`; review 3 of line RG-KB item 12, F1).
+    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp, psi_reads: bool) -> bool {
+        (app == BlastpApp::Psiblast && psi_reads)
+            || formats.iter().any(|format| format.reads_subjects())
+            || (formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects(app))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    report_prep::prefetch_format(app, formats),
+                ))
+    }
+
+    /// Whether the call reads its subjects' letters from NCBI's scope for a PSSM: psiblast's
+    /// `-in_pssm` (the archive of its rounds) or a round (`round`) that makes the PSSM of the next
+    /// round or the last one saved (`PsiRoundIo::may_make_next`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    fn psi_reads(
+        args: &ResolvedBlastpArgs,
+        round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    ) -> bool {
+        args.psi_pssm.is_some()
+            || round.is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next)
+    }
+
+    /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
+    /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
+    /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
+    /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
+    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters)
+    /// or search one (`-in_pssm`), keep LOSAT's refusal.
+    fn shows_query_bioseqs(
+        formats: &[BlastpReport],
+        args: &ResolvedBlastpArgs,
+        psi_reads: bool,
+    ) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        (args.app == BlastpApp::Blastp
+            || (args.app == BlastpApp::Psiblast && !psi_reads && args.psi_search.is_none()))
+            && formats.iter().all(|format| match *format {
+                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
+                BlastpReport::CustomTabular(spec) => {
+                    tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
+                }
+                BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
+                    tabular_shows(None, crate::blastinput::app::Program::Blastp)
+                }
+                _ => false,
+            })
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
@@ -2625,19 +2674,31 @@ fn check_tabular_lookups(
             subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Blastp,
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| match listed_titles {
+                            Some(titles) => titles.seen_row(q_idx, hsp.s_idx as usize),
+                            None => hsp.s_idx as usize,
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -2652,6 +2713,7 @@ fn check_tabular_lookups(
                 Some(titles) => crate::report::tabular::failed_database_subject(
                     titles.oid(s_idx),
                     loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
                     failure,
                 ),
                 None => crate::report::tabular::failed_record_title(
@@ -2659,6 +2721,7 @@ fn check_tabular_lookups(
                     subject_records[s_idx].shown_id(),
                 ),
             },
+            crate::blastinput::app::Program::Blastp,
             application,
             taxdb_found,
         );
@@ -5705,23 +5768,59 @@ fn check_shown_subject_titles(
     Ok(())
 }
 
-/// The titles that a pairwise report shows, checked where the subjects are a database's
-/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
-/// or a FASTA set's (`check_shown_subject_titles`).
+/// The titles that a pairwise report (`pairwise`) shows, the subjects of the final lists
+/// (`shown`), checked where the subjects are a database's (`ListedTitles::check_shown_titles`,
+/// which takes the subjects whose load throws from the view's `hit_loads`, then
+/// `ListedTitles::refuse_described_lines` of the subjects of the final hit lists whose
+/// description lines the report prints, `report_prep::described_in`: the first review of line
+/// RG-KB item 12) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the
+/// description lines of the records whose ids `-parse_deflines` read, the view's
+/// `listed_parsed`: the second review, N2). `rows_of` is `run_call`'s closure of the rows of a
+/// range of queries.
 fn check_pairwise_shown_titles(
-    listed_titles: Option<&database::ListedTitles<'_>>,
-    database: Option<&database::BlastpDatabase>,
+    view: &report_write::ReportView<'_>,
+    pairwise: crate::report::pairwise::PairwiseView,
+    rows_of: &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     shown: &std::collections::BTreeSet<usize>,
-    subject_records: &[FastaRecord],
-    loads: &crate::report::db_subject::HitLoads,
 ) -> Result<()> {
-    match listed_titles {
-        Some(titles) => titles.check_shown_titles(
-            database.expect("listed titles are a database's"),
-            shown,
-            loads,
-        ),
-        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+    let described = report_prep::described_in(
+        pairwise,
+        view.args,
+        view.pairwise_hits,
+        rows_of,
+        view.listed_titles,
+        view.psi_found_before,
+    );
+    match view.listed_titles {
+        Some(titles) => {
+            titles.check_shown_titles(
+                view.database.expect("listed titles are a database's"),
+                shown,
+                view.hit_loads,
+            )?;
+            titles.refuse_described_lines(view.hit_lists, view.hit_loads, described)
+        }
+        None => {
+            check_shown_subject_titles(shown.iter().copied(), view.subject_records)?;
+            if view.listed_parsed.is_empty() {
+                return Ok(());
+            }
+            crate::algorithm::common::database::refuse_described_records(
+                view.hit_lists.len(),
+                |query| match &view.hit_lists[query] {
+                    Some(hit_list) => hit_list
+                        .hsplist_array
+                        .iter()
+                        .take(hit_list.hsplist_count)
+                        .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx))
+                        .collect(),
+                    None => Vec::new(),
+                },
+                described,
+                view.listed_parsed,
+                view.args.app.name(),
+            )
+        }
     }
 }
 
@@ -9906,6 +10005,45 @@ fn query_xml_stats(
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-866
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+/// Resolves database subjects whose Seq-align id matches a `-parse_deflines` query Bioseq in the
+/// same scope, refusing formats where NCBI's scope reads letters of the query Bioseq as a subject.
+fn resolve_seen_queries(
+    listed_titles: Option<&mut database::ListedTitles<'_>>,
+    hit_lists: &[Option<BlastpHitList>],
+    query_records: &[FastaRecord],
+    args: &ResolvedBlastpArgs,
+    requested_formats: &[BlastpReport],
+    reports: &BlastpReports<'_>,
+    can_show: bool,
+) -> Result<()> {
+    let psi_reads = BlastpReport::psi_reads(args, reports.psi_round);
+    let (Some(titles), Some(scopes), true) = (
+        listed_titles,
+        reports.query_scopes,
+        BlastpReport::resolve_subjects(requested_formats, args.app, psi_reads),
+    ) else {
+        return Ok(());
+    };
+    let record = |query: usize| {
+        crate::report::query_bioseq::QueryRecordRef::of(
+            query_records.get(query.checked_sub(scopes.first())?)?,
+        )
+    };
+    let run = crate::report::query_bioseq::SeenRun {
+        shows: BlastpReport::shows_query_bioseqs(requested_formats, args, psi_reads) && can_show,
+        known: scopes.first()..if reports.last_call {
+            usize::MAX
+        } else {
+            scopes.first() + query_records.len()
+        },
+        record: &record,
+        protein: true,
+    };
+    titles.refuse_ids_of_queries(hit_lists, scopes, &run)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_call(
     args: ResolvedBlastpArgs,
@@ -10447,14 +10585,21 @@ fn run_call(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
-    // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`, mode 0 or the
-    // position-based redo) takes the place of both, and reads them as they are too.
-    let ordinary_traceback = args.comp_based_stats.mode
+    // `-comp_based_stats 0` without `-use_sw_tback`: the ordinary traceback below reads the
+    // compact lists as they are. With `-use_sw_tback` (item X4-c0), NCBI runs the Smith-Waterman
+    // redo without composition adjustment in batch OID order (`sw_c0`). psiblast `-in_pssm` and
+    // rpsblast take their own paths and leave the redo unused.
+    let sw_c0_redo = !args.ungapped
+        && args.use_sw_tback
+        && args.psi_search.is_none()
+        && args.rps_search.is_none()
+        && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    let ordinary_traceback = (args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
+        && !sw_c0_redo)
         || args.psi_search.is_some()
         || args.rps_search.is_some();
-    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback && !sw_c0_redo {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -10468,7 +10613,7 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
-    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -10541,6 +10686,9 @@ fn run_call(
             blastp_parallel_pool,
         )?)
     } else {
+        if sw_c0_redo {
+            redo_run::sw_matrix_check(args.scoring.matrix, &query_batches, &query_batch_skipped)?;
+        }
         None
     };
     // The parameters of each query's redo (`redo_run::RedoParamsBuilder`), which the redo's paths
@@ -10583,8 +10731,12 @@ fn run_call(
             .as_ref()
             .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
         fetch_notes: &fetch_notes,
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
         x_win_expand,
         ordinary_traceback,
+        sw_c0_redo,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10596,54 +10748,15 @@ fn run_call(
         ))]
         timing_enabled,
     };
-    // The plan chooses the redo's path (`redo_run::RedoPath`) and expands the compact lists that
-    // the path reads expanded; the path redoes the matches.
-    match redo_run::plan_redo_and_expand_lists(
+    // The plan chooses the redo's path (`redo_run::RedoPath`), expands the compact lists that
+    // the path reads expanded, and redoes the matches (`redo_run::run_redo`).
+    redo_run::run_redo(
         &redo,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
-    ) {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::Windows => redo_run::x_windows_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::MatchParallel(q_idx) => redo_run::match_parallel_redo(
-            &redo,
-            q_idx,
-            &preliminary_hit_lists,
-            &mut redone_matches,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::QueryParallel(kappa_parallel_query_indices) => {
-            redo_run::query_parallel_redo(
-                &redo,
-                &kappa_parallel_query_indices,
-                &preliminary_hit_lists,
-                &mut redone_matches,
-            )?
-        }
-        redo_run::RedoPath::OneThread => redo_run::one_thread_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-    }
+        &mut redone_matches,
+        &mut x_prelim_freed,
+    )?;
 
     if timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
@@ -10735,11 +10848,18 @@ fn run_call(
         &query_batches,
         report_prep::prefetch_format(args.app, &requested_formats),
     );
-    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
-    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
-        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
-    }
+    resolve_seen_queries(
+        listed_titles.as_mut(),
+        &hit_lists,
+        query_records,
+        &args,
+        &requested_formats,
+        reports,
+        ranges.query_input.range_length.is_none()
+            && database.is_some_and(|database| !database.loads_write_texts()),
+    )?;
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
@@ -11254,7 +11374,7 @@ fn run_call(
         // (`FormatRefusal::check`) leaves them to the next. The shown subjects are those of the
         // final lists (the rows' subjects).
         let pairwise_shown: Option<std::collections::BTreeSet<usize>> = match outfmt {
-            BlastpReport::Pairwise(_) => {
+            BlastpReport::Pairwise(view) => {
                 let shown: std::collections::BTreeSet<usize> = hit_lists
                     .iter()
                     .flatten()
@@ -11262,13 +11382,7 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = check_pairwise_shown_titles(
-                    listed_titles.as_ref(),
-                    database,
-                    &shown,
-                    subject_records,
-                    &prefetched.hit_loads,
-                );
+                let checked = check_pairwise_shown_titles(&report_view, view, &rows_of, &shown);
                 if !format.refusal.check(checked)? {
                     continue;
                 }

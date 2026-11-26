@@ -598,3 +598,313 @@ fn x4mt_continuation_rows_give_ncbis_bytes_above_one_thread() {
         }
     }
 }
+
+// `-comp_based_stats 0 -use_sw_tback` (line RG item X4-c0): NCBI's one-thread Smith-Waterman redo
+// reads each batch's preliminary stream in `(ordinal ASC, query DESC)` order (`blast_hspstream.c:
+// 678-686`). `sw_subjects.faa` places `sfail` at OID 0 and `sok1` at OID 1, so `sw_fail_last.faa`
+// (`[qok1, tks_W]`) resets status on `sok1` (exit 0); `sw_subjects_rev.faa` reverses them so
+// `sw_fail_first.faa` ends with `Traceback failed` (exit 3) while `sw_fail_last.faa` triggers the
+// cleanup crash refusal (exit 1); `sw_same_oid.faa` puts both on OID 0 so reverse-query tie-break
+// decides exit 3 vs exit 0. Every thread count and `sw_c0` execution path must match `n1`.
+#[test]
+fn c0_oid_order_status_and_same_oid_tie_break() {
+    let opts = [
+        "-comp_based_stats",
+        "0",
+        "-searchsp",
+        "1000",
+        "-evalue",
+        "1e4",
+    ];
+    let paths: &[(usize, &[(&str, &str)])] = &[
+        (1, &[]),
+        (2, &[]),
+        (4, &[]),
+        (8, &[]),
+        (8, &[("LOSAT_X_BPREDOPAR", "0")]),
+        (8, &[("LOSAT_X_BPREDOPARWINDOW", "1")]),
+        (8, &[("LOSAT_X_BPREDOLPT", "0")]),
+    ];
+
+    // OID 0 sfail fails, OID 1 sok1 resets status -> exit 0 with qok1's row.
+    let alone = sw_search_with("x4/sw_subjects.faa", "x4/sw_ok.faa", &opts, "6", 1, &[]);
+    assert_eq!(alone.code, Some(0), "{}", alone.stderr);
+    assert!(!alone.stdout.is_empty());
+    for &(threads, env) in paths {
+        let run = sw_search_with(
+            "x4/sw_subjects.faa",
+            "x4/sw_fail_last.faa",
+            &opts,
+            "6",
+            threads,
+            env,
+        );
+        assert_eq!(
+            run.code,
+            Some(0),
+            "oid reset n{threads} {env:?}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, alone.stdout, "oid reset n{threads} {env:?}");
+        assert_eq!(run.stderr, "", "oid reset n{threads} {env:?}");
+    }
+
+    // Reversed subjects: OID 0 sok1 fills q1, OID 1 sfail fails last while q0 heap is empty -> rc 3.
+    for &(threads, env) in paths {
+        let run = sw_search_with(
+            "x4/sw_subjects_rev.faa",
+            "x4/sw_fail_first.faa",
+            &opts,
+            "6",
+            threads,
+            env,
+        );
+        assert_eq!(
+            run.code,
+            Some(3),
+            "rev first n{threads} {env:?}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, "", "rev first n{threads} {env:?}");
+        assert_eq!(run.stderr, TRACEBACK_FAILED, "rev first n{threads} {env:?}");
+    }
+
+    // Reversed subjects + sw_fail_last: OID 0 sok1 fills q0 (first query), OID 1 sfail fails last -> refusal.
+    for &(threads, env) in paths {
+        let run = sw_search_with(
+            "x4/sw_subjects_rev.faa",
+            "x4/sw_fail_last.faa",
+            &opts,
+            "6",
+            threads,
+            env,
+        );
+        assert_eq!(
+            run.code,
+            Some(1),
+            "rev last n{threads} {env:?}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, "", "rev last n{threads} {env:?}");
+        assert!(
+            run.stderr.contains(NCBI_CRASHES),
+            "rev last n{threads} {env:?}: {}",
+            run.stderr
+        );
+    }
+
+    // Same OID 0: [tks_W, qok1] runs q1 (qok1) before q0 (tks_W fails last, empty q0 heap) -> rc 3;
+    // [qok1, tks_W] runs q1 (tks_W fails) before q0 (qok1 resets status) -> rc 0.
+    let same_ok = sw_search_with("x4/sw_same_oid.faa", "x4/sw_ok.faa", &opts, "6", 1, &[]);
+    assert_eq!(same_ok.code, Some(0), "{}", same_ok.stderr);
+    assert!(!same_ok.stdout.is_empty());
+    for &(threads, env) in paths {
+        let first = sw_search_with(
+            "x4/sw_same_oid.faa",
+            "x4/sw_fail_first.faa",
+            &opts,
+            "6",
+            threads,
+            env,
+        );
+        assert_eq!(
+            first.code,
+            Some(3),
+            "sameoid first n{threads} {env:?}: {}",
+            first.stderr
+        );
+        assert_eq!(first.stdout, "", "sameoid first n{threads} {env:?}");
+        assert_eq!(
+            first.stderr, TRACEBACK_FAILED,
+            "sameoid first n{threads} {env:?}"
+        );
+
+        let last = sw_search_with(
+            "x4/sw_same_oid.faa",
+            "x4/sw_fail_last.faa",
+            &opts,
+            "6",
+            threads,
+            env,
+        );
+        assert_eq!(
+            last.code,
+            Some(0),
+            "sameoid last n{threads} {env:?}: {}",
+            last.stderr
+        );
+        assert_eq!(
+            last.stdout, same_ok.stdout,
+            "sameoid last n{threads} {env:?}"
+        );
+        assert_eq!(last.stderr, "", "sameoid last n{threads} {env:?}");
+    }
+}
+
+// `-comp_based_stats 0 -use_sw_tback` with an endless redo in batch 2 (`BATCH_SIZE=1`): batch 1's
+// report is written without the epilog, then batch 2 is refused.
+#[test]
+fn c0_endless_redo_is_refused_after_batches_before() {
+    let opts = [
+        "-comp_based_stats",
+        "0",
+        "-searchsp",
+        "1000",
+        "-evalue",
+        "1e4",
+    ];
+    let alone = sw_search_with(
+        "x4/sw_endless_subjects.faa",
+        "x4/sw_ok.faa",
+        &opts,
+        "6",
+        1,
+        &[],
+    );
+    let alone7 = sw_search_with(
+        "x4/sw_endless_subjects.faa",
+        "x4/sw_ok.faa",
+        &opts,
+        "7",
+        1,
+        &[],
+    );
+    let epilog = alone7
+        .stdout
+        .rfind("# BLAST processed")
+        .expect("outfmt 7's last line");
+    for threads in [1, 4, 8] {
+        let run = sw_search_with(
+            "x4/sw_endless_subjects.faa",
+            "x4/sw_endless_last.faa",
+            &opts,
+            "6",
+            threads,
+            &[("BATCH_SIZE", "1")],
+        );
+        assert_eq!(run.code, Some(1), "n{threads}: {}", run.stderr);
+        assert_eq!(run.stdout, alone.stdout, "n{threads}");
+        assert!(
+            run.stderr.contains("does not end in NCBI BLAST+ 2.17.0"),
+            "n{threads}: {}",
+            run.stderr
+        );
+        let commented = sw_search_with(
+            "x4/sw_endless_subjects.faa",
+            "x4/sw_endless_last.faa",
+            &opts,
+            "7",
+            threads,
+            &[("BATCH_SIZE", "1")],
+        );
+        assert_eq!(commented.code, Some(1), "n{threads}: {}", commented.stderr);
+        assert_eq!(commented.stdout, alone7.stdout[..epilog], "n{threads}");
+    }
+}
+
+// `-matrix IDENTITY -use_sw_tback` (item X4-c0): NCBI resets CBS to 0 and still runs
+// `Blast_RedoAlignmentCore_MT` for every searched batch, where `s_MatrixInfoInit` fails without
+// frequency ratios (`Traceback failed`, exit 3), even with 0 hits; batches without valid contexts
+// are not searched and exit 0.
+#[test]
+fn c0_identity_matrix_fails_every_searched_batch() {
+    let opts = ["-matrix", "IDENTITY"];
+    for threads in [1, 4] {
+        let ok = sw_search_with(
+            "x4/sw_subjects.faa",
+            "x4/sw_ok.faa",
+            &opts,
+            "6",
+            threads,
+            &[],
+        );
+        assert_eq!(ok.code, Some(3), "ident n{threads}: {}", ok.stderr);
+        assert_eq!(ok.stdout, "", "ident n{threads}");
+        assert_eq!(ok.stderr, TRACEBACK_FAILED, "ident n{threads}");
+
+        let inv = sw_search_with(
+            "x4/sw_subjects.faa",
+            "o4b2/inv.faa",
+            &opts,
+            "6",
+            threads,
+            &[],
+        );
+        assert_eq!(inv.code, Some(0), "ident inv n{threads}: {}", inv.stderr);
+        assert_eq!(inv.stdout, "", "ident inv n{threads}");
+        assert!(
+            inv.stderr.contains("Karlin-Altschul"),
+            "ident inv n{threads}: {}",
+            inv.stderr
+        );
+    }
+}
+
+/// Fast `db.x4.c0.*` rows checked by CI across thread counts and `sw_c0` execution paths:
+/// SicyWSV `-max_target_seqs 5` (deferred heap tests and continuations in OID order), single
+/// query `one.db.mts5`, OID-order status and same-OID tie-break, cleanup crash anchors,
+/// `-matrix IDENTITY`, `x4excl`, and `t5d` fetch-warning order (`fx` vs `fxr`).
+const X4C0_CI_ROWS: [&str; 17] = [
+    "db.x4.c0.sicy.mts5.6",
+    "db.x4.c0.one.db.mts5.6",
+    "db.x4.c0.would.6",
+    "db.x4.c0.fail.b_oid.6",
+    "db.x4.c0.fail.rev_first.6",
+    "db.x4.c0.fail.c.6",
+    "db.x4.c0.fail.h.6",
+    "db.x4.c0.sameoid.first.6",
+    "db.x4.c0.sameoid.last.6",
+    "db.x4.c0.ident.6",
+    "db.x4.c0.ident.invw.b1.7",
+    "db.x4.c0.excl.kept.6",
+    "db.x4.c0.excl.et.m1.6",
+    "db.x4.c0.t5d.sw.6",
+    "db.x4.c0.t5d.swx.6",
+    "db.x4.c0.t5d.fx.6",
+    "db.x4.c0.t5d.fxr.6",
+];
+
+// Each `X4C0_CI_ROWS` entry matches its frozen NCBI BLAST+ 2.17.0 stdout (via
+// `losat_output_bytes`) and exit status at 1 thread, and produces identical stdout, stderr, and
+// exit status at 2, 4, and 8 threads as well as with `LOSAT_X_BPREDOPAR=0`,
+// `LOSAT_X_BPREDOPARWINDOW=1`, and `LOSAT_X_BPREDOLPT=0`.
+#[test]
+fn c0_manifest_rows_match_ncbi_at_every_thread_count_and_path() {
+    let rows = manifest_rows("blastp.x4.tsv", "db.x4.");
+    for &row_id in &X4C0_CI_ROWS {
+        let row = rows
+            .iter()
+            .find(|row| row.row_id == row_id)
+            .unwrap_or_else(|| panic!("{row_id} in blastp.x4.tsv"));
+        let first = row_run(row, 1, &[]);
+        assert_eq!(
+            first.0,
+            Some(row.rc),
+            "{row_id} n1: {}",
+            String::from_utf8_lossy(&first.2)
+        );
+        if row.kind == "ncbi" {
+            assert_eq!(
+                first.1,
+                frozen_stdout(row),
+                "{row_id} n1: the frozen NCBI stdout"
+            );
+        }
+        for (threads, env) in [
+            (2, &[][..]),
+            (4, &[][..]),
+            (8, &[][..]),
+            (8, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+            (8, &[("LOSAT_X_BPREDOPARWINDOW", "1")][..]),
+            (8, &[("LOSAT_X_BPREDOLPT", "0")][..]),
+        ] {
+            let again = row_run(row, threads, env);
+            assert_eq!(
+                again,
+                first,
+                "{row_id} n{threads} {env:?}: {}",
+                String::from_utf8_lossy(&again.2)
+            );
+        }
+    }
+}

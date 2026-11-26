@@ -434,8 +434,8 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
-    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
-    // after IDENTITY's reset too; the same choice as `ordinary_traceback` in `run_call`). A PSSM
+    // The final X-drop reaches the unscaled `ALIGN_EX` only at mode 0: the ordinary traceback, or
+    // the Smith-Waterman redo at scale 1 (`sw_c0`), after IDENTITY's reset too. A PSSM
     // search converts its X-drops with the PSSM's Lambda and checks them there
     // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {

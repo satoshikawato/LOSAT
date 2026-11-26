@@ -1658,15 +1658,28 @@ impl ScopeWalk {
             self.scope = ScopePlaces::default();
             self.scope_handles.clear();
             self.in_record = false;
-            self.prune_blobs();
+            self.prune_blobs(false);
         }
         self.batch = Some(batch);
     }
 
-    /// Drops cached `BlobKeys` for sequences no longer held by `self.ids`.
-    fn prune_blobs(&mut self) {
+    /// Drops cached `BlobKeys` for sequences no longer held by `self.ids`. When `save_handles` is
+    /// true (still inside a live scope), preserves their handle lists in `scope_handles` so
+    /// [`Self::relock`] stays exact for sequences still in the scope.
+    fn prune_blobs(&mut self, save_handles: bool) {
         let ids = &self.ids;
-        self.blobs.retain(|&ord, _| ids.has_sequence(ord));
+        let scope_handles = &mut self.scope_handles;
+        self.blobs.retain(|&ord, keys| {
+            if ids.has_sequence(ord) {
+                return true;
+            }
+            if save_handles {
+                scope_handles
+                    .entry(ord)
+                    .or_insert_with(|| keys.all_handles().to_vec().into_boxed_slice());
+            }
+            false
+        });
     }
 
     /// Step 1: the cache of the current scope.
@@ -1830,7 +1843,7 @@ impl ScopeWalk {
             });
         }
         if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
-            self.prune_blobs();
+            self.prune_blobs(true);
         }
     }
 
@@ -1871,7 +1884,7 @@ impl ScopeWalk {
                 .or_insert_with(|| keys.all_handles().to_vec().into_boxed_slice());
         }
         if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
-            self.prune_blobs();
+            self.prune_blobs(true);
         }
     }
 
@@ -2741,9 +2754,7 @@ impl ScopeWalk {
                 }
             }
         }
-        if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
-            self.prune_blobs();
-        }
+        self.prune_blobs(true);
     }
 }
 

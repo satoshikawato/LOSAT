@@ -767,10 +767,13 @@ impl RpsRun<'_> {
             // peak RSS on large single-volume domain databases (e.g. `cdd_delta`, 32 MiB per
             // table) stays at or below NCBI's single-threaded `x_FindDomainHits` at 16+ threads.
             const DELTA_DOMAIN_DIAG_BUDGET: usize = 192 * 1024 * 1024;
-            let diag_bytes =
-                super::wordfinder::diag_table_length(concat_length, self.window, rows.len(), longest)
-                    as usize
-                    * std::mem::size_of::<u32>();
+            let diag_bytes = super::wordfinder::diag_table_length(
+                concat_length,
+                self.window,
+                rows.len(),
+                longest,
+            ) as usize
+                * std::mem::size_of::<u32>();
             let budget_workers = if self.options.domain_search && diag_bytes > 0 {
                 (DELTA_DOMAIN_DIAG_BUDGET / diag_bytes).max(1)
             } else {

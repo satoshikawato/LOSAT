@@ -950,16 +950,8 @@ impl RpsVolumeSetup {
     /// The profiles' letters come when the search needs them (`ProfileLetters`). A volume that this
     /// set-up has checked opens as `reopen` opens it: its files are those it checked (the run's),
     /// and NCBI's own errors of them come again where each search opens them.
-    pub(crate) fn open(
-        &mut self,
-        volume: &Volume,
-        cbs: bool,
-    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        self.open_in_pool(volume, cbs, None, false)
-    }
-
-    /// `open` with a search pool for parallel `.loo` hit checking (`RpsVolumeFiles::open_for_in_pool`)
-    /// and optional `.loo` remap after the check (`drop_loo_pages`).
+    /// Uses `pool` for parallel `.loo` hit checking (`RpsVolumeFiles::open_for_in_pool`) and
+    /// optionally remaps `.loo` after checking (`drop_loo_pages`).
     pub(crate) fn open_in_pool(
         &mut self,
         volume: &Volume,

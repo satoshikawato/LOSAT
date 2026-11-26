@@ -188,3 +188,20 @@ fn an_x_in_the_query_has_no_ratios() {
     assert!(ratios[2].iter().all(|&ratio| ratio == 0.0));
     assert!(ratios[1].iter().any(|&ratio| ratio != 0.0));
 }
+
+#[test]
+fn a_zero_count_nan_column_on_x_matches_ordinary_x_column() {
+    let sbp = blosum62();
+    let mut msa_ok = one_domain(QUERY.iter().map(|&l| one_letter_column(l, 50.0)).collect());
+    msa_ok.query[2] = X;
+    let mut msa_nan = msa_ok.clone();
+    msa_nan.columns[2].wfreqs = [f64::NAN; BLASTAA_SIZE];
+    assert!(validate_cd_msa(&msa_nan).is_ok());
+    let pssm_ok = create_pssm_from_cdd(&msa_ok, 0, &sbp).unwrap();
+    let pssm_nan = create_pssm_from_cdd(&msa_nan, 0, &sbp).unwrap();
+    assert_eq!(pssm_ok.scores, pssm_nan.scores);
+    assert_eq!(
+        pssm_ok.diagnostics.frequency_ratios,
+        pssm_nan.diagnostics.frequency_ratios
+    );
+}

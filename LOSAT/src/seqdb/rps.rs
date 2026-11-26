@@ -398,10 +398,10 @@ pub(crate) struct RpsVolumeFiles {
 }
 
 impl RpsVolumeFiles {
-    /// rpsblast's `open_for` with an `.aux` without a token as a refusal (the tests' files).
+    /// rpsblast's `open_for_in_pool` with an `.aux` without a token as a refusal (the tests' files).
     #[cfg(test)]
     pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
-        Self::open_for(base, lengths, "RPSBLAST").map_err(|fault| match fault {
+        Self::open_for_in_pool(base, lengths, "RPSBLAST", None, false).map_err(|fault| match fault {
             RpsVolumeFault::Files(error) => error,
             RpsVolumeFault::NoMatrix => RpsOpenError::Refused(
                 "a profile database whose .aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K) is not supported by LOSAT's RPSBLAST".to_string(),
@@ -410,24 +410,16 @@ impl RpsVolumeFiles {
     }
 
     /// Opens the RPS files of the volume `base` (its path without extension) whose sequence part
-    /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id).
+    /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id), running
+    /// the `.loo` hit check across `pool` when available and optionally remapping `.loo` after the
+    /// check (`drop_loo_pages`) so pages not read by subsequent queries do not stay resident
+    /// (DELTA-BLAST's single-query iterations on a large domain volume).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:180-188
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:294-306
     /// (The `.rps` file's check, rps_aux.cpp:338-348, is the same.)
     /// `program` is the name in LOSAT's refusals; an `.aux` without a token is
     /// `RpsVolumeFault::NoMatrix`, NCBI's engine error of each query (review A of PS12a, N2).
-    pub(crate) fn open_for(
-        base: &Path,
-        lengths: &[u32],
-        program: &str,
-    ) -> Result<Self, RpsVolumeFault> {
-        Self::open_checking(base, lengths, program, true, false, None, false)
-    }
-
-    /// `open_for` running the `.loo` hit check across `pool` when available, and optionally
-    /// remapping `.loo` after the check (`drop_loo_pages`) so pages not read by subsequent queries
-    /// do not stay resident (DELTA-BLAST's single-query iterations on a large domain volume).
     pub(crate) fn open_for_in_pool(
         base: &Path,
         lengths: &[u32],

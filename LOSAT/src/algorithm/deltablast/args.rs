@@ -296,6 +296,7 @@ impl DeltablastArgs {
             query_loc: self.query_loc,
             subject_loc: self.subject_loc,
             outfmt: self.outfmt,
+            html: false,
             num_iterations: self.num_iterations,
             pseudocount: self.pseudocount,
             inclusion_ethresh: self.inclusion_ethresh,

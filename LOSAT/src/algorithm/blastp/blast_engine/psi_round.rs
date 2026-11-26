@@ -110,7 +110,11 @@ pub(super) fn search_rounds(
             // is `Some`), `CDeltaBlast::Run` opens `-rpsdb` and checks the domain search options
             // before the query splitter (`CHUNK_SIZE`) and before `BlastSetup_Validate`
             // (`Sequence contains no data` / `Bad argument to function detected`).
-            if let Some(delta) = args.delta.as_deref().filter(|_| batches.stop_batch.is_some()) {
+            if let Some(delta) = args
+                .delta
+                .as_deref()
+                .filter(|_| batches.stop_batch.is_some())
+            {
                 refuse_before_output(args, subject_source)?;
                 write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                 outputs.diagnostics.write_all(warnings)?;
@@ -764,11 +768,9 @@ fn search_delta_batch(
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
             // `CPsiBlast::Run` meets an empty `-db` or unopenable `.psq` here, after the domain
             // search and CDD PSSM, and before `SavePssmToFile` or report formatting.
-            if let Some(failure) = call
-                .call_source
-                .database()
-                .and_then(|db| crate::algorithm::common::database::PsiSearchReadFailure::of(db.seqdb()))
-            {
+            if let Some(failure) = call.call_source.database().and_then(|db| {
+                crate::algorithm::common::database::PsiSearchReadFailure::of(db.seqdb())
+            }) {
                 return Err(failure.error(args.app.name()));
             }
             let formatted = *calls + held.len();

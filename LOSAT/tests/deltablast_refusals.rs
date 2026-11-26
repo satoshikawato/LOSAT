@@ -231,7 +231,11 @@ fn first_batch_stops_check_rpsdb_and_domain_options_first() {
     let qe2 = temp.0.join("qe2.fa");
     let qe = temp.0.join("qe.fa");
     let q1 = temp.0.join("q1.fa");
-    std::fs::write(&qe2, ">q1\nMKVLAAGIVALLLAAGCSSSKEETLKKAMDELTANG\n>empty\n\n").unwrap();
+    std::fs::write(
+        &qe2,
+        ">q1\nMKVLAAGIVALLLAAGCSSSKEETLKKAMDELTANG\n>empty\n\n",
+    )
+    .unwrap();
     std::fs::write(&qe, ">empty\n\n").unwrap();
     std::fs::write(&q1, ">q1\nMKVLAAGIVALLLAAGCSSSKEETLKKAMDELTANG\n").unwrap();
     let delta_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/delta");
@@ -251,7 +255,8 @@ fn first_batch_stops_check_rpsdb_and_domain_options_first() {
     );
     assert_eq!(c1.rc, 2, "c1: {}", c1.stderr);
     assert!(
-        c1.stderr.contains("No alias or index file found for protein database [nosuch]"),
+        c1.stderr
+            .contains("No alias or index file found for protein database [nosuch]"),
         "c1: {}",
         c1.stderr
     );
@@ -271,7 +276,8 @@ fn first_batch_stops_check_rpsdb_and_domain_options_first() {
     );
     assert_eq!(c2.rc, 2, "c2: {}", c2.stderr);
     assert!(
-        c2.stderr.contains("No alias or index file found for protein database [nosuch]"),
+        c2.stderr
+            .contains("No alias or index file found for protein database [nosuch]"),
         "c2: {}",
         c2.stderr
     );
@@ -291,7 +297,8 @@ fn first_batch_stops_check_rpsdb_and_domain_options_first() {
     );
     assert_eq!(c3.rc, 2, "c3: {}", c3.stderr);
     assert!(
-        c3.stderr.contains("No alias or index file found for protein database [nosuch]"),
+        c3.stderr
+            .contains("No alias or index file found for protein database [nosuch]"),
         "c3: {}",
         c3.stderr
     );
@@ -310,7 +317,8 @@ fn first_batch_stops_check_rpsdb_and_domain_options_first() {
     );
     assert_eq!(c4.rc, 2, "c4: {}", c4.stderr);
     assert!(
-        c4.stderr.contains("No alias or index file found for protein database [nosuch]"),
+        c4.stderr
+            .contains("No alias or index file found for protein database [nosuch]"),
         "c4: {}",
         c4.stderr
     );
@@ -370,7 +378,10 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
     // m4: 4-byte valid magic .wcounts -> no-hit query exits 0; hit query refuses cleanly.
     let m4 = copy_db_without(&delta_dir, "deltatest", &temp.0.join("m4"), "");
     std::fs::write(temp.0.join("m4/deltatest.wcounts"), &orig_wcounts[..4]).unwrap();
-    let run = run_query("q_none.faa", &["-rpsdb", m4.to_str().unwrap(), "-outfmt", "6"]);
+    let run = run_query(
+        "q_none.faa",
+        &["-rpsdb", m4.to_str().unwrap(), "-outfmt", "6"],
+    );
     assert_eq!(run.rc, 0, "m4 no-hit: {}", run.stderr);
     let run = run_query(
         "q_serpin.faa",
@@ -381,7 +392,10 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
     // h20: 20-byte truncated header .wcounts -> no-hit exits 0; hit refuses.
     let h20 = copy_db_without(&delta_dir, "deltatest", &temp.0.join("h20"), "");
     std::fs::write(temp.0.join("h20/deltatest.wcounts"), &orig_wcounts[..20]).unwrap();
-    let run = run_query("q_none.faa", &["-rpsdb", h20.to_str().unwrap(), "-outfmt", "6"]);
+    let run = run_query(
+        "q_none.faa",
+        &["-rpsdb", h20.to_str().unwrap(), "-outfmt", "6"],
+    );
     assert_eq!(run.rc, 0, "h20 no-hit: {}", run.stderr);
     let run = run_query(
         "q_serpin.faa",
@@ -392,7 +406,10 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
     // o4: 4-byte valid magic .obsr -> no-hit exits 0; hit refuses.
     let o4 = copy_db_without(&delta_dir, "deltatest", &temp.0.join("o4"), "");
     std::fs::write(temp.0.join("o4/deltatest.obsr"), &orig_obsr[..4]).unwrap();
-    let run = run_query("q_none.faa", &["-rpsdb", o4.to_str().unwrap(), "-outfmt", "6"]);
+    let run = run_query(
+        "q_none.faa",
+        &["-rpsdb", o4.to_str().unwrap(), "-outfmt", "6"],
+    );
     assert_eq!(run.rc, 0, "o4 no-hit: {}", run.stderr);
     let run = run_query(
         "q_serpin.faa",
@@ -418,7 +435,10 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
     // e0: empty .wcounts -> refused before NCBI crashes.
     let e0 = copy_db_without(&delta_dir, "deltatest", &temp.0.join("e0"), "");
     std::fs::write(temp.0.join("e0/deltatest.wcounts"), []).unwrap();
-    let run = run_query("q_none.faa", &["-rpsdb", e0.to_str().unwrap(), "-outfmt", "6"]);
+    let run = run_query(
+        "q_none.faa",
+        &["-rpsdb", e0.to_str().unwrap(), "-outfmt", "6"],
+    );
     assert_refused(&run, "e0", "shorter than its 4-byte magic number");
 
     // Zero-count .wcounts column: refused on a non-X query residue, succeeds on an X query residue.
@@ -440,13 +460,14 @@ fn short_and_corrupt_wcounts_and_obsr_match_ncbi_open_and_refuse_on_hit() {
 
 #[test]
 fn domain_search_refusal_and_subject_limit_by_num_descriptions_name_deltablast() {
-    let temp = TempDir(
-        std::env::temp_dir().join(format!("losat-deltablast-a3d7-{}", std::process::id())),
-    );
+    let temp =
+        TempDir(std::env::temp_dir().join(format!("losat-deltablast-a3d7-{}", std::process::id())));
     let delta_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/delta");
-    // A3: truncate .loo of a copy of deltatest so domain search refuses in DELTABLAST's name.
+    // A3: truncate .loo of a copy of deltatest (keeping its valid 4-byte magic) so domain search
+    // refuses in DELTABLAST's name, not RPSBLAST's.
     let badloo = copy_db_without(&delta_dir, "deltatest", &temp.0.join("badloo"), "");
-    std::fs::write(temp.0.join("badloo/deltatest.loo"), [0u8; 4]).unwrap();
+    let orig_loo = std::fs::read(delta_dir.join("deltatest.loo")).unwrap();
+    std::fs::write(temp.0.join("badloo/deltatest.loo"), &orig_loo[..16]).unwrap();
     let run = run_query(
         "q_serpin.faa",
         &["-rpsdb", badloo.to_str().unwrap(), "-outfmt", "6"],
@@ -474,5 +495,9 @@ fn domain_search_refusal_and_subject_limit_by_num_descriptions_name_deltablast()
         ],
         &[],
     );
-    assert_refused(&run, "D7 num_descriptions/num_alignments", "-num_descriptions");
+    assert_refused(
+        &run,
+        "D7 num_descriptions/num_alignments",
+        "-num_descriptions",
+    );
 }

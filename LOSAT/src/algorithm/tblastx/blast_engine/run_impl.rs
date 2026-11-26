@@ -4534,15 +4534,11 @@ impl BatchReports<'_> {
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
                         prefetch_format,
                     ),
-                    titles: crate::algorithm::common::database::TitleReads::of(
-                        !formats.is_empty()
-                            && formats.iter().all(|format| format.writes_seq_aligns()),
-                        formats
-                            .first()
-                            .is_some_and(|format| format.prefetches_subjects())
-                            && !crate::algorithm::common::database::prefetch_always_off(
-                                prefetch_format,
-                            ),
+                    titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                        crate::report::archive::options::RequestKind::Tblastx,
+                        formats.iter().map(|format| {
+                            format.report_format().map_or(-1, |format| format as i32)
+                        }),
                     ),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose

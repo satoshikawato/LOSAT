@@ -1371,11 +1371,27 @@ impl TblastxOutputFormat {
         )
     }
 
-    /// Whether the format writes the search's Seq-aligns as they are (outfmt 8, 9, 11 and 12,
-    /// `ReportFormat::writes_seqaligns`), so that NCBI's formatter reads no definition line
-    /// (`common::database::TitleReads`).
-    pub(crate) fn writes_seq_aligns(self) -> bool {
-        matches!(self, Self::Seqalign(_) | Self::Archive)
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Unsupported => None,
+        }
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which

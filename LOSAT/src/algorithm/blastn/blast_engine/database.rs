@@ -1840,18 +1840,11 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format(output_formats)),
         one_by_one: shared::prefetch_may_be_off(prefetch_format(output_formats)),
-        titles: shared::TitleReads::of(
-            !output_formats.is_empty()
-                && output_formats.iter().all(|format| {
-                    matches!(
-                        format,
-                        BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive
-                    )
-                }),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Blastn,
             output_formats
-                .first()
-                .is_some_and(|format| format.prefetches_subjects())
-                && !shared::prefetch_always_off(prefetch_format(output_formats)),
+                .iter()
+                .map(|format| format.report_format() as i32),
         ),
     }
 }

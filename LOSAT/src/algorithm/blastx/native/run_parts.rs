@@ -267,8 +267,9 @@ impl ArchiveBatch<'_> {
                         search_subjects,
                         results,
                         options.gapped,
-                        // The archive reads no title besides the Seq-aligns' (no prefetch).
-                        ReportedAsks::of_archive(),
+                        // The archive reads no title besides the Seq-aligns' (no prefetch;
+                        // RPSTBLASTN still stays `Reports`).
+                        ReportedAsks::of_archive(options),
                         (&mut *diagnostics, Some(handle)),
                     )? {
                         None => ReportedSubjects::default(),

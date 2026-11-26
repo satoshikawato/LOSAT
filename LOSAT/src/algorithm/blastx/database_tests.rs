@@ -338,3 +338,105 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
     assert_eq!(fetched(SubjectFetch::WithIdentities, 0), none);
     std::fs::remove_dir_all(&cwd).unwrap();
 }
+
+// RG-KB 9(b) review (PR #1637 small finding 3): in pairwise mode, a later subject's
+// `StoredTitle::check_shown_source` refusal must stay in the deferred `refused` slot so it
+// neither overtakes an earlier `check_reported_title` refusal nor overtakes a later damaged
+// header record's `HeaderReadError`.
+#[test]
+fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_header_error() {
+    use crate::seqdb::alias::SearchPath;
+    let cwd = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-blastx-db-title-order-{}-{:?}",
+        crate::utils::test_dir::process_id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&cwd).unwrap();
+    let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let bare_v4 = cwd.join("bare_v4");
+    let bare_args = crate::writedb::makeblastdb::MakedbArgs {
+        input: "-".to_string(),
+        input_type: "fasta".to_string(),
+        dbtype: "prot".to_string(),
+        title: Some("bare_v4".to_string()),
+        out: Some(bare_v4.to_str().unwrap().to_string()),
+        blastdb_version: 4,
+        max_file_sz: "1GB".to_string(),
+        metadata_output_prefix: None,
+        oid_masks: None,
+        logfile: None,
+        parse_seqids: false,
+        hash_index: false,
+        taxid: Some(9606),
+        taxid_map: None,
+        mask_data: None,
+        mask_id: None,
+        mask_desc: None,
+        gi_mask: false,
+        gi_mask_name: None,
+        randomize: false,
+    };
+    let (mut log, mut messages) = (Vec::new(), Vec::new());
+    let mut fasta: &[u8] = b">\nMDIVWSTFSARIQFAQYVPP\n";
+    let status = crate::writedb::makeblastdb::run_with(
+        &bare_args,
+        &ApplicationSettings::default(),
+        None,
+        crate::writedb::Platform::host(),
+        &mut fasta,
+        &mut log,
+        &mut messages,
+    );
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&messages));
+    let taxdb = tests.join("seqdb/taxdb/btd_empty");
+    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None);
+    let spec = format!(
+        "{} {}",
+        tests.join("db_search/tchar/tc_dmg_p").to_str().unwrap(),
+        bare_v4.to_str().unwrap(),
+    );
+    let database = BlastxDatabase {
+        db: SeqDb::open_in(spec.as_bytes(), SeqType::Protein, &search).unwrap(),
+        name: spec,
+        taxdb: shared::TaxdbRun::default(),
+        parsed_seqids: false,
+        program: PROGRAM,
+    };
+    let read = |lists: &[(usize, i32)]| {
+        let batches = one_query(lists);
+        ReportedSubjects::read_titles(
+            &database,
+            &batches,
+            true,
+            (true, shared::TitleReads::Reports),
+            (Default::default(), true),
+        )
+    };
+    // OID 0 (tc_dmg_p[0]) has a 0xE9 title byte; OID 1 (tc_dmg_p[1]) has a damaged header;
+    // OID 3 (pbare_t[0]) has an empty title with a taxid refused under btd_empty.
+    let err_source_only = read(&[(3, 90)]).err().expect("shown-source refusal");
+    assert!(
+        err_source_only
+            .downcast_ref::<shared::HeaderReadError>()
+            .is_none(),
+        "expected shown-source refusal, got HeaderReadError: {err_source_only:#}"
+    );
+    let err_title_first = read(&[(0, 90), (3, 80)])
+        .err()
+        .expect("OID 0 title refusal");
+    assert!(
+        format!("{err_title_first:#}")
+            .contains("has a stored title with a byte outside ' ' to '~'"),
+        "expected OID 0 title refusal first, got: {err_title_first:#}"
+    );
+    let err_damaged_after = read(&[(3, 90), (1, 80)])
+        .err()
+        .expect("OID 1 HeaderReadError");
+    assert!(
+        err_damaged_after
+            .downcast_ref::<shared::HeaderReadError>()
+            .is_some(),
+        "expected OID 1 HeaderReadError to win over OID 3 shown-source refusal, got: {err_damaged_after:#}"
+    );
+    std::fs::remove_dir_all(&cwd).unwrap();
+}

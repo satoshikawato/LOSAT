@@ -4726,32 +4726,52 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum TitleReads {
     /// Nothing: every format writes the Seq-aligns as they are (outfmt 8, 9, 11 and 12,
-    /// `ReportFormat::writes_seqaligns`), and the first one does not prefetch the subjects
-    /// ([`prefetches_subjects`]: a `PRE_FETCH_SEQS_LIMIT` of `INT_MAX` makes 8, 9 and 12 prefetch).
+    /// `ReportFormat::writes_seqaligns`), the first one does not prefetch the subjects
+    /// ([`prefetches_subjects`]: a `PRE_FETCH_SEQS_LIMIT` of `INT_MAX` makes 8, 9 and 12 prefetch),
+    /// and the application is one of the five search programs (`blastn`, `blastp`, `blastx`,
+    /// `tblastn`, `tblastx`; not `psiblast`, `rpsblast` or `rpstblastn`).
     SeqAligns,
-    /// The batches' prefetch or a formatter reads it too.
+    /// The batches' prefetch, a formatter, `psiblast`, `rpsblast`, or `rpstblastn` reads it too.
     #[default]
     Reports,
 }
 
 impl TitleReads {
-    /// What the reports read where every format writes the Seq-aligns as they are or not
-    /// (`seq_aligns`) and the first format's batches prefetch the subjects or not (`prefetched`,
-    /// `ParsedShown::prefetched`).
-    pub(crate) fn of(seq_aligns: bool, prefetched: bool) -> Self {
-        if seq_aligns && !prefetched {
-            TitleReads::SeqAligns
-        } else {
-            TitleReads::Reports
-        }
-    }
-
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-322
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-447
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-707
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:195-215
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:191-209
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:250-262
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:374-400
     /// What the reports of the formats `outfmts` (NCBI's numbers, the first format first) of a
     /// run of the application `app` read.
+    ///
+    /// `RequestKind::Psiblast`, `RequestKind::Rpsblast`, and `RequestKind::Rpstblastn` always
+    /// return [`TitleReads::Reports`]:
+    /// - `psiblast` reads subject definition lines when `CPsiBlastInputData` loads each included
+    ///   subject through `CScope` to compute a PSSM (`-num_iterations` != 1, including 0, or
+    ///   `-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`), and its traceback
+    ///   makes Seq-aligns for the longer hit list before `CBlastFormatUtil::PruneSeqalign` cuts it
+    ///   to `-max_target_seqs`.
+    /// - `rpsblast` and `rpstblastn` construct a fresh `CLocalRPSBlast` per query batch and open a
+    ///   fresh `CSearchDatabase` (`CSeqDB`, empty header cache) per volume in `s_RunLocalRpsSearch`,
+    ///   making Seq-aligns in volume order before `s_CombineSearchSets` merges them and before
+    ///   `PruneSeqalign` cuts them to `-max_target_seqs`.
+    ///
+    /// None of those extra reads or per-batch/per-volume caches is modelled yet (deferred to 9b-2).
     pub(crate) fn of_outfmts(
         app: crate::report::archive::options::RequestKind,
         outfmts: impl IntoIterator<Item = i32>,
     ) -> Self {
+        if matches!(
+            app,
+            crate::report::archive::options::RequestKind::Psiblast
+                | crate::report::archive::options::RequestKind::Rpsblast
+                | crate::report::archive::options::RequestKind::Rpstblastn
+        ) {
+            return TitleReads::Reports;
+        }
         let mut outfmts = outfmts.into_iter().peekable();
         let first = outfmts.peek().copied();
         let seq_aligns = first.is_some()

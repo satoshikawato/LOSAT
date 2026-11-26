@@ -1114,19 +1114,29 @@ impl ReportedAsks {
                 )
             }),
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
-                crate::report::archive::options::RequestKind::Blastx,
+                Self::request_kind(options),
                 [i32::from(options.outfmt)],
             ),
         }
     }
 
+    fn request_kind(
+        options: &super::args::ResolvedOptions,
+    ) -> crate::report::archive::options::RequestKind {
+        if options.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::Blastx
+        }
+    }
+
     /// What the BLAST archive (outfmt 11) asks, written from the batch's Seq-aligns: nothing of
     /// the reported sequences but their titles' reads by the Seq-aligns
-    /// (`common::database::TitleReads::SeqAligns`).
-    pub(super) fn of_archive() -> Self {
+    /// (`common::database::TitleReads::SeqAligns` for BLASTX; `Reports` for RPSTBLASTN).
+    pub(super) fn of_archive(options: &super::args::ResolvedOptions) -> Self {
         Self {
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
-                crate::report::archive::options::RequestKind::Blastx,
+                Self::request_kind(options),
                 [11],
             ),
             ..Self::default()
@@ -1146,10 +1156,14 @@ impl ReportedAsks {
             .map(Self::of)
             .reduce(Self::or)
             .unwrap_or_default();
+        let app = options.first().map_or(
+            crate::report::archive::options::RequestKind::Blastx,
+            Self::request_kind,
+        );
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,
-            crate::report::archive::options::RequestKind::Blastx,
+            app,
             options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
@@ -1162,7 +1176,7 @@ impl ReportedAsks {
             .first()
             .is_some_and(|options| Self::of(options).one_by_one);
         asks.titles = crate::algorithm::common::database::TitleReads::of_outfmts(
-            crate::report::archive::options::RequestKind::Blastx,
+            app,
             options.iter().map(|options| i32::from(options.outfmt)),
         );
         asks

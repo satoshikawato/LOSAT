@@ -857,51 +857,60 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
 // RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
 // format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
 // subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
-// may set); the others read it again (`TitleReads::Reports`, LOSAT's refusal).
+// may set), for the five search programs (not psiblast, rpsblast or rpstblastn);
+// the others read it again (`TitleReads::Reports`, LOSAT's refusal).
 #[test]
 fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
     use crate::report::archive::options::RequestKind;
-    let blastp =
-        |outfmts: &[i32]| TitleReads::of_outfmts(RequestKind::Blastp, outfmts.iter().copied());
-    assert_eq!(blastp(&[11]), TitleReads::SeqAligns);
-    assert_eq!(blastp(&[11, 11]), TitleReads::SeqAligns);
-    // psiblast's rounds prefetch before their test of the archive (`PrefetchFormat::of`).
-    assert_eq!(
-        TitleReads::of_outfmts(RequestKind::Psiblast, [11]),
-        TitleReads::of(
-            true,
-            prefetches_subjects(Some(PrefetchFormat::of(11, RequestKind::Psiblast)))
-        )
-    );
-    for outfmts in [
-        &[][..],
-        &[0],
-        &[3],
-        &[5],
-        &[6],
-        &[7],
-        &[10],
-        &[13],
-        &[17],
-        &[18],
-        &[11, 6],
-        &[11, 0],
+    for app in [
+        RequestKind::Blastn,
+        RequestKind::Blastp,
+        RequestKind::Blastx,
+        RequestKind::Tblastn,
+        RequestKind::Tblastx,
     ] {
-        assert_eq!(blastp(outfmts), TitleReads::Reports, "{outfmts:?}");
+        let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied());
+        assert_eq!(of(&[11]), TitleReads::SeqAligns, "{app:?}");
+        assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
+        for outfmts in [
+            &[][..],
+            &[0],
+            &[3],
+            &[5],
+            &[6],
+            &[7],
+            &[10],
+            &[13],
+            &[17],
+            &[18],
+            &[11, 6],
+            &[11, 0],
+        ] {
+            assert_eq!(of(outfmts), TitleReads::Reports, "{app:?} {outfmts:?}");
+        }
+        for outfmt in [8, 9, 12] {
+            let expected = if prefetches_subjects(Some(PrefetchFormat::of(outfmt, app))) {
+                TitleReads::Reports
+            } else {
+                TitleReads::SeqAligns
+            };
+            assert_eq!(of(&[outfmt, 11]), expected, "{app:?} {outfmt}");
+        }
     }
-    for outfmt in [8, 9, 12] {
-        assert_eq!(
-            blastp(&[outfmt, 11]),
-            TitleReads::of(
-                true,
-                prefetches_subjects(Some(PrefetchFormat::of(outfmt, RequestKind::Blastp)))
-            ),
-            "{outfmt}"
-        );
+    // psiblast, rpsblast and rpstblastn always stay `TitleReads::Reports`.
+    for app in [
+        RequestKind::Psiblast,
+        RequestKind::Rpsblast,
+        RequestKind::Rpstblastn,
+    ] {
+        for outfmts in [&[][..], &[8], &[9], &[11], &[12], &[8, 11], &[0], &[6]] {
+            assert_eq!(
+                TitleReads::of_outfmts(app, outfmts.iter().copied()),
+                TitleReads::Reports,
+                "{app:?} {outfmts:?}"
+            );
+        }
     }
-    assert_eq!(TitleReads::of(true, false), TitleReads::SeqAligns);
-    assert_eq!(TitleReads::of(true, true), TitleReads::Reports);
-    assert_eq!(TitleReads::of(false, false), TitleReads::Reports);
     assert_eq!(TitleReads::default(), TitleReads::Reports);
 }
 

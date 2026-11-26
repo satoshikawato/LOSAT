@@ -537,7 +537,9 @@ impl ReportedSubjects {
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db, one_by_one);
         headers.note_earlier(earlier);
-        // The first title that the reports refuse (`check_reported_title`).
+        // The first title or shown-source refusal that the reports refuse (`check_reported_title`,
+        // `StoredTitle::check_shown_source`), held until the batch's header reads finish so an
+        // earlier refusal does not get overtaken by a later one or overtake a later header error.
         let mut refused = None;
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -569,10 +571,12 @@ impl ReportedSubjects {
                             ) {
                                 refused.get_or_insert(refusal);
                             } else if pairwise {
-                                stored.check_shown_source(
+                                if let Err(refusal) = stored.check_shown_source(
                                     || database.db.oid(ordinal),
                                     database.program,
-                                )?;
+                                ) {
+                                    refused.get_or_insert(refusal);
+                                }
                             }
                             if stored.source != crate::report::defline::SourceTaxname::Unnamed {
                                 sources.insert(list.oid, stored.source);

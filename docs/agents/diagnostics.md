@@ -450,6 +450,7 @@ export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_CSRQSKEEP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCFOLDREG=1
 export LOSAT_X_DCLATEST=1
 export LOSAT_X_DCQSAHEAD=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -4397,6 +4398,34 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCFOLDREG=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
+  `LOSAT_X_DCLATEST`'s maps fold runs; in the strict set from the pull request that added it, 2026-11-26:
+  `LOSAT_X_DCFOLDREG=0` turns it off) runs the map fold in `blast_engine/x_dc_fold_reg.rs`
+  (`fold_two_hit_reg`, `#[inline(never)]`) instead of `fold_two_hit_on` on `Latest`. `fold_two_hit_on` reloaded
+  the map's buckets and shift on every seed, kept `top` and `entries` in memory across every insert, built the
+  `is_seed_masked` closure and tested `two_hits` and `x_tow` per seed, and looked up the query context before the
+  miss/reject tests. Now `latest::Hot` holds the buckets `Vec`, `shift`, `top` and `entries` in locals (giving
+  them back before cold paths and on `Drop`), `TOW` (`LOSAT_X_FOLDLEAN` with `word_length == lut_word_length`) is a
+  const generic, a miss inserts directly through `Hot::put_new` with `LvSeeds::bound_in` (no range check, as
+  `latest_bound` checked the chunk's range once), and the query context is read only on the cold `extend` path (or
+  in `word_of` when `LOSAT_X_FOLDLEAN=0`). Every decision, insert and hit is identical in order. `[TIMING]
+  x_dc_latest:` adds `reg_calls=` counting calls of `fold_two_hit_reg`. The unit tests
+  `the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map` and
+  `the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges` compare every retrieve/insert event,
+  map state, hit and count with `=0` across all four `(PT, LEAN)` instances, and `LOSAT/tests/blastn_dc_latest.rs`
+  (`dc_fold_reg_subjects`, `dc_fold_reg_db_soft_mask_out_of_order`) checks whole reports and `reg_calls=` against
+  `=0`.
+  Evidence (2026-11-26, workstation node 1, 16 cores, memory bound to the node; dev 5341bbc90, its merge
+  and the merge with `=0` in one run, rotated, medians; reports byte-identical in every arm): dc-megablast of
+  31,168 D. melanogaster cDNAs against 3 Mb of its genome (`-subject`, outfmt 6, sha1 `f129806fc5bfa034`) at one
+  thread 9.685 s against 10.781 s (x0.898, range 9.642-9.688 vs 10.772-10.818 s, cycles x0.895, instructions
+  x0.885), at 16 threads 1.039 s against 1.130 s (x0.920, cycles x0.908, instructions x0.888), at 8 threads
+  1.732 s against 1.894 s (x0.915, cycles x0.898, instructions x0.888); 5,000 of the cDNAs at 16 threads 0.223 s
+  against 0.233 s (x0.957, cycles x0.911); MG1655 against AP027131 0.298 s against 0.313 s at one thread (x0.952,
+  cycles x0.946) and 0.138 s against 0.137 s at 16 threads (cycles x0.974, instructions x0.944). VmHWM sampled
+  every 2 ms: +0.53 % (121,538 against 120,896 KiB, 8 rounds) at 16 threads, +0.53 % for 5,000 cDNAs, -0.12 % for
+  MG1655 at 16 threads, and +0.85 % (94,248 against 93,452 KiB, 3 rounds) at one thread (all well below the
+  wall-time reductions). `=0` took x0.983 to x1.005 of dev's time (cycles x0.994 to x1.006).
 - `LOSAT_X_DCLATEST=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
   `LOSAT_X_PAIRPARDISC`'s stage of the diagonal hash runs: a query block over 8000 letters, a subject searched
   by its owner, masked or not, two threads or more or one with `LOSAT_X_BNDCONE`, with or without
@@ -4433,8 +4462,9 @@ Scheduling (each value computed by one thread with the original function; order 
   their take-overs, so such a chunk goes to the chains (`x_pair_seed_disc.rs` `latest_ranges_ascend`, one pass
   over the chunk's ranges at the decision point; `LOSAT_X_REACH` records the reference side), on every path
   that folds on the maps (the owner's map, the partitions', one thread or many). `[TIMING] x_dc_latest:
-  stages= back= grows= buckets=` counts the stages folded on the maps, the chunks sent to the chains because
-  their ranges step back, the maps' growths and their largest size. The unit tests of `x_dc_latest.rs`
+  stages= back= grows= buckets= reg_calls=` counts the stages folded on the maps, the chunks sent to the chains
+  because their ranges step back, the maps' growths, their largest size and the calls of the fold with the map
+  in registers (`LOSAT_X_DCFOLDREG`, above). The unit tests of `x_dc_latest.rs`
   check the map against a model of the latest inserts over stages, clears, crowded buckets and growths,
   and against the chains with NCBI's window (every window) and LOSAT's (outside the band);
   `the_fold_on_the_map_makes_the_decisions_of_the_chains` compares the folds' decisions and inserts seed

@@ -293,6 +293,15 @@ impl LvSeeds {
         bound as i32
     }
 
+    /// EXPERIMENT (LOSAT_X_DCFOLDREG): `bound` of a position that lies in `lo..=hi`, without the
+    /// test of the range: for a fold that checked once that all its positions have a bound
+    /// (`x_dc_fold_reg.rs`).
+    #[inline(always)]
+    pub(super) fn bound_in(&self, s_off_pos: i32) -> i32 {
+        debug_assert!(s_off_pos >= 0 && self.bound(s_off_pos as usize) != i32::MIN);
+        (i64::from(s_off_pos) + self.add) as i32
+    }
+
     /// Tests only: the decisions of `s_BlastnDiagHashExtendInitialHit` that read the retrieve
     /// (module comment, (ii)), as the four callers take them from `last_hit` and `hit_saved` (`0`
     /// and `false` with no cell) before the seed is extended: rejected (`s_off_pos < last_hit`),

@@ -26,6 +26,7 @@ use crate::ncbi_str::{
 use crate::seqid::accguide::{identify_seq_id, parse_flags, SeqIdWarning, F_NUC, F_PROT};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::utils::byte_search::find_first;
 use crate::writedb::bioseq::SeqData;
 
 /// A warning of the reader, as NCBI posts it for a reader without a listener (neither
@@ -437,6 +438,8 @@ const BAD: u8 = 0;
 const SPACE: u8 = 1;
 const COMMENT: u8 = 2;
 const GAP: u8 = 3;
+/// The least residue value of the switch; short-run scans check the action table against it
+/// directly and longer runs use `Alphabet::is_residue` (tested against it for every byte).
 const RESIDUE_MIN: u8 = b'*';
 
 /// The character switch of `ParseDataLine` for protein (`fAssumeProt`) or nucleotide
@@ -480,6 +483,120 @@ const fn char_actions(protein: bool, parse_gaps: bool) -> [u8; 256] {
 const NUCLEOTIDE_GAP_ACTIONS: [u8; 256] = char_actions(false, true);
 const NUCLEOTIDE_ACTIONS: [u8; 256] = char_actions(false, false);
 const PROTEIN_ACTIONS: [u8; 256] = char_actions(true, false);
+
+/// The residues of a data line, following the protein, nucleotide-with-gaps, and
+/// nucleotide-without-gaps cases of `CFastaReader::ParseDataLine`'s character switch.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-826
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Alphabet {
+    Protein,
+    NucleotideGaps,
+    Nucleotide,
+}
+
+/// Whether `byte` is a letter accepted by protein input in either case, following the letter
+/// cases of `CFastaReader::ParseDataLine`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-918
+const fn is_protein_letter(byte: u8) -> bool {
+    (byte & 0xdf).wrapping_sub(b'A') < 26
+}
+
+/// Whether `byte` is a nucleotide letter in either case (`ABCDGHKMNRSTUVWY`), following the
+/// nucleotide branch of `CFastaReader::ParseDataLine` by the ranges of their offsets from `A`:
+/// A–D, G–H, K, M–N, R–W and Y. Clearing bit 5 folds lower case to upper case without mapping
+/// any non-letter into `A`–`Z`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874,900-907
+const fn is_nucleotide_letter(byte: u8) -> bool {
+    let offset = (byte & 0xdf).wrapping_sub(b'A');
+    (offset <= 3)
+        | (offset.wrapping_sub(6) <= 1)
+        | (offset == 10)
+        | (offset.wrapping_sub(12) <= 1)
+        | (offset.wrapping_sub(17) <= 5)
+        | (offset == 24)
+}
+
+impl Alphabet {
+    /// The character switch of the alphabet.
+    const fn actions(self) -> &'static [u8; 256] {
+        match self {
+            Alphabet::Protein => &PROTEIN_ACTIONS,
+            Alphabet::NucleotideGaps => &NUCLEOTIDE_GAP_ACTIONS,
+            Alphabet::Nucleotide => &NUCLEOTIDE_ACTIONS,
+        }
+    }
+
+    /// Whether `CFastaReader::ParseDataLine`'s character switch stores `byte` as a residue
+    /// (`actions()[byte] >= RESIDUE_MIN`), computed by arithmetic so `find_first` can test a
+    /// block of bytes at once (`tests::residue_tests_match_the_tables` checks every byte).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-925
+    const fn is_residue(self, byte: u8) -> bool {
+        match self {
+            Alphabet::Protein => is_protein_letter(byte) | (byte == b'*') | (byte == b'-'),
+            Alphabet::NucleotideGaps => is_nucleotide_letter(byte),
+            Alphabet::Nucleotide => is_nucleotide_letter(byte) | (byte == b'-'),
+        }
+    }
+
+    /// The number of consecutive residues that `s` starts with, matching the residue cases of
+    /// `CFastaReader::ParseDataLine`. Short slices and the first 11 bytes use the action table
+    /// directly so spaced or digit-broken lines exit without extra arithmetic per byte; longer
+    /// runs use [`find_first`].
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:841-936
+    fn residue_run(self, s: &[u8]) -> usize {
+        let actions = self.actions();
+        if s.len() < 28 {
+            return s
+                .iter()
+                .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
+                .unwrap_or(s.len());
+        }
+        for (i, &byte) in s[..11].iter().enumerate() {
+            if actions[byte as usize] < RESIDUE_MIN {
+                return i;
+            }
+        }
+        let rest = &s[11..];
+        let end = match self {
+            Alphabet::Protein => find_first(rest, |byte| !Alphabet::Protein.is_residue(byte)),
+            Alphabet::NucleotideGaps => {
+                find_first(rest, |byte| !Alphabet::NucleotideGaps.is_residue(byte))
+            }
+            Alphabet::Nucleotide => find_first(rest, |byte| !Alphabet::Nucleotide.is_residue(byte)),
+        };
+        11 + end.unwrap_or(rest.len())
+    }
+}
+
+/// The bytes that `extend_upper` converts at once.
+const UPPER_BLOCK: usize = 32;
+
+/// Appends `run` to `out` in upper case (`to_ascii_uppercase` of every byte), matching the
+/// upper-case storage of accepted residues in `CFastaReader::ParseDataLine`. Short runs convert
+/// in a single pass; runs of at least `UPPER_BLOCK` bytes are copied whole and converted in
+/// blocks of `UPPER_BLOCK`, with the final block overlapping the previous one (converting a byte
+/// twice leaves it upper case).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:939-950
+fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
+    let len = run.len();
+    if len < UPPER_BLOCK {
+        out.extend(run.iter().map(u8::to_ascii_uppercase));
+        return;
+    }
+    let start = out.len();
+    out.extend_from_slice(run);
+    let added = &mut out[start..];
+    for block in added.as_chunks_mut::<UPPER_BLOCK>().0 {
+        block.make_ascii_uppercase();
+    }
+    added[len - UPPER_BLOCK..].as_chunks_mut::<UPPER_BLOCK>().0[0].make_ascii_uppercase();
+}
 
 /// The state of the record being read (`ReadOneSeq` resets it).
 struct RecordState {
@@ -768,6 +885,77 @@ fn is_ambig_nuc(c: u8) -> bool {
     b"URYSWKMBDHVN".contains(&c.to_ascii_uppercase())
 }
 
+/// General counting fallback for [`data_line_counts`] when `checked` contains a non-`ACGT`
+/// nucleotide byte or a non-residue protein byte, following `CFastaReader::CheckDataLine`'s
+/// classification loop and `;` comment stop.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:730-750
+#[cold]
+#[inline(never)]
+fn data_line_counts_slow(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    if checked.len() < 32 {
+        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
+        for &c in checked {
+            if c.is_ascii_alphabetic() || c == b'*' {
+                good += 1;
+                if is_nuc && is_ambig_nuc(c) {
+                    ambig_nuc += 1;
+                }
+            } else if c == b'-' {
+                good += 1;
+            } else if is_space(c) || c.is_ascii_digit() {
+            } else if c == b';' {
+                break;
+            } else {
+                bad += 1;
+            }
+        }
+        return (good, bad, ambig_nuc);
+    }
+    fn count(bytes: &[u8], test: impl Fn(u8) -> bool) -> usize {
+        // At most 70 bytes: the count fits a byte.
+        usize::from(
+            bytes
+                .iter()
+                .fold(0u8, |count, &c| count + u8::from(test(c))),
+        )
+    }
+    let checked = &checked[..find_first(checked, |c| c == b';').unwrap_or(checked.len())];
+    let good = |c: u8| c.is_ascii_alphabetic() | (c == b'*') | (c == b'-');
+    let goods = count(checked, good);
+    let bads = count(checked, |c| !(good(c) | is_space(c) | c.is_ascii_digit()));
+    let ambiguous = if is_nuc {
+        count(checked, |c| c.is_ascii_alphabetic() && is_ambig_nuc(c))
+    } else {
+        0
+    };
+    (goods, bads, ambiguous)
+}
+
+/// Counts good bytes (letters, `*`, `-`), bad bytes (neither good, white space, nor digit), and
+/// for nucleotide input ambiguous nucleotide letters over `checked` (at most 70 bytes) up to the
+/// first `;`, following `CFastaReader::CheckDataLine`. A line consisting solely of `A`/`C`/`G`/`T`
+/// (nucleotide, either case) or accepted protein residues returns `(checked.len(), 0, 0)` after
+/// one [`find_first`] scan; any other line uses [`data_line_counts_slow`]
+/// (`tests::data_line_counts_match_the_loop` compares against the byte-by-byte loop).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:719-750
+fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    debug_assert!(checked.len() <= 70);
+    if is_nuc {
+        let is_acgt = |c: u8| {
+            let u = c & 0xdf;
+            (u == b'A') | (u == b'C') | (u == b'G') | (u == b'T')
+        };
+        if find_first(checked, |c| !is_acgt(c)).is_none() {
+            return (checked.len(), 0, 0);
+        }
+    } else if find_first(checked, |c| !Alphabet::Protein.is_residue(c)).is_none() {
+        return (checked.len(), 0, 0);
+    }
+    data_line_counts_slow(checked, is_nuc)
+}
+
 impl RecordState {
     /// `ParseDefLine`: the title for the reader's checks
     /// (`CFastaDeflineReader::ParseDefline`), the ids (with `-parse_seqids`) or the
@@ -836,9 +1024,7 @@ impl RecordState {
             if title_start < len {
                 let end = title_start
                     + 1
-                    + defline[title_start + 1..]
-                        .iter()
-                        .position(|&byte| byte < b' ')
+                    + find_first(&defline[title_start + 1..], |byte| byte < b' ')
                         .unwrap_or(len - title_start - 1);
                 self.titles.push(LineText {
                     text: defline[title_start..end].to_vec(),
@@ -901,25 +1087,8 @@ impl RecordState {
         if !self.seq_data.is_empty() {
             return Ok(());
         }
-        let is_nuc = self.is_nuc();
-        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
         let len_to_check = s.len().min(70);
-        for &c in &s[..len_to_check] {
-            if c.is_ascii_alphabetic() || c == b'*' {
-                good += 1;
-                if is_nuc && is_ambig_nuc(c) {
-                    ambig_nuc += 1;
-                }
-            } else if c == b'-' {
-                good += 1;
-            } else if is_space(c) || c.is_ascii_digit() {
-                // White space and digits are neutral.
-            } else if c == b';' {
-                break;
-            } else {
-                bad += 1;
-            }
-        }
+        let (good, bad, ambig_nuc) = data_line_counts(&s[..len_to_check], self.is_nuc());
         if bad >= good / 3 && (len_to_check > 3 || good == 0 || bad > good) {
             return Err(ParseError::fasta_error(
                 ErrCode::Format,
@@ -979,13 +1148,14 @@ impl RecordState {
         self.check_data_line(s, line_number, warn)?;
 
         // `fParseGaps` is set only for nucleotide input (`ReaderFlags`).
-        let actions = if !self.is_nuc() {
-            &PROTEIN_ACTIONS
+        let alphabet = if !self.is_nuc() {
+            Alphabet::Protein
         } else if self.flags.parse_gaps {
-            &NUCLEOTIDE_GAP_ACTIONS
+            Alphabet::NucleotideGaps
         } else {
-            &NUCLEOTIDE_ACTIONS
+            Alphabet::Nucleotide
         };
+        let actions = alphabet.actions();
         let seq_data_length = self.seq_data.len() + s.len();
         self.bad_positions.clear();
         let mut pos = 0;
@@ -1007,19 +1177,24 @@ impl RecordState {
                     pos += run - 1;
                 }
                 BAD => self.bad_positions.push(pos as u32),
-                _ => {
+                residue => {
                     self.close_gap(pos == 0, seq_data_length, raw_length);
                     // The residues that follow are stored at once (LOSAT's speed: no gap
-                    // is open after the first one).
-                    let run = 1 + s[pos + 1..]
-                        .iter()
-                        .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
-                        .unwrap_or(s.len() - pos - 1);
+                    // is open after the first one). The switch stores a residue in upper case
+                    // (`tests::residue_tests_match_the_tables`).
+                    let run = 1 + alphabet.residue_run(&s[pos + 1..]);
+                    debug_assert!(run >= 1);
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    self.seq_data
-                        .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                    if run == 1 {
+                        self.seq_data.push(residue);
+                    } else if run < UPPER_BLOCK {
+                        self.seq_data
+                            .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                    } else {
+                        extend_upper(&mut self.seq_data, &s[pos..pos + run]);
+                    }
                     pos += run - 1;
                 }
             }
@@ -1785,3 +1960,7 @@ fn gap_mod_warnings(
         && !(evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED));
     specified_type || specified_evidence
 }
+
+#[cfg(test)]
+#[path = "reader_tests.rs"]
+mod tests;

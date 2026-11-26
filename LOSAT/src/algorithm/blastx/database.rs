@@ -86,6 +86,21 @@ impl BlastxDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(crate) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -132,6 +147,11 @@ impl BlastxDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
@@ -276,7 +296,7 @@ impl BlastxDatabase {
     /// sequence where it first reads it (`XStreamDb::x_check`).
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
         if self.db.first_oid_read_fails() {
-            return Err(PreliminaryReadError("Database memory map file error").into());
+            return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
         let mut longest = 0;
@@ -331,7 +351,7 @@ pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
 /// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
 fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
     if db.first_oid_read_fails() {
-        return Err(PreliminaryReadError("Database memory map file error").into());
+        return Err(PreliminaryReadError::from_static("Database memory map file error").into());
     }
     let mut longest = 0;
     let mut first_too_long = None;
@@ -516,7 +536,7 @@ impl ReportedSubjects {
     /// The titles of the reported sequences of the batches `batches` (one query batch), read
     /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
-    /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// batch (`ErrorAfterBatchReports`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
     /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
@@ -902,7 +922,6 @@ impl ReportedSubjects {
                     .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
                     .collect(),
                 lowercase_masks: Vec::new(),
-                warnings: Vec::new(),
                 source: None,
                 around: None,
                 skipped: None,

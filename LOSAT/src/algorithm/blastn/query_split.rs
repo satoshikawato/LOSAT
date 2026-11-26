@@ -134,11 +134,12 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
 /// LOSAT's refusal of a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE whose wrapped
-/// chunk ranges leave gaps between chunks that all hold a query (decision D13 of
-/// PD-LOSAT-NCBI-DEFECTS): NCBI searches on and loses the hits in the gaps. Where such a pair
-/// leaves a chunk without a query, `CQuerySplitter::Split` stops first and LOSAT refuses that
-/// empty chunk instead. The one text of BLASTN's, BLASTX's, BLASTP's, psiblast's and TBLASTN's
-/// gap refusals.
+/// chunk ranges leave gaps between the chunks of a query batch of `program` (LOSAT's name of it;
+/// decision D13 of PD-LOSAT-NCBI-DEFECTS): NCBI's chunk ranges then wrap, and NCBI searches the
+/// chunks with the hits in the gaps lost (where such a pair leaves a chunk without a query,
+/// `CQuerySplitter::Split` stops first and LOSAT refuses that empty chunk instead). The one text
+/// of BLASTN's, BLASTP's, psiblast's and TBLASTN's gap refusals (BLASTX's chunk size is not evened
+/// again, so its negative pairs always leave chunks without a query).
 pub fn negative_split_refusal(program: &str) -> String {
     format!(
         "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s chunk ranges wrapped, which is not supported by LOSAT's {program}"

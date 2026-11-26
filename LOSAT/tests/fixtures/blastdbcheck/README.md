@@ -85,9 +85,8 @@ on that day, in a run of those rows only.
 line (the Owner, 2026-11-21).
 
 ## Rows that wait for LOSAT
-`LOSAT_REFUSES`, `AWAITING_ZERO_PAGE`, `AWAITING_Q_D2B_OV`, `AWAITING_CDD_DELTA` and `AWAITING_READER` in
+`LOSAT_REFUSES`, `AWAITING_ZERO_PAGE`, `AWAITING_Q_D2B_OV` and `AWAITING_CDD_DELTA` in
 `tests/blastdbcheck_fixtures.rs` name rows where the test expects LOSAT's refusal (exit status 1, `Error: ` ... `not
 supported by LOSAT`) instead of NCBI's bytes: NCBI crashes or never ends; NCBI reads zeros past the end of a short
-file's last page; NCBI's alias checks overflow a signed integer and the overflow decides the check; `-cdd_delta`; alias
-keys that LOSAT's reader does not read yet (`MEMB_BIT`, `TAXIDLIST` over version 5). NCBI's frozen result stays for the
-day LOSAT gives it.
+file's last page; NCBI's alias checks overflow a signed integer and the overflow decides the check; `-cdd_delta`.
+NCBI's frozen result stays for the day LOSAT gives it.

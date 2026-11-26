@@ -126,13 +126,18 @@ pub struct PsiSearch {
     /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
     /// refusals that name the option name that one.
     pub(crate) from_msa: bool,
-    /// The query's Seq-inst has the molecule `other` (psiblast only), with the coding number of
+    /// The query's Seq-inst has the molecule `other` (psiblast and tblastn), with the coding number of
     /// its Seq-data (`CSeq_data::E_Choice`: iupacaa 2, ncbieaa 8, ncbistdaa 10). NCBI searches it
     /// as a protein; the tabular formats read the query's letters through the object manager for
     /// the fields `qseq`, `sseq`, `btop`, `positive`, `ppos`, `nident`, `mismatch` and `pident`
     /// (the default fields among them), which throws `CSeqVectorException` at the first row
     /// (`report::tabular::query_sequence_exception`).
     pub(crate) query_other_coding: Option<i32>,
+    /// The letter that a query with one letter more than its Seq-inst's `length` has past the
+    /// `length` (ASCII; empty for any other query): the search reads the first `length` letters,
+    /// and the PSSM engine of the next round (NCBI BLAST+ 2.17.0 reads the query's whole Seq-data)
+    /// all of them (line PS item PS7c).
+    pub(crate) query_tail: Vec<u8>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -469,6 +474,7 @@ impl PsiSearch {
             split_setup: None,
             from_msa: false,
             query_other_coding: None,
+            query_tail: Vec::new(),
         }
     }
 

@@ -16,7 +16,6 @@ fn record(letters: usize) -> FastaRecord {
         title: Vec::new(),
         sequence,
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

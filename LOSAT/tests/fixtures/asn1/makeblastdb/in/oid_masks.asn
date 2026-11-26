@@ -1,0 +1,16 @@
+Seq-entry ::= set {
+  seq-set {
+    seq {
+      id { other { accession "XM_000001", version 1 } },
+      descr { title "predicted mRNA" },
+      inst { repr raw, mol rna, length 4,
+        seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NM_000001", version 1 } },
+      descr { title "curated mRNA" },
+      inst { repr raw, mol rna,
+        length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

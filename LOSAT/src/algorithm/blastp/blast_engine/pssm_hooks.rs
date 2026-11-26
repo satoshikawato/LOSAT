@@ -217,7 +217,7 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
     crate::core::x_drop::gapped_x_dropoffs(
         args.x_drop_gapped_bits,
         args.x_drop_final_bits,
-        karlin.gapped.lambda,
+        crate::core::x_drop::extension_lambda(&karlin.gapped),
     )
 }
 
@@ -616,7 +616,8 @@ pub(super) fn pssm_traceback(
             preliminary_hit_lists,
             compact_hit_lists,
             redone,
-        );
+        )
+        .map(seqalign_scores_of_lists);
     }
     PssmTraceback0 {
         rows: &psi.pssm,
@@ -635,6 +636,27 @@ pub(super) fn pssm_traceback(
         link: link_context.map(|context| (EvenGapLinkParams::traceback(), context)),
     }
     .run(preliminary_hit_lists, compact_hit_lists, pool)
+    .map(seqalign_scores_of_lists)
+}
+
+/// The final lists' E-values and bit scores as the Seq-align that NCBI makes of them carries them
+/// (`seqalign_scores`): a NaN E-value stays as the one it lacks (`seqalign_evalue_absent`), and a
+/// bit score below 0 (a PSSM whose gapped Karlin-Altschul block gives them) is the readers' -1.
+/// The lists are in their final
+/// order (the traceback's sorts read the E-values as the search made them).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
+fn seqalign_scores_of_lists(mut lists: Vec<Option<BlastpHitList>>) -> Vec<Option<BlastpHitList>> {
+    for hsp in lists
+        .iter_mut()
+        .flatten()
+        .flat_map(|list| list.hsplist_array.iter_mut())
+        .flat_map(|hsp_list| hsp_list.hsps.iter_mut())
+    {
+        (hsp.e_value, hsp.bit_score) =
+            crate::report::serial::seqalign::seqalign_scores(hsp.e_value, hsp.bit_score);
+    }
+    lists
 }
 
 /// The position-based redo of a PSSM search (`pssm_search::redo1`, modes 1 to 3): the matrix

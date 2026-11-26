@@ -20,7 +20,7 @@ use super::{
     after_batch_reports, context_lengths, database, database_search_error, prolog_with_report,
     reborrow_outputs, write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage,
     BlastnArgs, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching, QueryContext,
-    SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
+    SequenceData, SetupOnly, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::query_split::{ReadFails, SetupCheckFailure, UnmetChecks};
 use crate::algorithm::blastn::scoring::{
@@ -46,7 +46,8 @@ pub(super) struct ContextInputs<'a> {
     pub(super) stage: BatchStage<'a>,
     /// Whether NCBI searches the batch chunk by chunk (`search_query_chunks`): the subjects and
     /// the greedy set-up are then checked by the set-up of each chunk (`BLAST_GapAlignSetUp` in
-    /// the chunk's `CPrelimSearchRunner`), after the chunk's masks, not by the batch's.
+    /// the chunk's `CPrelimSearchRunner`), after the chunk's masks, or, if no chunk has a valid
+    /// context, by the batch's traceback set-up (`SThreadLocalDataArraySetup`), after the chunks.
     pub(super) split: bool,
     pub(super) subjects: SubjectSource<'a>,
     pub(super) seq_data: &'a SequenceData<'a>,
@@ -192,8 +193,6 @@ fn karlin_blocks<const UNGAPPED: bool>(
     Ok((context_karlin, round_down_evalue_score))
 }
 
-/// The checks of the set-up on the subjects (a database without sequences, the average subject
-/// length) and on the greedy gap costs, then the blocks the search reads for each context and the
 /// LOSAT's refusals of the greedy set-up of `BLAST_GapAlignSetUp` (`s_BlastGreedyAlignMemAlloc`),
 /// which NCBI reaches with a valid context only (with no valid context, NCBI extends nothing):
 /// gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`;
@@ -208,21 +207,97 @@ pub(super) fn greedy_setup_refusal(args: &BlastnArgs, ungapped: bool) -> Option<
     check_greedy_matrix_only(args, ungapped).err()
 }
 
-/// An error of the set-up of a batch with a valid context, NCBI's or LOSAT's refusal where NCBI
-/// crashes or LOSAT does not follow it, where NCBI meets it: in a batch after the first, the
-/// batches before had no valid query (one with a valid query would have raised it), and NCBI
-/// has written their reports (`run_in_pool`), before a crash too (a statistics count of 0,
-/// D1a-5; matrix-only scoring with gap costs 0 and 0, D1a-6 of line RG); in the first batch,
-/// after the prolog.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+/// The checks of `BLAST_GapAlignSetUp` after the Karlin-Altschul block check: first a statistics
+/// count of 0 of a positive total (`common::database::check_setup_count`, where NCBI divides by
+/// zero and crashes), then `stats::setup::setup_subject_length` (the total divided by `num_seqs`,
+/// cast to `Int4` and then `Uint4`, is 0: NCBI's engine error `subject_error`,
+/// `SUBJECT_LENGTH_TOO_SHORT` in the preliminary stage and `TRACEBACK_FAILED` in the traceback
+/// stage), then LOSAT's refusals of the greedy set-up (`greedy_setup_refusal`).
+#[cfg(test)]
+pub(super) fn gap_align_setup_error(
+    args: &BlastnArgs,
+    subjects: SubjectSource<'_>,
+    seq_data: &SequenceData<'_>,
+    ungapped: bool,
+    subject_error: &str,
+) -> Option<anyhow::Error> {
+    let total_length = seq_data.db_len_total;
+    let (total_length, num_seqs) = if total_length > 0 {
+        (total_length, seq_data.db_num_seqs)
+    } else {
+        // A database with a total length of 0 holds sequences without letters only:
+        // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
+        (
+            subjects.prepared().map_or(0, |prepared| {
+                if prepared.records.is_empty() {
+                    0
+                } else {
+                    prepared.letters().len(0)
+                }
+            }) as i64,
+            1,
+        )
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A count of 0 (of a positive total) is the division by 0 where NCBI crashes, LOSAT's
+    // refusal (`common::database::check_setup_count`, D1a-5 of line RG) at this batch, after
+    // the reports of the batches before (NCBI's output before its crash in the tabular
+    // formats), as the error below; a run whose batches have no valid context does not reach
+    // it and is reported as NCBI's. Else `stats::setup::setup_subject_length`: the total
+    // divided by `num_seqs`, cast to `Int4` and then to `Uint4`, is 0 (a negative `NSEQ`
+    // passes; one of 2^31 fails).
+    crate::algorithm::common::database::check_setup_count(total_length, num_seqs, false, "BLASTN")
+        .err()
+        .or_else(|| {
+            crate::stats::setup::setup_subject_length(total_length, num_seqs, None)
+                .is_none()
+                .then(|| {
+                    anyhow::Error::from(crate::cli::NativeError {
+                        exit: 3,
+                        message: format!("{ENGINE_ERROR} {subject_error}\n").into(),
+                    })
+                })
+        })
+        // The greedy set-up after the subjects: NCBI 2.17.0 reports `The average subject
+        // length is too short` (or `Traceback failed` in the batch traceback set-up when no
+        // chunk had a valid context, exit status 3) with gap costs or scores that LOSAT refuses
+        // for the greedy extension, also in a split query batch (`CHUNK_SIZE=200`; line RG D1a-6).
+        .or_else(|| greedy_setup_refusal(args, ungapped))
+}
+
+/// A failure of a batch with a valid context — NCBI's own error or LOSAT's refusal where NCBI
+/// crashes or LOSAT does not follow it — at the point where NCBI meets it: in a batch after the
+/// first, wrapped in `ErrorAfterBatchReports` so `run_in_pool` writes the reports of the batches
+/// before (`write_batch_reports`, hits included, as for `database_search_error`); in the first
+/// batch, after writing the prologs that come with the reports (`write_pairwise_prologs`).
+///
+/// The average subject length, statistics count of 0 (D1a-5), and greedy set-up refusals (D1a-6)
+/// do not depend on the queries, so in a batch after the first every earlier batch had no valid
+/// query. A 64-bit effective search space overflow (`effective_search_spaces`,
+/// `batch_setup::batch_spaces`, or mid-search at `subject_space_overflow.check()` in `run.rs`;
+/// D1a-6 review A F2) depends on the query length (and subject length for per-subject spaces), so
+/// valid earlier batches with hits may precede it; the handler writes their reports alike.
 pub(super) fn setup_failure(
     error: anyhow::Error,
     first_batch: bool,
+    setup_only: bool,
     outputs: BatchOutputs<'_, '_>,
     intro: BlastnIntro,
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     if !first_batch {
         return after_batch_reports(error);
+    }
+    // In `refused_batch_setup_error` (`setup_only`), a refusal that is not NCBI's `NativeError`
+    // gives way to the scope refusal, whose `fail_batch!` writes the prologs itself.
+    if setup_only && !error.is::<crate::cli::NativeError>() {
+        return error;
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
     match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
@@ -255,7 +330,7 @@ pub(super) fn split_read_error(subjects: SubjectSource<'_>) -> Option<anyhow::Er
         return None;
     };
     if database.first_oid_read_fails() {
-        Some(database::PreliminaryReadError("Database memory map file error").into())
+        Some(database::PreliminaryReadError::from_static("Database memory map file error").into())
     } else {
         database.sequence_file_read_error()
     }
@@ -363,7 +438,7 @@ pub(super) fn traceback_setup_error(
         }),
         UnmetChecks::Refusal(refusal) => refusal,
     };
-    setup_failure(error, first_batch, outputs, intro, shown)
+    setup_failure(error, first_batch, false, outputs, intro, shown)
 }
 
 /// Checks of `BLAST_GapAlignSetUp` on the subjects and greedy extension parameters for a batch
@@ -402,6 +477,7 @@ pub(super) fn check_gap_align_setup(
     subjects: SubjectSource<'_>,
     ungapped: bool,
     first_batch: bool,
+    setup_only: bool,
     outputs: BatchOutputs<'_, '_>,
     intro: BlastnIntro,
     shown: &ShownSubjects,
@@ -409,7 +485,8 @@ pub(super) fn check_gap_align_setup(
     if let SubjectSource::Database(database) = subjects {
         if database.first_oid_read_fails() {
             return Err(database_search_error(
-                database::PreliminaryReadError("Database memory map file error").into(),
+                database::PreliminaryReadError::from_static("Database memory map file error")
+                    .into(),
                 first_batch,
                 outputs,
                 intro,
@@ -421,6 +498,7 @@ pub(super) fn check_gap_align_setup(
         return Err(setup_failure(
             failure.into_error(),
             first_batch,
+            setup_only,
             outputs,
             intro,
             shown,
@@ -429,6 +507,8 @@ pub(super) fn check_gap_align_setup(
     Ok(())
 }
 
+/// The checks of the set-up on the subjects (a database without sequences, the average subject
+/// length) and on the greedy gap costs, then the blocks the search reads for each context and the
 /// effective search space of each context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
@@ -436,7 +516,7 @@ pub(super) fn check_gap_align_setup(
 /// (`BLAST_CalcEffLengths`).
 fn effective_search_spaces<const UNGAPPED: bool>(
     inputs: &ContextInputs<'_>,
-    outputs: BatchOutputs<'_, '_>,
+    mut outputs: BatchOutputs<'_, '_>,
     context_karlin: &[Option<ContextKarlin>],
     context_valid: &[bool],
     any_valid_context: bool,
@@ -453,6 +533,13 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         shown,
         ..
     } = inputs;
+    let setup_only = matches!(
+        stage,
+        BatchStage::Search {
+            setup_only: SetupOnly::Whole | SetupOnly::Split,
+            ..
+        }
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-939
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
@@ -461,7 +548,16 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // A split batch checks these through `SplitBatchSteps` in `search_query_chunks` /
     // `refused_batch_setup_error` (`BatchStage::ChunkPrelim` and `ContextInputs::split`).
     if any_valid_context && !split && !matches!(stage, BatchStage::ChunkPrelim { .. }) {
-        check_gap_align_setup(args, subjects, UNGAPPED, first_batch, outputs, intro, shown)?;
+        check_gap_align_setup(
+            args,
+            subjects,
+            UNGAPPED,
+            first_batch,
+            setup_only,
+            reborrow_outputs(&mut outputs),
+            intro,
+            shown,
+        )?;
     }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin
@@ -499,7 +595,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-182
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:690-693
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
-    let query_eff_searchsp: Vec<i64> = query_contexts
+    let query_eff_searchsp: Vec<i64> = match query_contexts
         .iter()
         .zip(&search_karlin)
         .zip(context_valid)
@@ -522,6 +618,19 @@ fn effective_search_spaces<const UNGAPPED: bool>(
             )
             .map(|(_, effective_search_space)| effective_search_space)
         })
-        .collect::<Result<_>>()?;
+        .collect::<Result<_>>()
+    {
+        Ok(spaces) => spaces,
+        Err(error) => {
+            return Err(setup_failure(
+                error,
+                first_batch,
+                setup_only,
+                outputs,
+                intro,
+                shown,
+            ));
+        }
+    };
     Ok((search_karlin, query_eff_searchsp))
 }

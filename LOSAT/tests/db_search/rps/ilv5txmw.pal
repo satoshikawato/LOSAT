@@ -1,0 +1,5 @@
+TITLE t
+DBLIST rpstax
+TAXIDLIST /losat-idlist-fixture-missing/none.txt
+NSEQ 3
+LENGTH 560

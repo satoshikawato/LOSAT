@@ -28,10 +28,9 @@ use super::{
 };
 use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::common::database::HeaderReadError;
 use crate::algorithm::psiblast::pssm::{
-    ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmQueryRecord, PssmScoring,
-    QueryPssm,
+    ncbistdaa_letters, query_pssm, seqalign_pssm_evalue, PssmAlignment, PssmAncillary,
+    PssmQueryRecord, PssmScoring, QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
     HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
@@ -41,6 +40,7 @@ use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::app::CompositionMode;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::QueryBatches;
 use crate::blastinput::seq_range;
@@ -409,6 +409,11 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.query_other_coding);
+                // And the letter past its Seq-inst's length (`PsiSearch::query_tail`).
+                search.query_tail = args
+                    .psi_search
+                    .as_deref()
+                    .map_or_else(Vec::new, |psi| psi.query_tail.clone());
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -503,10 +508,10 @@ fn run_queries(
             // batches): the outfmt 0 prolog if nothing was written, and the reader's messages
             // of a batch whose first round fails.
             if let Err(error) = result {
-                if error.is::<HeaderReadError>() {
+                if error.is::<ErrorAfterBatchReports>() {
                     let failure = error
-                        .downcast::<HeaderReadError>()
-                        .expect("the error was checked to be a HeaderReadError");
+                        .downcast::<ErrorAfterBatchReports>()
+                        .expect("the error was checked to be an ErrorAfterBatchReports");
                     if calls == 0 {
                         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                     }
@@ -578,6 +583,11 @@ fn run_queries(
                 observer.rounds_converged(query);
             }
             write_converged(outputs)?;
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+        if let Some(database) = subject_source.database() {
+            database.reset_scope();
         }
     }
     if epilog {
@@ -738,25 +748,33 @@ fn later_round_report_contexts<'a>(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:556-558
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1135-1145
 /// The line `Search has CONVERGED!` between two `NcbiEndl`s, for every report that is not
-/// structured (psiblast's outfmt 0, 6, 7, 10 and 20), on the report's one stream: the
-/// application writes it after the query's rounds, outside the formatter's regions (`Site::Report`:
-/// no `CBlastTabularInfo` lives there, so a failed write there is the application's "BLAST failed
-/// to write output", exit 6), each `NcbiEndl` a line feed and a flush (`ostream::ncbi_endl`). The
-/// next query's report starts in the format's region again (`Site::of_format`).
+/// structured (`HasStructuredOutputFormat`: BLAST XML, the Seq-annots, the XML2 and JSON documents
+/// and SAM) and not the archive (psiblast's outfmt 0 to 4, 6, 7, 10, 18 and 20), on the report's
+/// one stream: the application writes it after the query's rounds, outside the formatter's regions
+/// (`Site::Report`: no `CBlastTabularInfo` lives there, so a failed write there is the
+/// application's "BLAST failed to write output", exit 6), each `NcbiEndl` a line feed and a flush
+/// (`ostream::ncbi_endl`). The next query's report starts in the format's region again
+/// (`Site::of_format`).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
     use crate::report::ostream::{ncbi_endl, ReportWrite, Site};
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-        if matches!(
+        if !matches!(
             ReportFormat::from_number(number),
-            Some(
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader
+            None | Some(
+                ReportFormat::Xml
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
+                    | ReportFormat::Xml2
+                    | ReportFormat::Json
+                    | ReportFormat::Xml2S
+                    | ReportFormat::JsonS
+                    | ReportFormat::JsonSeqalign
+                    | ReportFormat::Sam
+                    | ReportFormat::ArchiveFormat
             )
         ) {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
@@ -773,9 +791,9 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238 (cited at
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
-/// The epilog of each report after the last round: outfmt 0's, outfmt 7's `# BLAST processed R
-/// queries` (R the rounds formatted, `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt
-/// 6, 8 to 11 and 20.
+/// The epilog of each report after the last round: outfmt 0's (also that of the query-anchored
+/// reports 1 to 4), outfmt 7's `# BLAST processed R queries` (R the rounds formatted,
+/// `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt 6, 8 to 12, 18 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -806,7 +824,10 @@ fn write_round_epilogs(
             continue;
         }
         match crate::blastinput::app::parse_formatting_string(format.outfmt)?.number {
-            0 => {}
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2237-2238
+            // The formats below the tabular ones end with the pairwise footer; the tabular ones and
+            // those after them write no footer.
+            0..=4 => {}
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2246
             // BLAST XML's end, after the rounds' `Iteration`s (`BlastXmlWriter::finish`).
             5 => {
@@ -887,9 +908,7 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 /// below `-inclusion_ethresh`, `x_ExtractAlignmentData`): the round's inclusion set and the
 /// subjects whose letters the PSSM reads (`ListedTitles::pssm_reads`).
 pub(super) fn included(e_value: f64, inclusion_ethresh: f64) -> bool {
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
-    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
-        < inclusion_ethresh
+    seqalign_pssm_evalue(e_value) < inclusion_ethresh
 }
 
 #[cold]
@@ -1181,13 +1200,23 @@ fn next_pssm(
         }
     };
     let mut unread = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
+    // The PSSM engine reads the query's whole Seq-data, also the letter past a Seq-inst `length`
+    // that is one less than the letters (`PsiSearch::query_tail`).
+    let query_letters = [
+        record.seq(),
+        args.psi_search
+            .as_deref()
+            .map_or(&[][..], |psi| psi.query_tail.as_slice()),
+    ]
+    .concat();
     let pssm = query_pssm(
         &io.request,
         scoring,
         table_gapped,
         args.inclusion_ethresh,
         PssmQueryRecord {
-            letters: record.seq(),
+            letters: &query_letters,
             id: &id,
             title: record.title(),
         },

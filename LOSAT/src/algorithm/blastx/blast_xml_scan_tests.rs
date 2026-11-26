@@ -20,7 +20,6 @@ fn record(title: &str, letters: usize) -> FastaRecord {
         title: title.as_bytes().to_vec(),
         sequence,
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -170,29 +169,28 @@ fn a_refusal_of_two_queries_with_one_id_stops_the_read_at_its_batch() {
 
 /// The (title, letters) of every record that the search's stream of `file` reads.
 fn search_reads(
-    settings: &super::super::input::QueryStreamSettings,
+    settings: &super::super::input_source::QueryStreamSettings,
     file: crate::blastinput::input_files::InputFile,
     batch_size: usize,
 ) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut read = Vec::new();
-    super::super::input::read_fasta_stream_batches(
-        &mut settings.stream(file),
-        false,
-        false,
-        batch_size,
-        false,
-        None,
-        &mut |batch| {
-            read.extend(
-                batch
-                    .iter()
-                    .map(|record| (record.title.clone(), record.sequence.clone())),
-            );
-            Ok(())
-        },
-        &mut |_| Ok(()),
-    )
-    .unwrap();
+    settings
+        .stream(file, false)
+        .read_batches(
+            false,
+            batch_size,
+            None,
+            &mut |batch| {
+                read.extend(
+                    batch
+                        .iter()
+                        .map(|record| (record.title.clone(), record.sequence.clone())),
+                );
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
+        .unwrap();
     read
 }
 
@@ -219,7 +217,7 @@ fn the_read_before_the_search_gives_the_open_file_back_where_it_was() {
     }
     std::fs::write(&path, &text).unwrap();
     let second = text.windows(4).position(|w| w == b">q2 ").unwrap() as u64;
-    let settings = super::super::input::QueryStreamSettings {
+    let settings = super::super::input_source::QueryStreamSettings {
         program: super::super::args::ProgramName::BLASTX,
         parse_deflines: false,
         id_scope: None,

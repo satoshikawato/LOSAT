@@ -300,9 +300,9 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
 /// (a query whose ID is not found, or another rethrown exception) or fails (a subject).
 /// `line` is the line as read (`classify` trims it); `program` and `role` name the reader in
 /// the rejection. Both readers ask here: the shared reader (`reader::read_one_seq`, with its
-/// data loaders on) and BLASTX's command line reader (`algorithm::blastx::input`,
-/// `FastaStream::seq_id_role`). BLASTX's web ABI v1 (`algorithm::blastx::web`, frozen) does not:
-/// it reads such a line as data, as before.
+/// data loaders on), BLASTX's too (`algorithm::blastx::input_source`). BLASTX's web ABI v1
+/// (`algorithm::blastx::web`, frozen) reads without the data loaders: it reads such a line as data,
+/// as before.
 pub(crate) fn reject_seq_id_line(line: &[u8], program: &str, role: &str) -> Option<anyhow::Error> {
     if classify(line) == SeqIdLine::Fasta {
         return None;

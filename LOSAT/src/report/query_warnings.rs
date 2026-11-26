@@ -1624,6 +1624,17 @@ pub fn null_descriptor_error() -> String {
     setup_error(crate::ncbi_exception::NULL_POINTER)
 }
 
+/// The set-up's error of a query whose Seq-inst has no `length`: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetBlastSequence` throws `"Cannot get sequence length"`, which
+/// `SetupQueries_OMF` catches as a warning of the query and invalidates its contexts, as
+/// `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:317-321
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:609-652
+pub fn missing_length_error() -> String {
+    setup_error("Cannot get sequence length")
+}
+
 /// The text of the set-up's error of one query whose one message is `message`: its severity
 /// (`Warning`) and a space after it (`TSearchMessages::ToString`, cited at
 /// `invalid_residues_error`).

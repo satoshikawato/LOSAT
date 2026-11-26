@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use super::stream::LineReader;
-use super::{FastaRecord, ReadError, ReaderConfig};
+use super::{FastaRecord, ReadError, ReaderConfig, UpperRecord};
 use crate::ncbi_str::{
     is_blank, is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end,
 };
@@ -453,6 +453,27 @@ impl<R: Read> FastaReader<R> {
     /// `UngetLine` on that path) and the local-ID counter has not moved, so a further call
     /// reads from the next line (oracle BI net2, net5).
     pub(crate) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+        self.read_one_seq_inner(None, warn)
+            .map(|(record, _)| record)
+    }
+
+    /// Reads one record (`read_one_seq`) keeping `sequence` in upper case and returning the
+    /// lowercase mask intervals directly (`self.mask`) when `keep_masks` is set (empty otherwise),
+    /// avoiding a lowercase-and-rescan round trip for callers whose record stores upper-case
+    /// letters with interval masks (`algorithm::blastx::input_source`).
+    pub(crate) fn read_one_seq_upper(
+        &mut self,
+        keep_masks: bool,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
+        self.read_one_seq_inner(Some(keep_masks), warn)
+    }
+
+    fn read_one_seq_inner(
+        &mut self,
+        upper: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         if self.config.data_loaders {
             let (program, role) = (self.config.program, self.config.role);
             let line = self.lines.next_line();
@@ -461,13 +482,17 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.unget_line();
         }
-        self.read_fasta_seq(warn)
+        self.read_fasta_seq(upper, warn)
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:312-440
     /// `FASTA_PROGRESS` posts to a listener only, and there is none. `CBadResiduesException`
     /// comes only with `fValidate`, which is not set.
-    fn read_fasta_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+    fn read_fasta_seq(
+        &mut self,
+        upper: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         self.seq_data.clear();
         self.gaps.clear();
         self.mask_range_start = None;
@@ -562,7 +587,7 @@ impl<R: Read> FastaReader<R> {
                 ),
             ));
         }
-        self.assemble_seq(warn)
+        self.assemble_seq(upper, warn)
     }
 
     /// The title of a defline (`ParseDefLine` with `fNoParseID`), and the generated local
@@ -833,9 +858,14 @@ impl<R: Read> FastaReader<R> {
     /// already become residues, so the record is the same sequence in delta pieces.
     /// `CSeqportUtil::Pack` packs nucleotides into `ncbi2na`/`ncbi4na`, where `U` and `T`
     /// are the same code and any non-IUPACna byte read under a protein Seq-id maps to `N`
-    /// (`CIupacnaTo4na::scm_Table`, `sequtil_tables.cpp:392-457`). The residues in the
-    /// lowercase mask are returned in lower case (LOSAT's representation of the mask).
-    fn assemble_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
+    /// (`CIupacnaTo4na::scm_Table`, `sequtil_tables.cpp:392-457`), so LOSAT stores `U` as `T`.
+    /// The residues in the lowercase mask are returned in lower case (LOSAT's representation of
+    /// the mask), or as mask intervals when `upper_masks` is `Some`.
+    fn assemble_seq(
+        &mut self,
+        upper_masks: Option<bool>,
+        warn: Warn<'_>,
+    ) -> Result<UpperRecord, ReadError> {
         // CloseMask at the end of the record: the interval ends at the last position.
         if let Some(start) = self.mask_range_start.take() {
             self.mask.push((start, self.current_pos_with_gaps() - 1));
@@ -903,29 +933,49 @@ impl<R: Read> FastaReader<R> {
                 *residue = if *residue == b'U' { b'T' } else { *residue };
             }
         }
-        // A packed record's mask is in its intervals.
-        if self.x_packed.is_none() {
-            for &(from, to) in &self.mask {
-                for residue in &mut sequence[from as usize..=to as usize] {
-                    *residue = residue.to_ascii_lowercase();
+        // A packed record's mask is in its intervals; callers asking for upper-case letters with
+        // mask intervals (`upper_masks`) take them straight from `self.mask`.
+        let masks = match upper_masks {
+            Some(keep_masks) => {
+                if keep_masks && !self.mask.is_empty() {
+                    // `check_length` enforces `<= i32::MAX`.
+                    self.mask
+                        .iter()
+                        .map(|&(from, to)| (from as i32, to as i32))
+                        .collect()
+                } else {
+                    Vec::new()
                 }
             }
-        }
-        Ok(FastaRecord {
-            local_id: self.local_id.take().unwrap_or_default(),
-            title: std::mem::take(&mut self.title),
-            sequence,
-            warnings: Vec::new(),
-            source: (self.config.keep_defline || self.believed.is_some()).then(|| {
-                Box::new(super::RecordSource {
-                    defline: std::mem::take(&mut self.defline),
-                    uncut: None,
-                    believed: self.believed.take(),
-                    cut_from: 0,
-                    uncut_length: 0,
-                })
-            }),
-        })
+            None => {
+                if self.x_packed.is_none() {
+                    for &(from, to) in &self.mask {
+                        for residue in &mut sequence[from as usize..=to as usize] {
+                            *residue = residue.to_ascii_lowercase();
+                        }
+                    }
+                }
+                Vec::new()
+            }
+        };
+        Ok((
+            FastaRecord {
+                local_id: self.local_id.take().unwrap_or_default(),
+                title: std::mem::take(&mut self.title),
+                sequence,
+                warnings: Vec::new(),
+                source: (self.config.keep_defline || self.believed.is_some()).then(|| {
+                    Box::new(super::RecordSource {
+                        defline: std::mem::take(&mut self.defline),
+                        uncut: None,
+                        believed: self.believed.take(),
+                        cut_from: 0,
+                        uncut_length: 0,
+                    })
+                }),
+            },
+            masks,
+        ))
     }
 
     /// `-parse_deflines` (`IdScope::add_record`): the record's letters are complete and its letters
@@ -1116,30 +1166,13 @@ pub fn pack_protein_read_nucleotide(seq_data: &mut [u8]) {
     }
 }
 
-/// Normalizes upper-case nucleotide residues read by `scan_data_line` as `CSeqportUtil::Pack`
-/// packs `e_Iupacna` into `ncbi2na`/`ncbi4na`: calls `pack_protein_read_nucleotide` when the
-/// Seq-id named protein, otherwise maps `U` to `T`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
-#[inline]
-pub(crate) fn encode_nucleotide_residues(seq_data: &mut [u8], believed_molecule: Option<bool>) {
-    if believed_molecule == Some(true) {
-        pack_protein_read_nucleotide(seq_data);
-    } else {
-        for residue in seq_data.iter_mut() {
-            // A select rather than a conditional store (LOSAT's speed: vectorized).
-            *residue = if *residue == b'U' { b'T' } else { *residue };
-        }
-    }
-}
-
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
 /// The rest of the function (the modifiers, cited at `gap_mod_warnings`) only warns:
 /// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
 ///
 /// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
 /// its warnings: the reader of the four programs (`FastaReader::parse_gap_line`) and BLASTX's
-/// (`blastx::input`) read gap lines with it.
+/// (`blastx::input_source`) read gap lines with it.
 pub(crate) fn gap_line_size(
     line: &[u8],
     line_number: u64,

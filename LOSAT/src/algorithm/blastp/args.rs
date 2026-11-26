@@ -794,6 +794,12 @@ impl BlastpArgs {
         self.check_options(&mut std::io::sink())
     }
 
+    /// `resolve` without opening `-in_pssm` or `-in_msa` from disk (for web ABI v2's `validate`,
+    /// which checks options alone without the run's working directory).
+    pub(crate) fn resolve_without_files(&self) -> Result<ResolvedBlastpArgs> {
+        self.check_options_with(false, &mut std::io::sink())
+    }
+
     /// NCBI's `CBlastAppArgs::SetOptions` for blastp after the files are opened: the task's
     /// options, each argument handler in the order of `CBlastpAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
@@ -801,6 +807,14 @@ impl BlastpArgs {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     pub fn check_options(
         &self,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<ResolvedBlastpArgs> {
+        self.check_options_with(true, diagnostics)
+    }
+
+    fn check_options_with(
+        &self,
+        read_files: bool,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<ResolvedBlastpArgs> {
         use crate::blastinput::app::CompositionMode;
@@ -940,6 +954,7 @@ impl BlastpArgs {
         let msa_read = match self
             .psiblast_pssm
             .as_ref()
+            .filter(|_| read_files)
             .and_then(|pssm| pssm.in_msa.as_ref())
         {
             Some(input) => Some(crate::algorithm::psiblast::in_msa::read_in_msa(
@@ -963,6 +978,7 @@ impl BlastpArgs {
             None => match self
                 .psiblast_pssm
                 .as_ref()
+                .filter(|_| read_files)
                 .and_then(|pssm| pssm.in_pssm.as_deref())
             {
                 Some(path) => Some(crate::algorithm::pssm_search::in_pssm::read_in_pssm(
@@ -1028,7 +1044,12 @@ impl BlastpArgs {
         };
         // A PSSM search runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`), which every later
         // reader of the options sees (`algorithm::psiblast::in_pssm::position_based_mode`).
-        let mode = if psi_search.is_some() {
+        let has_pssm_query = psi_search.is_some()
+            || self
+                .psiblast_pssm
+                .as_ref()
+                .is_some_and(|pssm| pssm.in_pssm.is_some() || pssm.in_msa.is_some());
+        let mode = if has_pssm_query {
             crate::algorithm::psiblast::in_pssm::position_based_mode(mode)
         } else {
             mode

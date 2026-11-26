@@ -397,13 +397,19 @@ impl TblastnArgs {
         self.check_options(&mut std::io::sink())
     }
 
+    /// `resolve` without opening `-in_pssm` from disk (for web ABI v2's `validate`, which checks
+    /// options alone without the run's working directory).
+    pub(crate) fn resolve_without_files(&self) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(None, false, &mut std::io::sink())
+    }
+
     /// `check_options` for the output formats of a `run_local` call (their numbers).
     pub fn check_options_for_formats(
         &self,
         outfmts: &[i32],
         diagnostics: &mut dyn Write,
     ) -> Result<ResolvedTblastnArgs> {
-        self.check_options_with(Some(outfmts), diagnostics)
+        self.check_options_with(Some(outfmts), true, diagnostics)
     }
 
     /// NCBI's `CBlastAppArgs::SetOptions` for tblastn after the files are opened: the task's
@@ -412,12 +418,13 @@ impl TblastnArgs {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     pub fn check_options(&self, diagnostics: &mut dyn Write) -> Result<ResolvedTblastnArgs> {
-        self.check_options_with(None, diagnostics)
+        self.check_options_with(None, true, diagnostics)
     }
 
     fn check_options_with(
         &self,
         outfmts: Option<&[i32]>,
+        read_files: bool,
         diagnostics: &mut dyn Write,
     ) -> Result<ResolvedTblastnArgs> {
         use crate::blastinput::app::{
@@ -567,7 +574,7 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
         // The PSSM is read by the last handler of tblastn's options (`CPsiBlastArgs`, after the
         // composition-based statistics, tblastn_args.cpp:128-130), before `Validate`.
-        let pssm = match self.in_pssm.as_deref() {
+        let pssm = match self.in_pssm.as_deref().filter(|_| read_files) {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
@@ -821,24 +828,15 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     })
 }
 
-// No NCBI counterpart: LOSAT Web's host has no file system.
-/// The browser's refusal of `-in_pssm` (a PSSM query): the host has no PSSM files (line PS, item
-/// PSW1). The Web's checks of the options (`check_options`) and its runs (the adapter's `run`,
-/// before `run_local`) make it; the library API's records take the option (`api::Inputs::pssm`).
-pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
-    if args.in_pssm.is_some() {
-        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
-    }
-    Ok(())
-}
-
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
-    // `-db` is checked as the command line checks it: the database is opened by the run
-    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
-    refuse_browser_pssm_query(args)?;
-    let resolved = args.resolve()?;
+    // `-db` and `-in_pssm` are checked as the command line checks them without reading files: the
+    // run opens them from its working directory (`run_local` / `run_local_database`).
+    let resolved = args.resolve_without_files()?;
+    if !resolved.gapped && args.in_pssm.is_some() {
+        anyhow::bail!("{}", ungapped_pssm_refusal());
+    }
     search_settings(&resolved)?;
     check_search_limits(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where

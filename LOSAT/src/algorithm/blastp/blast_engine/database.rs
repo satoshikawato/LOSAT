@@ -472,10 +472,12 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
     };
     for bounds in offsets.windows(2) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
         // The sequence and the sentinel byte after it; proteins whose NCBI 32-bit length is <= 0
-        // (`0` or `>= 2^31`) are skipped and do not advance the diagonal offset.
+        // (`0`, `>= 2^31`, or non-ascending offsets) are skipped and do not advance the diagonal
+        // offset.
         let subject_length =
-            crate::seqdb::ncbi_protein_length((bounds[1] - bounds[0]).saturating_sub(1));
+            crate::seqdb::ncbi_protein_length(bounds[1].wrapping_sub(bounds[0]).wrapping_sub(1));
         if subject_length <= 0 {
             continue;
         }

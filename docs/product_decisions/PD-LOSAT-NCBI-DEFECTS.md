@@ -819,8 +819,8 @@
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
   1.114 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
-  `-ends`/`-stride` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and
-  empty CDD profile files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
+  `-ends` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow,
+  line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
   JST, Q-D2b-OV=A; numbered after 1.113 at the merge of dev that brought 1.113 (PS14); first
   1.109, then 1.110, 1.113, exception 31 until 1.111 took 31)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -4762,18 +4762,18 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
     `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
     Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
 
-## Approved exception 32 (`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed overflow, version 1.114)
+## Approved exception 32 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.114)
 
 Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
 Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
 The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さない（PD に新例外）」. Not taken: (B) reproducing
 NCBI's signed wraparound; (C) refusing overflowing inputs.
 
-32. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
+32. **`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed 32-bit or
     64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.114).** NCBI BLAST+ 2.17.0
     computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
-    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
-    (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where
+    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends` OID bounds
+    (`blastdbcheck.cpp:666-682`) in signed 32-bit `int` and 64-bit `Int8`, where
     products such as `(FIRST_OID + 1) * (LAST_OID + 1)` (e.g. `65535 * 65535`) or `num_oids - n`
     for `-ends -2147483648` overflow signed integer arithmetic (undefined behavior in C++): NCBI's
     x86-64 build wraps them to negative or zero values, emitting false alias errors (rows `a_ov1`,
@@ -4781,14 +4781,12 @@ NCBI's signed wraparound; (C) refusing overflowing inputs.
     back into the valid OID range (row `ends_intmin`, passing exit 0 while nearby `-ends -2147483638`
     jumps to `oid 2147483647` and fails with `OID not found`). LOSAT computes the alias count
     expressions in 128-bit signed integers (`blastdbcheck::alias::check_values`) and
-    `-ends`/`-stride` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
+    `-ends` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
     signed overflow and producing exact results (`a_ov1` and `a_ov2` pass with exit 0 while keeping
     non-overflow warnings such as `.msk` extension warnings; `a_dir` and `a_dir_v1` drop those two
     false errors and report 19 alias errors and 37 total errors instead of 21 and 39; `ends_intmin`
     jumps past the volume to `oid 2147483657` and fails with `OID not found`, matching nearby
-    `-ends -2147483638`). Under rule 3, `blastdbcheck -cdd_delta` also refuses empty (0-byte)
-    `.loo`, `.rps`, `.freq`, `.wcounts`, and `.obsr` profile files (row `c_rps0`, where NCBI
-    dereferences a null memory mapping and crashes with exit status 139).
+    `-ends -2147483638`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

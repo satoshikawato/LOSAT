@@ -792,3 +792,313 @@ fn zero_page_cross_program_parity() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Loads a frozen NCBI BLAST+ 2.17.0 cross-program fixture (`nonasc_xprog/<name>.{out,err,rc}`)
+/// translated into LOSAT wording.
+fn load_nonasc_expected(name: &str) -> (Vec<u8>, Vec<u8>, i32) {
+    let base = fixtures().join("nonasc_xprog");
+    let out =
+        losat::wording::losat_output_bytes(&fs::read(base.join(format!("{name}.out"))).unwrap())
+            .into_owned();
+    let err = losat::wording::losat_bytes(&fs::read(base.join(format!("{name}.err"))).unwrap())
+        .into_owned();
+    let rc: i32 = fs::read_to_string(base.join(format!("{name}.rc")))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    (out, err, rc)
+}
+
+/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`.
+fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>, Vec<u8>, i32) {
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg(sub)
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C")
+        .env("HOME", &home)
+        .env("NCBI_CONFIG_PATH", &home)
+        .env("BLAST_USAGE_REPORT", "false")
+        .output()
+        .unwrap();
+    (
+        with_run(&out.stdout, root),
+        with_run(&out.stderr, root),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
+/// PR #1660 R2 cross-program parity for non-ascending index offsets (`d_p4_nonasc_seq`,
+/// `d_p4_nonasc_hdr`, `n4_amb_eq_start`, `n4_amb_gt_next`) across `blastdbcmd`, `blastp`
+/// (`-num_threads 1` and `4` in `[profile.test]` with overflow checks), `blastn`, and
+/// `blastdbcheck` against frozen NCBI BLAST+ 2.17.0 outputs in `nonasc_xprog/`.
+#[test]
+fn nonasc_cross_program_parity() {
+    let root = scratch("nonasc-xprog");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+
+    let cp_db = |dst: &Path, stem: &str, with_tax: bool| {
+        fs::create_dir_all(dst).unwrap();
+        let prefix = format!("{stem}.");
+        for entry in fs::read_dir(base_in()).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if name.starts_with(&prefix) {
+                fs::copy(entry.path(), dst.join(name)).unwrap();
+            }
+        }
+        if with_tax {
+            let tax = fixtures().join("files/tax/good");
+            for f in ["taxdb.bti", "taxdb.btd"] {
+                fs::copy(tax.join(f), dst.join(f)).unwrap();
+            }
+        }
+    };
+    let poke = |path: PathBuf, at: usize, hex: &str| {
+        let mut b = fs::read(&path).unwrap();
+        let v = hex_bytes(hex);
+        b[at..at + v.len()].copy_from_slice(&v);
+        fs::write(path, b).unwrap();
+    };
+    let assert_refused = |label: &str, got: (Vec<u8>, Vec<u8>, i32)| {
+        assert_eq!(got.2, 1, "{label}: expected rc=1, err={:?}", text(&got.1));
+        assert!(
+            got.1.starts_with(b"Error: ") && text(&got.1).contains("not supported by LOSAT"),
+            "{label}: expected LOSAT refusal, got stderr={:?}",
+            text(&got.1)
+        );
+    };
+
+    let q3 = root.join("q3.faa");
+    fs::write(&q3, b">q3\nCSNFRHATLYNGCRFTMHYLCSNFRHATLYNGCRFTMHYL\n").unwrap();
+    let q2 = root.join("q2.faa");
+    fs::write(&q2, b">q2\nRKFVIYQLDPFWRIVLEYPDRKFVIYQLDPFWRIVLEYPD\n").unwrap();
+    let q4 = root.join("q4.faa");
+    fs::write(&q4, b">q4\nKDWNCQIETHWPKCNEVQHTKDWNCQIETHWPKCNEVQHT\n").unwrap();
+    let qn = root.join("qn.fna");
+    fs::write(
+        &qn,
+        b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+    let (q3s, q2s, q4s, qns) = (
+        q3.to_str().unwrap(),
+        q2.to_str().unwrap(),
+        q4.to_str().unwrap(),
+        qn.to_str().unwrap(),
+    );
+
+    // 1. d_p4_nonasc_seq (p4.pin@106 = 01f4 -> seq=[1, 62, 500, 179, ...]).
+    let d_seq = root.join("d_p4_nonasc_seq");
+    cp_db(&d_seq, "p4", true);
+    poke(d_seq.join("p4.pin"), 106, "01f4");
+    for (name, sub, args) in [
+        (
+            "nonasc_seq_dbcmd_fasta",
+            "blastdbcmd",
+            vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
+        ),
+        (
+            "nonasc_seq_dbcmd_fmt",
+            "blastdbcmd",
+            vec![
+                "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_seq, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    // Cross-thread invariance + debug-build overflow-check coverage: -num_threads 4 matches -num_threads 1
+    // (NCBI -num_threads 4 drops OIDs 3..8 due to CSeqDBImpl::x_FillSeqBuffer returning empty chunk on len<0).
+    let got_t4 = run_losat_sub(
+        &root,
+        &d_seq,
+        "blastp",
+        &[
+            "-query",
+            q3s,
+            "-db",
+            "p4",
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ],
+    );
+    assert_eq!(got_t4, load_nonasc_expected("nonasc_seq_blastp_t1"));
+
+    // 2. d_p4_nonasc_hdr (p4.pin@68 = 00000000 -> hdr=[0, 79, 167, 0, 334, ...]).
+    let d_hdr = root.join("d_p4_nonasc_hdr");
+    cp_db(&d_hdr, "p4", true);
+    poke(d_hdr.join("p4.pin"), 68, "00000000");
+    for (name, sub, args) in [
+        (
+            "nonasc_hdr_dbcmd_fasta",
+            "blastdbcmd",
+            vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
+        ),
+        (
+            "nonasc_hdr_dbcmd_fmt",
+            "blastdbcmd",
+            vec![
+                "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q2s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q2s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q4_t1",
+            "blastp",
+            vec![
+                "-query",
+                q4s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q4_t1",
+            "blastp",
+            vec![
+                "-query",
+                q4s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_hdr, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    // OID 3's header range [0, 334) decodes OID 0's gi|101 -> existing lookup-mismatch refusal.
+    for t in ["1", "4"] {
+        let got = run_losat_sub(
+            &root,
+            &d_hdr,
+            "blastp",
+            &[
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                t,
+            ],
+        );
+        assert_refused(&format!("nonasc_hdr_blastp_q3_t{t}"), got);
+    }
+
+    // 3. Nucleotide ambiguity offset out of order: amb == start (OOB buffer[-1]) and amb > next
+    // (reads past OID into OID 2; SIGABRT in NCBI blastn -num_threads 4). Uniform Rule-3 refusal.
+    for (label, hex) in [
+        ("n4_amb_eq_start", "00000020"),
+        ("n4_amb_gt_next", "0000003b"),
+    ] {
+        let d = root.join(label);
+        cp_db(&d, "n4", true);
+        poke(d.join("n4.nin"), 100, hex);
+        for (sub, args) in [
+            (
+                "blastdbcmd",
+                vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
+            ),
+            (
+                "blastn",
+                vec![
+                    "-query",
+                    qns,
+                    "-db",
+                    "n4",
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    "1",
+                ],
+            ),
+            (
+                "blastn",
+                vec![
+                    "-query",
+                    qns,
+                    "-db",
+                    "n4",
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    "4",
+                ],
+            ),
+            (
+                "blastdbcheck",
+                vec!["-db", "n4", "-dbtype", "nucl", "-full"],
+            ),
+        ] {
+            let got = run_losat_sub(&root, &d, sub, &args);
+            assert_refused(&format!("{label}_{sub}"), got);
+        }
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}

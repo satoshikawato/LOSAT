@@ -7,6 +7,6 @@
   `blastdbcheck`, `blastdbcmd`, and the search programs; handles non-ascending index offsets,
   `SEQDB_FILE_ASSERT` exception messages in `blastdbcheck`, and `Error: (803.7)` diagnostics for
   `#`-replaced definition-line bytes in `blastdbcheck` and failed `blastdbcmd` header decodes.
-- `blastdbcheck`: widens alias count checks (`i128`) and `-ends`/`-stride` OID bounds (`i64`) so
+- `blastdbcheck`: widens alias count checks (`i128`) and `-ends` OID bounds (`i64`) so
   signed integer overflow does not cause false alias errors or wrapped OIDs
   (`PD-LOSAT-NCBI-DEFECTS` version 1.114, approved exception 32).

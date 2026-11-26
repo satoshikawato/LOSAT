@@ -8,7 +8,7 @@ use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{
-    decode_defline_taxids, decode_deflines_as, decode_full, holds_a_seqid, Defline,
+    decode_defline_taxids, decode_deflines_as, decode_full, decode_full_in, holds_a_seqid, Defline,
 };
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
@@ -367,7 +367,18 @@ impl Volume {
     /// within the file without reading its bytes: matches NCBI's `x_OpenSeqFile` and mapping
     /// check before `x_GetSequence` returns a non-positive length.
     pub fn check_protein_range(&self, oid: u32) -> Result<(), SeqDbError> {
-        self.checked_protein_range(oid).map(|_| ())
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein range check of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let (start, end) = self.index.sequence_range(oid)?;
+        let Some(lead_start) = start.checked_sub(1) else {
+            return Err(self.index.sequence_changed(oid, 2));
+        };
+        let file = self.seq_file()?;
+        let check_end = if end > start { end } else { start };
+        file.x_check_range(lead_start, check_end)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1630-1635
@@ -661,8 +672,17 @@ impl Volume {
             let next = seq_offsets[i + 1];
             let len_i32 = (next as i32).wrapping_sub(1).wrapping_sub(start as i32);
             if len_i32 <= 0 {
-                if start >= 1 && next > start {
-                    file.x_check_range(u64::from(start) - 1, u64::from(next))?;
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1804
+                // When start is 0, GetFileDataPtr returns null and x_GetSequence returns -1, which
+                // s_SeqDbGetSequence skips (e.g. a truncated .pin zero-filled in its last 4 KiB
+                // page).
+                if start >= 1 {
+                    let check_end = if next > start {
+                        u64::from(next)
+                    } else {
+                        u64::from(start)
+                    };
+                    file.x_check_range(u64::from(start) - 1, check_end)?;
                 }
                 data.push(0);
                 packed_offsets.push(data.len() as u32);
@@ -733,6 +753,9 @@ impl Volume {
         if !valid_seq {
             return Err(self.index.sequence_changed(first, seq_offsets.len()));
         }
+        // Rule 3: when `!(start < amb <= next)` NCBI reads out of the sequence's range (before
+        // `start` for `amb <= start`, or past `next` into the following sequence for `amb > next`
+        // where multithreaded `blastn` also aborts). Refuse at the shared reader read site.
         if !amb_offsets
             .iter()
             .enumerate()
@@ -951,32 +974,30 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
-    /// `defline_set`, `None` for a stored header of no bytes, which NCBI's read gives as no set
-    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_at`).
-    pub fn header_set(&self, oid: u32) -> Result<Option<crate::seqid::DeflineSet>, SeqDbError> {
-        self.with_header_record(oid, |record, path| {
-            if record.is_empty() {
-                return Ok(None);
-            }
-            self.decode_kept_set(oid, record, path).map(Some)
-        })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
-    /// `defline_set` and the stored record it was decoded from, `None` in place of the record
-    /// when the definition-line rule dropped a line of it (`x_GetFilteredHeader`'s `changed`,
-    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, as
-    /// [`Volume::header_set`].
-    pub fn defline_set_with_record(
+    /// `defline_set` written over `set`, whose buffers are kept (`header::decode_full_in`):
+    /// `None` for a stored header of no bytes, which NCBI's read gives as no set
+    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_in`);
+    /// else whether the definition-line rule dropped a line of the record
+    /// (`x_GetFilteredHeader`'s `changed`). With `record`, the stored record the set was decoded
+    /// from is written there where no line was dropped (`SeqDb::defline_set_with_header_in`).
+    pub fn header_set_in(
         &self,
         oid: u32,
-    ) -> Result<Option<(crate::seqid::DeflineSet, Option<Vec<u8>>)>, SeqDbError> {
-        self.with_header_record(oid, |record, path| {
-            if record.is_empty() {
+        set: &mut crate::seqid::DeflineSet,
+        record: Option<&mut Vec<u8>>,
+    ) -> Result<Option<bool>, SeqDbError> {
+        self.with_header_record(oid, |stored, path| {
+            if stored.is_empty() {
+                set.deflines.clear();
+                set.utf8 = false;
                 return Ok(None);
             }
-            let (set, dropped) = self.decode_kept_set_dropped(oid, record, path)?;
-            Ok(Some((set, (!dropped).then(|| record.to_vec()))))
+            let dropped = self.decode_kept_set_in(oid, stored, path, set)?;
+            if let Some(record) = record.filter(|_| !dropped) {
+                record.clear();
+                record.extend_from_slice(stored);
+            }
+            Ok(Some(dropped))
         })
     }
 
@@ -1363,25 +1384,27 @@ impl Volume {
         record: &[u8],
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
-        self.decode_kept_set_dropped(oid, record, path)
-            .map(|(set, _)| set)
+        let mut set = crate::seqid::DeflineSet::default();
+        self.decode_kept_set_in(oid, record, path, &mut set)?;
+        Ok(set)
     }
 
-    /// `decode_kept_set` and whether the rule dropped a line of the record.
-    fn decode_kept_set_dropped(
+    /// `decode_kept_set` written over `set`, whose buffers are kept; whether the rule dropped a
+    /// line of the record.
+    fn decode_kept_set_in(
         &self,
         oid: u32,
         record: &[u8],
         path: &Path,
-    ) -> Result<(crate::seqid::DeflineSet, bool), SeqDbError> {
-        let mut set = decode_full(record, path)?;
+        set: &mut crate::seqid::DeflineSet,
+    ) -> Result<bool, SeqDbError> {
+        decode_full_in(record, path, set)?;
         let stored_lines = set.deflines.len();
         if self.filters_lines() {
-            let keep = self.line_mask(oid, &set)?;
+            let keep = self.line_mask(oid, set)?;
             set.retain_lines(&keep);
         }
-        let dropped = set.deflines.len() != stored_lines;
-        Ok((set, dropped))
+        Ok(set.deflines.len() != stored_lines)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
@@ -1454,11 +1477,12 @@ impl Volume {
         let amb = self.index.ambiguity_offsets(first, end)?;
         let file_len = self.seq_file()?.readable_len();
         Ok(seq
-            .iter()
+            .windows(2)
             .zip(&amb)
-            .map(|(&start, &amb_start)| {
-                let (start, amb_start) = (u64::from(start), u64::from(amb_start));
-                if amb_start <= start || amb_start > file_len {
+            .map(|(pair, &amb_start)| {
+                let (start, amb_start, next) =
+                    (u64::from(pair[0]), u64::from(amb_start), u64::from(pair[1]));
+                if !(start < amb_start && amb_start <= next) || amb_start > file_len {
                     return None;
                 }
                 let high = packed_length(start, amb_start, 3);
@@ -1476,9 +1500,9 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
         let seq = self.index.sequence_offsets(oid, oid + 1)?;
-        let (start, amb_start) = (u64::from(seq[0]), u64::from(amb[0]));
+        let (start, amb_start, next) = (u64::from(seq[0]), u64::from(amb[0]), u64::from(seq[1]));
         let file = self.seq_file()?;
-        if amb_start <= start {
+        if !(start < amb_start && amb_start <= next) {
             return Err(SeqDbError::Format {
                 path: file.path().to_path_buf(),
                 message: format!("sequence {named}: the ambiguity offset lies outside its data"),

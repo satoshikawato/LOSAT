@@ -30,6 +30,6 @@ For every option: `losat blastdbcheck -help`.
 
 ## Differences from NCBI BLAST+
 
-For alias count checks and `-ends`/`-stride` OID bounds that overflow NCBI's 32-bit or 64-bit signed integers, LOSAT computes the values in wider signed integers so overflow does not produce false errors or wrapped OIDs (see [Differences from NCBI BLAST+](../differences.md#blastdbcheck-alias-count-checks-and--ends-near-231)). Every other run writes the same report and exit status as NCBI BLAST+ 2.17.0, including truncated database files whose missing bytes fall within the last 4 KiB memory page.
+For alias count checks and `-ends` OID bounds that overflow NCBI's 32-bit or 64-bit signed integers, LOSAT computes the values in wider signed integers so overflow does not produce false errors or wrapped OIDs (see [Differences from NCBI BLAST+](../differences.md#blastdbcheck-alias-count-checks-and--ends-near-231)). Every other run writes the same report and exit status as NCBI BLAST+ 2.17.0, including truncated database files whose missing bytes fall within the last 4 KiB memory page.
 
 LOSAT refuses inputs where NCBI crashes, never finishes or reads past its memory mapping: an empty sequence or CDD profile file, a cut file whose offsets pass the last 4 KiB page, a cut string ISAM, a non-index file found by `-dir`, `-stride 0` or below, and a random sample of a database that includes none of its sequences (see [What LOSAT refuses](../refusals.md#blastdbcheck)).

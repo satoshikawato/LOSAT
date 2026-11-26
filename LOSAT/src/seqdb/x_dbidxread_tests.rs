@@ -544,23 +544,170 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             overwrite_entries(&index, arrays, num_oids, array, words);
             let n = num_oids as u32;
             let label = format!("{name}, array {array} set to {:?}..", &words[..2]);
-            let _ = volume.read_block(0, n, 0, 0);
-            for first in 0..n {
-                let _ = volume.block_end(first, 64);
-                let _ = volume.block_bytes(first, n);
-                let _ = volume.read_block(first, first + 1, first, first);
+            fn assert_format<T: std::fmt::Debug>(
+                label: &str,
+                res: Result<T, SeqDbError>,
+                needle: &str,
+                ctx: &str,
+            ) {
+                match res {
+                    Err(SeqDbError::Format { message, .. }) => assert!(
+                        message.contains(needle),
+                        "{label} ({ctx}): expected {needle:?} in {message:?}"
+                    ),
+                    other => panic!("{label} ({ctx}): expected Format({needle:?}), got {other:?}"),
+                }
             }
-            let mut visited = 0;
-            volume.visit_deflines(0, n, 1 << 20, &mut |_, _| {
-                visited += 1;
-                true
-            });
-            assert_eq!(visited, n, "{label}");
-            if array == 0 {
-                // Header offsets read again in a range return the re-read descending values
-                // without panicking (CSeqDBIdxFile does not enforce ascending offsets).
-                let reread = volume.index().header_offsets(0, n).expect(&label);
-                assert_eq!(reread, words, "{label}");
+            let is_zeros = words[0] == 0;
+            match (seqtype, array, is_zeros) {
+                (_, 0, _) => {
+                    // Header array overwritten with descending offsets: sequence reads succeed,
+                    // header reads yield NCBI's CEofException (`negative_length_eof`), and
+                    // `header_offsets` returns the re-read descending words.
+                    volume.read_block(0, n, 0, 0).expect(&label);
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        volume.block_bytes(first, n).expect(&label);
+                        volume
+                            .read_block(first, first + 1, first, first)
+                            .expect(&label);
+                    }
+                    let mut visited = 0;
+                    volume.visit_deflines(0, n, 1 << 20, &mut |_, res| {
+                        match res {
+                            Err(SeqDbError::Ncbi(err)) => {
+                                assert!(err.is_class("CEofException"), "{label}: {err:?}");
+                            }
+                            other => panic!("{label}: expected CEofException, got {other:?}"),
+                        }
+                        visited += 1;
+                        true
+                    });
+                    assert_eq!(visited, n, "{label}");
+                    let reread = volume.index().header_offsets(0, n).expect(&label);
+                    assert_eq!(reread, words, "{label}");
+                }
+                (SeqType::Protein, 1, false) => {
+                    // Descending protein sequence offsets: `read_block` and `block_bytes` report
+                    // `sequence_changed`, while `read_protein_search_block` skips negative-length
+                    // proteins (NCBI `x_GetSequence` behavior) except OID n-1 if start == 0.
+                    assert_format(
+                        &label,
+                        volume.read_block(0, n, 0, 0),
+                        "Sequence offsets",
+                        "block",
+                    );
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        assert_format(
+                            &label,
+                            volume.block_bytes(first, n),
+                            "Sequence offsets",
+                            "bytes",
+                        );
+                        assert_format(
+                            &label,
+                            volume.read_block(first, first + 1, first, first),
+                            "Sequence offsets",
+                            "one",
+                        );
+                    }
+                    let skipped = volume.read_protein_search_block(0, n, 0, 0).expect(&label);
+                    for i in 0..n as usize {
+                        assert!(skipped.protein(i).is_empty(), "{label} oid {i}");
+                    }
+                }
+                (SeqType::Protein, 1, true) => {
+                    // Zero protein sequence offsets (`start == 0 < 1`): `read_block` reports
+                    // `sequence_changed`, while `read_protein_search_block` skips each protein
+                    // as NCBI's `x_GetSequence` returns `-1` when `start == 0` (`p4_pincut`).
+                    assert_format(
+                        &label,
+                        volume.read_block(0, n, 0, 0),
+                        "Sequence offsets",
+                        "block",
+                    );
+                    let skipped = volume.read_protein_search_block(0, n, 0, 0).expect(&label);
+                    for i in 0..n as usize {
+                        assert!(skipped.protein(i).is_empty(), "{label} oid {i}");
+                    }
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        assert_eq!(volume.block_bytes(first, n).expect(&label), 1, "{label}");
+                        assert_format(
+                            &label,
+                            volume.read_block(first, first + 1, first, first),
+                            "Sequence offsets",
+                            "one",
+                        );
+                    }
+                }
+                (SeqType::Nucleotide, 1, false) => {
+                    // Descending nucleotide sequence offsets: `read_block` and `block_bytes`
+                    // report `sequence_changed`.
+                    assert_format(
+                        &label,
+                        volume.read_block(0, n, 0, 0),
+                        "Sequence offsets",
+                        "block",
+                    );
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        assert_format(
+                            &label,
+                            volume.block_bytes(first, n),
+                            "Sequence offsets",
+                            "bytes",
+                        );
+                        assert_format(
+                            &label,
+                            volume.read_block(first, first + 1, first, first),
+                            "Sequence offsets",
+                            "one",
+                        );
+                    }
+                }
+                (SeqType::Nucleotide, 1, true) => {
+                    // Zero nucleotide sequence offsets with pristine positive ambiguity offsets
+                    // (`amb > next`): `read_block` reports `ambiguity_changed`.
+                    assert_format(
+                        &label,
+                        volume.read_block(0, n, 0, 0),
+                        "Ambiguity offsets",
+                        "block",
+                    );
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        assert_eq!(volume.block_bytes(first, n).expect(&label), 0, "{label}");
+                        assert_format(
+                            &label,
+                            volume.read_block(first, first + 1, first, first),
+                            "Ambiguity offsets",
+                            "one",
+                        );
+                    }
+                }
+                (SeqType::Nucleotide, 2, _) => {
+                    // Zero nucleotide ambiguity offsets (`amb <= start`): `read_block` reports
+                    // `ambiguity_changed`.
+                    assert_format(
+                        &label,
+                        volume.read_block(0, n, 0, 0),
+                        "Ambiguity offsets",
+                        "block",
+                    );
+                    for first in 0..n {
+                        volume.block_end(first, 64).expect(&label);
+                        volume.block_bytes(first, n).expect(&label);
+                        assert_format(
+                            &label,
+                            volume.read_block(first, first + 1, first, first),
+                            "Ambiguity offsets",
+                            "one",
+                        );
+                    }
+                }
+                other => unreachable!("unexpected test case {other:?}"),
             }
         }
     }

@@ -111,6 +111,7 @@ impl Tests {
             taxdb: &self.taxdb,
             run: TaxdbRun::sequential_with(Arc::clone(&self.taxdb)),
             lookup: None,
+            kept_set: DeflineSet::default(),
             diag,
         };
         let mut faults = 0;
@@ -201,6 +202,8 @@ struct Volume<'a, 'd> {
     taxdb: &'a Arc<LazyTaxDb>,
     run: TaxdbRun,
     lookup: Option<SeqidLookup<'a>>,
+    /// Kept header-set buffers reused across OIDs (`SeqDb::header_set_in`).
+    kept_set: DeflineSet,
     diag: &'a mut Diag<'d>,
 }
 
@@ -308,7 +311,10 @@ impl<'a> Volume<'a, '_> {
                     if check_offsets {
                         let count = state.num_profiles.max(0) as usize;
                         for i in 0..count {
-                            if header.offsets[i] != state.offsets[i] {
+                            if !matches!(
+                                (header.offsets.get(i), state.offsets.get(i)),
+                                (Some(a), Some(b)) if a == b
+                            ) {
                                 log.line(
                                     BRIEF,
                                     &[
@@ -424,8 +430,7 @@ impl<'a> Volume<'a, '_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:592-603
-    // Approved exception (`PD-LOSAT-NCBI-DEFECTS`, Owner Q-D2b-OV=A): widen `oid + n` to `i64` so
-    // `oid` does not wrap past `INT_MAX`.
+    // Widen `oid + n` to `i64` so `oid` does not wrap past `INT_MAX`.
     /// `CStrideTest` of every `n`-th OID: 1 at the first OID that fails. With `n` of 0 or less
     /// NCBI's loop never ends after an OID that passes (`CheckOrFindOID` moves a negative OID to
     /// the first, which then passes as seen): LOSAT's refusal there.
@@ -572,6 +577,14 @@ impl<'a> Volume<'a, '_> {
 
     /// The steps of `TestOID` on `oid`: the failure of the first that fails.
     fn oid_checks(&mut self, oid: i64) -> Result<Option<Failure>, Stop> {
+        let mut set = std::mem::take(&mut self.kept_set);
+        let result = self.oid_checks_in(oid, &mut set);
+        self.kept_set = set;
+        result
+    }
+
+    /// [`Volume::oid_checks`] reusing `set` as its header buffer.
+    fn oid_checks_in(&mut self, oid: i64, set: &mut DeflineSet) -> Result<Option<Failure>, Stop> {
         // Headers: `GetSeqIDs`, the Seq-ids of every definition line.
         let Some(at) = u32::try_from(oid)
             .ok()
@@ -584,11 +597,12 @@ impl<'a> Volume<'a, '_> {
                 unknown: String::new(),
             }));
         };
-        let header = self.header_set(at, oid);
+        let header = self.header_set(at, oid, set);
         // NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` posts `Error: (803.7)` while
         // reading strings, both on valid headers and before a later BER error throws.
         let need_posts = match &header {
-            Ok(set) => set.as_ref().is_some_and(has_replaced_bytes),
+            Ok(true) => has_replaced_bytes(set),
+            Ok(false) => false,
             Err(SeqDbError::Ncbi(_)) => true,
             Err(_) => false,
         };
@@ -596,8 +610,8 @@ impl<'a> Volume<'a, '_> {
             let posts = self.db.header_replaced_char_posts_at(at);
             self.diag.post_replaced(&posts);
         }
-        let set = match header {
-            Ok(set) => set,
+        let has_set = match header {
+            Ok(has_set) => has_set,
             Err(error) => return Failure::of("headers", &error).map(Some),
         };
         // Sequence: `GetSequence`, which maps the sequence's bytes. For a protein with
@@ -611,36 +625,43 @@ impl<'a> Volume<'a, '_> {
             return Ok(Some(Failure::own("sequence", "sequence data is empty")));
         }
         // Bioseq: `GetBioseq`, none for no definition line or no letters (`length < 1`).
-        let set = match set {
-            Some(set) if !set.deflines.is_empty() => set,
-            _ => return Ok(Some(Failure::own("bioseq", "no bioseq"))),
-        };
-        if let Some(failure) = self.bioseq(at, oid as u32, &set)? {
+        if !has_set || set.deflines.is_empty() {
+            return Ok(Some(Failure::own("bioseq", "no bioseq")));
+        }
+        if let Some(failure) = self.bioseq(at, oid as u32, set)? {
             return Ok(Some(failure));
         }
-        if self.flags.taxids && !has_taxid(oid, &set)? {
+        if self.flags.taxids && !has_taxid(oid, set)? {
             return Ok(Some(Failure::own("taxid", "no taxid set")));
         }
         if self.flags.isam {
-            return self.isam_lookups(oid, &set);
+            return self.isam_lookups(oid, set);
         }
         Ok(None)
     }
 
-    /// `GetHdr` of the OID at `at`: `None` for a stored header of no bytes, a set of no lines
-    /// (`x_GetFilteredHeader`). Where the volume filters its sets NCBI's read of no set throws:
-    /// LOSAT refuses it.
-    fn header_set(&self, at: SeqLocation, oid: i64) -> Result<Option<DeflineSet>, SeqDbError> {
-        let set = self.db.header_set_at(at)?;
-        if set.is_none() && self.db.filters_header_sets(at) {
-            return Err(SeqDbError::Unsupported {
-                path: path_from_bytes(self.name),
-                message: format!(
-                    "OID {oid}: a stored header of no bytes in a volume whose sets NCBI filters"
-                ),
-            });
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2086-2200,2250-2261
+    /// `GetHdr` of the OID at `at` written over `set`: `false` for a stored header of no bytes, a
+    /// set of no lines (`x_GetFilteredHeader`). Where the volume filters its sets NCBI's read of
+    /// no set throws: LOSAT refuses it.
+    fn header_set(
+        &self,
+        at: SeqLocation,
+        oid: i64,
+        set: &mut DeflineSet,
+    ) -> Result<bool, SeqDbError> {
+        if !self.db.header_set_in(at, set)? {
+            if self.db.filters_header_sets(at) {
+                return Err(SeqDbError::Unsupported {
+                    path: path_from_bytes(self.name),
+                    message: format!(
+                        "OID {oid}: a stored header of no bytes in a volume whose sets NCBI filters"
+                    ),
+                });
+            }
+            return Ok(false);
         }
-        Ok(set)
+        Ok(true)
     }
 
     /// The length returned by `GetSequence` for the sequence at `at`: signed 32-bit for protein

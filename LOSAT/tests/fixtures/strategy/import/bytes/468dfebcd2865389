@@ -1,0 +1,73 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 576 total letters
+
+
+
+Query= lcl|Query_1 qx1 plus strand gene
+
+Length=129
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_2 qx2 minus strand gene
+
+Length=129
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_3 qx3 no hits
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3021
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  7:50 PM
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: -100000

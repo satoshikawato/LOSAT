@@ -1,0 +1,99 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 576 total letters
+
+
+
+Query= lcl|Query_1 qx1 plus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  95.9    1e-25  1
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 95.9 bits (203),  Expect = 1e-25
+ Identities = 35/39 (90%), Positives = 35/39 (90%), Gaps = 0/39 (0%)
+ Frame = +1/+1
+
+Query  4    LMGVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPTNMCW  120
+            L  VFAVRRKVMDDPKIRDGPMAVMKGWENYCWP NM W
+Sbjct  40   LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  156
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_2 qx2 minus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx2 minus strand gene                                                 92.3    2e-24  1
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 92.3 bits (195),  Expect = 2e-24
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = -1/-1
+
+Query  120  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  13
+            DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY
+Sbjct  175  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  68
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_3 qx3 no hits
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3021
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  7:50 PM
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

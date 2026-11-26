@@ -92,7 +92,7 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
+use crate::blastinput::query_batch::{BatchCount, LoopBatchSizes, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
     RangeRole, SequenceRange,
@@ -218,6 +218,15 @@ mod na_scan;
 // file).
 #[path = "two_stage_scan.rs"]
 mod two_stage_scan;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,90-106,109-185 (the
+// diagonal table and its exit), c++/src/algo/blast/core/na_ungapped.c:631-775 and :799-944 (the
+// diagonal array's and the hash's initial-hit steps) and :1597-1695 (`BlastNaWordFinder`).
+// The word finder of a window below 0 (an imported search strategy's `WindowSize`): the one-hit
+// steps with a diagonal table that starts at the window and carries its state from one chunk to
+// the next (a child module, so that it uses the private types of this file).
+#[path = "neg_window.rs"]
+mod neg_window;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:701-918
 // (`s_BlastSearchEngineCore`, whose :870-900 set the e-values of the subject's list and reap it),
@@ -3811,6 +3820,10 @@ struct SubjectScratch {
     x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
     diag_table_offset: i32,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-157
+    // The diagonal table of a window below 0 (`neg_window.rs`), made by the first chunk that
+    // needs it and kept from chunk to chunk. `None` for every other search.
+    neg: Option<neg_window::NegTable>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     offset_pairs: Vec<OffsetPair>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
@@ -3845,6 +3858,7 @@ impl SubjectScratch {
             // No NCBI counterpart: empty until a partitioned stage runs (LOSAT_X_PAIRPARFOLD).
             x_pair_fold: x_pair_seed::PartScratch::default(),
             diag_table_offset: window_size as i32,
+            neg: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:991-1041
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
             offset_pairs: vec![
@@ -4789,6 +4803,8 @@ struct SamTarget<'a> {
 /// final hit list.
 #[derive(Clone)]
 struct BlastnReportInputs<'a> {
+    /// The pairwise report's name of the subjects (`ShownSubjects::pairwise_name`).
+    pairwise_subject_title: &'a str,
     queries: &'a [FastaRecord],
     /// Under `-parse_deflines`, the scopes of the call's queries, which say how the XML family
     /// formats show each result (`BatchResults::query_scopes`); `None` otherwise.
@@ -4832,8 +4848,9 @@ struct BlastnReportInputs<'a> {
     gap_extend: i32,
     /// The task is megablast or blastn (`BlastnPairwiseReport::zero_gap_extension_formula`).
     zero_gap_extension_formula: bool,
-    /// The two-hit window of the task, printed in the epilog when not 0.
-    window_size: usize,
+    /// The two-hit window of the task, printed in the epilog when not 0 (below 0 too: an
+    /// imported search strategy's window).
+    window_size: i32,
     /// An ungapped (`-ungapped`) search: one Karlin block, no gap costs in the reports, and the
     /// hit list of the end of the traceback is the preliminary one (`finish_query_hit_list`).
     ungapped: bool,
@@ -4938,6 +4955,8 @@ struct BlastnReportInputs<'a> {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`ShownSubjects::tabular_taxdb_found`).
     tabular_taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the formatter's warnings.
+    app: crate::blastinput::app::Program,
     /// The taxonomy database of a `-subject` search's organism report (`BlastnArgs::subject_taxdb`).
     subject_taxdb: Option<&'a crate::algorithm::common::database::SubjectTaxdb>,
 }
@@ -5801,7 +5820,7 @@ fn post_process_hits_and_write(
             report,
             unsearched.clone(),
             query_titles,
-            subject_title,
+            report.pairwise_subject_title,
         )?)
     } else {
         None
@@ -6028,6 +6047,7 @@ fn post_process_hits_and_write(
                     format_warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),
+                    report.app.ncbi_name(),
                 )?;
             } else if output_format == BlastnOutputFormat::Archive {
                 // The BLAST archive (outfmt 11): one document per query batch of the call.
@@ -6220,7 +6240,7 @@ fn write_custom_tabular(
         Some(database) => database.tabular_names(spec, &taxonomy)?,
         None => report
             .subject_taxdb
-            .map(|taxdb| taxdb.report_names("BLASTN")),
+            .map(|taxdb| taxdb.report_names(report.app.ncbi_name())),
     };
     let subjects = match (report.database_ordinals, report.database_reader) {
         (Some(ordinals), Some(reader)) => TabularSubjects::Database {
@@ -6277,6 +6297,7 @@ fn write_custom_tabular(
             false,
             names.as_ref(),
             "BLASTN",
+            report.app.ncbi_name(),
             &queries,
             writer,
             warnings,
@@ -6301,6 +6322,7 @@ fn write_custom_tabular(
             .epilog
             .then_some(report.queries_before + hit_lists.len()),
         taxdb_found: report.tabular_taxdb_found,
+        app: report.app,
         names: names.as_ref(),
     };
     write_blastn_tabular(&tab, hit_lists, writer, warnings, probe)
@@ -6320,6 +6342,7 @@ pub fn run(
     // The command line's progress bar (`BlastnArgs::progress_bar`; no NCBI counterpart). The
     // library API and the web entries come through `run_local` and leave it off.
     args.progress_bar = true;
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:128-133
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
@@ -6382,6 +6405,10 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&import.warning_lines())?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -6389,16 +6416,18 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args
-            .db_filter
-            .resolve(&settings, "blastn", &mut *diagnostics)
-        {
-            Ok(list) => list,
-            Err(error) => {
-                write_run_error_archive(&args, archive.as_ref(), &error);
-                return Err(error);
+        Some(_) => {
+            match args
+                .db_filter
+                .resolve(&settings, args.app().ncbi_name(), &mut *diagnostics)
+            {
+                Ok(list) => list,
+                Err(error) => {
+                    write_run_error_archive(&args, archive.as_ref(), &error);
+                    return Err(error);
+                }
             }
-        },
+        }
         None => None,
     };
     let cli_subjects = if args.db.is_some() {
@@ -6426,7 +6455,11 @@ pub fn run(
     check_utf8_file_name(&args.query, "query", "BLASTN")?;
     // NCBI opens the query file inside `Run` too (`CStdCmdLineArgs` in its handler of the
     // arguments does not): its error is saved and an error archive follows.
-    let query_file = match open_input(&args.query, "query", "BLASTN") {
+    let query_file = match crate::report::archive::read::import::ImportRun::open_query(
+        args.import.as_ref(),
+        &args.query,
+        "BLASTN",
+    ) {
         Ok(file) => file,
         Err(error) => {
             write_run_error_archive(&args, archive.as_ref(), &error);
@@ -6566,19 +6599,34 @@ fn read_cli_subjects(
     diagnostics: &mut (dyn std::io::Write + Send),
     keep_deflines: bool,
 ) -> Result<CliSubjects> {
-    let Some(subject_path) = args.subject.as_deref() else {
-        // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
-        return Err(crate::cli::NativeError {
-            exit: 1,
-            message: format!(
-                "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
-                crate::wording::USER_MANUAL_FOOTER
-            ).into(),
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
+    let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
+    let subject_path = match (imported, args.subject.as_deref()) {
+        (Some(_), _) => None,
+        (None, Some(path)) => Some(path),
+        (None, None) => {
+            // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
+            return Err(crate::cli::NativeError {
+                exit: 1,
+                message: format!(
+                    "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                    crate::wording::USER_MANUAL_FOOTER
+                )
+                .into(),
+            }
+            .into());
         }
-        .into());
     };
-    check_utf8_file_name(subject_path, "subject", "BLASTN")?;
-    let subject_file = open_input(subject_path, "subject", "BLASTN")?;
+    let subject_file = match (imported, subject_path) {
+        (Some(text), _) => {
+            crate::report::archive::read::import::ImportRun::input_of("subject", text)?
+        }
+        (None, Some(path)) => {
+            check_utf8_file_name(path, "subject", "BLASTN")?;
+            open_input(path, "subject", "BLASTN")?
+        }
+        (None, None) => unreachable!("an error above"),
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // The subject range is read after the subject file is opened, before it is read.
     let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
@@ -6656,6 +6704,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
+                args.app().ncbi_name(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -6668,7 +6717,7 @@ fn open_search_database(
                 database.list_taxids(),
                 &database.statistics(),
                 false,
-                args.searchsp.is_some_and(|space| space > 0),
+                args.searchsp.is_some_and(|space| space != 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "BLASTN",
             )?;
@@ -6780,7 +6829,7 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the largest query
     // batch.
     let x_rule = x_query_stream::Rule {
-        batch_letters: x_query_batch_letters(&args.task),
+        batch_letters: x_query_batch_letters(&args),
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
@@ -6819,9 +6868,9 @@ fn search_cli(
     let mut query_source = FastaInputSource::from_file(query_file, query_config);
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         // NCBI returns from `Run` here, before its `PrintErrorArchive`: the message is not an
         // archive's.
         if let Some(handle) = &args.archive {
@@ -6934,8 +6983,12 @@ fn search_cli(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:100-102
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+/// An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
 fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
+    match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Ok(Some(range)),
+        None => parse_optional_range(args.query_loc.as_deref(), RangeRole::Query),
+    }
 }
 
 /// The ranges of a search: the query range as given, and the subjects' ranges.
@@ -7035,11 +7088,12 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        app::formatting_handler_check(&choice, Program::Blastn)?;
+        app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastn)?;
         outfmts.push(choice.number);
     }
     args.html_links = app::html_links(
         args.html,
+        crate::report::archive::options::RequestKind::from(args.app()),
         crate::report::archive::options::RequestKind::Blastn,
         args.database_name(),
         &outfmts,
@@ -7049,6 +7103,13 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
     args.report_counts = counts;
     outputs.diagnostics.write_all(&warnings)?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        outputs
+            .diagnostics
+            .write_all(&import.option_warning_lines())?;
+    }
     check_scoring_options(args)
 }
 
@@ -7354,9 +7415,9 @@ fn search_database(
     within: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list = args
-        .db_filter
-        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -7426,11 +7487,14 @@ fn search(
     // reported an empty query file and read its queries; the records of the other callers
     // get NCBI's warning for an input without records.
     if query_records.is_empty() && matches!(reading, QueryReading::Records) {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         return Ok(());
     }
+    // Another running application (TBLASTX's, running a BLASTN strategy) reads its batch size
+    // here, after `Query is Empty!` and before anything of its formatter (`app_query_batch_size`).
+    let app_batch_size = app_query_batch_size(&args)?;
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
     // and before the formatter (`mb_index::megablast_index`); LOSAT's refusal of an index comes
     // with its other limits below.
@@ -7448,10 +7512,13 @@ fn search(
     if let (Subjects::Database(database), Some(option)) = (subjects, args.db_mask.option()) {
         let archive = args.archive.clone();
         let diagnostics = &mut *outputs.diagnostics;
-        let resolved = database.resolve_mask_option(&option, &mut |text| match &archive {
-            Some(handle) => handle.write_warning(diagnostics, text),
-            None => diagnostics.write_all(text),
-        })?;
+        let resolved =
+            database.resolve_mask_option(&option, args.app().ncbi_name(), &mut |text| {
+                match &archive {
+                    Some(handle) => handle.write_warning(diagnostics, text),
+                    None => diagnostics.write_all(text),
+                }
+            })?;
         crate::algorithm::common::database::note_archive_database_masking(
             args.archive.as_ref(),
             args.strategy.as_ref(),
@@ -7473,7 +7540,7 @@ fn search(
         write_empty_subject_warnings_by_length(
             subject_set.records(),
             |index| subject_set.len(index),
-            "blastn",
+            args.app().ncbi_name(),
             outputs.diagnostics,
         )?;
     }
@@ -7508,13 +7575,14 @@ fn search(
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
+        app_batch_size,
     )
     .map(|(mut batching, overlap_error)| {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:263-264
         // The caller's records are one batch (`BlastnArgs::one_query_batch`): a size that the
         // records do not reach, fixed as `BATCH_SIZE` fixes it.
         if args.one_query_batch {
-            batching.fixed_batch_size = i32::MAX;
+            batching.fixed = Some(i32::MAX as u32);
             batching.batch_size = i32::MAX as u32;
         }
         (batching, overlap_error)
@@ -7571,7 +7639,17 @@ fn search(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // The repeat search of `-filtering_db` runs in the pool of the search whose queries it masks
     // (`repeat_search_hits`); every other search has its own.
-    let requested = args.num_threads;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185
+    // A window below 0 (an imported search strategy's) keeps the diagonal table's state from
+    // one word finder call to the next, so NCBI's result with several threads depends on which
+    // thread takes which subject; the search gives NCBI's one-thread result at any thread
+    // count (PD-LOSAT-NCBI-DEFECTS approved exception 34, Owner 2026-11-24 「Q-F2-28=A」): one
+    // thread, the subjects in NCBI's order on one table.
+    let requested = if super::super::coordination::determine_window_size(&args) < 0 {
+        1
+    } else {
+        args.num_threads
+    };
     let run = |pool: &crate::utils::threading::SearchPool<'_>| {
         run_in_pool(
             args,
@@ -7643,30 +7721,20 @@ fn database_search_error(
     }
 }
 
-/// NCBI's query batch sizes of a search of `subjects`, one batch at a time, as `run_in_pool`
+/// NCBI's query batch sizes of a search of BLASTN's options, one batch at a time, as `run_in_pool`
 /// takes them: for a caller that hands over one batch at a time (`api::run_batches`,
 /// `BlastnArgs::one_query_batch`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-270
-pub(crate) struct QueryBatchSizes {
-    batching: QueryBatching,
-    mixer: BatchSizeMixer,
-}
+pub(crate) struct QueryBatchSizes;
 
 impl QueryBatchSizes {
-    pub(crate) fn new(args: &BlastnArgs, subjects: &[FastaRecord]) -> Result<Self> {
-        use crate::blastinput::seq_range::{record_interval, RecordInterval};
-        let subject_range = parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject)?;
-        let total_length: i64 = subjects
-            .iter()
-            .map(|record| match subject_range.as_ref() {
-                Some(range) => match record_interval(range, record.seq().len()) {
-                    RecordInterval::Letters { from, to } => (to - from + 1) as i64,
-                    RecordInterval::Empty | RecordInterval::PastEnd => 0,
-                },
-                None => record.seq().len() as i64,
-            })
-            .sum();
+    pub(crate) fn of_subjects(
+        args: &BlastnArgs,
+        subjects: &[FastaRecord],
+    ) -> Result<LoopBatchSizes> {
+        let total_length =
+            crate::blastinput::seq_range::subject_letters(args.subject_loc.as_deref(), subjects)?;
         Self::of_total_length(args, total_length)
     }
 
@@ -7679,71 +7747,98 @@ impl QueryBatchSizes {
         args: &BlastnArgs,
         name: &str,
         settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    ) -> Result<Self> {
+    ) -> Result<LoopBatchSizes> {
         let total_length = database::BlastnDatabase::open(name, settings)
             .map_or(0, |database| database.pairwise_database().total_letters);
         Self::of_total_length(args, total_length)
     }
 
-    fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<Self> {
-        let (mut batching, _) = query_batching_from_environment(
+    fn of_total_length(args: &BlastnArgs, total_length: i64) -> Result<LoopBatchSizes> {
+        let (batching, _) = query_batching_from_environment(
             super::super::coordination::task_uses_megablast_chunks(&args.task),
+            app_query_batch_size(args)?,
         )?;
-        let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
-        if batching.fixed_batch_size == 0 {
-            if total_length > 0 {
-                mixer.set_target_hits((total_length / 3000) as i32);
-            }
-            batching.batch_size = mixer.batch_size(None) as u32;
-        }
-        Ok(Self { batching, mixer })
-    }
-
-    /// The size of the next batch (`TSeqPos`).
-    pub(crate) fn batch_size(&self) -> u32 {
-        self.batching.batch_size
-    }
-
-    /// The batch just searched made `extensions` successful initial extensions.
-    pub(crate) fn searched(&mut self, extensions: i32) {
-        if self.batching.fixed_batch_size == 0 {
-            self.batching.batch_size = self.mixer.batch_size(Some(extensions)) as u32;
-        }
+        Ok(batching.sizes(|| total_length))
     }
 }
 
-/// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
-/// query chunk sizes, as a query batch of the search uses them.
+/// The batch size of the running application where it is not BLASTN's (TBLASTX's, running a
+/// BLASTN strategy): `BATCH_SIZE`, else its own size (`Program::fixed_query_batch_size`), which
+/// its arguments read before the formatter is made (`CBlastInput`'s), where a `BATCH_SIZE` that
+/// NCBI cannot convert stops the run (`app::query_batch_size`). `None` for BLASTN's application,
+/// which reads its sizes after the prolog (`query_batching_from_environment`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:136-137
+fn app_query_batch_size(args: &BlastnArgs) -> Result<Option<u32>> {
+    args.app()
+        .fixed_query_batch_size()
+        .map(app::query_batch_size)
+        .transpose()
+}
+
+/// NCBI's query batch rule and query chunk sizes, as a query batch of the search uses them.
 #[derive(Clone, Copy, Debug)]
 struct QueryBatching {
-    /// The `BATCH_SIZE` value; 0 when it is not set.
-    fixed_batch_size: i32,
-    /// The size of the current batch (`TSeqPos`).
+    /// The fixed size of the batches (`TSeqPos`): `BATCH_SIZE` under BLASTN's application (where
+    /// a size of 0 is none), or another running application's (`app_query_batch_size`, where 0
+    /// is a size); `None` where BLASTN's application's `CBatchSizeMixer` sizes them (`sizes`).
+    fixed: Option<u32>,
+    /// The size of the current batch (`TSeqPos`): the loop's (`LoopBatchSizes::current`).
     batch_size: u32,
     split: SplitSizes,
 }
 
+impl QueryBatching {
+    /// The loop's sizes over a database of `total_length()` letters (read only for the mixer).
+    fn sizes(&self, total_length: impl FnOnce() -> i64) -> LoopBatchSizes {
+        match self.fixed {
+            Some(size) => LoopBatchSizes::Fixed(size),
+            None => {
+                LoopBatchSizes::of_blastn_app(0, self.split.mixer_max_batch_size(), total_length())
+            }
+        }
+    }
+}
+
 /// Reads the environment variables that set NCBI's query batches and chunks, in NCBI's
-/// order: `CHUNK_SIZE` (the `CBatchSizeMixer` maximum), `BATCH_SIZE`, then
-/// `OVERLAP_CHUNK_SIZE` (the query splitter of the first batch).
+/// order. Under BLASTN's application (`app_batch_size` `None`): `CHUNK_SIZE` (the
+/// `CBatchSizeMixer` maximum), `BATCH_SIZE`, then `OVERLAP_CHUNK_SIZE` (the query splitter of the
+/// first batch). Under another running application, whose batch size (`app_batch_size`) it read
+/// before its formatter: `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE`, both read first by the query
+/// splitter of the first batch.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-262
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:55-59
-/// A `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot convert is the `Err`: its
-/// `CStringException` (`app::environment_int`), which stops NCBI after the outfmt 0 prolog and
-/// before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE` is read by the query
-/// splitter of each batch, after the batch is read: one that it cannot convert is the second
-/// value, its exception, which stops the first batch there (`run_in_pool`); no batch is split
-/// with it, so the sizes count it as unset. The batch sizes alone (`QueryBatchSizes`) do not
-/// depend on it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits
-/// a query batch (`search_query_chunks`), and otherwise searches as NCBI.
-fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Result<()>)> {
+/// Under BLASTN's application, a `CHUNK_SIZE` or `BATCH_SIZE` that `NStr::StringToInt` cannot
+/// convert is the `Err`: its `CStringException` (`app::environment_int`), which stops NCBI after
+/// the outfmt 0 prolog and before the first batch is read (`run_in_pool`). `OVERLAP_CHUNK_SIZE`
+/// (and under another application `CHUNK_SIZE` too) is read by the query splitter of each batch,
+/// after the batch is read: one that it cannot convert is the second value, its exception, which
+/// stops the first batch there (`run_in_pool`); no batch is split with it, so the sizes count it
+/// as unset. The batch sizes alone (`QueryBatchSizes`) do not depend on it. A negative
+/// `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where it splits a query batch
+/// (`search_query_chunks`), and otherwise searches as NCBI.
+fn query_batching_from_environment(
+    megablast: bool,
+    app_batch_size: Option<u32>,
+) -> Result<(QueryBatching, Result<()>)> {
     use crate::blastinput::app::read_query_split_variable;
-    let chunk_size = read_query_split_variable("CHUNK_SIZE")?;
-    let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
-        std::env::var_os("BATCH_SIZE").as_deref(),
-    )
-    .map_err(|e| crate::cli::NativeError::exception(&e))?;
+    let (chunk_size, chunk_error) = match (app_batch_size, read_query_split_variable("CHUNK_SIZE"))
+    {
+        (_, Ok(chunk_size)) => (chunk_size, Ok(())),
+        (None, Err(error)) => return Err(error),
+        (Some(_), Err(error)) => (None, Err(error)),
+    };
+    let fixed = match app_batch_size {
+        Some(size) => Some(size),
+        None => {
+            let size = crate::blastinput::query_batch::get_query_batch_size(
+                std::env::var_os("BATCH_SIZE").as_deref(),
+            )
+            .map_err(|e| crate::cli::NativeError::exception(&e))?;
+            (size != 0).then_some(size as u32)
+        }
+    };
     let (overlap, overlap_error) = match read_query_split_variable("OVERLAP_CHUNK_SIZE") {
         Ok(overlap) => (overlap, Ok(())),
         Err(error) => (None, Err(error)),
@@ -7751,11 +7846,11 @@ fn query_batching_from_environment(megablast: bool) -> Result<(QueryBatching, Re
     let split = SplitSizes::new(megablast, chunk_size, overlap);
     Ok((
         QueryBatching {
-            fixed_batch_size,
-            batch_size: fixed_batch_size as u32,
+            fixed,
+            batch_size: fixed.unwrap_or(0),
             split,
         },
-        overlap_error,
+        chunk_error.and(overlap_error),
     ))
 }
 
@@ -8043,7 +8138,14 @@ impl<'a> SubjectSource<'a> {
 /// (`User specified sequence set (Input: PATH)`; the `-db` value for a database), the
 /// counts, and for a database the lines of `GetBlastDbInfo` (`PairwiseDatabase`).
 struct ShownSubjects {
+    /// The name of the tabular and the other reports: `User specified sequence set (Input:
+    /// PATH)` for a subject set (an imported strategy's subjects: an empty PATH), the `-db`
+    /// value for a database.
     name: String,
+    /// The pairwise report's name (`report::pairwise::scan_mode_definition`; the `-db` value
+    /// for a database): an empty input tag (an imported strategy's subjects) names no input
+    /// (`I.blastn.sub.alone`).
+    pairwise_name: String,
     /// The statistics' number of sequences, NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
     num_seqs: i32,
     /// The statistics' total length, NCBI's `Int8` (`SubjectMetadata::db_len_total`).
@@ -8052,6 +8154,8 @@ struct ShownSubjects {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
     tabular_taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the formatter's warnings.
+    app: crate::blastinput::app::Program,
     /// The run's `-html` data for the outfmt 0 to 4 prolog (`BlastnArgs::html_links`,
     /// `write_blastn_pairwise_prolog`); `None`: the plain prolog.
     html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
@@ -8066,18 +8170,24 @@ impl ShownSubjects {
                     "User specified sequence set (Input: {})",
                     args.subject_path().display()
                 ),
+                pairwise_name: crate::report::pairwise::scan_mode_definition(
+                    &args.subject_path().display().to_string(),
+                ),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: None,
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                app: args.app(),
                 html_links: args.html_links.clone(),
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
+                pairwise_name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                app: args.app(),
                 html_links: args.html_links.clone(),
             },
         }
@@ -8395,22 +8505,18 @@ fn run_in_pool(
             return Err(error);
         }
     };
-    let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
-    if batching.fixed_batch_size == 0 {
-        // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
-        // `m_DbInfo`, `GetBlastDbInfo`: the whole database's, also with a list).
-        let total_length = shown
+    // The loop's batch sizes: BLASTN's application's mixer starts from the database's total, the
+    // `Int8` of its index files (`GetDbTotalLength` sums `m_DbInfo`, `GetBlastDbInfo`: the whole
+    // database's, also with a list); another running application's size is fixed.
+    let mut sizes = batching.sizes(|| {
+        shown
             .database
             .as_ref()
             .map_or(source.metadata().db_len_total, |database| {
                 database.total_letters
-            });
-        if total_length > 0 {
-            mixer.set_target_hits((total_length / 3000) as i32);
-        }
-        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to `TSeqPos`.
-        batching.batch_size = mixer.batch_size(None) as u32;
-    }
+            })
+    });
+    batching.batch_size = sizes.current();
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-280
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // A reader at the end of its input reads no batch (its `End()` is true): the report of no
@@ -8700,9 +8806,10 @@ fn run_in_pool(
             batch_title_warnings.append(&strategy.take_all_posts());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
-        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer) and
-        // `OVERLAP_CHUNK_SIZE` before the batch's queries are set up (their masks below): a value
-        // that NCBI cannot convert stops the first batch here, after its reader's messages
+        // The query splitter of the batch reads `CHUNK_SIZE` (converted already by the mixer of
+        // BLASTN's application; another application's first reading) and `OVERLAP_CHUNK_SIZE`
+        // before the batch's queries are set up (their masks below): a value that NCBI cannot
+        // convert stops the first batch here, after its reader's messages
         // (`query_batching_from_environment`).
         if input_start == 0 {
             if let Err(error) = std::mem::replace(&mut overlap_error, Ok(())) {
@@ -9452,7 +9559,7 @@ fn run_in_pool(
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let text = query_warning(
-                "blastn",
+                args.app().ncbi_name(),
                 args.first_query_ordinal + query_input.ordinal(start + index),
                 &batch_records.searched()[index],
                 &messages,
@@ -9468,10 +9575,8 @@ fn run_in_pool(
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
         // NCBI's `Int4` count of the batch's successful initial extensions.
-        if batching.fixed_batch_size == 0 {
-            batching.batch_size =
-                mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
-        }
+        sizes.searched(batch.good_init_extends as u32 as i32);
+        batching.batch_size = sizes.current();
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:299-300
         // For a caller that sizes the batches itself (`QueryBatchSizes`).
         if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -9636,18 +9741,25 @@ fn run_in_pool(
 }
 
 // No NCBI counterpart (when LOSAT reads the records only): it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_QSTREAM): the letters of the largest query batch of a search of `task`, as
-/// `run_in_pool` reads its batches (`query_batching_from_environment`): `BATCH_SIZE` when it is
-/// set (a `TSeqPos`), else the `CBatchSizeMixer` maximum (`CHUNK_SIZE`, or the task's chunk size,
-/// less 1000: 999,000 letters for blastn, 4,999,000 for megablast and dc-megablast; as the loop's
-/// `TSeqPos`, so a maximum below 0 is a batch of about 4.29e9 letters); 0 when the variables cannot
-/// be read (the search stops at them before its first batch).
-fn x_query_batch_letters(task: &str) -> u64 {
-    match query_batching_from_environment(super::super::coordination::task_uses_megablast_chunks(
-        task,
-    )) {
-        Ok((batching, _)) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
-        Ok((batching, _)) => u64::from(batching.split.mixer_max_batch_size() as u32),
+/// EXPERIMENT (LOSAT_X_QSTREAM): the letters of the largest query batch of a search of `args`, as
+/// `run_in_pool` reads its batches (`query_batching_from_environment`): the fixed size when there
+/// is one (`BATCH_SIZE`, or another running application's, a `TSeqPos`), else the
+/// `CBatchSizeMixer` maximum (`CHUNK_SIZE`, or the task's chunk size, less 1000: 999,000 letters
+/// for blastn, 4,999,000 for megablast and dc-megablast; as the loop's `TSeqPos`, so a maximum
+/// below 0 is a batch of about 4.29e9 letters); 0 when the variables cannot be read (the search
+/// stops at them before its first batch).
+fn x_query_batch_letters(args: &BlastnArgs) -> u64 {
+    let batching = app_query_batch_size(args).and_then(|app_batch_size| {
+        query_batching_from_environment(
+            super::super::coordination::task_uses_megablast_chunks(&args.task),
+            app_batch_size,
+        )
+    });
+    match batching {
+        Ok((batching, _)) => match batching.fixed {
+            Some(size) => u64::from(size),
+            None => u64::from(batching.split.mixer_max_batch_size() as u32),
+        },
         Err(_) => 0,
     }
 }
@@ -9701,7 +9813,7 @@ fn prolog_with_report(output_format: BlastnOutputFormat) -> bool {
 fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
     BlastnIntro {
-        megablast: args.task == "megablast",
+        megablast: args.pairwise_megablast_reference(),
         indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
     }
@@ -9726,6 +9838,7 @@ fn write_pairwise_prologs(
             super::super::tabular::write_tabular_prolog_warning(
                 spec,
                 shown.tabular_taxdb_found,
+                shown.app,
                 &mut *outputs.diagnostics,
             )?;
         }
@@ -9760,7 +9873,7 @@ fn write_format_prolog(
             &mut writer,
             crate::wording::REPORT_VERSION,
             intro,
-            shown.name.as_bytes(),
+            shown.pairwise_name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
             shown.total_letters,
@@ -9969,7 +10082,7 @@ fn write_reports_untimed(
             "BLASTN",
         )?;
     }
-    let megablast = args.task == "megablast";
+    let megablast = args.structured_megablast_reference();
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
     // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
@@ -10149,6 +10262,7 @@ fn write_reports_untimed(
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
+        pairwise_subject_title: &subjects.shown.pairwise_name,
         query_reads: &query_reads,
         queries: query_records,
         query_records: crate::algorithm::blastn::pairwise::QueryRecords::new(
@@ -10241,6 +10355,7 @@ fn write_reports_untimed(
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,
+        app: subjects.shown.app,
         subject_taxdb: args.subject_taxdb.as_ref(),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
@@ -10404,7 +10519,7 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
         .sum();
     crate::blastinput::app::check_diag_table_window(
         i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
-        i32::try_from(window).unwrap_or(i32::MAX),
+        window,
         "BLASTN",
     )
 }
@@ -11058,10 +11173,17 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:133-142
     // The two-hit window of the task or of `-window_size` (`configure_task`; a window whose sum
     // with the query would pass 2^30 is refused before this search, `check_batch_window`).
-    let window_size = config.window_size;
+    // The sum is NCBI's `Int4` one, without its wrap (the check refuses the sums over 2^30; a
+    // window below 0 only shortens it, down to the table of one cell).
+    // A window below 0 (`neg_window`, an imported search strategy's) is searched by the word
+    // finder of `neg_window.rs`; the unsigned window of the other word finders is then 0.
+    let window = config.window_size;
+    let neg_window = window.min(0);
+    let window_size = usize::try_from(window).unwrap_or(0);
     let diag_array_length = {
+        let target = query_concat_length as i64 + i64::from(window);
         let mut diag_array_length = 1usize;
-        while diag_array_length < query_concat_length + window_size {
+        while (diag_array_length as i64) < target {
             diag_array_length <<= 1;
         }
         diag_array_length
@@ -11508,6 +11630,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         scan_step,
         scan_range,
         window_size,
+        neg_window,
         offset_array_size,
         use_direct_lookup,
         small_na_compressed_query: &small_na_compressed_query,

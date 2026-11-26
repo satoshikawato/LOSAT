@@ -1,0 +1,95 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: arch_snucl
+           2 sequences; 965 total letters
+
+
+
+Query= lcl|Query_1 qn1 query nucleotide one
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          117     3e-31
+sn2 subject nucleotide beta reverse                                   91.6    2e-23
+
+
+>sn1 subject nucleotide alpha
+Length=488
+
+ Score = 117 bits (63),  Expect = 3e-31
+ Identities = 67/69 (97%), Gaps = 0/69 (0%)
+ Strand=Plus/Plus
+
+Query  31   ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGAC  90
+            |||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||
+Sbjct  46   ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGAC  105
+
+Query  91   GACCCGAAA  99
+            |||||||||
+Sbjct  106  GACCCGAAA  114
+
+
+>sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 91.6 bits (49),  Expect = 2e-23
+ Identities = 60/65 (92%), Gaps = 1/65 (2%)
+ Strand=Plus/Minus
+
+Query  36   GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGA-CC  94
+            ||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| ||
+Sbjct  452  GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCC  393
+
+Query  95   CGAAA  99
+            | |||
+Sbjct  392  CAAAA  388
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 75600
+
+
+Query= lcl|Query_2 qn2 unrelated nucleotide (no hits expected)
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 67095
+
+
+  Database: arch_snucl
+    Posted date:  Oct 22, 2026  11:14 PM
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

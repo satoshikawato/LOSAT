@@ -297,3 +297,18 @@ fn subject_set_total_is_ncbis_int8_sum() {
     assert!(metadata.db_len_total > i64::from(u32::MAX));
     assert_eq!(metadata.db_num_seqs, 2);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:479-497
+// An imported search strategy carries any `Int4` `WindowSize`: the window stays signed from the
+// import to the word finder.
+#[test]
+fn window_size_below_zero_is_kept_signed() {
+    for task in ["megablast", "dc-megablast", "blastn", "blastn-short"] {
+        for window in [-1, -40, i32::MIN, i32::MAX] {
+            let mut args = blastn_args(&["-task", task]);
+            args.window_size = Some(window);
+            assert_eq!(determine_window_size(&args), window, "{task} {window}");
+            assert_eq!(configure_task(&args).window_size, window, "{task} {window}");
+        }
+    }
+}

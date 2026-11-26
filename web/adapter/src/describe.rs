@@ -31,7 +31,8 @@ const ADAPTER_OWNED: [&str; 6] = [
 /// The options of `program` that the browser's searches of records take none of (tblastn's
 /// `-in_pssm`, which the browser refuses until line PS's PSW1): the browser's list
 /// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out. The
-/// search strategy file `-export_search_strategy` is a file of the run (line RG's F1w), described.
+/// search strategy files are described: `-import_search_strategy`, a named input file of kind 3
+/// (line RG's F2), and `-export_search_strategy`, a file of the run (line RG's F1w).
 fn records_refused(program: Program) -> &'static [&'static str] {
     losat::web_adapter::records_refused_options(program.api())
 }
@@ -155,7 +156,8 @@ mod tests {
 
     // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
     // the adapter's `describe` does not list it (the browser's list, `records_refused`). The search
-    // strategy file of the five programs is a file of the run (line RG's F1w): listed.
+    // strategy files of the five programs are listed: the one the run imports (a named input file,
+    // line RG's F2) and the one it writes (a file of the run, line RG's F1w).
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
         assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
@@ -175,10 +177,12 @@ mod tests {
                     "{program} lists -{flag}"
                 );
             }
-            assert!(
-                described.contains("\"-export_search_strategy\""),
-                "{program} does not list -export_search_strategy"
-            );
+            for flag in ["-import_search_strategy", "-export_search_strategy"] {
+                assert!(
+                    described.contains(&format!("\"{flag}\"")),
+                    "{program} does not list {flag}"
+                );
+            }
         }
     }
 }

@@ -144,7 +144,7 @@ fn intersected_segments_with_equal_subject_start_keep_stable_order() {
     // Adjacent subject ranges [0, 10] and [10, 20] (a gap in the query of the kept hit) intersect
     // with a segment covering [0, 20], producing pieces [0, 10] and [10, 10] / [10, 20] that tie
     // on `subject.from == 10`. Rust's stable sort keeps their intersection order (Owner
-    // Q-DL-SEGTIE=A, 2026-11-26; PD-LOSAT-NCBI-DEFECTS 1.122).
+    // Q-DL-SEGTIE=A, 2026-11-26; PD-LOSAT-NCBI-DEFECTS 1.123).
     let mut target = hit(1, 1e-3, &[(0, 0, 20)]);
     let ranges = vec![Range { from: 0, to: 10 }, Range { from: 10, to: 20 }];
     target.intersect_with_ranges(&ranges, true);

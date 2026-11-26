@@ -216,7 +216,15 @@ impl Diag<'_> {
     /// Writes `text`, diagnostic lines that end with their line feeds (an NCBI report made by
     /// `crate::ncbi_exception`: `err_post_x`, `NcbiException::report_default_ex`).
     pub(crate) fn write_text(&mut self, text: &[u8]) {
-        if text.is_empty() || !self.before_text(self.target.place()) {
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+        // When `self.stdout` is set (`ToolLog::Stdout`), `-logfile` is `/dev/stdout`, a log file
+        // rather than `cerr`, so it does not trigger `cerr`'s tie to `cout`.
+        let place = if self.stdout.is_some() {
+            TextPlace::LogFile
+        } else {
+            self.target.place()
+        };
+        if text.is_empty() || !self.before_text(place) {
             return;
         }
         if let Some(record) = &mut self.record {

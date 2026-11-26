@@ -1,0 +1,111 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 1,122 total letters
+
+
+
+Query= lcl|Query_1 qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  159     2e-56
+sn2 minus strand gene                                                 127     1e-43
+
+
+>sn1 plus strand gene
+Length=501
+
+ Score = 159 bits (403),  Expect = 2e-56, Method: Compositional matrix adjust.
+ Identities = 78/90 (87%), Positives = 79/90 (88%), Gaps = 3/90 (3%)
+ Frame = +1
+
+Query  10   ANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIP  69
+            A FAV RKVMDDPKIRDGP AVMKGWENYCWPANMSWKVLM YEFSSDIHP   W CWIP
+Sbjct  88   AVFAVRRKVMDDPKIRDGPEAVMKGWENYCWPANMSWKVLMTYEFSSDIHP---WWCWIP  258
+
+Query  70   KEMATPGWWNTDTLHMSEMGLWMHKYPKCM  99
+            KE  TPGWW TDTLHM+EMGLWMHKYPKCM
+Sbjct  259  KEQQTPGWWKTDTLHMAEMGLWMHKYPKCM  348
+
+
+>sn2 minus strand gene
+Length=471
+
+ Score = 127 bits (318),  Expect = 1e-43, Method: Compositional matrix adjust.
+ Identities = 65/93 (70%), Positives = 69/93 (74%), Gaps = 4/93 (4%)
+ Frame = -3
+
+Query  10   ANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHPCNLWI  65
+            A+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANM   VLMKYEF S IHPCN W 
+Sbjct  424  ADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMGAHVLMKYEFQSGIHPCNQWT  245
+
+Query  66   CWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKC  98
+            CWIPK MA PGW  TDTL +SEMGLWMH  P C
+Sbjct  244  CWIPKYMAVPGWCYTDTLDVSEMGLWMHCEPMC  146
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.524    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 23040
+
+
+Query= lcl|Query_2 qp2 unrelated protein (no hits expected)
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 plus strand gene                                                  12.7    1.4  
+
+
+>sn1 plus strand gene
+Length=501
+
+ Score = 12.7 bits (21),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  27   EHLTFQWCNYFW  38
+            E +   W NY W
+Sbjct  145  EAVMKGWENYCW  180
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9369
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  1:15 AM
+  Number of letters in database: 1,122
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

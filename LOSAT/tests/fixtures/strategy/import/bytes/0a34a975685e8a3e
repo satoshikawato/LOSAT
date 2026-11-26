@@ -1,0 +1,3 @@
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+BLAST query/options error: Invalid discontiguous template parameters: template length must be 16, 18, or 21
+Please refer to the BLAST+ user manual.

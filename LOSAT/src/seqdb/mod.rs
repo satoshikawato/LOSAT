@@ -1315,6 +1315,36 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
     Ok(())
 }
 
+/// Resolved volume bases and file paths that reading a BLAST database can open
+/// ([`SeqDb::read_paths`]).
+#[derive(Debug, Default)]
+pub(crate) struct DbReadPaths {
+    /// Resolved volume paths without extension, in NCBI's `FindVolumePaths` order.
+    pub(crate) volumes: Vec<Vec<u8>>,
+    /// All files that reading the database can open: alias files, alias filter list files
+    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), `MASKLIST` GI-mask files,
+    /// volume component files (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`), and for protein databases,
+    /// RPS files (`rps::RPS_EXTENSIONS`).
+    pub(crate) files: Vec<Vec<u8>>,
+}
+
+fn push_mol_extensions(
+    out: &mut std::collections::BTreeSet<Vec<u8>>,
+    base: &[u8],
+    mol: &[u8],
+    extensions: &[&str],
+) {
+    for ext in extensions {
+        out.insert([base, b".", mol, ext.as_bytes()].concat());
+    }
+}
+
+fn strip_ascii_suffix<'a>(bytes: &'a [u8], suffix: &[u8]) -> Option<&'a [u8]> {
+    let len = bytes.len().checked_sub(suffix.len())?;
+    let (head, tail) = bytes.split_at(len);
+    tail.eq_ignore_ascii_case(suffix).then_some(head)
+}
+
 impl SeqDb {
     /// Opens the database `name`: a path without extension, absolute or
     /// relative to the current directory. `name.{p|n}al` is read when it
@@ -1538,14 +1568,70 @@ impl SeqDb {
         let volumes: std::collections::BTreeSet<Vec<u8>> = tree.volumes.into_iter().collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok((
+            Self::sort_volume_set(volumes),
+            Self::sort_volume_set(alias_files),
+        ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2668
+    /// Single owner of the files that reading the BLAST database `name` (`seqtype`, `path`) can
+    /// open: calls `alias::resolve_in` once and collects every alias file, every alias filter list
+    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), every `MASKLIST` GI-mask file,
+    /// and every volume component file (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`, and for protein
+    /// databases, `rps::RPS_EXTENSIONS`), along with the resolved volume bases in NCBI order.
+    pub(crate) fn read_paths(
+        name: &[u8],
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<DbReadPaths, SeqDbError> {
+        use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
+        let tree = alias::resolve_in(name, seqtype, path)?;
+        let volumes = Self::sort_volume_set(tree.volumes.into_iter().collect());
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+
+        let mut files = std::collections::BTreeSet::new();
+        let mol = seqtype.letter().as_bytes();
+        let alias_suffix = match seqtype {
+            SeqType::Nucleotide => b".nal".as_slice(),
+            SeqType::Protein => b".pal".as_slice(),
+        };
+        for alias in &alias_files {
+            files.insert(alias.clone());
+            if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
+                push_mol_extensions(&mut files, stem, mol, &LMDB_EXTENSIONS);
+                files.insert([stem, b".", mol, b"js"].concat());
+            }
+        }
+        alias::collect_alias_list_files(&tree.root, &mut files);
+        if let Some(gi_masks) = &tree.gi_masks {
+            for mask_name in gi_masks {
+                gi_mask::read_paths(mask_name, path, &mut files);
+            }
+        }
+        for volume in &volumes {
+            push_mol_extensions(&mut files, volume, mol, &VOLUME_EXTENSIONS);
+            push_mol_extensions(&mut files, volume, mol, &LMDB_EXTENSIONS);
+            if seqtype == SeqType::Protein {
+                for ext in rps::RPS_EXTENSIONS {
+                    files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());
+                }
+            }
+        }
+        Ok(DbReadPaths {
+            volumes,
+            files: files.into_iter().collect(),
+        })
+    }
+
+    fn sort_volume_set(set: std::collections::BTreeSet<Vec<u8>>) -> Vec<Vec<u8>> {
         // `std::sort` of the set's (distinct) members: no two compare equal, so the order is
         // that of the comparison alone.
-        let sorted = |set: std::collections::BTreeSet<Vec<u8>>| {
-            let mut paths: Vec<Vec<u8>> = set.into_iter().collect();
-            paths.sort_by(|a, b| Self::compare_volume_names(a, b));
-            paths
-        };
-        Ok((sorted(volumes), sorted(alias_files)))
+        let mut paths: Vec<Vec<u8>> = set.into_iter().collect();
+        paths.sort_by(|a, b| Self::compare_volume_names(a, b));
+        paths
     }
 
     /// The order in which NCBI searches and numbers the volumes of a database

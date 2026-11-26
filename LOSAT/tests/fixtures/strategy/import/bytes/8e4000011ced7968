@@ -1,0 +1,4 @@
+Warning: [tblastx] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output
+Warning: [tblastx] seg cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy

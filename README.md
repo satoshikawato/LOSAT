@@ -164,7 +164,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 - **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. Add it with `cargo add losat`. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
 - **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. Install it with `pip install pylosat`. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
-- **WebAssembly & LOSAT Web:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and the browser preview LOSAT Web runs on it (supporting FASTA subjects, local BLAST database folders with `-db` and filter lists, and BLASTN `-filtering_db` repeats databases read in place from your device); `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md), the [WebAssembly page](docs/manual/src/libraries/webassembly.md), and the [LOSAT Web guide](docs/manual/src/web.md).
+- **WebAssembly & LOSAT Web:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and the browser preview LOSAT Web runs on it (supporting FASTA subjects, local BLAST database folders with `-db`, database masking (`-db_soft_mask`, `-db_hard_mask`) and filter lists, BLASTN `-filtering_db` repeats databases read in place from your device, and WindowMasker counts (`-window_masker_db`, `-window_masker_taxid`)); `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md), the [WebAssembly page](docs/manual/src/libraries/webassembly.md), and the [LOSAT Web guide](docs/manual/src/web.md).
 
 ---
 
@@ -176,7 +176,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter`, and `psiblast -phi_pattern`; options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter`, and `psiblast -phi_pattern`; options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
 ## Citation & References

@@ -1,0 +1,152 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 576 total letters
+
+
+
+Query= lcl|Query_1 qx1 plus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  95.9    1e-25  1
+sx2 minus strand gene                                                 60.2    7e-15  1
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 95.9 bits (203),  Expect = 1e-25
+ Identities = 35/39 (90%), Positives = 35/39 (90%), Gaps = 0/39 (0%)
+ Frame = +1/+1
+
+Query  4    LMGVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPTNMCW  120
+            L  VFAVRRKVMDDPKIRDGPMAVMKGWENYCWP NM W
+Sbjct  40   LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  156
+
+
+ Score = 72.5 bits (152),  Expect = 1e-18
+ Identities = 31/39 (79%), Positives = 33/39 (85%), Gaps = 0/39 (0%)
+ Frame = -2/-1
+
+Query  119  QHMFVGQQ*FSQPFITAMGPSRIFGSSITFRLTANTPIK  3
+            Q +F GQQ*FSQPFITAMGPS IFGSS+T RLTANT  K
+Sbjct  155  QDIFAGQQ*FSQPFITAMGPSLIFGSSMTLRLTANTAFK  39
+
+
+ Score = 69.3 bits (145),  Expect = 1e-17
+ Identities = 21/36 (58%), Positives = 27/36 (75%), Gaps = 0/36 (0%)
+ Frame = -1/-3
+
+Query  120  PTHVCWPAVIFPTFHNSHGAITDLWVVHYLPSDCEY  13
+            P H+CWPA+IFP FHN HG ++D WV+H L  D E+
+Sbjct  156  PRHICWPAIIFPAFHNRHGPVSDFWVIHDLTPDGEH  49
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 60.2 bits (125),  Expect = 7e-15
+ Identities = 22/25 (88%), Positives = 24/25 (96%), Gaps = 0/25 (0%)
+ Frame = +1/-1
+
+Query  28   RKVMDDPKIRDGPMAVMKGWENYCW  102
+            RKVMDDPKIRDGPMAVMK WE+YC+
+Sbjct  190  RKVMDDPKIRDGPMAVMKVWESYCF  116
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_2 qx2 minus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx2 minus strand gene                                                 92.3    2e-24  1
+sx1 plus strand gene                                                  29.9    9e-06  1
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 92.3 bits (195),  Expect = 2e-24
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = -1/-1
+
+Query  120  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  13
+            DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY
+Sbjct  175  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  68
+
+
+ Score = 49.2 bits (101),  Expect = 1e-11
+ Identities = 24/37 (65%), Positives = 27/37 (73%), Gaps = 0/37 (0%)
+ Frame = +2/+3
+
+Query  14   YFIRTCALMLAMLCRMKQYDSHTFITAIGPSRIFGST  124
+            YFI+T A M A+   MKQ  SHTFITAIGPS I GS+
+Sbjct  69   YFIKT*ADMFAIEWSMKQ*LSHTFITAIGPSLILGSS  179
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 29.9 bits (59),  Expect = 9e-06
+ Identities = 12/17 (71%), Positives = 14/17 (82%), Gaps = 0/17 (0%)
+ Frame = +2/-1
+
+Query  74   SHTFITAIGPSRIFGST  124
+            S  FITA+GPS IFGS+
+Sbjct  125  SQPFITAMGPSLIFGSS  75
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= lcl|Query_3 qx3 no hits
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3021
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  7:50 PM
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -112,6 +112,9 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) scan_step: usize,
     pub(super) scan_range: usize,
     pub(super) window_size: usize,
+    /// The window when it is below 0 (an imported search strategy's), else 0: the batch's word
+    /// finder is then `neg_window.rs`'s.
+    pub(super) neg_window: i32,
     pub(super) offset_array_size: usize,
     pub(super) use_direct_lookup: bool,
     pub(super) small_na_compressed_query: &'a [u8],
@@ -252,6 +255,11 @@ pub(super) struct ScanBatch<'a> {
     pub(super) scan_step: usize,
     pub(super) scan_range: usize,
     pub(super) window_size: usize,
+    /// `PrelimBatch::neg_window`.
+    pub(super) neg_window: i32,
+    /// The word finders that replace the scan of a chunk (`prelim_chunk_hits`), `None` for a
+    /// batch with neither.
+    pub(super) special_finders: Option<SpecialFinders<'a>>,
     pub(super) two_hits: bool,
     pub(super) offset_array_size: usize,
     pub(super) use_direct_lookup: bool,
@@ -283,6 +291,18 @@ pub(super) struct ScanBatch<'a> {
     pub(super) min_ungapped_score: i32,
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     pub(super) timing_enabled: bool,
+}
+
+/// The word finders of a batch that replace the scan of a chunk (`prelim_chunk_hits`): the
+/// MegaBLAST database index's and that of a window below 0. A batch has them as one value
+/// (`ScanBatch::special_finders`), so that the chunks of a batch with neither test one value, as
+/// they tested the index alone.
+#[derive(Clone, Copy)]
+pub(super) struct SpecialFinders<'a> {
+    /// The index's seeds (`PrelimBatch::mb_index`).
+    pub(super) index: Option<&'a super::mb_index_seeds::IndexSeeds<'a>>,
+    /// A window below 0 (`PrelimBatch::neg_window`): the word finder of `neg_window.rs`.
+    pub(super) neg_window: bool,
 }
 
 impl<'a> ScanBatch<'a> {
@@ -326,6 +346,13 @@ impl<'a> ScanBatch<'a> {
             scan_step: batch.scan_step,
             scan_range: batch.scan_range,
             window_size,
+            neg_window: batch.neg_window,
+            special_finders: (batch.mb_index.is_some() || batch.neg_window != 0).then_some(
+                SpecialFinders {
+                    index: batch.mb_index,
+                    neg_window: batch.neg_window != 0,
+                },
+            ),
             two_hits,
             offset_array_size: batch.offset_array_size,
             use_direct_lookup: batch.use_direct_lookup,
@@ -413,6 +440,9 @@ pub(super) struct PrelimSubject<'a> {
 /// table's offset moved on. The list is in the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
+/// The word finder of a batch with an index, or with a window below 0 (`PrelimBatch::neg_window`),
+/// replaces the scan (`ScanBatch::special_finders`).
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`)
 pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
@@ -431,13 +461,28 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1727-1734
     // A batch searched with a MegaBLAST database index has the indexed word finder, which scans
     // a sequence of a database volume without an index as without the index.
-    if let Some(index) = batch.mb_index {
-        if index.is_indexed(subject.s_idx as u32) {
-            return super::mb_index_seeds::index_chunk_hits::<UNGAPPED>(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1695
+    // A window below 0 has the word finder of `neg_window.rs`, after the index's.
+    if let Some(special) = scan.special_finders {
+        if let Some(index) = special.index {
+            if index.is_indexed(subject.s_idx as u32) {
+                return super::mb_index_seeds::index_chunk_hits::<UNGAPPED>(
+                    scan,
+                    index,
+                    subject,
+                    chunk,
+                    gap_scratch,
+                    subject_scratch,
+                    reuse_prelim_hits,
+                );
+            }
+        }
+        if special.neg_window {
+            return super::neg_window::neg_chunk_hits::<UNGAPPED>(
                 scan,
-                index,
                 subject,
                 chunk,
+                soft_ranges,
                 gap_scratch,
                 subject_scratch,
                 reuse_prelim_hits,
@@ -698,6 +743,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     dbg_ungapped_low: &mut dbg_ungapped_low,
                     dbg_gapped_attempted: &mut dbg_gapped_attempted,
                 },
+                (),
             );
         }
         if scan.two_stage_lookup_ref.is_none() {
@@ -1314,14 +1360,21 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1677
 /// The shortest subject that the preliminary stage searches (the traceback skips the shorter
-/// ones too). NCBI skips only an empty subject; one shorter than a word has no word to scan
-/// (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches skip it, but
-/// the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
-/// into the next one of the index's local id, so an indexed search searches it.
-pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usize {
-    if indexed {
+/// ones too). NCBI skips only an empty subject (`min_subj_seq_length` is 1); one shorter than a
+/// word has no word to scan (`BlastNaWordFinder`'s scan range ends below its start), so a
+/// non-negative window's scan can skip it, but:
+/// - the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
+///   into the next one of the index's local id, so an indexed search searches it;
+/// - with a negative window (`neg_window < 0`), `BlastNaWordFinder` still calls
+///   `Blast_ExtendWordExit` with the subject length, moving the carried diagonal table's offset by
+///   subject length plus window, which blocks later subjects' words, so any non-empty subject must
+///   reach `collect_subject_prelim` -> `neg_chunk_hits` (which exits on a short chunk while
+///   honoring masks and `-use_index`).
+pub(super) fn shortest_subject(effective_word_size: usize, indexed_or_neg: bool) -> usize {
+    if indexed_or_neg {
         1
     } else {
         effective_word_size
@@ -1422,9 +1475,10 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     if s_len_full
         < shortest_subject(
             effective_word_size,
-            batch
-                .mb_index
-                .is_some_and(|index| index.is_indexed(s_idx as u32)),
+            scan.neg_window < 0
+                || batch
+                    .mb_index
+                    .is_some_and(|index| index.is_indexed(s_idx as u32)),
         )
     {
         if db_masked {

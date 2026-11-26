@@ -1,0 +1,7 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "A" }, descr { title "a" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } },
+        set { seq-set { seq { id { local str "B" }, descr { title "b" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }, set { seq-set { seq { id { local str "C" }, descr { title "c" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } } } }, seq { id { local str "D" }, descr { title "d" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } } } },
+        seq { id { local str "E" }, descr { title "e" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

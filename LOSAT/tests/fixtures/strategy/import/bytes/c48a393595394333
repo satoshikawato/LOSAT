@@ -1,0 +1,162 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: seg masks v5
+Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+           7 sequences; 1,720 total letters
+
+
+
+Query= lcl|Query_1 qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p2 random                                                             17.7    0.71 
+p5 random for hand masks                                              16.5    1.9  
+p7 PA block                                                           15.8    2.7  
+
+
+>p2 random
+Length=250
+
+ Score = 17.7 bits (34),  Expect = 0.71, Method: Compositional matrix adjust.
+ Identities = 14/63 (22%), Positives = 22/63 (35%), Gaps = 8/63 (13%)
+
+Query  66   CWIPKEMATPGWWNTDTLHMSEMGLW------MHKYPKCMCVMVRPTDQSLRHWKIMHDA  119
+            CWI   +  P  W  + LH      +       H YP C  + +    Q   H     ++
+Sbjct  94   CWIQGGVIWPEAW--EILHNMAAAFYEKEWRGRHGYPICHAITIGTGMQCWGHDATTEES  151
+
+Query  120  NFE  122
+             F+
+Sbjct  152  TFD  154
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 16.5 bits (31),  Expect = 1.9, Method: Compositional matrix adjust.
+ Identities = 10/44 (23%), Positives = 15/44 (34%), Gaps = 0/44 (0%)
+
+Query  70   KEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHW  113
+            K+ +   W +  T    +   W  KY   +    R T     HW
+Sbjct  76   KKDSGKEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHW  119
+
+
+ Score = 15.0 bits (27),  Expect = 6.5, Method: Compositional matrix adjust.
+ Identities = 6/16 (38%), Positives = 7/16 (44%), Gaps = 0/16 (0%)
+
+Query  98   CMCVMVRPTDQSLRHW  113
+            CM    +  DQ  R W
+Sbjct  354  CMPFRTQVNDQYKRKW  369
+
+
+ Score = 14.2 bits (25),  Expect = 8.8, Method: Compositional matrix adjust.
+ Identities = 8/34 (24%), Positives = 18/34 (53%), Gaps = 1/34 (3%)
+
+Query  102  MVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGR  135
+            MV   +   +H  ++ +A+F + +  H++   GR
+Sbjct  154  MVCAPEDPHQHDVMLSNADFIR-ECAHFITLQGR  186
+
+
+>p7 PA block
+Length=150
+
+ Score = 15.8 bits (29),  Expect = 2.7, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+
+Query  86  SEMGLWMHKYPKC  98
+           +E+ L  H YP C
+Sbjct  8   AEVCLNSHCYPLC  20
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 161568
+
+
+Query= lcl|Query_2 qp2 unrelated protein (no hits expected)
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              15.8    0.51 
+p6 p1 homolog                                                         13.9    3.5  
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 15.8 bits (29),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 5/11 (45%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+
+Query  25  WKEHLTFQWCN  35
+           WK+  TF+ C+
+Sbjct  83  WKDAKTFRGCD  93
+
+
+ Score = 14.2 bits (25),  Expect = 2.3, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+
+Query  21  AWMLWKEHLT  30
+           +W +W+ +LT
+Sbjct  37  SWYIWRINLT  46
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 13.9 bits (24),  Expect = 3.5, Method: Compositional matrix adjust.
+ Identities = 6/12 (50%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+
+Query  27   EHLTFQWCNYFW  38
+            E  T Q C Y W
+Sbjct  287  ERPTSQACLYNW  298
+
+
+
+Lambda      K        H        a         alpha
+   0.328    0.137    0.542    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 43038
+
+
+  Database: seg masks v5
+  Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+    Posted date:  Nov 21, 2026  4:28 AM
+  Number of letters in database: 1,720
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -3,7 +3,7 @@ use super::*;
 fn names(inputs: &OptionInputs) -> Vec<String> {
     algorithm_options(inputs)
         .iter()
-        .map(|param| param.name.to_string())
+        .map(|param| param.name().to_string())
         .collect()
 }
 
@@ -15,7 +15,7 @@ fn the_window_masker_database_follows_the_dust_options() {
     inputs.window_masker_db = Some("counts.obinary".to_string());
     inputs.dust = Some(Filter::No);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     let at = listed
         .iter()
         .position(|&name| name == "WindowMaskerDatabase")
@@ -44,7 +44,7 @@ fn the_window_masker_taxid_is_a_parameter_unless_it_is_0() {
     let mut inputs = OptionInputs::new(Program::Blastn, "blastn");
     inputs.window_masker_taxid = Some(562);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     let at = listed
         .iter()
         .position(|&name| name == "WindowMaskerTaxId")
@@ -76,11 +76,13 @@ fn a_parameter_set_again_keeps_its_place() {
     let mut inputs = OptionInputs::new(Program::Blastn, "blastn-short");
     inputs.evalue = Some(1e-5);
     let list = algorithm_options(&inputs);
-    assert_eq!(list[0].name, "EvalueThreshold");
+    assert_eq!(list[0].name(), "EvalueThreshold");
     assert_eq!(list[0].value, ParamValue::Evalue(1e-5));
-    assert_eq!(list[1].name, "MatchReward");
+    assert_eq!(list[1].name(), "MatchReward");
     assert_eq!(
-        list.iter().filter(|p| p.name == "EvalueThreshold").count(),
+        list.iter()
+            .filter(|p| p.name() == "EvalueThreshold")
+            .count(),
         1
     );
 }
@@ -202,7 +204,7 @@ fn the_applications_lists_are_their_handles_and_classes() {
     let params = algorithm_options(&psi_tblastn);
     let listed: Vec<String> = params
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| format!("{}={:?}", param.name(), param.value))
         .collect();
     assert_eq!(
         listed,
@@ -272,7 +274,7 @@ fn the_applications_options_take_their_places() {
     inputs.culling_limit = Some(2);
     inputs.sum_stats = Some(true);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     assert_eq!(
         listed[..9],
         [

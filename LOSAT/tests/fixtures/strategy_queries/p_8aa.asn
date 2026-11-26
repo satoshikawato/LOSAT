@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "eight aa" }, inst { repr raw, mol aa, length 6, seq-data ncbi8aa '000119FA1B1C'H } }
+      }
+    }

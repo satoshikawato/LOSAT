@@ -30,6 +30,7 @@
 //! the 16 values of the hit they read crossed a struct on every hit and cost `-task blastn
 //! -ungapped` 0.3 % more instructions even inlined.
 
+use super::neg_window::NegSteps;
 use super::prelim_subject::ScanBatch;
 use super::x_bn_ext_first;
 use super::{
@@ -97,8 +98,10 @@ pub(super) struct WordExtend<'a> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1058-1059 (`s_BlastNaExtend`),
 /// :641-642 (`s_BlastnDiagTableExtendInitialHit`) and :809 (`s_BlastnDiagHashExtendInitialHit`)
-/// The counters have no NCBI counterpart (diagnostics only).
-pub(super) struct PairExtendState<'s> {
+/// The counters have no NCBI counterpart (diagnostics only). `N` is where the batches' steps go
+/// (`neg_window::NegSteps`), fixed for the search: `()`, a field of no size, for a window of 0 or
+/// more.
+pub(super) struct PairExtendState<'s, N> {
     /// The chunk's initial hits (NCBI's `init_hitlist`).
     pub(super) ungapped_hits: &'s mut Vec<UngappedHit>,
     /// The diagonal array (a query block of at most 8000 letters) or the diagonal hash.
@@ -112,6 +115,9 @@ pub(super) struct PairExtendState<'s> {
     pub(super) dbg_ungapped_ext_calls: &'s mut usize,
     pub(super) dbg_ungapped_low: &'s mut usize,
     pub(super) dbg_gapped_attempted: &'s mut usize,
+    /// Where the batches' steps go (`neg_window::NegSteps`): `()` for a window of 0 or more (this
+    /// module's steps), the diagonal table of a window below 0 (`neg_window.rs`' steps).
+    pub(super) neg: N,
 }
 
 /// The steps of the offset pairs that the scan of one chunk with a two-stage table
@@ -135,15 +141,29 @@ pub(super) struct PairExtendState<'s> {
 /// (`extend_pairs_in`'s `EXT_FIRST`): a lookup hit's word extension before its context, for a
 /// megablast table whose lookup width is below the word size (a word to extend) and none of the
 /// diagnostics that print or count a hit before its extension; else the order before the switch.
-pub(super) fn extend_offset_pairs(
+pub(super) fn extend_offset_pairs<N: NegSteps>(
     scan: &ScanBatch<'_>,
     x: &PairExtendInputs<'_>,
-    state: &mut PairExtendState<'_>,
+    state: &mut PairExtendState<'_, N>,
     offset_pairs: &[OffsetPair],
     offset_pairs_len: &mut usize,
     scan_pause_ns: &mut u64,
     track_scan_pause: bool,
 ) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:631-775,799-944
+    // A window below 0: the one-hit steps of its diagonal table (`neg_window.rs`); for `()` the
+    // test is none (`NegSteps::table` is `None`).
+    if let Some(neg) = state.neg.table() {
+        super::neg_window::extend_offset_pairs(
+            scan,
+            x,
+            neg,
+            &mut *state.ungapped_hits,
+            offset_pairs,
+            offset_pairs_len,
+        );
+        return;
+    }
     let ext_first = x_bn_ext_first() && {
         let form = x.small_na_word.is_none()
             && scan.word_length > scan.lut_word_length
@@ -152,7 +172,7 @@ pub(super) fn extend_offset_pairs(
         form
     };
     if ext_first {
-        extend_pairs_in::<true>(
+        extend_pairs_in::<true, N>(
             scan,
             x,
             state,
@@ -162,7 +182,7 @@ pub(super) fn extend_offset_pairs(
             track_scan_pause,
         );
     } else {
-        extend_pairs_in::<false>(
+        extend_pairs_in::<false, N>(
             scan,
             x,
             state,
@@ -176,10 +196,10 @@ pub(super) fn extend_offset_pairs(
 
 /// `extend_offset_pairs` in the form `EXT_FIRST` (LOSAT_X_BNEXTFIRST, there).
 #[inline(always)]
-fn extend_pairs_in<const EXT_FIRST: bool>(
+fn extend_pairs_in<const EXT_FIRST: bool, N>(
     scan: &ScanBatch<'_>,
     x: &PairExtendInputs<'_>,
-    state: &mut PairExtendState<'_>,
+    state: &mut PairExtendState<'_, N>,
     offset_pairs: &[OffsetPair],
     offset_pairs_len: &mut usize,
     scan_pause_ns: &mut u64,

@@ -73,6 +73,10 @@ const fileOn = computed(
 const dbOn = computed(() => props.field.kind === 'database' && (value.value === true || text.value.trim() !== ''));
 /** The row names its counts by a taxonomy ID (the default) or by a file chosen beside it. */
 const countsBy = computed(() => (taxidField.value === undefined || value.value === true || text.value.trim() !== '' ? 'file' : 'taxid'));
+/** Database `-no_taxid_expansion` is active in BLASTN `-db` mode, which NCBI declares incompatible with `-window_masker_taxid`. */
+const noTaxidExpansionActive = computed(() => props.model.noTaxidExpansionActive === true);
+const taxidBlockedByDb = computed(() => props.field.kind === 'file' && taxidField.value !== undefined && noTaxidExpansionActive.value);
+const taxidConflict = computed(() => taxidBlockedByDb.value && fileOn.value && countsBy.value === 'taxid');
 /** The option that the row writes: -window_masker_taxid while the counts are named by a taxonomy ID. */
 const shownFlag = computed(() => (taxidField.value !== undefined && countsBy.value === 'taxid' ? taxidField.value.flag : props.field.flag));
 /** The file chosen for the option, which the run reads under the option's value. */
@@ -185,9 +189,13 @@ function toggleFilter(on: boolean): void {
 
 /** The box of a file option: checked, it waits for a file (the run cannot start without one); unchecked, it lets the file go. */
 function toggleFile(on: boolean): void {
-  if (taxidField.value !== undefined) props.model.setRepeats?.(on ? 'taxid' : 'off');
-  else if (on) props.model.setField(props.field.flag, true);
-  else props.model.setFile(props.field.flag, undefined);
+  if (taxidField.value !== undefined) {
+    props.model.setRepeats?.(on ? (noTaxidExpansionActive.value ? 'file' : 'taxid') : 'off');
+  } else if (on) {
+    props.model.setField(props.field.flag, true);
+  } else {
+    props.model.setFile(props.field.flag, undefined);
+  }
 }
 
 function toggleDatabase(on: boolean): void {
@@ -280,7 +288,7 @@ function onList(next: string): void {
           <!-- How the counts are named, as NCBI's "Species-specific repeats" has its select after the box (WW2): a taxonomy ID, or a file of the user's. -->
           <span v-if="fileOn && taxidField" class="select-clip">
             <select :value="countsBy" aria-label="Name the counts by" :data-testid="`${id}-by`" @change="chooseCountsBy(($event.target as HTMLSelectElement).value)">
-              <option value="taxid">Taxonomy ID</option>
+              <option value="taxid" :disabled="taxidBlockedByDb && countsBy !== 'taxid'">Taxonomy ID</option>
               <option value="file">Counts file</option>
             </select>
           </span>
@@ -498,6 +506,23 @@ function onList(next: string): void {
           <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
           <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
         </span>
+        <!-- Incompatibility notice when BLASTN `-window_masker_taxid` meets `-no_taxid_expansion` in Database mode (WW4). -->
+        <p v-if="taxidConflict" class="error db-conflict-note" role="alert" :data-testid="`${id}-no-taxid-conflict`">
+          Incompatible with <code>-no_taxid_expansion</code> in Database masking and filters.
+          <button type="button" class="link" :data-testid="`${id}-use-file`" @click="chooseCountsBy('file')">Use Counts file</button>
+          <button
+            v-if="model.clearNoTaxidExpansion"
+            type="button"
+            class="link"
+            :data-testid="`${id}-clear-noexp`"
+            @click="model.clearNoTaxidExpansion()"
+          >
+            Clear -no_taxid_expansion
+          </button>
+        </p>
+        <p v-else-if="taxidBlockedByDb && fileOn" class="muted db-conflict-note" :data-testid="`${id}-taxid-disabled-note`">
+          Taxonomy ID (<code>-window_masker_taxid</code>) is unavailable while <code>-no_taxid_expansion</code> is set in Database masking and filters.
+        </p>
         <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
         <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
         <!-- Shared local BLAST database picker for BLASTN `-filtering_db` (RG-D4 W2). -->

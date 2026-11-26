@@ -42,7 +42,7 @@ fn options_error_text(message: &str) -> (i32, Vec<u8>) {
 #[test]
 fn every_format_of_ncbi_s_list_is_read() {
     for number in (0..=18).chain([20]) {
-        let formatting = extract_formatting(&options(&number.to_string()), 500).unwrap();
+        let formatting = extract_formatting(&options(number.to_string()), 500).unwrap();
         assert_eq!(formatting.choice.number, number);
         assert!(!formatting.choice.custom(), "{number}");
         assert!(formatting.warnings.is_empty(), "{number}");

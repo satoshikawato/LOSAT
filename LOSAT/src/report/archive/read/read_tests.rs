@@ -234,8 +234,14 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                 }
             }
             let placeholder = has_placeholder(&text);
+            // Device-limit fixtures cut at the final byte (`db.device.*.last.11.out`) lack only
+            // the trailing line break after `}`: the archive itself reads whole and writes back
+            // equal up to that final `\n`.
+            let cut_last_lf =
+                !text.ends_with(b"\n") && out.strip_suffix(b"\n") == Some(text.as_slice());
             if error.is_none()
                 && out != text
+                && !cut_last_lf
                 && (!placeholder || unwrapped(&out) != unwrapped(&text))
             {
                 let at = out

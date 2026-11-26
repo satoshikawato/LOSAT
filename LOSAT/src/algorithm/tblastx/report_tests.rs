@@ -536,8 +536,9 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
         assert!(format.is_tabular(), "{outfmt}");
     }
     // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
-    // messages (not the archive, XML2 and JSON; the Seq-annots only with
-    // `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID P3, which the test process may have set).
+    // messages (not the archive; the Seq-annots only with `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID
+    // P3, which the test process may have set; the XML2 and JSON documents too, line DBID
+    // taxpf-1).
     let seq_annots = |number| {
         crate::algorithm::common::database::seq_annots_prefetch(Some(
             crate::algorithm::common::database::PrefetchFormat::of(
@@ -557,9 +558,9 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
         ("9", seq_annots(9)),
         ("11", false),
         ("12", seq_annots(12)),
-        ("13", false),
-        ("15", false),
-        ("16", false),
+        ("13", true),
+        ("15", true),
+        ("16", true),
     ] {
         assert_eq!(
             output_format(outfmt).prefetches_subjects(),

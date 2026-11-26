@@ -1,0 +1,294 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       503     5e-170
+BDT63570.1 wsv260-like protein [Pasiphaea japonica whispovirus]       25.0    1.3   
+
+
+
+Query_1  99   YNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRF  158
+53       189  F.N.SHS..IITH.PKS.M..K.NS..A...TSSSSSAIVTR.TTQR.SN.------.Y.  251
+                                                  \                       
+                                                  |                       
+                                          MSYRSNNTK
+
+Query_1  159  SHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKL  218
+53       252  QQ.KR.C.QNIS....V.....I...QIL.GD..G.L.EP....IIIR.DAN.LE..LT.  311
+
+Query_1  219  EKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKA  278
+53       312  KDT.S..QR..VN...SCAQN.NYSF..RV.NFA..KPI.R.IER.SE.HTN.EL.IT.S  371
+
+Query_1  279  SKFLWSNNRTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAK  338
+53       372  YTLTPNQT.GYKL.DNM....YDG.PTMCV.I..FKTYRNY.TTH-------LDLLYL.R  427
+                                      \                                   
+                                      |                                   
+                                    GCD
+
+Query_1  339  NVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSEL  398
+53       428  D.....QESY.R.MK.E....F..SWC..Q.CNN.KGVSR.P..PEA.FPYT.F.T...R  487
+
+Query_1  399  YLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCV  458
+53       488  F....L......D..R......RP.CLT...L.SL.GFGIQ.NL......LSV.P....L  547
+72       720   .Q..T.ELM..K.-QLVEYK.NT.KIKLLMA.STT..Q-......                764
+                         \                                                
+                         |                                                
+                        GP
+
+Query_1  459  EMDFAGISVIDVLNGDLKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVR  518
+53       548  ..E...MALQ.......N.NLNGP.PHNQ.QHLRID..--.MI.H.MAPSKLKGI..N..  606
+                                       \                                  
+                                       |                                  
+                                       P
+
+Query_1  519  MLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGL  578
+53       607  ...V..N..DE.KK..TLH....HA.VGVANL..D.F......A.T..I...........  666
+
+Query_1  579  VNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGTDERFFSNHPHTAPEFINSE  638
+53       667  ......A.......S...........LL.ADYCDKV.RRNNP.NVYNLY.Q....YLQGR  728
+                                                       \                  
+                                                       |                  
+                                                      PY
+
+Query_1  639  LCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYE  698
+53       729  M.N.A...Y..S..ISFVIAT.SS..T.FAVG.MK...KLSFLLGLA..KCASK..KP.I  788
+
+Query_1  699  IAPVIGACFPFKDNIAKLFQSPKH  722
+53       789  LTKA.AG...LQEK.M...LN...  812
+
+
+Lambda      K        H        a         alpha
+   0.317    0.133    0.397    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+Results from round 2
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       1023    0.0  
+BDT63570.1 wsv260-like protein [Pasiphaea japonica whispovirus]       52.8    3e-09
+
+Sequences not found previously or not previously below threshold:
+
+
+
+
+Query_1  96   STPYNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYR  155
+53       186  .RHF.N.SHS..IITH.PKS.M..K.NS..A...TNNTKSAIVTR.TTQR.SN.------  248
+                                                 \                        
+                                                 |                        
+                                         SSSSMSYRS
+
+Query_1  156  KRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKW  215
+53       249  .Y.QQ.KR.C.QNIS....V.....I...QIL.GD..G.L.EP....IIIR.DAN.LE..  308
+
+Query_1  216  VKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAK  275
+53       309  LT.KDT.S..QR..VN...SCAQN.NYSF..RV.NFA..KPI.R.IER.SE.HTN.EL.I  368
+
+Query_1  276  EKASKFLWSNNRTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDH  335
+53       369  T.SYTLTPNQT.GYKL.DNM....YDG.PTMCV.I..FKTYRNY.TTH-------LDLLY  424
+                                         \                                
+                                         |                                
+                                       GCD
+
+Query_1  336  MAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGP  395
+53       425  L.RD.....QESY.R.MK.E....F..SWC..Q.CNN.KGVSR.P..PEA.FPYT.F.T.  484
+72       713                                                           .AT  715
+
+Query_1  396  SELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEG  455
+53       485  ..RF....L......D..R......RP.CLT...L.SL.GFGIQ.NL......LSV.P..  544
+72       716  NAKQ.Q..T.ELM..K.-QLVEYK.NT.KIKLLMA.STT..Q-......             764
+                            \                                             
+                            |                                             
+                           GP
+
+Query_1  456  FCVEMDFAGISVIDVLNGDLKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLY  515
+53       545  ..L..E...MALQ.......N.NLNGP.PHNQ.QHLRID..--.MI.H.MAPSKLKGI..  603
+                                          \                               
+                                          |                               
+                                          P
+
+Query_1  516  GVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQ  575
+53       604  N.....V..N..DE.KK..TLH....HA.VGVANL..D.F......A.T..I........  663
+
+Query_1  576  QGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGTDERFFSNHPHTAPEFI  635
+53       664  .........A.......S...........LL.ADYCDKV.RRNNP.NVYNLY.Q....YL  725
+                                                          \               
+                                                          |               
+                                                         PY
+
+Query_1  636  NSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPR  695
+53       726  QGRM.N.A...Y..S..ISFVIAT.SS..T.FAVG.MK...KLSFLLGLA..KCASK..K  785
+
+Query_1  696  AYEIAPVIGACFPFKDNIAKLFQSPKH  722
+53       786  P.ILTKA.AG...LQEK.M...LN...  812
+
+
+Lambda      K        H        a         alpha
+   0.317    0.133    0.376    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0407    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+Results from round 3
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       999     0.0  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       122     2e-30
+
+Sequences not found previously or not previously below threshold:
+
+
+
+
+Query_1  29    GGEGGGQFKIPSAIAVKSCCSKNATRRSPPSDSPYSLRPMKRLKKNNGEVGGKAPPPVTL  88
+53       155                                   G.F.NKA----SSS.KM.KQ.TYS.HPK  178
+82       4576  ..Q.------T.N.TSHPLI.SL..SGR...AGIGDGHSTQN.A..D.LA.SSSS.DF.H  4654
+                                                         \        \        
+                                                         |        |        
+                                           NLLQTISNITRDANL PSFFNAFSRA
+82       1425                                 .GTS.S.AG.NF.DEQDKLT.NT..TS.F  1459
+                                                    \            \         
+                                                    |            |         
+                                                  NLY          MNN
+
+Query_1  89    RLREDYESTPYNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRA  148
+53       179   VTCRRPL.RHF.N.SHS..IITH.PKS.M..K.NS..A...TNNTKSAIVTR.TTQR.SN  247
+                                                         \                 
+                                                         |                 
+                                                 SSSSMSYRS
+82       4655  SKQLQTA..IL.NTTETHN.LANLGAKAGVPE.AKLHRNVLTS.MNEDEITRDINDIESK  4732
+                       \                                  \                
+                       |                                  |                
+               STSADSKEATVEIILG                          IL
+82       1460  ENNLENPAKVWSVCALPHFDVAIVPKL.SNISSS..YHG.H.LALNADCKPQRWENTLAG  1525
+                                                \                          
+                                                |                          
+                                           DQLFRL
+
+Query_1  149   NADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRN  208
+53       248   .------.Y.QQ.KR.C.QNIS....V.....I...QIL.GD..G.L.EP....IIIR.D  301
+82       4733  LETR.L.NA.QDLKRSMLISSSSPSSVNA.....M.RTDAANG.L.---.NNDN.II.    4787
+82       1526  .KAGNFLRL..DNKR.LDTVLASP.EVCDLI..V.TSTDVIHNIG.LSNADKIQKLLDGG  1593
+                     \        \                \                           
+                     |        |                |                           
+                    FG     TFNL               RE
+
+Query_1  209   FSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIK  268
+53       302   AN.LE..LT.KDT.S..QR..VN...SCAQN.NYSF..RV.NFA..KPI.R.IER.SE.H  361
+82       1594  A.AVK.Y-----S.L.VSNQ.IQ.T..S                                  1618
+                                    \                                      
+                                    |                                      
+                                   LI
+
+Query_1  269   QSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWI  328
+53       362   TN.EL.IT.SYTLTPNQT.GYKL.DNM....YDG.PTMCV.I..FKTYRNY.TTH-----  419
+                                                 \                         
+                                                 |                         
+                                               GCD
+
+Query_1  329   KTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYAS  388
+53       420   --LDLLYL.RD.....QESY.R.MK.E....F..SWC..Q.CNN.KGVSR.P..PEA.FP  477
+
+Query_1  389   QVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGV  448
+53       478   YT.F.T...RF....L......D..R......RP.CLT...L.SL.GFGIQ.NL......  537
+82       2803                        D.SGLLT.V.SPRF.RMSIVD.LSCKSP.K.L....SL  2852
+                                                   \                       
+                                                   |                       
+                                        AGRGGEKGGLSL
+
+Query_1  449   RKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLC  508
+53       538   LSV.P....L..E...MALQ.......N.NLNGP.PHNQ.QHLRID..--.MI.H.MAPS  596
+                                                  \                        
+                                                  |                        
+                                                  P
+
+Query_1  509   RMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVN  568
+53       597   KLKGI..N.....V..N..DE.KK..TLH....HA.VGVANL..D.F......A.T..I.  656
+
+Query_1  569   IVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGTDERFFSNHP  628
+53       657   ................A.......S...........LL.ADYCDKV.RRNNP.NVYNLY.  718
+                                                                  \        
+                                                                  |        
+                                                                 PY
+
+Query_1  629   HTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQ  688
+53       719   Q....YLQGRM.N.A...Y..S..ISFVIAT.SS..T.FAVG.MK...KLSFLLGLA..K  778
+
+Query_1  689   EKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+53       779   CASK..KP.ILTKA.AG...LQEK.M...LN...  812
+
+
+Lambda      K        H        a         alpha
+   0.318    0.130    0.354    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0397    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

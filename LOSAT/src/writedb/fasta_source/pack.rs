@@ -420,7 +420,7 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-pub(super) struct Ncbi4naBuilder {
+pub(crate) struct Ncbi4naBuilder {
     bytes: Vec<u8>,
     /// The last byte holds one letter, in its high half.
     odd: bool,
@@ -431,7 +431,7 @@ impl Ncbi4naBuilder {
     /// one that the input states rather than holds (a gap line), so the allocation can fail
     /// without the process being short of memory for anything else; that failure is
     /// returned (`fix_bioseq_deltas`), and no later growth can fail.
-    pub(super) fn with_letters(letters: usize) -> Result<Self, std::collections::TryReserveError> {
+    pub(crate) fn with_letters(letters: usize) -> Result<Self, std::collections::TryReserveError> {
         let mut bytes = Vec::new();
         bytes.try_reserve_exact(letters.div_ceil(2))?;
         Ok(Self { bytes, odd: false })
@@ -446,7 +446,7 @@ impl Ncbi4naBuilder {
     }
 
     /// `run` letters of the NCBI8na code `code` (a gap: 15).
-    pub(super) fn push_run(&mut self, code: u8, mut run: usize) {
+    pub(crate) fn push_run(&mut self, code: u8, mut run: usize) {
         if run > 0 && self.odd {
             self.push_code(code);
             run -= 1;
@@ -459,7 +459,7 @@ impl Ncbi4naBuilder {
     }
 
     /// The NCBI8na codes of IUPACna residues of a literal.
-    pub(super) fn push_iupacna(&mut self, mut src: &[u8]) {
+    pub(crate) fn push_iupacna(&mut self, mut src: &[u8]) {
         if let (true, [first, rest @ ..]) = (self.odd, src) {
             self.push_code(NCBI4NA_CODES[*first as usize]);
             src = rest;
@@ -474,12 +474,71 @@ impl Ncbi4naBuilder {
         }
     }
 
+    /// Appends up to `letters` bases from packed NCBI2na bytes (`CSeqConvert::Convert` from
+    /// `e_Ncbi2na` to `e_Ncbi8na`, clamped by `AdjustLength` to `src.len() * 4`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-349
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:774-806
+    pub(crate) fn push_ncbi2na(&mut self, src: &[u8], letters: usize) {
+        let count = letters.min(src.len().saturating_mul(4));
+        if count == 0 {
+            return;
+        }
+        let start = if !self.odd {
+            let full_bytes = count / 4;
+            for &byte in &src[..full_bytes] {
+                let b0 = 1u8 << ((byte >> 6) & 3);
+                let b1 = 1u8 << ((byte >> 4) & 3);
+                let b2 = 1u8 << ((byte >> 2) & 3);
+                let b3 = 1u8 << (byte & 3);
+                self.bytes.push((b0 << 4) | b1);
+                self.bytes.push((b2 << 4) | b3);
+            }
+            full_bytes * 4
+        } else {
+            0
+        };
+        for i in start..count {
+            let shift = 6 - 2 * (i & 3);
+            let code = 1u8 << ((src[i / 4] >> shift) & 3);
+            self.push_code(code);
+        }
+    }
+
+    /// Appends up to `letters` bases from packed NCBI4na bytes (`CSeqConvert::Convert` from
+    /// `e_Ncbi4na` to `e_Ncbi8na`, clamped by `AdjustLength` to `src.len() * 2`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:350-356
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:808-837
+    pub(crate) fn push_ncbi4na(&mut self, src: &[u8], letters: usize) {
+        let count = letters.min(src.len().saturating_mul(2));
+        if count == 0 {
+            return;
+        }
+        if !self.odd {
+            let full_bytes = count / 2;
+            self.bytes.extend_from_slice(&src[..full_bytes]);
+            if count % 2 == 1 {
+                self.push_code(src[full_bytes] >> 4);
+            }
+            return;
+        }
+        for i in 0..count {
+            let code = if i & 1 == 0 {
+                src[i / 2] >> 4
+            } else {
+                src[i / 2] & 0x0f
+            };
+            self.push_code(code);
+        }
+    }
+
     /// The count of letters appended.
-    pub(super) fn letters(&self) -> usize {
+    pub(crate) fn letters(&self) -> usize {
         self.bytes.len() * 2 - usize::from(self.odd)
     }
 
-    pub(super) fn into_bytes(self) -> Vec<u8> {
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
 }

@@ -499,8 +499,8 @@ pub(super) fn prefetch_reported_subjects(
     // Outfmt 0 to 4 (`blastp_pairwise_view_of`): NCBI's `PrintOneResultSet` sorts the hits by
     // `-sorthits` and writes the description lines before the alignments in all five
     // (blast_format.cpp:1523-1541), so they read the subjects in one order.
-    let pairwise_first = first_report
-        .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
+    let pairwise_first =
+        first_report.is_some_and(|format| blastp_pairwise_view_of(format as i32).is_some());
     // The query records that NCBI's scope holds at the prefetch of the batch of the searched
     // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
     // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of
@@ -561,8 +561,10 @@ pub(super) fn prefetch_reported_subjects(
     // that the cut reports left (`shared::XmlReportsBefore`, from the reads of the queries'
     // reports modelled here).
     let xml_first = first_report == Some(crate::blastinput::app::ReportFormat::Xml);
+    // The record that the report shows (`query_batch::xml_shown_of`).
     let xml_cut = |query: usize| {
-        query_records.get(query).is_some_and(|record| {
+        let shown = crate::blastinput::query_batch::xml_shown_of(reports.query_scopes, query);
+        query_records.get(shown).is_some_and(|record| {
             crate::report::blast_xml::names::iteration_cut_before_hits(
                 record.local_id.as_bytes(),
                 record.warning_id(),
@@ -703,6 +705,17 @@ pub(super) fn prefetch_reported_subjects(
                 }
                 Ok(())
             };
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+            // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+            // Multi-round psiblast keeps its scope across rounds of a query and resets it in
+            // `psi_round::run_queries` after all rounds finish.
+            let reset_batch_scope = || {
+                if reports.psi_round.is_none() {
+                    database.reset_scope();
+                }
+            };
             for batch in query_batches {
                 // No batch after the run's end is prefetched, nor read one by one.
                 if !hit_loads.reaches(batch.searched.start) {
@@ -714,6 +727,7 @@ pub(super) fn prefetch_reported_subjects(
                 if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
                     let report_loads = prefetch_taxids || scope_loads;
                     if !report_loads && !pssm_loads {
+                        reset_batch_scope();
                         continue;
                     }
                     for query in batch.searched.clone() {
@@ -795,9 +809,11 @@ pub(super) fn prefetch_reported_subjects(
                             }
                         }
                     }
+                    reset_batch_scope();
                     continue;
                 }
                 if !reports_model {
+                    reset_batch_scope();
                     continue;
                 }
                 // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
@@ -854,6 +870,7 @@ pub(super) fn prefetch_reported_subjects(
                 if !messages.is_empty() {
                     prefetch_posts.push((batch.searched.start, messages));
                 }
+                reset_batch_scope();
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-264

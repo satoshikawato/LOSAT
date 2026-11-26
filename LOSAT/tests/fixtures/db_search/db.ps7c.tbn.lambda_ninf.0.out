@@ -1,0 +1,269 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide slices of two shrimp viruses
+           5 sequences; 33,385 total letters
+
+
+
+Query= rnd random
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block        0.0    0.0  
+v_slice LvMJNV 21001-39000 with ambiguity codes                        0.0    0.0  
+m_minus MelaMJNV 59001-62000 with ambiguity codes                      0.0    0.0  
+v_far_22pct LvMJNV 28501-30700 diverged                                0.0    0.0  
+v_mut_8pct LvMJNV 28501-30700 with substitutions and indels            0.0    0.0  
+
+
+>m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block
+Length=8000
+
+ Score = -1.0 bits (41),  Expect = 0.0
+ Identities = 6/12 (50%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  9     YRWNMHFWQCPY  20
+             YR  ++F+Q PY
+Sbjct  2991  YRQFLYFYQLPY  2956
+
+
+ Score = -1.0 bits (31),  Expect = 0.0
+ Identities = 4/4 (100%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  26    HKWY  29
+             HKWY
+Sbjct  1536  HKWY  1525
+
+
+ Score = -1.0 bits (21),  Expect = 0.0
+ Identities = 3/8 (38%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  13    MHFWQCPY  20
+             +H+   PY
+Sbjct  3292  LHYRILPY  3315
+
+
+ Score = -1.0 bits (20),  Expect = 0.0
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  9     YRWNMHFWQCPY  20
+             Y W   +  C Y
+Sbjct  5316  YHWCD*Y*NCVY  5281
+
+
+ Score = -1.0 bits (15),  Expect = 0.0
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  9     YRWNMHFWQCPY  20
+             YR+      C Y
+Sbjct  2472  YRYIYLLLICIY  2437
+
+
+ Score = -1.0 bits (13),  Expect = 0.0
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  21    RGW  23
+             RG+
+Sbjct  3796  RGF  3804
+
+
+ Score = -1.0 bits (13),  Expect = 0.0
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -1
+
+Query  18    CPY  20
+             C Y
+Sbjct  2216  CYY  2208
+
+
+ Score = -1.0 bits (13),  Expect = 0.0
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  28    WY  29
+             W+
+Sbjct  5815  WW  5820
+
+
+ Score = -1.0 bits (11),  Expect = 0.0
+ Identities = 3/12 (25%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = -2
+
+Query  4     HPKQCYRWNMHF  15
+             H  +     M+F
+Sbjct  1990  HSWKKGNHRMYF  1955
+
+
+>v_slice LvMJNV 21001-39000 with ambiguity codes
+Length=18000
+
+ Score = -1.0 bits (32),  Expect = 0.0
+ Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  2      WWHPKQCYR  10
+              W+ PK+  R
+Sbjct  14503  WYQPKEVLR  14477
+
+
+ Score = -1.0 bits (28),  Expect = 0.0
+ Identities = 3/7 (43%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -2
+
+Query  7     QCYRWNM  13
+             +C+ W M
+Sbjct  8786  ECWPWRM  8766
+
+
+ Score = -1.0 bits (27),  Expect = 0.0
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  18    CPYRGWTMHKWY  29
+             CP+    +  WY
+Sbjct  2524  CPFHINMISVWY  2489
+
+
+ Score = -1.0 bits (25),  Expect = 0.0
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = +2
+
+Query  8      CYRWNMHF  15
+              CY+   HF
+Sbjct  13370  CYKG*RHF  13393
+
+
+ Score = -1.0 bits (21),  Expect = 0.0
+ Identities = 4/10 (40%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+ Frame = -2
+
+Query  5     PKQCYRWNMH  14
+             P Q    NM+
+Sbjct  2243  PTQIKTMNMY  2214
+
+
+ Score = -1.0 bits (17),  Expect = 0.0
+ Identities = 3/9 (33%), Positives = 4/9 (44%), Gaps = 0/9 (0%)
+ Frame = +3
+
+Query  20     YRGWTMHKW  28
+              Y G  +  W
+Sbjct  17499  YHGIAIPIW  17525
+
+
+ Score = -1.0 bits (16),  Expect = 0.0
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -1
+
+Query  27    KW  28
+             KW
+Sbjct  2763  KW  2758
+
+
+ Score = -1.0 bits (14),  Expect = 0.0
+ Identities = 1/4 (25%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = +2
+
+Query  13     MHFW  16
+              +H++
+Sbjct  12731  LHYF  12742
+
+
+ Score = -1.0 bits (13),  Expect = 0.0
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +3
+
+Query  20     YR  21
+              YR
+Sbjct  16332  YR  16337
+
+
+>m_minus MelaMJNV 59001-62000 with ambiguity codes
+Length=3000
+
+ Score = -1.0 bits (26),  Expect = 0.0
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = -3
+
+Query  19   PYRGWT  24
+            PY  WT
+Sbjct  109  PYLVWT  92
+
+
+ Score = -1.0 bits (19),  Expect = 0.0
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +3
+
+Query  20    YRG  22
+             YRG
+Sbjct  1851  YRG  1859
+
+
+ Score = -1.0 bits (16),  Expect = 0.0
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -2
+
+Query  27    KW  28
+             KW
+Sbjct  1328  KW  1323
+
+
+>v_far_22pct LvMJNV 28501-30700 diverged
+Length=2200
+
+ Score = -1.0 bits (20),  Expect = 0.0
+ Identities = 4/9 (44%), Positives = 4/9 (44%), Gaps = 0/9 (0%)
+ Frame = +3
+
+Query  11   WNMHFWQCP  19
+            WN     CP
+Sbjct  609  WNY*RCICP  635
+
+
+>v_mut_8pct LvMJNV 28501-30700 with substitutions and indels
+Length=2185
+
+ Score = -1.0 bits (15),  Expect = 0.0
+ Identities = 3/8 (38%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  19   PYRGWTMH  26
+            P R  + H
+Sbjct  913  PIRKASGH  936
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.142    0.742    0.792     4.96 
+
+
+Effective search space used: 277575
+
+
+  Database: nucleotide slices of two shrimp viruses
+    Posted date:  Oct 15, 2026  10:35 PM
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

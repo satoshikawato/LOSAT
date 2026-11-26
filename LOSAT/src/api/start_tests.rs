@@ -960,23 +960,23 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
     }
 }
 
-// Line WQA's sweep, D11 (2026-11-20) and its round 2: a caller's `-logfile` name is read as the
-// command line on Linux reads it where the name's directories exist (`RunFiles::log_target`). NCBI
-// BLAST+ 2.17.0 and LOSAT's command line, with a `.ncbirc` of the one byte 0xEF, which NCBI cannot
-// read (the usage report's `Error: (110.4) Error reading the registry after line 1: `, written to
-// the standard error at once), and the run's warning (`-max_target_seqs 1`; TBLASTX writes it where
-// the diagnostics go): `-logfile -` writes the error once to the standard error; `/dev/stderr` is a
-// file there, which gets the error too, so the standard error has it twice; `logs/run.log`,
-// `/dev/stdout`, `logs/` (the file `logs`) and ` run.log` (`run.log`) are files, which get it (the
-// command line writes `/dev/stdout`'s into its standard output); `/dev/fd/2`, `/proc/self/fd/2` and
-// `/dev/fd/1` are files on procfs, which reports no free space, so they get nothing; `logs/.` names
-// a directory and `/dev/fd/3` a file descriptor that the run has not opened, which NCBI cannot
-// open: as `-`. The run's warning goes to the file in TBLASTX, else
-// to the standard error.
+// Line WQA's sweep, D11 (2026-11-20) and D19: a caller's `-logfile` name is read as the command
+// line on Linux reads it in a working directory holding the run's real files
+// (`RunFiles::log_target`). NCBI BLAST+ 2.17.0 and LOSAT's command line, with a `.ncbirc` of the
+// one byte 0xEF, which NCBI cannot read (the usage report's `Error: (110.4) Error reading the
+// registry after line 1: `, written to the standard error at once), and the run's warning
+// (`-max_target_seqs 1`; TBLASTX writes it where the diagnostics go): `-logfile -` writes the
+// error once to the standard error; `/dev/stderr` is a file there, which gets the error too, so
+// the standard error has it twice; `logs/run.log` without `logs` stays on the standard error,
+// whereas with `logs` present (`src/run.log` in the crate's directory) it is a file; `/dev/stdout`
+// stays named `/dev/stdout`; `logs/` is the file `logs` and ` run.log` is `run.log`; `/dev/fd/2`,
+// `/proc/self/fd/2` and `/dev/fd/1` are files on procfs, which reports no free space, so they get
+// nothing; `src` names a directory and `/dev/fd/3` a file descriptor that the run has not opened,
+// which NCBI cannot open: as `-`. A `-logfile` naming a file of the run's directory is refused.
 #[test]
 fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
     use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
-    use crate::report::run_files::RunFiles;
+    use crate::report::run_files::{FileReceiver, RunFiles};
     use std::io::Write as _;
     // The registry file of the working directory: `.ncbirc`, `ncbi.ini` on Windows.
     let registry = if cfg!(windows) {
@@ -988,12 +988,12 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
     let error = "Error: (110.4) Error reading the registry after line 1: \n";
     let warning = "Warning: w\n";
     // Where the name sends the start's messages: `cerr`, a file that is the standard error, a file
-    // of the run, or nowhere (a file system without free space).
+    // of the run (under its normalized host name), or nowhere (a file system without free space).
     #[derive(Clone, Copy, PartialEq)]
     enum Kind {
         Stderr,
         StderrFile,
-        File,
+        File(&'static str),
         Nowhere,
     }
     for program in ["blastn", "tblastx"] {
@@ -1004,11 +1004,15 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
             ("/proc/self/fd/2", Kind::Nowhere),
             ("/dev/fd/2", Kind::Nowhere),
             ("/dev/fd/1", Kind::Nowhere),
-            ("logs/run.log", Kind::File),
-            ("/tmp/run.log", Kind::File),
-            ("/dev/stdout", Kind::File),
-            ("logs/", Kind::File),
-            (" run.log", Kind::File),
+            ("no_such_logs/run.log", Kind::Stderr),
+            ("src/run.log", Kind::File("src/run.log")),
+            ("src", Kind::Stderr),
+            ("src/", Kind::Stderr),
+            ("/tmp/run.log", Kind::File("/tmp/run.log")),
+            ("/dev/stdout", Kind::File("/dev/stdout")),
+            ("logs/", Kind::File("logs")),
+            (" run.log", Kind::File("run.log")),
+            ("./run.log", Kind::File("run.log")),
             ("logs/.", Kind::Stderr),
             ("/dev/fd/3", Kind::Stderr),
         ] {
@@ -1041,8 +1045,8 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
                 "{label}"
             );
             let expected_files = match kind {
-                Kind::File => vec![(
-                    logfile.as_bytes().to_vec(),
+                Kind::File(host_name) => vec![(
+                    host_name.as_bytes().to_vec(),
                     format!("{error}{}", if follows { warning } else { "" }).into_bytes(),
                 )],
                 _ => Vec::new(),
@@ -1050,10 +1054,48 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
             assert_eq!(*kept.0.lock().unwrap(), expected_files, "{label}");
             let expected_place = match (follows, kind) {
                 (false, _) | (true, Kind::Stderr | Kind::StderrFile) => TextPlace::StandardError,
-                (true, Kind::File) => TextPlace::LogFile,
+                (true, Kind::File(_)) => TextPlace::LogFile,
                 (true, Kind::Nowhere) => TextPlace::Nowhere,
             };
             assert_eq!(place, expected_place, "{label}");
+        }
+        // A `-logfile` naming a file of the run's directory (registered or on disk) is refused.
+        struct WithRegistered(Vec<Vec<u8>>);
+        impl FileReceiver for WithRegistered {
+            fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn registered_files(&self) -> &[Vec<u8>] {
+                &self.0
+            }
+        }
+        let receiver = std::sync::Arc::new(WithRegistered(vec![
+            b"q.fa".to_vec(),
+            b"in/s.fa".to_vec(),
+            b".ncbirc".to_vec(),
+        ]));
+        for existing in ["q.fa", "./q.fa", "in/s.fa", ".ncbirc", "Cargo.toml"] {
+            let words = ["-logfile", existing];
+            let mut stderr = Vec::new();
+            let err = begin_with(
+                ApplicationStart::with_files(program, &words, &[], &files),
+                &words,
+                &RunFiles::Receiver(receiver.clone()),
+                &mut stderr,
+            )
+            .err()
+            .expect("existing file must be refused");
+            assert_eq!(
+                err,
+                format!(
+                    "a -logfile file '{existing}' that is a file of the run's directory (the \
+                     command line appends its messages to it; LOSAT Web reads the run's files \
+                     and writes none of them) is not supported by LOSAT's {}",
+                    program.to_ascii_uppercase()
+                ),
+                "{program} {existing}"
+            );
+            assert_eq!(String::from_utf8(stderr).unwrap(), error);
         }
     }
 }

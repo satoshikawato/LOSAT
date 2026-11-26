@@ -1,5 +1,6 @@
 use super::*;
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
+use crate::report::serial::seqalign::{row_range_exception, std_seg_lengths_not_accurate};
 
 // NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0,
 // db.x2g.bx.f0616.subj.6 and db.rpstbn.sw.nest.p.0: `CATCH_ALL`'s report of the three exceptions.
@@ -52,6 +53,7 @@ fn ungapped(q_start: i32, q_end: i32) -> super::super::results::Hsp {
         positive: 0,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     }
 }
 
@@ -110,7 +112,6 @@ fn record(sequence: &str) -> super::super::input::FastaRecord {
         title: Vec::new(),
         sequence: sequence.as_bytes().to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -265,33 +266,57 @@ fn a_row_that_starts_with_a_gap_has_no_range() {
         edit_script: ops,
         ..ungapped(0, 285)
     };
+    let seqids = Some(RowRangeError::SeqidsNotConsistent);
     let starts = gapped(vec![Ins(95), Sub(190)]);
-    assert_eq!(row_range(&starts, AlignRow::Query), None);
-    assert_eq!(
-        row_range(&starts, AlignRow::Subject),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
-    assert_eq!(
-        rows_range(&starts),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_row_range(&starts, AlignRow::Query, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_row_range(&starts, AlignRow::Subject, rewritten),
+            seqids
+        );
+        assert_eq!(reported_rows_range(&starts, rewritten), seqids);
+    }
     let query_first = gapped(vec![Del(3), Sub(190)]);
-    assert_eq!(
-        row_range(&query_first, AlignRow::Query),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
-    assert_eq!(row_range(&query_first, AlignRow::Subject), None);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_row_range(&query_first, AlignRow::Query, rewritten),
+            seqids
+        );
+        assert_eq!(
+            reported_row_range(&query_first, AlignRow::Subject, rewritten),
+            None
+        );
+    }
     for ops in [
         vec![Sub(190), Ins(95)],
         vec![Sub(90), Del(5), Sub(100)],
         Vec::new(),
     ] {
-        assert_eq!(rows_range(&gapped(ops.clone())), None, "{ops:?}");
+        assert_eq!(
+            reported_rows_range(&gapped(ops.clone()), false),
+            None,
+            "{ops:?}"
+        );
+        assert_eq!(
+            reported_rows_range(&gapped(ops.clone()), true),
+            None,
+            "{ops:?}"
+        );
     }
-    // An HSP of length 0: both rows empty, the query's first.
-    assert_eq!(rows_range(&ungapped(4, 4)), Some(RowRangeError::Empty));
+    // An HSP of length 0: both rows empty without rewrite; with rewrite, the subject row stays.
     assert_eq!(
-        row_range(&ungapped(4, 4), AlignRow::Subject),
+        reported_rows_range(&ungapped(4, 4), false),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_row_range(&ungapped(4, 4), AlignRow::Query, true),
+        None
+    );
+    assert_eq!(
+        reported_row_range(&ungapped(4, 4), AlignRow::Subject, true),
         Some(RowRangeError::Empty)
     );
 }

@@ -447,6 +447,9 @@ fn heading_of(title: &[u8]) -> String {
         None,
         DatabaseHeading::Title(title, &crate::report::defline::UNNAMED_SOURCE),
         true,
+        &[],
+        None,
+        0,
         &[&hit],
         &[0],
         0..1,
@@ -657,7 +660,6 @@ fn alignment_rows_of_one_column_step_one_letter() {
             &hit,
             "ACDeF",
             "ACDEW",
-            [&[], &[]],
             Default::default(),
             None,
             &config,
@@ -707,7 +709,6 @@ fn alignment_rows_of_one_column_step_one_letter() {
         &hit,
         "MQ",
         "MQ",
-        [&[], &[]],
         Default::default(),
         None,
         &config,
@@ -860,7 +861,6 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                 &blastp.hit,
                 "MRKVL",
                 "MRKVL",
-                [&[], &[]],
                 Default::default(),
                 None,
                 &PairwiseConfig {
@@ -911,7 +911,6 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
             &hit,
             &letters,
             &letters,
-            [&[], &[]],
             Default::default(),
             None,
             &PairwiseConfig {
@@ -1270,6 +1269,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         prolog: true,
         parsed_subjects: Vec::new(),
         subject_sources: Vec::new(),
+        subject_oids: None,
     };
     // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
     let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]
@@ -1551,7 +1551,6 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
             &hit,
             &query,
             &subject,
-            [&[], &[]],
             Default::default(),
             masks,
             &config,
@@ -1584,4 +1583,152 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
     assert!(of.of(3).is_none() && of.of(5).is_none());
     assert_eq!(rows(of.of(4)), html);
     assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
+}
+
+// Line PS item PS7c (review B3): the HSP whose values the description table and `-sorthits`'
+// identity show is the first that raises the highest bit score from 0 (`GetSeqAlignSetCalcParams`):
+// a first HSP of a NaN or negative bit score does not hide a later one above 0, and a subject
+// without one shows 0.0 and 0.0 and an identity of 0 over 1.
+#[test]
+fn the_shown_hsp_raises_the_highest_bit_score_from_zero() {
+    let hit = |bit_score: f64, num_ident: usize| {
+        PairwiseHit::from(Hit {
+            bit_score,
+            num_ident,
+            ..make_hit()
+        })
+    };
+    let (nan, negative, five, five_again) =
+        (hit(f64::NAN, 1), hit(-1.0, 2), hit(5.0, 3), hit(5.0, 4));
+    let shown = |hits: &[&PairwiseHit]| shown_hsp(hits).map(|hit| hit.hit.num_ident);
+    assert_eq!(shown(&[&nan, &five]), Some(3));
+    assert_eq!(shown(&[&negative, &five, &five_again]), Some(3));
+    assert_eq!(shown(&[&nan, &negative]), None);
+    assert_eq!(table_scores(shown_hsp(&[&nan, &negative])), (0.0, 0.0));
+    assert_eq!(table_scores(shown_hsp(&[&nan, &five])), (5.0, 1e-50));
+}
+
+// Review R2 finding 4: with `-html` and a skipped database heading, a later part of a subject
+// (`LOSAT_X_PAIRWISEPAR`) that opens with class N HSPs must write their `alignment skipped` lines
+// before retrying the heading and placing its HTML posts at the part's first non-class-N HSP; a
+// later part holding only class N HSPs must place no heading posts at all.
+#[test]
+fn later_part_html_posts_wait_for_first_shown_hsp_with_class_n() {
+    use crate::report::defline::SourceTaxname;
+    use crate::report::html_ids::{HtmlHeading, HtmlPost, HtmlReport};
+    use crate::report::query_warnings::ReportPlace;
+
+    let bad_source = SourceTaxname::Named(Arc::from(&b"Bad \x81 name"[..]))
+        .of_stored(|| b"BL_ORD_ID:0".to_vec());
+    let links = Arc::new(html_links_with(None));
+    let report = HtmlReport::new(&links, [crate::seqdb::Oid::of_unrestricted(0)]);
+
+    let make = |left_of_record: bool| {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.subject_length = Some(100);
+        hit.query_left_of_record = left_of_record;
+        hit
+    };
+    // 0: shown (starts heading, skipped + 1 InitConfig post)
+    // 1: class N (skipped, no post)
+    // 2: class N (skipped, no post)
+    // 3: shown (retries heading, skipped + 1 InitConfig post)
+    // 4: class N (skipped, no post)
+    // 5: class N (skipped, no post)
+    let owned = [
+        make(false),
+        make(true),
+        make(true),
+        make(false),
+        make(true),
+        make(true),
+    ];
+    let hits: Vec<&PairwiseHit> = owned.iter().collect();
+    let indices: Vec<HspIndex> = (0..hits.len()).collect();
+
+    let run_parts = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let mut out = Vec::new();
+        let mut placed = Vec::new();
+        for part in parts {
+            let posts = std::cell::RefCell::new(Vec::new());
+            let html = HtmlHeading {
+                report: &report,
+                s_idx: 0,
+                rank: 1,
+                posts: &posts,
+            };
+            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+                if let ReportPlace::Html(post) = place {
+                    placed.push((writer.len(), post));
+                }
+                Ok(())
+            };
+            write_database_subject_alignments_part(
+                &mut out,
+                None,
+                DatabaseHeading::Title(&[], &bad_source),
+                false,
+                &[],
+                Some(&[0]),
+                0,
+                &hits,
+                &indices,
+                part.clone(),
+                Some(html),
+                &mut hook,
+                |writer, _, _| writer.write_all(b"<hsp>\n"),
+            )
+            .unwrap();
+        }
+        (out, placed)
+    };
+
+    let (serial_out, serial_posts) = run_parts(&[0..6]);
+    // Part 0..1 has first_shown; part 1..4 opens with 2 class N HSPs before shown idx 3;
+    // part 4..6 has ONLY class N HSPs (must emit no posts).
+    let (split_out, split_posts) = run_parts(&[0..1, 1..4, 4..6]);
+    assert_eq!(split_out, serial_out);
+    assert_eq!(split_posts, serial_posts);
+    // Exactly two InitConfig posts: before idx 0 (byte 0) and before idx 3 (after 3 lines).
+    assert_eq!(split_posts.len(), 2);
+    assert_eq!(split_posts[0].0, 0);
+    assert!(split_posts[1].0 > 0);
+    let prefix = std::str::from_utf8(&split_out[..split_posts[1].0]).unwrap();
+    assert_eq!(prefix.lines().count(), 3);
+}
+
+/// The `Gaps =` of an HSP's header, the tables' counts and the library's `HspRecord` count the
+/// columns inside the query row's aligned range (`PairwiseHit::query_range_lengths`, NCBI's
+/// `x_GetNumGaps` and `GetAlignLengths`): a Smith-Waterman alignment's end gaps in the query's
+/// row are left out, the subject row's and an X-drop script's inner gaps stay.
+#[test]
+fn header_gaps_leave_out_the_query_rows_end_gaps() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    use crate::report::serial::seqalign::AlignLengths;
+    let counts = |length: usize, gapopen: usize, ops: Vec<crate::common::GapEditOp>| {
+        let AlignLengths {
+            length,
+            gaps,
+            gap_opens,
+        } = PairwiseHit::from(Hit {
+            length,
+            mismatch: 5,
+            gapopen,
+            gap_info: Some(ops),
+            ..make_hit()
+        })
+        .query_range_lengths();
+        (length, gaps, gap_opens)
+    };
+    // 95 identities and 5 mismatches in each: the rest of `length` are gap columns.
+    assert_eq!(counts(195, 1, vec![Del(95), Sub(100)]), (100, 0, 0));
+    assert_eq!(
+        counts(105, 2, vec![Sub(60), Ins(2), Sub(40), Del(3)]),
+        (102, 2, 1)
+    );
+    assert_eq!(counts(104, 1, vec![Ins(4), Sub(100)]), (104, 4, 1));
+    assert_eq!(counts(103, 1, vec![Sub(50), Del(3), Sub(50)]), (103, 3, 1));
+    let plain = PairwiseHit::from(make_hit());
+    assert_eq!(plain.query_range_lengths().gaps, 0);
+    assert_eq!(plain.query_range_lengths().length, plain.hit.length);
 }

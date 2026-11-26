@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "u8" }, descr { title "cafÃ© title" }, inst { repr raw, mol aa, length 3, seq-data iupacaa "MKV" } },
+    seq { id { local str "ff" }, descr { title "bad ÿ byte" }, inst { repr raw, mol aa, length 3, seq-data iupacaa "MKV" } }
+  }
+}

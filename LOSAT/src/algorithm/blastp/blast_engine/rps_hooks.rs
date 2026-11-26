@@ -684,7 +684,7 @@ pub(super) fn request_space(
 /// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
 /// traceback reads, `ProfileLetters`: `BLAST Database error`, exit status 2) ends the run after the
 /// reports of the batches before it (without the epilog) and after that batch's reader messages
-/// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
+/// and request. That is the error of a header file that a batch reaches (`ErrorAfterBatchReports`, named
 /// by the batch's first query), whose batches before blastp's driver searches again and reports
 /// alone (`search`). LOSAT's refusals end the run as they are.
 #[cold]
@@ -694,12 +694,7 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
         return error;
     }
     // The traceback fails before the batch's Seq-aligns: NCBI read none of its headers.
-    database::HeaderReadError {
-        query: run.batches[batch].start,
-        error,
-        utf8: None,
-    }
-    .into()
+    crate::blastinput::app::ErrorAfterBatchReports::of_batch(run.batches[batch].start, error).into()
 }
 
 // `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole (the

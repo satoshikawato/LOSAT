@@ -50,16 +50,18 @@ export function runFileOption(file: RunFile): RunFileOption {
 
 /**
  * The files of a run (stream 8) with the option that named each, which the engine's *start* of the
- * argv gives (ABI v2 §9: `log_file`, `strategy_file`): a file of a name that both give is the file
- * of `-logfile`, as the engine refuses a strategy file that is the file of `-logfile`. A file that
- * neither names is an error of the engine.
+ * argv gives (ABI v2 §9: `log_file`, `log_file_name`, `strategy_file`): a file of a name that both
+ * give is the file of `-logfile`, as the engine refuses a strategy file that is the file of
+ * `-logfile`. A file that neither names is an error of the engine.
  */
 export function namedRunFiles(
   files: readonly RunFile[],
-  start: { readonly logFile: string | null; readonly strategyFile: string | null },
+  start: { readonly logFile: string | null; readonly logFileName?: string | null; readonly strategyFile: string | null },
 ): RunFile[] {
   return files.map((file) => {
-    if (file.name === start.logFile) return { name: file.name, bytes: file.bytes };
+    if (file.name === start.logFile || (start.logFileName != null && file.name === start.logFileName)) {
+      return { name: file.name, bytes: file.bytes };
+    }
     if (file.name === start.strategyFile) return { name: file.name, bytes: file.bytes, option: 'export_search_strategy' };
     throw new Error(`the engine's archive of the run's files (ABI v2 stream 8) has a file that the argv does not name: ${JSON.stringify(file.name)}`);
   });

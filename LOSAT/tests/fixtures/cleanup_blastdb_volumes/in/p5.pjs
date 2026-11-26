@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "p5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "p5",
+  "number-of-letters": 2376,
+  "number-of-sequences": 12,
+  "last-updated": "2026-11-25T05:17:00",
+  "number-of-volumes": 2,
+  "bytes-total": 40608,
+  "bytes-to-cache": 2646,
+  "files": [
+    "p5.00.phr",
+    "p5.00.pin",
+    "p5.00.psq",
+    "p5.01.phr",
+    "p5.01.pin",
+    "p5.01.psq",
+    "p5.pal",
+    "p5.pdb",
+    "p5.pot",
+    "p5.ptf",
+    "p5.pto"
+  ]
+}

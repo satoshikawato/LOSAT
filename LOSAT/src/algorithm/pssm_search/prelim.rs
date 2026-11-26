@@ -49,8 +49,10 @@ pub(crate) struct PssmPrelim<'a, R: PssmRows> {
     pub(crate) word_size: i32,
     /// `-window_size`; 0 for the one-hit search.
     pub(crate) window: i32,
-    /// `cutoffs->x_dropoff` of the context (the ceiling of `x_dropoff` times ln 2 over
-    /// `kbp_psi->Lambda`, of the search's `-xdrop_ungap`, 7 bits by default).
+    /// `cutoffs->x_dropoff_init` of the context (the ceiling of `x_dropoff` times ln 2 over
+    /// `kbp_psi->Lambda`, of the search's `-xdrop_ungap`, 7 bits by default); the ungapped
+    /// extension's X-drop is this, or `word_cutoff` where it is 0 (a `kbp_psi` Lambda of
+    /// `PLUS-INFINITY`).
     pub(crate) x_dropoff: i32,
     /// `word_params->cutoffs[0].cutoff_score`.
     pub(crate) word_cutoff: i32,
@@ -339,7 +341,12 @@ impl<R: PssmRows> PssmPrelim<'_, R> {
     ) {
         let rows = self.rows;
         let word_size = self.word_size;
-        let x_dropoff = self.x_dropoff;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:217-221,380-383
+        let x_dropoff = if self.x_dropoff == 0 {
+            self.word_cutoff
+        } else {
+            self.x_dropoff
+        };
         let cutoff = self.word_cutoff;
         if self.window != 0 {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:551-603

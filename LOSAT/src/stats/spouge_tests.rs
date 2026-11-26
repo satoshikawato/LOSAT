@@ -554,3 +554,161 @@ fn test_blast_spouge_etos_matches_ncbi_formula_for_representative_evalues() {
     };
     assert_eq!(blast_spouge_etos(1e-30, &tight_kbp, &gbp, 64, 96), 3749);
 }
+
+/// BLOSUM62's Gumbel block (gap costs 11 and 1, as NCBI's table holds it) with the database length
+/// `db_length`.
+fn blosum62_gumbel(db_length: i64) -> BlastGumbelBlk {
+    BlastGumbelBlk {
+        lambda: 0.267,
+        c: 0.669720,
+        g: 12.0,
+        a: 1.9,
+        alpha: 42.602800,
+        sigma: 43.636200,
+        a_un: 0.7916,
+        alpha_un: 4.964660,
+        b: 2.0 * 12.0 * (0.7916 - 1.9),
+        beta: 2.0 * 12.0 * (4.964660 - 42.602800),
+        tau: 2.0 * 12.0 * (4.964660 - 43.636200),
+        db_length,
+    }
+}
+
+/// NCBI's `BLAST_SpougeEtoS` in 128-bit integers, every step NCBI's from NCBI's first bound (its
+/// cast of the double, then at least 2): `None` where the doubling passes 2^100 (a negative Lambda,
+/// whose e-value grows with the score, or a Lambda so small that the cutoff is past every integer
+/// the test needs).
+fn unbounded_etos(
+    evalue: f64,
+    kbp: &KarlinParams,
+    gbp: &BlastGumbelBlk,
+    m: i32,
+    n: i32,
+) -> Option<i128> {
+    let stoe = |score: i128| spouge_stoe_at(score as f64, kbp, gbp, m, n);
+    let db_scale_factor = if gbp.db_length != 0 {
+        gbp.db_length as f64
+    } else {
+        1.0
+    };
+    let e0 = evalue.max(f64::MIN_POSITIVE);
+    let mut a = 0i128;
+    let mut b = i128::from(
+        crate::core::blast_util::ncbi_int4_from_double(
+            (db_scale_factor / e0).glibc_ln() / kbp.lambda,
+        )
+        .max(2),
+    );
+    let mut e = stoe(b);
+    while e > e0 {
+        a = b;
+        b *= 2;
+        if b > 1 << 100 {
+            return None;
+        }
+        e = stoe(b);
+    }
+    while b - a > 1 {
+        let c = (a + b) / 2;
+        if stoe(c) > e0 {
+            a = c;
+        } else {
+            b = c;
+        }
+    }
+    Some(a)
+}
+
+// Line PS item PS7c, fix round 1 (review B1; PD-LOSAT-NCBI-DEFECTS approved exception 31, the
+// Owner's answer Q-PS7c-SPOUGE=B of 2026-11-24): the search for the hit-saving cutoff is NCBI's in
+// integers that do not overflow. Where that cutoff is at most 2^31 - 1, `blast_spouge_etos` gives
+// it, also where NCBI's `Int4` doubling or bisection would overflow (2e-9 to 7e-9 here); where it is
+// above, or where no score reaches the e-value (a negative Lambda, a Lambda of 0), it gives
+// `i32::MAX`, which no `Int4` score passes. Lambdas that are not numbers, infinite or very large
+// take NCBI's steps (no overflow). Every search ends.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
+#[test]
+fn the_cutoff_search_is_ncbi_s_without_the_int4_overflow() {
+    let gbp = blosum62_gumbel(5000);
+    let lambdas = [
+        1e-7, 5e-8, 2e-8, 1e-8, 8e-9, 7e-9, 6e-9, 5e-9, 4e-9, 3e-9, 2e-9, 1e-9, 1e-12, 1e-300, 0.0,
+        -1e-300, -1e-9, -0.5, -10.0, 0.267, 1e300,
+    ];
+    let special = [f64::INFINITY, f64::NEG_INFINITY, f64::NAN];
+    let mut widened = 0;
+    for lambda in lambdas.into_iter().chain(special) {
+        for (evalue, m, n) in [(10.0, 100, 200), (1e-6, 30, 10), (1000.0, 398, 87)] {
+            let kbp = KarlinParams {
+                lambda,
+                k: 0.041,
+                h: 0.14,
+                alpha: 1.9,
+                beta: -30.0,
+            };
+            let expected = match unbounded_etos(evalue, &kbp, &gbp, m, n) {
+                Some(cutoff) if cutoff <= i128::from(i32::MAX) => cutoff as i32,
+                _ => i32::MAX,
+            };
+            let cutoff = blast_spouge_etos(evalue, &kbp, &gbp, m, n);
+            assert_eq!(
+                cutoff, expected,
+                "lambda {lambda:e}, e-value {evalue:e}, m {m}, n {n}"
+            );
+            widened += usize::from(cutoff > 1 << 30);
+        }
+    }
+    // The searches whose doubling (`b *= 2` past 2^30) or bisection (`a + b`) NCBI's `Int4` cannot
+    // hold give a cutoff above 2^30.
+    assert!(widened >= 20, "{widened}");
+}
+
+// Line PS item PS7c, fix round 1: the arguments that NCBI BLAST+ 2.17.0 passes to
+// `BLAST_SpougeEtoS` (read under gdb: the rnd PSSM of 30 letters with K 0.045959763921667597,
+// `-evalue 10`, the shortest subject of tests/db_search/paja, 10 letters, and of
+// tests/db_search/tslice, 3 codons, `-subject` 87 and 728, and the database lengths). Where NCBI's
+// search stays inside `Int4` (psiblast's and tblastn's 8e-9) LOSAT's cutoff is NCBI's last
+// bisection score. Where NCBI's bisection adds past `Int4` (psiblast's 5e-9 to 7e-9: 733,828,724 +
+// 1,467,657,448 at 6e-9, which NCBI wraps to the cutoff -1,046,740,562; tblastn's 4e-9 and 5e-9:
+// 876,829,330 + 1,753,658,660 at 4e-9, wrapped to -832,239,653) LOSAT's is the bisection's in 64
+// bits, the widened cutoff of PD-LOSAT-NCBI-DEFECTS approved exception 31 (rows
+// db.ps7c.ps.lambda_6e-9 and db.ps7c.tbn.lambda_4e-9, where NCBI's wrapped cutoff and LOSAT's both
+// report no hit). Where NCBI's doubling passes `Int4` (1e-9 and 1e-300, where NCBI never ends; -0.5,
+// where NCBI wraps the bound to `INT_MIN` and returns 2^30) the cutoff is above 2^31 - 1 (about
+// 7.4e9 for psiblast's 1e-9) or no score reaches the e-value: `i32::MAX`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
+#[test]
+fn ncbi_s_cutoff_searches_of_the_rnd_pssm_widened() {
+    let etos = |lambda: f64, subject_length: i32, db_length: i64| {
+        let kbp = KarlinParams {
+            lambda,
+            k: 0.045959763921667597,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        blast_spouge_etos(10.0, &kbp, &blosum62_gumbel(db_length), 30, subject_length)
+    };
+    let (psiblast, tblastn) = ((10, 66_738), (3, 11_128));
+    assert_eq!(etos(8e-9, psiblast.0, psiblast.1), 923_444_142);
+    assert_eq!(etos(8e-9, tblastn.0, tblastn.1), 844_769_078);
+    for (lambda, (subject_length, db_length), cutoff) in [
+        (5e-9, psiblast, 1_477_510_627),
+        (6e-9, psiblast, 1_231_258_856),
+        (6e-9, (87, 66_738), 1_289_763_807),
+        (7e-9, psiblast, 1_055_364_733),
+        (4e-9, tblastn, 1_689_538_156),
+        (4e-9, (728, 11_128), 1_630_696_603),
+        (5e-9, tblastn, 1_351_630_525),
+    ] {
+        assert_eq!(
+            etos(lambda, subject_length, db_length),
+            cutoff,
+            "lambda {lambda:e}, subject length {subject_length}"
+        );
+    }
+    for lambda in [1e-9, 1e-300, -0.5] {
+        for (subject_length, db_length) in [psiblast, tblastn] {
+            assert_eq!(etos(lambda, subject_length, db_length), i32::MAX);
+        }
+    }
+}

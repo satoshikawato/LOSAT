@@ -1,0 +1,83 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/rps/nest_p.fna).
+           1 sequences; 1,140 total letters
+
+
+
+Query= f101
+
+Length=190
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+nest_p                                                                394     4e-144
+
+
+
+Query_1    1     MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+Subject_1  286   ............................................................  465
+Subject_1  286   ............................................................  465
+Subject_1  811        ..YYRYRS.TAP*K..L                                        761
+Subject_1  779                                                           ..S.  790
+Subject_1  868                     ...RHP.TQPH                                 836
+Subject_1  688                                                              .  686
+Subject_1  1084                                                       ..H.Q.   1067
+
+Query_1    61    TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+Subject_1  466   ............................................................  645
+Subject_1  466   ............................................................  645
+Subject_1  859                                       ........................  930
+Subject_1  481          H.SQW.PYH.R.GS.E...                                    425
+Subject_1  791   ..TIIM*S.W..                                                  826
+Subject_1  985                                  ..VYGS.*T.V..                  947
+Subject_1  685   SVR.S..Q                                                      662
+Subject_1  172       .THTLFQ..                                                 146
+
+Query_1    121   ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+Subject_1  646   ............................................................  825
+Subject_1  646   ............................................................  825
+Subject_1  931   ............................................................  1110
+Subject_1  55               ...QPYR.WL.DGSR.TA                                 2
+Subject_1  748                      .KSC.L..VLR.                               713
+Subject_1  1129        P.RT.P.LRR                                              1100
+Subject_1  1054                  V..WYQ.YIS.W.S..V                             983
+                                          \                                  
+                                          |                                  
+                                    SCTLKPT
+
+Query_1    181   AEMYAAACRD  190
+Subject_1  826   ..........  855
+Subject_1  826   ..........  855
+Subject_1  1111  ..........  1140
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: User specified sequence set (Input: tests/fasta/rps/nest_p.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,140
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

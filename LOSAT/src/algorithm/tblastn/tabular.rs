@@ -31,10 +31,12 @@ use super::x_subject_store::SubjectLetters;
 use crate::algorithm::common::tabular::{TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::cli::NativeError;
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
-use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
+use crate::report::row_letters::QueryLetters;
+use crate::report::serial::seqalign::{reported_std_seg_row_range, row_range_exception, AlignRow};
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
     TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
@@ -131,6 +133,9 @@ pub(super) struct TblastnTabular<'a> {
     pub matrix: ScoringMatrix,
     /// The program line of outfmt 7 (`program_version`).
     pub program_version: &'static str,
+    /// A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the first row
+    /// whose fields read the query's letters throws (`report::tabular::query_sequence_end`).
+    pub query_other_coding: Option<i32>,
 }
 
 /// The custom tabular report of a checked `-outfmt` value (`TabularSpec::of_app`, tblastn's
@@ -340,6 +345,30 @@ pub(super) fn write_tblastn_tabular(
         )?;
         writer.write_all(&buf)?;
         buf.clear();
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
+        // `qcovs` reads the query range of every HSP of the query before its first row: a query
+        // row that starts with a gap throws there, after outfmt 7's lines (`-subject`'s mapping
+        // drops at most one end segment, `KappaResultHitList::put_in_report_order`, so any
+        // remaining leading query gap still throws).
+        if needs.qcovs {
+            let unranged = hitlist
+                .lists()
+                .iter()
+                .flat_map(|list| list.hsps.hsps.iter().zip(&list.payloads))
+                .find_map(|(linked, payload)| {
+                    reported_std_seg_row_range(
+                        i64::from(linked.hsp.q_start),
+                        i64::from(linked.hsp.q_end),
+                        &payload.edit_script,
+                        AlignRow::Query,
+                        false,
+                    )
+                });
+            if let Some(error) = unranged {
+                writer.flush()?;
+                return Err(NativeError::exception(&row_range_exception(error)).into());
+            }
+        }
         // The query's formatter (`TabularRows`).
         let mut rows = TabularRows::default();
         for list in hitlist.lists() {
@@ -390,6 +419,11 @@ pub(super) fn write_tblastn_tabular(
             );
             let mut translation = None;
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer, &buf, coding,
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
                 // A row that reads the subject (`TabularSpec::subject_fetch`, by the Seq-align's
                 // identities for `nident` alone, `database::reads_subject`) loads it first where
@@ -470,18 +504,6 @@ pub(super) fn write_tblastn_tabular(
                         &mut srow,
                     )?;
                 }
-                // The query row's gap residues (`TabularHsp::stored_gaps`; a PSSM query's).
-                let query_gaps = if rows_read {
-                    stored_gap_columns(
-                        query_letters,
-                        b'-',
-                        usize::try_from(hsp.q_start)?,
-                        &payload.edit_script,
-                        RowSide::Query,
-                    )
-                } else {
-                    Vec::new()
-                };
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1072-1084
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1244
                 // The protein query has no strand (frame 0); the subject's frame is read in its
@@ -512,10 +534,14 @@ pub(super) fn write_tblastn_tabular(
                     q_frame: 0,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_bytes(), srow.as_bytes())),
-                    end_gaps: true,
-                    stored_gaps: [&query_gaps, &[]],
-                    // The protein query's residues, in the HSP's context and in the Seq-align.
-                    qcovhsp: qcovhsp.of_hsp(hsp.q_end - hsp.q_start, hsp.q_end - hsp.q_start),
+                    ops: &payload.edit_script,
+                    // The protein query's residues, in the HSP's context (with the letters that
+                    // `-subject`'s mapper left out, which NCBI's BlastHSP still has) and in the
+                    // Seq-align.
+                    qcovhsp: qcovhsp.of_hsp(
+                        hsp.q_end - hsp.q_start + payload.query_left_out as i32,
+                        hsp.q_end - hsp.q_start,
+                    ),
                 };
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {

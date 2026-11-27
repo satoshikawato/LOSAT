@@ -390,8 +390,8 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 109,
-        "expected >= 109 frozen cases, got {checked}"
+        checked >= 110,
+        "expected >= 110 frozen cases, got {checked}"
     );
 }
 

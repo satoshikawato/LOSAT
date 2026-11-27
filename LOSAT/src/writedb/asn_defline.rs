@@ -382,6 +382,18 @@ struct LocPiece {
     strand: i32,
 }
 
+/// Deferred `s_GetStrand` candidate and top-level `empty` Seq-id keys kept only for complex
+/// locations whose scope-free `IsOneBioseq` check failed; resolved in `build_indices` once
+/// `id_to_bioseq` is populated.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+#[derive(Clone, Debug)]
+struct DeferredStrand {
+    strand: i32,
+    empty_ids: Box<[Option<HandleKey>]>,
+}
+
 /// Compact representation of a `Seq-loc` extracted during the TSE walk.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CompactLoc {
@@ -390,12 +402,14 @@ pub(crate) struct CompactLoc {
     strand: i32,
     /// Whether the top-level `Seq-loc` is `mix` or `packed-int` (`CAnnotObjectType_Less`).
     is_complex: bool,
-    /// Candidate `s_GetStrand` value kept when pieces name multiple `Seq-id` keys; applied in
-    /// `build_indices` only when `loc_single_bioseq` resolves all pieces to one Bioseq
+    /// Candidate `s_GetStrand` value and any `empty` Seq-id keys kept when pieces or `empty`
+    /// sub-locations name multiple `Seq-id` keys; applied in `build_indices` only when
+    /// `loc_single_bioseq_with_empties` resolves all pieces and `empty` IDs to one Bioseq
     /// (`IsSameBioseq`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
-    deferred_strand: Option<i32>,
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+    deferred_strand: Option<Box<DeferredStrand>>,
     /// FASTA string of the first Seq-id (for `cannot find sequence` error on missing product).
     first_id_fasta: Option<Vec<u8>>,
 }
@@ -810,29 +824,39 @@ impl TseFeatureIndex {
     }
 
     /// Resolves `sequence::GetStrand` for multi-`Seq-id` complex locations once `id_to_bioseq`
-    /// is populated, applying the cached `s_GetStrand` value only when all pieces resolve to one
-    /// Bioseq (`IsSameBioseq`).
+    /// is populated, applying the cached `s_GetStrand` value only when all pieces and `empty`
+    /// Seq-ids resolve to one Bioseq (`IsSameBioseq`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
     fn resolve_deferred_strands(&mut self) {
         for i in 0..self.genes.len() {
-            if let Some(st) = self.genes[i].loc.deferred_strand.take() {
-                if self.loc_single_bioseq(&self.genes[i].loc).is_some() {
-                    self.genes[i].loc.strand = st;
+            if let Some(def) = self.genes[i].loc.deferred_strand.take() {
+                if self
+                    .loc_single_bioseq_with_empties(&self.genes[i].loc, &def.empty_ids)
+                    .is_some()
+                {
+                    self.genes[i].loc.strand = def.strand;
                 }
             }
         }
         for i in 0..self.cds.len() {
-            if let Some(st) = self.cds[i].loc.deferred_strand.take() {
-                if self.loc_single_bioseq(&self.cds[i].loc).is_some() {
-                    self.cds[i].loc.strand = st;
+            if let Some(def) = self.cds[i].loc.deferred_strand.take() {
+                if self
+                    .loc_single_bioseq_with_empties(&self.cds[i].loc, &def.empty_ids)
+                    .is_some()
+                {
+                    self.cds[i].loc.strand = def.strand;
                 }
             }
         }
         for i in 0..self.biosrcs.len() {
-            if let Some(st) = self.biosrcs[i].loc.deferred_strand.take() {
-                if self.loc_single_bioseq(&self.biosrcs[i].loc).is_some() {
-                    self.biosrcs[i].loc.strand = st;
+            if let Some(def) = self.biosrcs[i].loc.deferred_strand.take() {
+                if self
+                    .loc_single_bioseq_with_empties(&self.biosrcs[i].loc, &def.empty_ids)
+                    .is_some()
+                {
+                    self.biosrcs[i].loc.strand = def.strand;
                 }
             }
         }
@@ -990,6 +1014,27 @@ impl TseFeatureIndex {
             }
         }
         bio
+    }
+
+    /// Scope-aware `IsOneBioseq` check over `loc.pieces` and top-level `empty` Seq-id keys
+    /// (`s_GetId` walks `CSeq_loc_CI` with `eEmpty_Allow` and checks `IsSameBioseq`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1447-1462
+    fn loc_single_bioseq_with_empties(
+        &self,
+        loc: &CompactLoc,
+        empty_ids: &[Option<HandleKey>],
+    ) -> Option<usize> {
+        let bio = self.loc_single_bioseq(loc)?;
+        for e in empty_ids {
+            let key = e.as_ref()?;
+            let &bi = self.id_to_bioseq.get(key)?;
+            if bi != bio {
+                return None;
+            }
+        }
+        Some(bio)
     }
 
     fn loc_ranges_by_rev(&self, loc: &CompactLoc) -> Vec<(usize, bool, u64, u64)> {
@@ -1788,6 +1833,7 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
 
     let mut stack = Vec::new();
     let mut mix_child_one_id = Vec::new();
+    let mut top_empties = Vec::new();
     let mut child_empties = Vec::new();
     if let Some((choice, inner)) = as_choice(root) {
         if choice == s.seqloc_mix {
@@ -1801,15 +1847,16 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
                         &out.pieces[start..],
                         &child_empties,
                     ));
+                    top_empties.append(&mut child_empties);
                 }
             }
         } else {
-            extract_loc_pieces(root, interner, &mut out, &mut stack, &mut child_empties);
+            extract_loc_pieces(root, interner, &mut out, &mut stack, &mut top_empties);
         }
     }
     let child_flags = (!mix_child_one_id.is_empty()).then_some(mix_child_one_id.as_slice());
-    out.strand = compute_top_strand(root, &out.pieces, child_flags);
-    out.deferred_strand = deferred_top_strand(root, &out.pieces, child_flags);
+    out.strand = compute_top_strand(root, &out.pieces, &top_empties, child_flags);
+    out.deferred_strand = deferred_top_strand(root, &out.pieces, top_empties, child_flags);
     out
 }
 
@@ -1995,7 +2042,13 @@ fn push_seq_pnt(pt: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) 
 /// `sequence::GetStrand` + `s_GetStrand` for ORF CDS labels and `TestForOverlap64`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
-fn compute_top_strand(loc: &Value, pieces: &[LocPiece], mix_child_one_id: Option<&[bool]>) -> i32 {
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+fn compute_top_strand(
+    loc: &Value,
+    pieces: &[LocPiece],
+    empties: &[Option<HandleKey>],
+    mix_child_one_id: Option<&[bool]>,
+) -> i32 {
     let s = dschema();
     let Some((choice, inner)) = as_choice(loc) else {
         return 0;
@@ -2022,7 +2075,7 @@ fn compute_top_strand(loc: &Value, pieces: &[LocPiece], mix_child_one_id: Option
         };
     }
     // `GetStrand` checks `IsOneBioseq` before calling `s_GetStrand`.
-    if !pieces_are_one_id(pieces) {
+    if !pieces_and_empties_are_one_id(pieces, empties) {
         return 0;
     }
     eval_s_get_strand(loc, mix_child_one_id)
@@ -2032,28 +2085,31 @@ fn compute_top_strand(loc: &Value, pieces: &[LocPiece], mix_child_one_id: Option
 /// whose `IsOneBioseq` check requires `id_to_bioseq` synonym resolution in `build_indices`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-389,450-513
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
 fn deferred_top_strand(
     loc: &Value,
     pieces: &[LocPiece],
+    empties: Vec<Option<HandleKey>>,
     mix_child_one_id: Option<&[bool]>,
-) -> Option<i32> {
+) -> Option<Box<DeferredStrand>> {
     let s = dschema();
     let (choice, _) = as_choice(loc)?;
     if choice == s.seqloc_int
         || choice == s.seqloc_whole
         || choice == s.seqloc_pnt
         || choice == s.seqloc_packed_pnt
-        || pieces_are_one_id(pieces)
+        || pieces_and_empties_are_one_id(pieces, &empties)
         || pieces.is_empty()
     {
         return None;
     }
     let st = eval_s_get_strand(loc, mix_child_one_id);
-    (st != 0).then_some(st)
-}
-
-fn pieces_are_one_id(pieces: &[LocPiece]) -> bool {
-    pieces_and_empties_are_one_id(pieces, &[])
+    (st != 0).then(|| {
+        Box::new(DeferredStrand {
+            strand: st,
+            empty_ids: empties.into_boxed_slice(),
+        })
+    })
 }
 
 /// Scope-free `IsOneBioseq` check over a subtree's extracted pieces and `empty` IDs.

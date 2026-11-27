@@ -1846,19 +1846,37 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .check_reported_titles(&database, &hit_lists, shared::TitleReads::SeqAligns)
         .unwrap();
     let posts = titles
-        .title_posts(&database, &hit_lists, [&(0..1)])
+        .title_posts(&database, &hit_lists, [&(0..1)], false)
         .unwrap();
     assert_eq!(posts.len(), 1);
     assert_eq!(posts[0].0, 0);
-    assert_eq!(
-        posts[0].1.text(),
-        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at \
-          byte 24\np10 l\xe9st protein\n"
-    );
+    let post: &[u8] = b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in \
+          string at byte 24\np10 l\xe9st protein\n";
+    assert_eq!(posts[0].1.text(), post);
     assert!(titles
-        .title_posts(&database, &hit_lists, [&(0..1)])
+        .title_posts(&database, &hit_lists, [&(0..1)], false)
         .unwrap()
         .is_empty());
+    // RG-KB 9b-2: with the prefetch (a table, `TitleReads::Prefetched`), the batch's prefetch
+    // loads the subject once more (its header found in the cache, its ids registered: one post),
+    // and a batch after finds its blob in NCBI's cache of released blobs (nothing). Each row
+    // that reads the definition line posts it again (`title_decodes`, by rank).
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Prefetched)
+        .unwrap();
+    database.seqdb().restart_header_reads();
+    let posts = titles
+        .title_posts(&database, &hit_lists, [&(0..1)], true)
+        .unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].1.text(), [post, post].concat());
+    assert!(titles
+        .title_posts(&database, &hit_lists, [&(0..1)], true)
+        .unwrap()
+        .is_empty());
+    let decodes = titles.title_decodes(&database, &hit_lists);
+    assert_eq!(decodes.of(1), post);
+    assert!(decodes.of(0).is_empty());
     drop(database);
     std::fs::remove_dir_all(&dir).unwrap();
 }

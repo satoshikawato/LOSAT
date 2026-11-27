@@ -97,6 +97,48 @@ test('-parse_deflines runs: the outputs are the CLI\'s and the results name the 
   }
 });
 
+// -parse_deflines typed in Additional options has the engine read the inputs again, with the other reader (line RG-XT
+// X7-5): until they are read, their blocks and cards keep their place (line WQA's D25, 2026-11-27). Their lines went and
+// came back, so "Run LOSAT" below them moved up some 175 px and back, and a press whose release came while they were
+// read was released beside the button: no run started, and the page said nothing. Here the press starts before the
+// option is typed and is released once the query is read again.
+test('Run LOSAT stays under a press while -parse_deflines has the inputs read again, and the press starts the run', async ({ page }) => {
+  const { program: id, query, subject } = CASES[1];
+  await program(page, id);
+  await paste(page, 'query', query);
+  await paste(page, 'subject', subject);
+  await openParameters(page);
+  const button = page.getByTestId('run-losat');
+  await button.scrollIntoViewIfNeeded();
+  const box = (await button.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  // The button's top when the press holds, and at each change of an input's state until its click.
+  await page.evaluate(() => {
+    const top = () => document.querySelector('[data-testid="run-losat"]')!.getBoundingClientRect().top;
+    const tops = [top()];
+    const reading = () => document.querySelector('[data-testid="query-source-0"]')?.getAttribute('data-status') === 'indexing';
+    let readAgain: () => void = () => undefined;
+    const queryReadAgain = new Promise<void>((resolve) => (readAgain = resolve));
+    const observer = new MutationObserver(() => {
+      tops.push(top());
+      if (reading()) readAgain();
+    });
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-status', 'data-check'] });
+    window.addEventListener('click', () => observer.disconnect(), { capture: true, once: true });
+    Object.assign(window, { readAgainTest: { tops, queryReadAgain } });
+  });
+  await page.getByTestId('param-extra').fill('-parse_deflines');
+  await page.evaluate(() => (window as unknown as { readAgainTest: { queryReadAgain: Promise<void> } }).readAgainTest.queryReadAgain);
+  await page.mouse.up();
+  const tops = await page.evaluate(() => (window as unknown as { readAgainTest: { tops: number[] } }).readAgainTest.tops);
+  expect(tops.length, 'the button\'s top at the press and at the changes of the inputs').toBeGreaterThan(1);
+  expect(new Set(tops), `the button's tops: ${tops.join(', ')}`).toEqual(new Set([tops[0]]));
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await expect(page.getByTestId('run-argv')).toContainText('-parse_deflines');
+});
+
 // The CLI reads the subjects first, and two subject records of one id stop it under -parse_deflines
 // (LOSAT's refusal: NCBI BLAST+ shows the first for both). When both records are in one subject
 // source, the form's input check (losat_web2_register with -parse_deflines) refuses that source with

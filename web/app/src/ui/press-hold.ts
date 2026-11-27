@@ -20,6 +20,8 @@
 // such a press held until the next one). A timer only ends a hold whose click never came after its
 // release (a touch that drags, a long touch): a tap's click may come in a later task than its release.
 
+import { contentHeight } from './height-hold';
+
 /** How long after its release a press whose click has not come still holds. */
 const UNCLICKED_MS = 1000;
 
@@ -62,12 +64,7 @@ export function holdWhilePressed(
     if (next === undefined) return;
     if (held !== undefined && held !== next) held.style.removeProperty('min-height');
     // The height that the element has now (a hold of an earlier press included), without its padding and border.
-    const style = getComputedStyle(next);
-    const edges =
-      style.boxSizing === 'border-box'
-        ? 0
-        : [style.paddingTop, style.paddingBottom, style.borderTopWidth, style.borderBottomWidth].reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
-    next.style.minHeight = `${next.getBoundingClientRect().height - edges}px`;
+    next.style.minHeight = `${contentHeight(next)}px`;
     held = next;
   };
   const onUp = (event: PointerEvent): void => {

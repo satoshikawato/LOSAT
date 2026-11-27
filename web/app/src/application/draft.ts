@@ -2575,6 +2575,15 @@ export function holdsInputs(state: DraftState): boolean {
   );
 }
 
+/**
+ * Whether a source is read again: it was read (the data layer has it), and it is read now with another reader (`-parse_deflines`
+ * typed or taken out, a program of the other molecule) or once more (a part of LOSAT that could not be loaded). Its records come
+ * back once it is read; meanwhile the form keeps the place that it had (line WQA's D25, 2026-11-27).
+ */
+export function isReadAgain(source: DraftSource): boolean {
+  return source.status === 'indexing' && source.sourceId !== undefined;
+}
+
 /** The included records of a ready source. */
 export function includedOf(source: DraftSource): readonly DatasetRecord[] {
   return source.base === undefined ? [] : includedRecords({ ...source.base, excluded: source.excluded });

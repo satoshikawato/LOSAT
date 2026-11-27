@@ -136,6 +136,10 @@ fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
             subject.to_str().unwrap(),
             "-task",
             "blastn",
+            // Only the last query's hit (an exact match) passes: the random queries' chance hits
+            // do not, so that a refused subject title is met in the last query's batch alone.
+            "-evalue",
+            "1e-30",
             "-outfmt",
             "5",
         ];
@@ -161,6 +165,8 @@ fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
                 fasta(&subject, &[(b"s1 subject", &hit)]);
                 let whole = run_with(&args_of(false), &env);
                 assert_eq!(whole.status.code(), Some(0), "{what}");
+                let hits = whole.stdout.windows(5).filter(|w| *w == b"<Hit>").count();
+                assert_eq!(hits, 1, "{what}: the last query's hit alone");
                 // a query title: the 291st query; a subject title: the subject of the last
                 // query's hit (the only query with one). The batches before hold fewer queries.
                 let refused_query = if what == "a query title" { 290 } else { 299 };

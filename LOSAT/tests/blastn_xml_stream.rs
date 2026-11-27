@@ -470,8 +470,10 @@ fn records_titled(dir: &TempDir, name: &str, deflines: [&[u8]; 6]) -> PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
-/// Under `-parse_deflines`, the results of consecutive queries of one Seq-id join one held
-/// `-subject` report of 16 and 15, across batches too (`XmlShow::joins_held`), and the report shows
+/// Under `-parse_deflines`, the results of consecutive queries of one Seq-id (here a PDB chain and
+/// its molecule without a chain: two sequences to NCBI's scope, which LOSAT reads, one Seq-id to
+/// its formatter) join one held `-subject` report of 16 and 15, across batches too
+/// (`XmlShow::joins_held`), and the report shows
 /// its first query's id, title and length: a title that LOSAT refuses on a joined query is never
 /// shown, so never refused (the bytes of the run without it), and one on the first query of a join
 /// is refused where NCBI makes the joined report, after the reports before it, with the switch
@@ -484,36 +486,36 @@ fn joined_results_of_one_seq_id_are_refused_where_ncbi_makes_their_report() {
         &dir,
         "plain.fa",
         [
-            b"lcl|qa first a",
-            b"lcl|qa second a",
-            b"lcl|qb first b",
-            b"lcl|qb second b",
-            b"lcl|qc first c",
-            b"lcl|qc second c",
+            b"pdb|1ABC|A first a",
+            b"pdb|1ABC| second a",
+            b"pdb|2ABC|A first b",
+            b"pdb|2ABC| second b",
+            b"pdb|3ABC|A first c",
+            b"pdb|3ABC| second c",
         ],
     );
     let joined_refused = records_titled(
         &dir,
         "joined.fa",
         [
-            b"lcl|qa first a",
-            b"lcl|qa second a",
-            b"lcl|qb first b",
-            b"lcl|qb , ,",
-            b"lcl|qc first c",
-            b"lcl|qc second c",
+            b"pdb|1ABC|A first a",
+            b"pdb|1ABC| second a",
+            b"pdb|2ABC|A first b",
+            b"pdb|2ABC| , ,",
+            b"pdb|3ABC|A first c",
+            b"pdb|3ABC| second c",
         ],
     );
     let lead_refused = records_titled(
         &dir,
         "lead.fa",
         [
-            b"lcl|qa first a",
-            b"lcl|qa second a",
-            b"lcl|qb , ,",
-            b"lcl|qb second b",
-            b"lcl|qc first c",
-            b"lcl|qc second c",
+            b"pdb|1ABC|A first a",
+            b"pdb|1ABC| second a",
+            b"pdb|2ABC|A , ,",
+            b"pdb|2ABC| second b",
+            b"pdb|3ABC|A first c",
+            b"pdb|3ABC| second c",
         ],
     );
     for (outfmt, threads) in [("16", 1), ("15", 4)] {
@@ -542,7 +544,10 @@ fn joined_results_of_one_seq_id_are_refused_where_ncbi_makes_their_report() {
             let args = args_of(&joined_refused);
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             let (joined, _) = same_two(&what, &args, threads, batch, None);
-            assert!(joined == whole, "{what}: the joined title is not shown\n{joined:?}");
+            assert!(
+                joined == whole,
+                "{what}: the joined title is not shown\n{joined:?}"
+            );
             let args = args_of(&lead_refused);
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             let (lead, _) = same_two(&what, &args, threads, batch, None);

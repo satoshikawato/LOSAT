@@ -92,7 +92,12 @@ fn call<W: StructuredXml>(
     let xml = BlastnXml {
         run: run(),
         queries,
-        query_records: crate::algorithm::blastn::pairwise::QueryRecords::new(queries, &query_input, queries, 0),
+        query_records: crate::algorithm::blastn::pairwise::QueryRecords::new(
+            queries,
+            &query_input,
+            queries,
+            0,
+        ),
         searched_lengths: &lengths,
         stats: vec![XmlStats::NONE; queries.len()],
         messages: vec![Vec::new(); queries.len()],

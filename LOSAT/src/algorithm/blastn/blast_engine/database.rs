@@ -587,6 +587,14 @@ impl BlastnDatabase {
         self.parsed_seqids
     }
 
+    /// Whether a batch's prefetch can stop at a lookup that fails on a file with NCBI's exception
+    /// (`shared::TaxdbRun::prefetch_can_stop`, decided once for the run): a database with parsed
+    /// Seq-ids whose lookups can fail so. The gate of the outfmt 5 scope of the batches before,
+    /// as BLASTX's (`blastx::native::BatchScopes`).
+    pub(super) fn prefetch_can_stop(&self) -> bool {
+        self.parsed_seqids && self.taxdb.prefetch_can_stop(&self.db)
+    }
+
     /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
     /// each rank, `ReportedSubjects::ordinals`; `parsed`: the sequences with parsed Seq-ids,
     /// `ReportedSubjects::parsed`) and what the taxonomy database says about it, for the XML2

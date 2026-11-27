@@ -8506,6 +8506,14 @@ fn run_in_pool(
     // Without the switches the records read before the search are those.
     let keep = queries.per_batch() && !stream.acting();
     let mut kept = x_query_stream::Kept::default();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313
+    // (cited at `common::database::stop_lookup_unsure`) Outfmt 5 keeps the queries of the batches
+    // before in NCBI's scope: where the loop does not hold the input records (not
+    // `x_query_stream::Queries::Records`), the scope of the batches read (`QueryScope`, the keys
+    // by which it finds them), kept where a prefetch of the run can stop
+    // (`BlastnDatabase::prefetch_can_stop`, as BLASTX's `BatchScopes`).
+    let keeps_xml_scope = xml && !matches!(queries, x_query_stream::Queries::Records { .. });
+    let mut xml_scope: Option<crate::blastinput::query_batch::QueryScope> = None;
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -8554,6 +8562,15 @@ fn run_in_pool(
         // the switch acts (an error here is the file changed between the two readings).
         let mut batch_records =
             queries.batch_in(input_start..input_end, start..end, parallel_pool)?;
+        if let (true, SubjectSource::Database(database)) = (keeps_xml_scope, source) {
+            if database.prefetch_can_stop() {
+                xml_scope.get_or_insert_with(Default::default).extend(
+                    &crate::blastinput::query_batch::QueryScope::of_shown_records(
+                        batch_records.input(),
+                    ),
+                );
+            }
+        }
         let mut batch_title_warnings = Posts::of_lines(
             batch_records
                 .input()
@@ -9204,13 +9221,18 @@ fn run_in_pool(
             // stops (both forms of the prefetch below): the batch's input records (those that
             // `-query_loc` drops included, each with its `Query_N` of the run,
             // `FastaRecord::local_id`), in outfmt 5, whose scope the formatter keeps, those of the
-            // batches before too (outfmt 5 keeps the records read before the search, as
-            // `query_scopes` above).
-            let scope = || {
-                crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
-                    x_query_stream::Queries::Records { input, .. } if xml => &input[..input_end],
-                    _ => batch_records.input(),
-                })
+            // batches before too: the records read before the search, or the scope kept of the
+            // batches read (`xml_scope`, where the records are read batch by batch).
+            let scope = || match (&queries, &xml_scope) {
+                (x_query_stream::Queries::Records { input, .. }, _) if xml => {
+                    crate::blastinput::query_batch::QueryScope::of_shown_records(
+                        &input[..input_end],
+                    )
+                }
+                (_, Some(kept)) => kept.clone(),
+                _ => crate::blastinput::query_batch::QueryScope::of_shown_records(
+                    batch_records.input(),
+                ),
             };
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)

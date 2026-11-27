@@ -44,3 +44,6 @@ letters is kept in the repository; the commit is the one that added the files.
 - `dxs_na_pq.fna`, `dxs_na_r.fna`, `dxs_s.fna` (line RG series D, item xml-stream, 2026-11-27): `na` of `xsb_na.fna`
   then a query of its letters titled `, ,`, or then `r`, 120 letters of a fixed generator that hit only the subject titled `, ,`
   of `dxs_s.fna` (beside `pa`); rows `db.dxs.blastn.*` of `tests/db_search_manifest/blastn.dxs.tsv`.
+- `dxs_pq_na.fna`, `dxs_na_nb.fna`, `dxs_na_nb_pq_nc.fna` (line RG series D, item xml-stream, review fix round, 2026-11-27):
+  records of the 93 letters of `na` of `xsb_na.fna` titled `, ,` then `na`; `na` then `nb`; `na`, `nb`, `, ,` and `nc`; rows
+  `db.dxs.blastn.{ttf,nanb,tmb}.*` of `tests/db_search_manifest/blastn.dxs.tsv`.

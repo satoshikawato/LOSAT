@@ -114,20 +114,21 @@ struct Run {
     side_files: Vec<String>,
 }
 
-/// Runs `command` (a search with `-outfmt outfmt`; 13 and 14 write to `dir/o.<ext>`).
+/// Runs `command` (a search with `-outfmt outfmt`; 13 and 14 write to `dir/o.<ext>`). The outputs
+/// of the runs before are removed first, so that `side_files` are this run's.
 fn run(mut command: Command, outfmt: &str, dir: &Path) -> Run {
     command.args(["-outfmt", outfmt]);
+    for entry in std::fs::read_dir(dir).expect("list the directory") {
+        let path = entry.expect("an entry").path();
+        if path.file_name().is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.starts_with("o.") || name.starts_with("o_")
+        }) {
+            std::fs::remove_file(path).expect("remove an old output");
+        }
+    }
     if matches!(outfmt, "13" | "14") {
         let ext = if outfmt == "13" { "json" } else { "xml" };
-        for entry in std::fs::read_dir(dir).expect("list the directory") {
-            let path = entry.expect("an entry").path();
-            if path.file_name().is_some_and(|name| {
-                let name = name.to_string_lossy();
-                name.starts_with("o.") || name.starts_with("o_")
-            }) {
-                std::fs::remove_file(path).expect("remove an old output");
-            }
-        }
         command.arg("-out").arg(dir.join(format!("o.{ext}")));
     }
     let output = command.output().expect("the search runs");

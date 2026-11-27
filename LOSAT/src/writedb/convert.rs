@@ -238,13 +238,15 @@ fn or_half(seq: &mut [u8], i: usize, half: u8) {
 }
 
 /// `WriteDB_Ncbi4naToBinary`'s loop over the input bytes `read` ([`NCBI4NA_BLOCK`] or more), a
-/// block of [`NCBI4NA_BLOCK`] bytes at a time (LOSAT's speed). Every block takes the same steps:
-/// the half of each of its bytes whose two bases are `A`, `C`, `G` or `T` by arithmetic
-/// ([`ncbi2na_code_of_base`]), 0 for its other bytes, and the block's output bytes written from
-/// these halves ([`pair_byte`]) without a branch a byte; then each byte with another base, in
-/// order, through [`ncbi4na_ambiguous_half`], whose half is ORed in. NCBI's loop calls `check`
-/// for exactly those bytes and in that order, so the ambiguity data and the random bases are
-/// NCBI's.
+/// block of [`NCBI4NA_BLOCK`] bytes at a time (LOSAT's speed). Every block takes one pass of
+/// arithmetic: the half of each of its bytes whose two bases are `A`, `C`, `G` or `T`
+/// ([`ncbi2na_code_of_base`]), and a flag for each of its other bytes. A block without a flag
+/// writes its output bytes from these halves ([`pair_byte`]) without a branch a byte. A block
+/// with a flag writes each output byte once, from its two input bytes in order: a flagged byte's
+/// half from [`ncbi4na_ambiguous_half`], the other's from the pass. (Writing a block's output
+/// bytes by vector and then ORing the flagged halves into them made all-N input run above dev:
+/// four times its memory-ordering machine clears.) NCBI's loop calls `check` for exactly the
+/// flagged bytes and in that order, so the ambiguity data and the random bases are NCBI's.
 /// The bytes after the last block run the loop's body ([`ncbi4na_byte_to_binary`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-518
@@ -270,16 +272,32 @@ fn ncbi4na_blocks_to_binary(
         }
         // The half of the even byte in the high four bits, that of the odd byte below it.
         let out = &mut seq[start / 2..(start + NCBI4NA_BLOCK) / 2];
-        for (byte, &two) in out.iter_mut().zip(halves.as_chunks::<2>().0) {
-            *byte = pair_byte(two);
-        }
-        if any != 0 {
-            for (offset, (&flag, &inp)) in ambiguous.iter().zip(block).enumerate() {
-                if flag != 0 {
-                    let i = start + offset;
-                    let half = ncbi4na_ambiguous_half(ambiguities, i, inp, base_length);
-                    or_half(seq, i, half);
-                }
+        if any == 0 {
+            for (byte, &two) in out.iter_mut().zip(halves.as_chunks::<2>().0) {
+                *byte = pair_byte(two);
+            }
+        } else {
+            let pairs = halves
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .zip(ambiguous.as_chunks::<2>().0)
+                .zip(block.as_chunks::<2>().0);
+            for (k, (byte, ((&[high, low], &[high_flag, low_flag]), &[high_inp, low_inp]))) in
+                out.iter_mut().zip(pairs).enumerate()
+            {
+                let i = start + 2 * k;
+                let high = if high_flag != 0 {
+                    ncbi4na_ambiguous_half(ambiguities, i, high_inp, base_length)
+                } else {
+                    high
+                };
+                let low = if low_flag != 0 {
+                    ncbi4na_ambiguous_half(ambiguities, i + 1, low_inp, base_length)
+                } else {
+                    low
+                };
+                *byte = (high << 4) | low;
             }
         }
     }

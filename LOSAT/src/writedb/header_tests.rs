@@ -473,8 +473,10 @@ mod parsed {
     }
 
     /// The diagnostics without the record (`defline_set_bad_chars`) are those of the record, for
-    /// strings of every byte in every string member, before and after other members, and lengths
-    /// whose BER length takes one to three bytes.
+    /// the texts of `search_texts` (random bytes of any value, and of an alphabet with bytes
+    /// outside ' '..'~') and texts of 127, 128, 255, 256 and 65,536 bytes (a BER length in the
+    /// short form and in the long form with one to three length bytes) in every string member of
+    /// every alternative with strings, before and after other members.
     #[test]
     fn bad_chars_alone_are_those_of_the_record() {
         let mut texts = crate::utils::byte_search::tests::search_texts();
@@ -613,8 +615,11 @@ mod parsed {
     }
 }
 
-/// The title's diagnostics without the record are those of the record, for titles of every byte
-/// and of lengths whose BER length takes one to four bytes.
+/// The title's diagnostics without the record are those of the record, for the texts of
+/// `search_texts` (random bytes of any value, and of an alphabet with bytes outside ' '..'~'),
+/// titles of 127, 128, 255, 256, 65,535 and 65,536 bytes and of 16 MiB (a BER length in the short
+/// form and in the long form with one to four length bytes) and titles of 1, 12, 30, 60 and 100
+/// bytes all outside ' '..'~'.
 #[test]
 fn bad_title_chars_are_those_of_the_record() {
     let mut texts = crate::utils::byte_search::tests::search_texts();
@@ -640,8 +645,10 @@ fn bad_title_chars_are_those_of_the_record() {
     }
 }
 
-/// The record fits the buffer it is written into: at most `DEFLINE_SET_OVERHEAD` bytes besides
-/// the title, with the longest lengths and integers.
+/// The record fits the buffer it is written into: at most 77 bytes besides the title, so within
+/// `DEFLINE_SET_OVERHEAD`, for titles of 0, 1, 127, 128, 255, 256, 65,535 and 65,536 bytes and of
+/// 16 MiB (a BER length of one to five bytes) and oids and taxids whose integers take one, two and
+/// four bytes.
 #[test]
 fn the_record_fits_its_buffer() {
     for len in [0, 1, 127, 128, 255, 256, 65_535, 65_536, 1 << 24] {

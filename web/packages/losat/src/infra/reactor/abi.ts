@@ -348,6 +348,13 @@ export class ReactorAbi {
     };
   }
 
+  private encodeArgv(argv: readonly string[]): Uint8Array {
+    // ABI v2 strips one trailing NUL ("a trailing NUL is allowed"), so an argv ending in an empty
+    // word (`['blast_formatter', '-rid', '']`) needs one extra trailing NUL to preserve it.
+    const joined = argv.join('\0');
+    return encoder.encode(argv.length > 0 && argv[argv.length - 1] === '' ? `${joined}\0` : joined);
+  }
+
   /**
    * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
    * data loaders on and, when the argv parses, with `-parse_deflines` on (the *validation* JSON,
@@ -355,7 +362,7 @@ export class ReactorAbi {
    * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
-    const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
+    const status = this.call(this.exports.losat_web2_validate, [this.encodeArgv(argv)]);
     // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
     // it is read before the error, whose call drops the responses.
     const known =
@@ -382,7 +389,7 @@ export class ReactorAbi {
    * command line's error text, or valid. The call emits no response for it, and none is read.
    */
   validateTool(argv: readonly string[]): ToolValidation {
-    const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
+    const status = this.call(this.exports.losat_web2_validate, [this.encodeArgv(argv)]);
     return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
   }
 
@@ -571,7 +578,7 @@ export class ReactorAbi {
       else if (stream === TOOL_FILES_STREAM) sink.file(parseToolFrame(bytes));
     };
     try {
-      this.check(this.call(this.exports.losat_web2_tool, [encoder.encode(argv.join('\0'))]));
+      this.check(this.call(this.exports.losat_web2_tool, [this.encodeArgv(argv)]));
     } finally {
       this.sink = undefined;
     }

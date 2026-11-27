@@ -2458,12 +2458,33 @@ impl CoutStrategy {
         };
     }
 
-    /// `cout` of its own where no report stream is attached (`attach`).
+    /// `cout` of its own where no report stream is attached (`attach`). Every command line run
+    /// attaches its report stream before its first request (`ReportStream::of_cli`), so a request
+    /// here is a slip of LOSAT's wiring, which a debug build (the tests) stops at; only the panic
+    /// hook's writes (`archive::strategy::install_panic_hook`) may come before it.
     fn own(&mut self) -> &mut CoutObject {
         if matches!(self.object, CoutObject::Unattached) {
+            debug_assert!(
+                std::thread::panicking(),
+                "LOSAT internal error: a request of -export_search_strategy - before the run's report stream"
+            );
             self.object = CoutObject::Own(StrategyStream::cout(self.program));
         }
         &mut self.object
+    }
+
+    /// The report's stream of `report`, which lives until the run's end (`end_run` comes before
+    /// `ReportStream::finish`): a stream gone is a slip of LOSAT's wiring, which a debug build
+    /// (the tests) stops at, outside the panic hook's writes.
+    fn report_core(
+        report: &std::sync::Weak<std::sync::Mutex<Core>>,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<Core>>> {
+        let core = report.upgrade();
+        debug_assert!(
+            core.is_some() || std::thread::panicking(),
+            "LOSAT internal error: a request of -export_search_strategy - after the run's report stream ended"
+        );
+        core
     }
 
     /// `StrategyStream::write_object` on NCBI's `cout`.
@@ -2476,7 +2497,7 @@ impl CoutStrategy {
         archive: StrategyArchive<'_>,
     ) -> std::io::Result<()> {
         match self.own() {
-            CoutObject::Report(report) => match report.upgrade() {
+            CoutObject::Report(report) => match Self::report_core(report) {
                 Some(core) => insert_request(&core, bytes, pieces, posts, diagnostics, archive),
                 None => Ok(()),
             },
@@ -2499,7 +2520,7 @@ impl CoutStrategy {
         archive: StrategyArchive<'_>,
     ) -> std::io::Result<()> {
         match self.own() {
-            CoutObject::Report(report) => match report.upgrade() {
+            CoutObject::Report(report) => match Self::report_core(report) {
                 Some(core) => {
                     let piece = crate::report::serial::encoder::BufferPiece::new(bytes.len(), 0);
                     insert_request(&core, bytes, &[piece], posts, diagnostics, archive)

@@ -984,6 +984,21 @@ const STOPS: &[Stop] = &[
             ("db.rps", 0, EMPTY),
         ],
     },
+    // The tie at the volume's first profile with a header of 8,416 bytes (2,101 profiles,
+    // `d_obsr49.smp` excluded): the header's first 8,192 bytes, which did not fit the stream's
+    // buffer, are in `.rps` and `.freq`.
+    Stop {
+        name: "d_tie_bighdr",
+        list: &[("d_badchar_in", 1), ("c2", 2100), ("d_obsr49", 1)],
+        words: &["-dbtype", "delta", "-exclude_invalid", "false"],
+        badchar: true,
+        files: &[
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 8192, 0xf311_da4e_821e_93a8),
+            ("db.loo", 0, EMPTY),
+            ("db.rps", 8192, 0xf311_da4e_821e_93a8),
+        ],
+    },
     // The tie at the fourth profile: three profiles' rows, two offsets.
     Stop {
         name: "d_tie_third",

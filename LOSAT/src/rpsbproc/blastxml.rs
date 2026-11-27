@@ -226,14 +226,18 @@ fn read_iteration<S: AsnSource>(
     let mut query = OfflineQuery::default();
     reader.class("Iteration", &ITERATION, |reader, index| match index {
         0 => reader.int4().map(drop),
+        // (The id and the title are read into their own strings, not copied from `scratch`: a
+        // long one is not held twice.)
         1 => {
-            reader.string(scratch)?;
-            query.set_accession(scratch);
+            let mut id = Vec::new();
+            reader.string(&mut id)?;
+            query.set_accession(id);
             Ok(())
         }
         2 => {
-            reader.string(scratch)?;
-            query.set_title(scratch);
+            let mut def = Vec::new();
+            reader.string(&mut def)?;
+            query.set_title(def);
             Ok(())
         }
         3 => {

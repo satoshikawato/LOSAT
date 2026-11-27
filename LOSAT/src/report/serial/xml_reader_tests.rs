@@ -283,3 +283,52 @@ fn documents_one_after_another() {
     }
     assert_eq!(names, vec![b"a".to_vec(), b"b".to_vec()]);
 }
+
+// ReadTagData and ReadCDSection (objistrxml.cpp:1271-1354, cited at `read_tag_data`): the
+// character data of a member read from a stream is the data read from the whole text, with its
+// entities, line ends and CDATA sections, and the stream does not keep the bytes read
+// (`StreamSource::release_before`): a text of megabytes is held once, in the string.
+#[test]
+fn long_character_data_is_not_kept_by_the_stream() {
+    let mut body = String::new();
+    for i in 0..60_000 {
+        body.push_str(match i % 7 {
+            0 => "&amp;&#65;&#x42;",
+            1 => "\r\n",
+            2 => "\r\r\n",
+            3 => "<![CDATA[<x>]]>",
+            _ => "abcdefghijklmnopqrstuvwxyz0123456789",
+        });
+    }
+    // One CDATA section of 3 MiB.
+    body.push_str(&format!("<![CDATA[{}]]>", "c".repeat(3 << 20)));
+    let text = doc(&format!(
+        "<Outer_name>{body}</Outer_name>\n<Outer_inner><Inner><Inner_big>7</Inner_big></Inner></Outer_inner>"
+    ));
+    let expected = read(&text).unwrap();
+    assert!(expected.0.len() > 4_000_000);
+    let mut stream = XmlReader::new(StreamSource::new(text.as_slice(), b""));
+    stream.begin_document("Outer").unwrap();
+    let mut name = Vec::new();
+    let mut largest = 0;
+    stream
+        .class("Outer", &OUTER, |reader, index| match index {
+            0 => {
+                reader.string(&mut name)?;
+                largest = reader.src.buffered();
+                Ok(())
+            }
+            1 => reader.int4().map(drop),
+            _ => reader.class("Inner", &INNER, |reader, index| {
+                if index == 0 {
+                    reader.real().map(drop)
+                } else {
+                    assert_eq!(reader.int8()?, 7);
+                    Ok(())
+                }
+            }),
+        })
+        .unwrap();
+    assert_eq!(name, expected.0);
+    assert!(largest < 8 * 64 * 1024, "the stream kept {largest} bytes");
+}

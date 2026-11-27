@@ -878,6 +878,7 @@ impl<S: AsnSource> XmlReader<S> {
             let c = self.peek(0)?;
             out.push(c);
             self.skip(1);
+            self.src.release_before(self.pos);
         }
         self.skip(3);
         Ok(true)
@@ -891,6 +892,9 @@ impl<S: AsnSource> XmlReader<S> {
         self.begin_data()?;
         let mut cr = false;
         loop {
+            // The bytes read are not asked for again: a long text is held in `out` alone, not in
+            // the stream's buffer as well (`StreamSource::release_before`).
+            self.src.release_before(self.pos);
             let c = self.read_encoded_char(b'<')?;
             if c < 0 {
                 if !self.read_cd_section(out)? {

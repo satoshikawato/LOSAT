@@ -49,3 +49,145 @@ fn format_g_keeps_the_sign_of_zero() {
     assert_eq!(format_g(179.393), "179.393");
     assert_eq!(OVERLAPLEADING, 1_410_065_408);
 }
+
+/// A writer whose bytes the test reads while the report is written.
+#[derive(Clone, Default)]
+struct Shared(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl Write for Shared {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The report's writes before line RG-KB 9a-2: every insertion copied into `pending`, which is
+/// written once NCBI's stream has written a block of it.
+struct CopyingReport {
+    pending: Vec<u8>,
+    buffer: crate::cli::NcbiBuffer,
+    file: Vec<u8>,
+}
+
+impl CopyingReport {
+    fn write_out(&mut self, n: usize) {
+        self.file.extend_from_slice(&self.pending[..n]);
+        self.pending.drain(..n);
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.pending.extend_from_slice(bytes);
+        self.buffer.sputn(bytes.len(), &self.pending);
+        if bytes.last() == Some(&b'\n') {
+            self.buffer.flush();
+        }
+        if self.pending.len() - self.buffer.held() >= REPORT_BLOCK {
+            self.write_out(self.pending.len() - self.buffer.held());
+        }
+    }
+
+    fn put(&mut self, byte: u8) {
+        self.pending.push(byte);
+        self.buffer.sputc(&self.pending);
+        if self.pending.len() - self.buffer.held() >= REPORT_BLOCK {
+            self.write_out(self.pending.len() - self.buffer.held());
+        }
+    }
+}
+
+// No NCBI counterpart: how LOSAT gets NCBI's writes of the report (`cli::NcbiBuffer`, observed
+// from NCBI's rpsbproc) to the file. The insertions that NCBI's stream has written go to the file
+// from where they are (`Report::write_through`): the file and the held bytes after every insertion
+// are those of the report that copied each insertion first, for every stream, and a string of a
+// megabyte is not kept in the report's buffer.
+#[test]
+fn report_writes_long_insertions_where_they_are() {
+    let streams = [
+        crate::cli::NcbiStdio::File,
+        crate::cli::NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        },
+        crate::cli::NcbiStdio::Cout {
+            block: 4096,
+            lines: true,
+        },
+        crate::cli::NcbiStdio::Cout {
+            block: 8192,
+            lines: false,
+        },
+        crate::cli::NcbiStdio::Cout {
+            block: 64,
+            lines: true,
+        },
+    ];
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move |bound: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % bound
+    };
+    for stream in streams {
+        let file = Shared::default();
+        let diag = Diagnostics::new(crate::blastinput::ncbi_environment::DiagTarget::Stderr);
+        let mut report = Report::new(Box::new(file.clone()), stream, true, diag);
+        let mut old = CopyingReport {
+            pending: Vec::new(),
+            buffer: crate::cli::NcbiBuffer::new(stream),
+            file: Vec::new(),
+        };
+        for step in 0..2000u64 {
+            let size = match next(20) {
+                0 => 0,
+                1 | 2 => REPORT_BLOCK as u64 - 1 + next(3),
+                3..=5 => next(3 * REPORT_BLOCK as u64),
+                6 => 1 << 20,
+                _ => next(300),
+            } as usize;
+            let mut bytes: Vec<u8> = (0..size)
+                .map(|i| b'a' + ((step as usize + i) % 26) as u8)
+                .collect();
+            for _ in 0..next(3) {
+                if size > 0 {
+                    let at = next(size as u64) as usize;
+                    bytes[at] = b'\n';
+                }
+            }
+            match next(8) {
+                0 => {
+                    report.put(b'\t');
+                    old.put(b'\t');
+                }
+                1 => {
+                    report.sync();
+                    let n = old.pending.len() - old.buffer.held();
+                    old.write_out(n);
+                }
+                _ => {
+                    report.write(&bytes);
+                    old.write(&bytes);
+                }
+            }
+            // (The bytes written at each step, compared and dropped.)
+            assert_eq!(*file.0.borrow(), old.file, "{stream:?} step {step}");
+            file.0.borrow_mut().clear();
+            old.file.clear();
+            assert_eq!(report.pending, old.pending, "{stream:?} step {step}");
+            assert_eq!(report.buffer, old.buffer, "{stream:?} step {step}");
+            assert!(
+                report.pending.capacity() <= 2 * REPORT_BLOCK + crate::cli::NCBI_BUFSIZ,
+                "{stream:?} step {step}: {}",
+                report.pending.capacity()
+            );
+        }
+        report.flush();
+        let n = old.pending.len();
+        old.write_out(n);
+        assert_eq!(*file.0.borrow(), old.file, "{stream:?}");
+    }
+}

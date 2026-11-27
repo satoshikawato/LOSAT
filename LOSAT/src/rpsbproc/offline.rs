@@ -75,13 +75,13 @@ impl OfflineQuery {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:125-142
     // (The Iteration's members come before its hits; `m_strMessage` is never printed.)
     /// `Iteration_query-ID`.
-    pub(crate) fn set_accession(&mut self, id: &[u8]) {
-        self.accession = id.to_vec();
+    pub(crate) fn set_accession(&mut self, id: Vec<u8>) {
+        self.accession = id;
     }
 
     /// `Iteration_query-def`.
-    pub(crate) fn set_title(&mut self, def: &[u8]) {
-        self.title = def.to_vec();
+    pub(crate) fn set_title(&mut self, def: Vec<u8>) {
+        self.title = def;
     }
 
     /// `Iteration_query-len`, an `int` stored in the `unsigned int` `m_uiSeqLen`.

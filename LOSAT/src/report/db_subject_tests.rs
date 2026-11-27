@@ -3820,6 +3820,9 @@ fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches
     // `s2` was NOT cached as `Resolved::Nothing`; a later load gets nothing or `s3` (line DBID
     // hr-3: `ShownBy::Holder` would name a sequence that NCBI gives).
     assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Order));
+    // `s0` resolved to its own record alone and was NOT cached as its own: NCBI's scope keeps
+    // its own record or sequence 1 for it, as the order fell.
+    assert_eq!(walk.load(&s0), shown(Some(1), ShownBy::Order));
 
     // A later batch of 1,100 fresh unpacked PDB ids evicts batch 0 from `m_Ids` and prunes
     // `blobs` / `scope_handles` on `enter(Some(1))`.

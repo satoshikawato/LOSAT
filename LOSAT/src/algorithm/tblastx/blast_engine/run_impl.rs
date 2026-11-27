@@ -3615,6 +3615,44 @@ fn refuse_tblastx_qseq_past_seen_query_len(
     Ok(())
 }
 
+/// Under `-parse_deflines`, the scopes of the run's query batches (`QueryScopes`): with outfmt 5
+/// against a database every input record's ids from the start (`with_whole_run_of`), with what
+/// NCBI's set-up of a refused batch reads (`-query_loc`, `-strand minus`: `ScopeRefusal`) and the
+/// run's XML failure for its matrix name (`xml_matrix`).
+fn tblastx_query_scopes(
+    args: &TblastxArgs,
+    input_records: &[FastaRecord],
+    subject_records: bool,
+    xml: bool,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+) -> Option<crate::blastinput::query_batch::QueryScopes> {
+    let query_range = crate::blastinput::seq_range::parse_optional_range(
+        args.query_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Query,
+    )
+    .ok()
+    .flatten();
+    let minus_strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand)
+        == crate::algorithm::blastn::args::QueryStrand::Minus;
+    crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        subject_records,
+        xml,
+        "TBLASTX",
+    )
+    .map(|scopes| {
+        if xml && !subject_records {
+            scopes.with_whole_run_of(input_records)
+        } else {
+            scopes
+        }
+        .with_refusal(args.scope_refusal.clone())
+        .with_query_range(query_range)
+        .with_minus_strand(minus_strand)
+        .with_xml_matrix_failure(xml_matrix)
+    })
+}
+
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
 /// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
 /// (`report_stream`), else all of them after the loop.
@@ -3645,32 +3683,14 @@ fn run_batch_loop(
         && crate::blastinput::query_batch::outfmts_have_xml(
             outputs.formats.iter().map(|format| format.outfmt),
         );
-    let query_range = crate::blastinput::seq_range::parse_optional_range(
-        args.query_loc.as_deref(),
-        crate::blastinput::seq_range::RangeRole::Query,
-    )
-    .ok()
-    .flatten();
-    let minus_strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand)
-        == crate::algorithm::blastn::args::QueryStrand::Minus;
     let query_scopes = &reports.query_scopes;
-    *query_scopes.borrow_mut() = crate::blastinput::query_batch::QueryScopes::of_search(
-        args.parse_deflines,
+    *query_scopes.borrow_mut() = tblastx_query_scopes(
+        args,
+        query_runs.input_records,
         subject_records,
         xml,
-        "TBLASTX",
-    )
-    .map(|scopes| {
-        if xml && !subject_records {
-            scopes.with_whole_run_of(query_runs.input_records)
-        } else {
-            scopes
-        }
-        .with_refusal(args.scope_refusal.clone())
-        .with_query_range(query_range)
-        .with_minus_strand(minus_strand)
-        .with_xml_matrix_failure(reports.xml_matrix_failure(outputs))
-    });
+        reports.xml_matrix_failure(outputs),
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
     // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,

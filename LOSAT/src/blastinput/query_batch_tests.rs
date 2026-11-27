@@ -282,11 +282,11 @@ fn a_refused_batch_knows_the_records_that_ncbis_set_up_reads_as_their_own() {
     assert_eq!(setup_records("TBLASTX", &batches), own(&[1, 0]));
     let batch: &[u8] = b">q1\nACGT\n>q2\nACGT\n>q1\nACGTACGT\n";
     assert_eq!(setup_records("TBLASTX", &[batch]), own(&[1, 1, 0]));
-    // BLASTN's set-up reads the repeat's own interval in the first record's letters (NCBI
-    // 2.17.0: past their end, `CSeqVector_CI: cannot locate segment`): refused where those
-    // are fewer.
-    assert_eq!(setup_records("BLASTN", &[batch]), None);
-    assert_eq!(setup_records("BLASTN", &batches), None);
+    // BLASTN's set-up reads the repeat's own interval in the first record's letters as the
+    // other programs' does (NCBI 2.17.0: past their end, `CSeqVector_CI: cannot locate segment`;
+    // line RG-KB item 7b), so its records with their own letters are known too.
+    assert_eq!(setup_records("BLASTN", &[batch]), own(&[1, 1, 0]));
+    assert_eq!(setup_records("BLASTN", &batches), own(&[1, 0]));
     // Nothing with its own letters: no set-up (`db.pd.q1c.bp.avgdup2.subj.6`).
     assert_eq!(
         setup_records("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"]),
@@ -1417,9 +1417,11 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
         |_| panic!("no set-up"),
     )
     .unwrap_err();
+    // `pair` ends with its last message's space, and each record's message adds one after it
+    // (two spaces in all, as in NCBI's bytes of strategy row `blastn.sub.pd.pastfirst.dnfd.b2.f6`).
     expect_native(
         err,
-        &format!("{ENGINE_ERROR} Warning: {pair}  Warning: {pair}  \n"),
+        &format!("{ENGINE_ERROR} Warning: {pair} Warning: {pair} \n"),
     );
     let err = refused_batch_error(
         run_masked("BLASTN", None, false, QueryMasks::Repeats, &mixed),

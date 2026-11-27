@@ -628,7 +628,7 @@ fn database_files_follow_what_the_run_asks_for() {
     }
     // A mask option: the GI masks, the GI index, and each volume's columns (the data files only
     // where the column's index file exists).
-    for option in ["db_soft_mask", "db_hard_mask", "import_search_strategy"] {
+    for option in ["db_soft_mask", "db_hard_mask"] {
         let masked = files(b"m", SeqType::Nucleotide, with(option));
         for name in [
             "mk.gni", "mk.gno", "v.nog", "v.naa", "v.nab", "v.nac", "v.nba", "v.nza",
@@ -638,6 +638,11 @@ fn database_files_follow_what_the_run_asks_for() {
         for name in ["v.nbb", "v.nbc", "v.nnd", "v.nos"] {
             assert!(!has(&masked, name), "{option}: {name} in {masked:?}");
         }
+    }
+    // An imported search strategy may hold either kind of option, so it asks for both.
+    let imported = files(b"m", SeqType::Nucleotide, with("import_search_strategy"));
+    for name in ["mk.gni", "v.nog", "v.naa", "v.nnd", "v.nos", "v.nto"] {
+        assert!(has(&imported, name), "{name} in {imported:?}");
     }
     // An id list or a taxonomy filter: the lookup files, not the masks.
     for option in [

@@ -11,11 +11,9 @@
 //! (`RoundSections`), so that no default report's instance is shared.
 
 use super::super::{
-    blastp_family_program, cpp_default_double, write_blast_database_header,
-    write_blastp_database_header_spacing, write_blastp_query_header, write_description_table,
-    write_no_hits_found, write_prolog, write_spaces, write_tblastn_unsearched_query_footer_spacing,
-    BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
-    RowDecoration,
+    cpp_default_double, write_blastp_query_header, write_description_table, write_no_hits_found,
+    write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
+    BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -73,45 +71,6 @@ impl RowDecoration for PatternRow {
     fn query_positions(&self) -> Option<(u32, u32)> {
         Some((self.from, self.to))
     }
-}
-
-/// The prolog of PHI-BLAST's outfmt 0 to 4 report (`PrintProlog` of `phiblastp`): its version
-/// line, the Gapped BLAST reference and the database's lines; with `-html` the page's head and the
-/// reference's link, whose registry reads post to `warnings` (`pairwise::html_with_diagnostics`).
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506
-pub(crate) fn write_phi_prolog(
-    writer: &mut dyn ReportWrite,
-    config: &PairwiseConfig,
-    report: &BlastpPairwiseReport,
-    database: Option<&PairwiseDatabase>,
-    warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
-) -> io::Result<()> {
-    let mut buffered = io::BufWriter::new(RoundWriter(writer));
-    let writer = &mut buffered;
-    let prolog = write_prolog(
-        writer,
-        blastp_family_program(&config.program),
-        &report.version,
-        false,
-        false,
-        false,
-        super::super::html_with_diagnostics(config.html_links(), warnings)?,
-    );
-    if let Err(error) = prolog {
-        let _ = writer.flush();
-        return Err(error);
-    }
-    match database {
-        Some(database) => write_blast_database_header(writer, database)?,
-        None => write_blastp_database_header_spacing(
-            writer,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            1,
-        )?,
-    }
-    writer.flush()
 }
 
 /// The outfmt 0 to 4 report of query `q_idx` of PHI-BLAST's round: `occurrence_hits[i]` are the

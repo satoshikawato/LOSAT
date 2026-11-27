@@ -1399,7 +1399,6 @@ pub(super) fn write_pairwise(
                 pairwise_database.as_ref(),
                 probe.as_mut(),
                 warnings.as_mut(),
-                reports.x_prolog,
                 crate::report::pairwise::psiblast_round::ReportRound {
                     number: io.state.number(),
                     found_before: psi_found_before
@@ -1429,7 +1428,6 @@ pub(super) fn write_pairwise(
             pairwise_database.as_ref(),
             probe.as_mut(),
             warnings.as_mut(),
-            reports.x_prolog,
             reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences
@@ -1455,8 +1453,8 @@ pub(super) fn write_pairwise(
 }
 
 /// psiblast `-phi_pattern`: the outfmt 0 to 4 reports of the window `window` of queries
-/// (`write_pairwise`'s): the prolog at the report's start, then each batch's report of its
-/// occurrences' rows (`phi_round`). Its results carry the query's masks (each occurrence's
+/// (`write_pairwise`'s; the prolog is the run's, before the search: `write_pairwise_prologs`):
+/// each batch's report of its occurrences' rows (`phi_round`). Its results carry the query's masks (each occurrence's
 /// `GetMaskedQueryRegions`, shown in lower case: `query_record_masks`), unlike psiblast's other
 /// rounds (`result_query_masks`), and no subject's masks: NCBI's PHI-BLAST report sets none (no
 /// `SetSubjectMasks`, so `-lcase_masking` shows a subject's letters in upper case). Outfmt 1 to 4
@@ -1479,7 +1477,6 @@ fn write_phi_window(
 ) -> Result<()> {
     let ReportView {
         args,
-        reports,
         ranges,
         query_records,
         query_frames,
@@ -1518,16 +1515,6 @@ fn write_phi_window(
             subject_masks: Default::default(),
         });
     use crate::report::pairwise::psiblast_round::phi_round;
-    if window.start == 0 && reports.x_prolog {
-        phi_round::write_phi_prolog(
-            writer,
-            pairwise_config,
-            pairwise_report,
-            pairwise_database.as_ref(),
-            warnings.as_mut(),
-        )
-        .map_err(crate::cli::NativeError::of_writer)?;
-    }
     for q_idx in window {
         // A batch's report is headed by its first query (`PhiBatch`).
         let Some(batch) = phi.call.batch_at(q_idx) else {

@@ -1017,7 +1017,8 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
         .find_map(|word| word.strip_prefix("kept="))
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| panic!("{stream}"));
-    assert!(kept_records > 0, "{stream}");
+    // The stream acts, so each batch's records are dropped after its reports.
+    assert_eq!(kept_records, 0, "{stream}");
     let zero = blastn(&scoring, 4, &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0")], None);
     let reports_after = blastn(&scoring, 4, &[SWITCH, ("LOSAT_X_RPTSTREAM", "0")], None);
     assert_eq!(

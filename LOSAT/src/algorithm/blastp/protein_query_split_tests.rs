@@ -292,11 +292,14 @@ fn a_split_batch_meets_its_chunk_steps_in_ncbis_order() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61 (cited at
 // `splits_query_batches`)
 // The one rule of whether NCBI splits a search's query batches (review 1 of line RG item X-bpgap,
-// S6): a gapped search of a FASTA query against sequences only.
+// S6): a gapped search of a FASTA query against sequences only, without a PHI-BLAST pattern
+// (psiblast `-phi_pattern`: NCBI 2.17.0 searches a 24,334-residue query whole, line PS item PS8a
+// `PS/tmp/fix8a/lq/ncbi.q_24k.6`).
 #[test]
 fn ncbi_splits_only_a_gapped_search_of_a_fasta_query_against_sequences() {
-    assert!(splits_query_batches(true, false, false));
-    assert!(!splits_query_batches(false, false, false));
-    assert!(!splits_query_batches(true, true, false));
-    assert!(!splits_query_batches(true, false, true));
+    assert!(splits_query_batches(true, false, false, false));
+    assert!(!splits_query_batches(false, false, false, false));
+    assert!(!splits_query_batches(true, true, false, false));
+    assert!(!splits_query_batches(true, false, true, false));
+    assert!(!splits_query_batches(true, false, false, true));
 }

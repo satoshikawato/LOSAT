@@ -58,4 +58,4 @@ If you parsed `-outfmt 6` or `7` output in v0.1.0, nothing changes: the columns 
 
 ## What is still not available
 
-`deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12`, `psiblast -phi_pattern` and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.
+`deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12`, `psiblast -phi_pattern` with more than one round (or `-html`) and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.

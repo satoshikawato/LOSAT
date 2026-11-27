@@ -1,0 +1,72 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 63 total letters
+
+Results from round 1
+
+
+Query= p30 short
+
+Length=30
+28 occurrence(s) of pattern: 
+X(3) at position(s) 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 of query sequence
+pattern probability=1
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 60
+Results from round 1
+
+
+Query= x10
+
+Length=10
+8 occurrence(s) of pattern: 
+X(3) at position(s) 1, 2, 3, 4, 5, 6, 7, 8 of query sequence
+pattern probability=1
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 60
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 63
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

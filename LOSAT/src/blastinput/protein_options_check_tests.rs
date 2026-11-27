@@ -18,6 +18,7 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
             evalue: 10.0,
             psiblast,
             psi_tblastn: false,
+            phi: false,
             x_dropoff: None,
             culling_limit: None,
             best_hit_overhang: None,

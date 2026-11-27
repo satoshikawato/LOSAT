@@ -44,24 +44,6 @@ const DENSE_SEG_GET_SEQ_START: ThrowSite = dense_seg_site(197);
 /// Dense-seg whose query starts are all negative.
 const DENSE_SEG_GET_SEQ_STOP: ThrowSite = dense_seg_site(235);
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:732-734
-/// `CAlnVec::x_GetSeqLeftSeg()` when row 0 has no segment with start >= 0.
-const ALNMAP_GET_SEQ_LEFT_SEG: ThrowSite = ThrowSite {
-    file: "src/objtools/alnmgr/alnmap.cpp",
-    line: 732,
-    kind: "CAlnException::eInvalidDenseg",
-    function: None,
-};
-
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:753-755
-/// `CAlnVec::x_GetSeqRightSeg()` when row 0 has no segment with start >= 0.
-const ALNMAP_GET_SEQ_RIGHT_SEG: ThrowSite = ThrowSite {
-    file: "src/objtools/alnmgr/alnmap.cpp",
-    line: 753,
-    kind: "CAlnException::eInvalidDenseg",
-    function: None,
-};
-
 /// `CDense_seg::GetSeqStart(): Row is empty` (outfmt 5, 13, 14, 15, 16).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:197-199
@@ -156,27 +138,6 @@ fn gapped_insert_subject_scores_throw_slow(
     None
 }
 
-/// `CAlnException::eInvalidDenseg` thrown by `CAlnMap::x_GetSeqLeftSeg` (`left = true`) or
-/// `CAlnMap::x_GetSeqRightSeg` (`left = false`) on an alignment whose query row (row 0) has only
-/// negative starts.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:724-760
-#[cold]
-#[inline(never)]
-pub(crate) fn alnmap_empty_query_row(left: bool) -> NcbiException {
-    if left {
-        NcbiException::new(
-            ALNMAP_GET_SEQ_LEFT_SEG,
-            "CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 0 contains gaps only.",
-        )
-    } else {
-        NcbiException::new(
-            ALNMAP_GET_SEQ_RIGHT_SEG,
-            "CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 0 contains gaps only.",
-        )
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1095
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:724-760
 /// The exception that NCBI's `CBlastTabularInfo::SetFields` throws when formatting a BLASTN
@@ -205,12 +166,16 @@ pub(crate) fn tabular_exception(spec: &TabularSpec, num_ident: usize) -> Option<
         PercentIdentical,
         GapOpenings,
     ]) {
-        return Some(alnmap_empty_query_row(false));
+        return Some(crate::report::serial::seqalign::aln_vec_row_gaps_only(
+            0, false,
+        ));
     }
     if spec.has_any(&[
         QuerySeq, SubjectSeq, Positives, Btop, QueryStart, QueryEnd, QueryFrame, Frames,
     ]) {
-        return Some(alnmap_empty_query_row(true));
+        return Some(crate::report::serial::seqalign::aln_vec_row_gaps_only(
+            0, true,
+        ));
     }
     None
 }

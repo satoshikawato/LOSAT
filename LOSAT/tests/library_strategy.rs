@@ -13,7 +13,7 @@ use losat::api::{run, run_collect, validate, Error, Inputs, Program};
 
 /// The rows `C.<program>.from.<program>` of `import_cases.tsv` that exit 0 (alone and with the
 /// command line's options).
-const C_ROWS: usize = 47;
+const C_ROWS: usize = 51;
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strategy/import")

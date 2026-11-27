@@ -2,7 +2,8 @@
 # space, {ss} the folder ss/), exit status, and the files of bytes/ that hold NCBI BLAST+ 2.17.0's
 # -num_threads 1 standard output and standard error (- empty). Probe ids of line RG item F2
 # (remaining-gaps-20261112/F/f2/tools/freeze_import.py; the rows of fix round 3, freeze_b3.py: the SAM
-# documents without the CL tag of their @PG line).
+# documents without the CL tag of their @PG line; the C.*.f6sci rows of line RG-F item F2f, NCBI's
+# warning prefix of the running application, probe of 2026-11-27).
 name	program	args	rc	out	err
 I.blastn.db.alone	blastn	-import_search_strategy {ss}/blastn.db.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
 I.blastn.db.q2	blastn	-import_search_strategy {ss}/blastn.db.ss -query tests/fixtures/strategy/import/in/q2_n.fna	0	d3756404cf373675	5fb617f6dbc5f542
@@ -650,6 +651,10 @@ C.blastn.from.tblastx.db.e20.f17	blastn	-import_search_strategy {ss}/s3.tblastx.
 C.blastn.from.tblastx.sub.e10.f17sq	blastn	-import_search_strategy {ss}/s3.tblastx.sub.e10.ss -outfmt 17%20SQ	0	5d565795fb5c3f5a	fa7b09d411446943
 C.blastn.from.tblastx.db.e15.f17sr	blastn	-import_search_strategy {ss}/s3.tblastx.db.e15.ss -outfmt 17%20SR	0	b156b1899d57d60c	aca15a7faf95f4ae
 C.blastn.from.tbx5.f17	blastn	-import_search_strategy {ss}/s3.tbx5.ss -outfmt 17	0	-	9ed4a0bff90828a9
+C.blastn.from.tblastx.db.f6sci	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 6%20qseqid%20sseqid%20sscinames	0	aea5578cbb8ce302	cbfd38c4f68533c6
+C.blastx.from.tblastx.db.f6sci	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 6%20qseqid%20sseqid%20sscinames	0	aea5578cbb8ce302	1b347d40c7075b2a
+C.tblastx.from.blastn.db.f6sci	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 6%20qseqid%20sseqid%20sscinames	0	9c2d1c6f2d00ea35	7f73f73734b399f2
+C.tblastx.from.blastx.db.f6sci	tblastx	-import_search_strategy {ss}/blastx.db.ss -outfmt 6%20qseqid%20sseqid%20sscinames	0	fb066b559d502e53	56fb888ba96c2979
 S3.blastn.window_neg1	blastn	-import_search_strategy {ss}/s3.blastn.window_neg1.ss	0	ce3ccf35a0a417a8	c7d9e175b47ef7bc
 S3.blastn.window_neg40	blastn	-import_search_strategy {ss}/s3.blastn.window_neg40.ss	0	76a7b61ebbd91f6b	c7d9e175b47ef7bc
 S3.blastp.window_neg1	blastp	-import_search_strategy {ss}/s3.blastp.window_neg1.ss	0	b926505ff9140792	1fc42b53917c7075

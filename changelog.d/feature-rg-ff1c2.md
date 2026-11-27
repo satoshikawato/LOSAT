@@ -1,0 +1,1 @@
+- `-export_search_strategy -` writes the search strategy to the standard output as NCBI BLAST+ does, in all eight search programs: each request goes into the report ahead of its batch's results when the report is on the standard output too, and the requests alone are on the standard output with `-out`. LOSAT Web and the library API still refuse `-`.

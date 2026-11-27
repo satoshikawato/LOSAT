@@ -737,19 +737,27 @@ fn out_is_created_only_where_ncbi_reaches_it() {
 
 /// A run of `-html` whose `./.ncbirc` is malformed (`tests/db_search/html/rc/bad`) ends in NCBI's
 /// prolog: `BlastPrintReference`'s registry exception, exit status 255, after the start of the HTML
-/// prolog and before NCBI's first request. With `-export_search_strategy -`, which LOSAT refuses at
-/// that request, BLASTX, BLASTN and TBLASTX write NCBI's standard output (NCBI's prolog, in
-/// LOSAT's words) with exit status 255, as the run without the option does: the exception is NCBI's
-/// error (`cli::native_error_of`), not LOSAT's refusal (line RG F1w review 2, S-b: the held prolog
+/// prolog and before NCBI's first request. With `-export_search_strategy -` (NCBI's `cout`, whose
+/// first request would come after that point) the five programs write NCBI's standard output
+/// (NCBI's prolog, in LOSAT's words) with exit status 255, as the run without the option does: the
+/// exception is NCBI's error (`cli::native_error_of`; line RG F1w review 2, S-b: the held prolog
 /// was dropped and stdout was empty). NCBI's bytes are `html_rcbad/<program>.out`: NCBI BLAST+
 /// 2.17.0's run of the same argv with `-export_search_strategy -` in a folder with that `.ncbirc`
-/// (the same bytes without the option). BLASTP and TBLASTN write their prolog after the request
-/// point, so their refusal still comes first (line T4's `-html` prolog; the handoff
-/// `F/f1w/handoff_T4_html_order.md` of line RG's records).
+/// (the same bytes without the option; BLASTP and TBLASTN frozen by line RG item F1c-2).
 #[test]
 fn a_malformed_ncbirc_ends_an_html_run_with_ncbis_prolog() {
     let folder = engine().join("tests/db_search/html/rc/bad");
     for (program, query, subject) in [
+        (
+            "blastp",
+            "tests/fasta/outfmt11/arch_bp_q.faa",
+            "tests/fasta/outfmt11/arch_bp_s.faa",
+        ),
+        (
+            "tblastn",
+            "tests/fasta/outfmt11/arch_tbn_q.faa",
+            "tests/fasta/outfmt11/arch_tbn_s.fna",
+        ),
         (
             "blastx",
             "tests/fasta/outfmt11/arch_bx_q.fna",

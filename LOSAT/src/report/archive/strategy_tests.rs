@@ -463,9 +463,9 @@ fn a_pssm_query_is_the_pssm_as_read() {
     }
 }
 
-/// `-` is refused at `check_report_stream` / `write_with`; a file (including the same path as
-/// `-out`) is created (emptied) with no refusal; a path that cannot be created is NCBI's argument
-/// error.
+/// `-` is NCBI's `cout` (`StrategyTarget::StandardOutput`, no refusal; LOSAT Web's `-` is refused at
+/// `check_report_stream` / `write_with`); a file (including the same path as `-out`) is created
+/// (emptied) with no refusal; a path that cannot be created is NCBI's argument error.
 #[test]
 fn the_file_is_created_and_its_refusal_kept() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -475,27 +475,31 @@ fn the_file_is_created_and_its_refusal_kept() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
-    let made = create_strategy_file(&path, "BLASTP").unwrap();
+    let made = create_strategy_file(&path).unwrap();
     assert!(matches!(made.target, StrategyTarget::Disk(_)) && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let dash = create_strategy_file(Path::new("-"), "BLASTP").unwrap();
-    assert!(matches!(dash.target, StrategyTarget::None));
-    assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
-    // The refusal comes where the run asks for it, and before any request.
-    let export = StrategyExport::for_run(
-        create_strategy_file(Path::new("-"), "BLASTP").unwrap(),
-        OptionInputs::new(Program::Blastp, "blastp"),
-        Some(6),
-        HitlistArgs::default(),
-        None,
-        &OptionsHandle::default(),
-    );
-    let refusal = check_report_stream(Some(&export)).unwrap_err();
+    let dash = create_strategy_file(Path::new("-")).unwrap();
+    assert!(matches!(dash.target, StrategyTarget::StandardOutput) && dash.refusal.is_none());
+    let export = |file| {
+        StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastp, "blastp"),
+            Some(6),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        )
+    };
+    assert!(check_report_stream(Some(&export(dash))).is_ok());
+    // LOSAT Web's refusal comes where the run asks for it, and before any request.
+    let web = RunFiles::Receiver(Arc::new(Received::default()));
+    let refused = export(create_strategy_file_in(&web, Path::new("-"), "BLASTP", &[]).unwrap());
+    let refusal = check_report_stream(Some(&refused)).unwrap_err();
     assert!(refusal.to_string().contains("standard output"), "{refusal}");
-    assert!(export.write_with(0..1, |_| Ok(())).is_err());
+    assert!(refused.write_with(0..1, |_| Ok(())).is_err());
     assert!(check_report_stream(None).is_ok());
     let missing = dir.join("no_such_dir").join("x");
-    let error = create_strategy_file(&missing, "BLASTP").unwrap_err();
+    let error = create_strategy_file(&missing).unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);
     assert_eq!(
@@ -508,11 +512,11 @@ fn the_file_is_created_and_its_refusal_kept() {
     );
     // The null device as the strategy file: nothing written there is kept.
     #[cfg(unix)]
-    drop(create_strategy_file(Path::new("/dev/null"), "BLASTP").unwrap());
+    drop(create_strategy_file(Path::new("/dev/null")).unwrap());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// A run refused at NCBI's first request (`-`) that ends before it with an exception of NCBI's
+/// A run refused at NCBI's first request (LOSAT Web's `-`) that ends before it with an exception of NCBI's
 /// that a report's writer carries (the `-html` links' registry, `NcbiException::into_io_error`):
 /// the end takes it for NCBI's error, as the command line's exit does (`cli::NativeError::caught`,
 /// exit status 255), and keeps its text, as it keeps a refusal of LOSAT's (the report stream
@@ -536,9 +540,10 @@ fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
     let error = exception();
     let native = crate::cli::NativeError::caught(&error).expect("NCBI's error");
     assert_eq!(native.exit, 255);
+    let web = RunFiles::Receiver(Arc::new(Received::default()));
     for error in [exception(), anyhow::anyhow!("a refusal of LOSAT's")] {
         let export = StrategyExport::for_run(
-            create_strategy_file(Path::new("-"), "BLASTX").unwrap(),
+            create_strategy_file_in(&web, Path::new("-"), "BLASTX", &[]).unwrap(),
             OptionInputs::new(Program::Blastx, "blastx"),
             Some(0),
             HitlistArgs::default(),
@@ -655,12 +660,13 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
 }
 
 /// The names that LOSAT Web reads otherwise than as a file of the run (`RunFiles::strategy_target`):
-/// NCBI's error at once where the command line cannot open the name; the command line's refusals of
-/// `-` and of the standard output, raised at NCBI's first request with the report held; no file for
-/// the null device; LOSAT Web's refusal, at the same point, of the standard error and of the file of
-/// another option of the run, which names that option.
+/// NCBI's error at once where the command line cannot open the name; LOSAT Web's refusals of `-` and
+/// of the standard output (which the command line writes; decision F1c-3 of line RG), raised at
+/// NCBI's first request with the report held; no file for the null device; LOSAT Web's refusal, at
+/// the same point, of the standard error and of the file of another option of the run, which names
+/// that option.
 #[test]
-fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
+fn a_receiver_refuses_the_standard_streams_and_what_it_has_no_file_for() {
     let received = Arc::new(Received::default());
     let files = RunFiles::Receiver(received.clone());
     let query = [RunFileName {

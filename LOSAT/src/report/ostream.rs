@@ -923,6 +923,23 @@ impl Core {
         };
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:816-827
+    /// An object that an object stream of NCBI's writes into this stream starts (the search
+    /// strategy's request of `-export_search_strategy -`, `CoutStrategy`): its insertions are NCBI's
+    /// pieces in the region `Site::Serial`, written where NCBI writes them. Returns the region the
+    /// report was in, which `leave_object` gives back.
+    fn enter_object(&mut self) -> std::io::Result<Site> {
+        let report = self.site;
+        self.set_site(Site::Serial { whole: false })?;
+        Ok(report)
+    }
+
+    /// The object of `enter_object` has ended (its `Close` flushed the stream): the report's
+    /// insertions go on in its region `report`.
+    fn leave_object(&mut self, report: Site) -> std::io::Result<()> {
+        self.set_site(report)
+    }
+
     /// `cerr`'s tie: standard output writes what it holds before a text on standard error. A
     /// failed `cout` while the formatter lives throws there, inside the post's destructor
     /// (`std::terminate`); the text is not written.
@@ -1047,8 +1064,10 @@ impl ReportStream {
     /// (NCBI's file buffer, `NcbiStdio::File`: 8,190 bytes held, the 8,191st written with them)
     /// or, with `None`, standard output (`NcbiStdio::cout`, tied to standard error).
     ///
-    /// A run whose strategy file `strategy` LOSAT refuses gives it the stream's request point
-    /// (`RequestPoint`), where NCBI's writes so far are made before the refusal.
+    /// The run's search strategy `strategy` gets the stream's request point (`RequestPoint`):
+    /// `-export_search_strategy -` writes into the stream where it is standard output (NCBI's one
+    /// `cout`, `CoutStrategy`), and a strategy file that LOSAT refuses makes NCBI's writes so far
+    /// there before the refusal.
     pub fn of_cli(
         out_file: Option<std::fs::File>,
         program: &'static str,
@@ -1176,8 +1195,11 @@ impl std::io::Write for ReportStream {
     }
 }
 
-/// The command line's report stream where NCBI writes its first search strategy request
-/// (`archive::strategy::check_report_stream`), for a strategy file that LOSAT refuses.
+/// The command line's report stream as the run's search strategy sees it: where NCBI writes its
+/// first request (`archive::strategy::check_report_stream`, for a strategy file that LOSAT
+/// refuses), and the stream object that `-export_search_strategy -` writes into when the report is
+/// on standard output (`CoutStrategy`). A weak hold: the strategy holds the report's stream, the
+/// stream nothing of the strategy.
 pub struct RequestPoint(std::sync::Weak<std::sync::Mutex<Core>>);
 
 impl RequestPoint {
@@ -1188,6 +1210,13 @@ impl RequestPoint {
             Some(core) => lock(&core).sync(),
             None => Ok(()),
         }
+    }
+
+    /// Whether the report's stream is standard output (`cout`), not the `-out` file.
+    fn standard_output(&self) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|core| lock(&core).standard_output)
     }
 }
 
@@ -2153,10 +2182,20 @@ pub(crate) fn emit_strategy_posts(
 /// - Bytes remaining in the file buffer at the end of the request are flushed in `~CObjectOStream::Close`;
 ///   if that flush fails, `bad` is set, the 4-line `Close` failure chain is posted (as 4 `ERROR`
 ///   messages for outfmt 11), and the run continues.
+///
+/// `-export_search_strategy -` with the report in `-out` is this stream on NCBI's `cout`
+/// (`StrategyStream::cout`): standard output's buffer (`NcbiStdio::cout`) and no exception mask
+/// (`CBlastFormat` sets the mask of the `-out` stream only), and `cerr`'s tie, by which a post
+/// makes `cout` write what it holds first.
 pub struct StrategyStream {
     device: Box<dyn std::io::Write + Send>,
     bad: bool,
     program: &'static str,
+    /// NCBI's buffer of the stream, which every request's `Close` flushes (standard output's is
+    /// made by its first insertion and kept for the run).
+    buffer: NcbiBuffer,
+    /// The stream is `cout`, to which `cerr` is tied.
+    tied: bool,
 }
 
 impl StrategyStream {
@@ -2167,7 +2206,62 @@ impl StrategyStream {
             device,
             bad: false,
             program,
+            buffer: NcbiBuffer::new(NcbiStdio::File),
+            tied: false,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-781
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    /// The strategy stream of `-export_search_strategy -` where the report is not on standard
+    /// output (`-out`): `cout` of the process (`standard_output_device`), apart from the report.
+    pub(crate) fn cout(program: &'static str) -> Self {
+        Self {
+            device: standard_output_device(),
+            bad: false,
+            program,
+            buffer: NcbiBuffer::new(NcbiStdio::cout()),
+            tied: true,
+        }
+    }
+
+    /// `cerr`'s tie before a post (`tied`): `cout` writes what it holds (`held`). A failed write
+    /// makes the stream bad without an exception (no mask), and its next piece is a write fault; a
+    /// failed write of standard output leaves nothing held (`Core::thrown`'s note, line RG T6 D3).
+    fn tie(&mut self, held: &mut Vec<u8>) {
+        if !self.tied || held.is_empty() || self.bad {
+            return;
+        }
+        let mut landed = 0u64;
+        if write_device(&mut *self.device, &mut landed, held)
+            .and_then(|()| self.device.flush())
+            .is_err()
+        {
+            self.bad = true;
+        }
+        held.clear();
+        self.buffer.flush();
+    }
+
+    /// The posts of `posts` that come before the piece at `limit` (`emit_strategy_posts`), after
+    /// `cerr`'s tie where the stream is `cout` (`tie`); returns how many were written.
+    fn posts(
+        &mut self,
+        posts: &[(u64, Vec<u8>)],
+        limit: Option<u64>,
+        held: &mut Vec<u8>,
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<usize> {
+        let count = posts
+            .iter()
+            .take_while(|(written, _)| limit.is_none_or(|bound| *written <= bound))
+            .count();
+        if count == 0 {
+            return Ok(0);
+        }
+        self.tie(held);
+        emit_strategy_posts(&posts[..count], None, diagnostics, archive)
     }
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
@@ -2185,6 +2279,7 @@ impl StrategyStream {
         archive: StrategyArchive<'_>,
     ) -> std::io::Result<()> {
         self.bad = true;
+        self.buffer.flush();
         let fault = match unended {
             Some((line, trace)) => format!(
                 "Error: (802.5) [{}] CObjectOStream: error at line {line}: {trace}: write fault\n",
@@ -2213,14 +2308,18 @@ impl StrategyStream {
         // NCBI's pending writes of the report before `SaveSearchStrategy` reach the report's
         // descriptor first, while bytes still held in NCBI's report buffer stay buffered.
         sync_report()?;
-        let mut buffer = NcbiBuffer::new(NcbiStdio::File);
         let mut held = Vec::new();
         let mut pos = 0usize;
         let mut next_post = 0usize;
         let mut landed = 0u64;
         for piece in pieces {
-            next_post +=
-                emit_strategy_posts(&posts[next_post..], Some(pos as u64), diagnostics, archive)?;
+            next_post += self.posts(
+                &posts[next_post..],
+                Some(pos as u64),
+                &mut held,
+                diagnostics,
+                archive,
+            )?;
             if piece.size == 0 {
                 continue;
             }
@@ -2228,12 +2327,24 @@ impl StrategyStream {
             let failed = if self.bad {
                 true
             } else {
-                let before = buffer.held();
-                buffer.sputn(piece.size, &[]);
-                if buffer.held() < before + piece.size {
-                    let written = write_device2(&mut *self.device, &mut landed, &held, chunk)
+                let before = self.buffer.held();
+                // The piece's bytes: standard output's buffer on a terminal writes at its newlines.
+                self.buffer.sputn(piece.size, chunk);
+                let kept = self.buffer.held();
+                if kept < before + piece.size {
+                    // The buffer writes what it held and the piece's first bytes, and keeps the
+                    // piece's last `kept` (none for a file's buffer; standard output's keeps what
+                    // passes its last block).
+                    debug_assert!(kept <= chunk.len());
+                    let (out, rest) = chunk.split_at(chunk.len() - kept);
+                    let written = write_device2(&mut *self.device, &mut landed, &held, out)
                         .and_then(|()| self.device.flush());
                     held.clear();
+                    held.extend_from_slice(rest);
+                    if written.is_err() {
+                        held.clear();
+                        self.buffer.flush();
+                    }
                     written.is_err()
                 } else {
                     held.extend_from_slice(chunk);
@@ -2251,7 +2362,9 @@ impl StrategyStream {
             }
             pos += piece.size;
         }
-        let _ = emit_strategy_posts(&posts[next_post..], None, diagnostics, archive)?;
+        self.posts(&posts[next_post..], None, &mut held, diagnostics, archive)?;
+        // `Close`'s flush: the buffer holds nothing after it.
+        self.buffer.flush();
         if !held.is_empty() && !self.bad {
             let flushed = write_device(&mut *self.device, &mut landed, &held)
                 .and_then(|()| self.device.flush());
@@ -2288,6 +2401,148 @@ impl StrategyStream {
         }
         Ok(())
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-781
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+/// The stream of `-export_search_strategy -`: NCBI's `cout`, the same object as the report's
+/// stream where the report is on standard output (`-out` absent or `-`), else `cout` apart from
+/// the report (`-out F`, `-out /dev/stdout`). Which of the two is known where the run makes its
+/// report stream (`ReportStream::of_cli`, `attach`), after the strategy (NCBI opens the strategy
+/// stream first).
+pub struct CoutStrategy {
+    program: &'static str,
+    object: CoutObject,
+}
+
+/// What `CoutStrategy` writes into.
+enum CoutObject {
+    /// The run has made no report stream yet (`attach`): `cout` holds nothing of a report.
+    Unattached,
+    /// The report's stream, `cout` (`ReportStream::standard_output`): each request is one more
+    /// object of an object stream of NCBI's on it (`insert_request`).
+    Report(std::sync::Weak<std::sync::Mutex<Core>>),
+    /// `cout` apart from the report in `-out` (`StrategyStream::cout`).
+    Own(StrategyStream),
+}
+
+impl CoutStrategy {
+    /// The stream of `-` of `program` (`ArchiveRequest::application`), until the run's report
+    /// stream is made.
+    pub fn new(program: &'static str) -> Self {
+        CoutStrategy {
+            program,
+            object: CoutObject::Unattached,
+        }
+    }
+
+    /// The run's report stream `report` is made: the requests go into it where it is `cout`, else
+    /// into `cout` of their own.
+    pub(crate) fn attach(&mut self, report: &RequestPoint) {
+        self.object = if report.standard_output() {
+            CoutObject::Report(report.0.clone())
+        } else {
+            CoutObject::Own(StrategyStream::cout(self.program))
+        };
+    }
+
+    /// `cout` of its own where no report stream is attached (`attach`).
+    fn own(&mut self) -> &mut CoutObject {
+        if matches!(self.object, CoutObject::Unattached) {
+            self.object = CoutObject::Own(StrategyStream::cout(self.program));
+        }
+        &mut self.object
+    }
+
+    /// `StrategyStream::write_object` on NCBI's `cout`.
+    pub fn write_object(
+        &mut self,
+        bytes: &[u8],
+        pieces: &[crate::report::serial::encoder::BufferPiece],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<()> {
+        match self.own() {
+            CoutObject::Report(report) => match report.upgrade() {
+                Some(core) => insert_request(&core, bytes, pieces, posts, diagnostics, archive),
+                None => Ok(()),
+            },
+            CoutObject::Own(stream) => {
+                stream.write_object(bytes, pieces, posts, diagnostics, archive)
+            }
+            CoutObject::Unattached => Ok(()),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:578-605
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-355
+    /// `StrategyStream::write_partial` on NCBI's `cout`: on the report's stream, the bytes that
+    /// the object stream wrote before its exception, then its `Close`'s flush.
+    pub fn write_partial(
+        &mut self,
+        bytes: &[u8],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<()> {
+        match self.own() {
+            CoutObject::Report(report) => match report.upgrade() {
+                Some(core) => {
+                    let piece = crate::report::serial::encoder::BufferPiece::new(bytes.len(), 0);
+                    insert_request(&core, bytes, &[piece], posts, diagnostics, archive)
+                }
+                None => Ok(()),
+            },
+            CoutObject::Own(stream) => stream.write_partial(bytes, posts, diagnostics, archive),
+            CoutObject::Unattached => Ok(()),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651 (SaveSearchStrategy)
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:816-827 (WriteObject)
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-918 (FlushBuffer and Flush)
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-355 (`~CObjectOStream`'s Close)
+/// A search strategy request `bytes` written by NCBI's object stream into the report's stream
+/// `core` (`cout`, `-export_search_strategy -`): after the report's bytes before it (what LOSAT's
+/// writer holds of them reaches the stream first: the flush of `diagnostics`, whose tie
+/// `query_warnings::TiedDiagnostics` makes), each of NCBI's buffer writes `pieces` one insertion,
+/// the `803.7` posts `posts` between them on `diagnostics` (whose `cerr` makes `cout` write what it
+/// holds first, `tie_standard_output`, the request's pieces so far among it), then `Close`'s flush
+/// of the stream. The insertions are an object's on NCBI's stream (`Site::Serial`): one that fails
+/// while the formatter lives ends the run in `std::terminate`, as NCBI's does on standard output
+/// (line RG survey F1c §2.7); the posts of the failure are not made (their tie throws).
+fn insert_request(
+    core: &std::sync::Arc<std::sync::Mutex<Core>>,
+    bytes: &[u8],
+    pieces: &[crate::report::serial::encoder::BufferPiece],
+    posts: &[(u64, Vec<u8>)],
+    diagnostics: &mut dyn std::io::Write,
+    archive: StrategyArchive<'_>,
+) -> std::io::Result<()> {
+    // A panic's hook (`archive::strategy::install_panic_hook`) does not wait for the stream,
+    // which the panicking thread may hold; the process ends without the report's held bytes too.
+    if std::thread::panicking() {
+        return Ok(());
+    }
+    diagnostics.flush()?;
+    let report = lock(core).enter_object()?;
+    let mut pos = 0usize;
+    let mut next_post = 0usize;
+    for piece in pieces {
+        next_post +=
+            emit_strategy_posts(&posts[next_post..], Some(pos as u64), diagnostics, archive)?;
+        if piece.size == 0 {
+            continue;
+        }
+        lock(core).insert(&bytes[pos..pos + piece.size])?;
+        pos += piece.size;
+    }
+    emit_strategy_posts(&posts[next_post..], None, diagnostics, archive)?;
+    let mut core = lock(core);
+    core.flush()?;
+    core.leave_object(report)
 }
 
 /// `cerr.tie()`: before a write to standard error, the run's report on standard output writes

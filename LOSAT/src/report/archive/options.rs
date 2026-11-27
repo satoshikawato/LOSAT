@@ -15,6 +15,7 @@
 //! replay every option list that NCBI wrote in the design's probes.
 
 use super::fields::{self, Field, ValueType};
+use super::read::options::{BuiltOptions, EProgram, Setter};
 use crate::blastinput::app::Program;
 
 /// The value of a recorded parameter (`Blast4-value`).
@@ -173,18 +174,33 @@ impl From<Program> for RequestKind {
 }
 
 impl RequestKind {
-    /// The request's `program` (`GetRemoteProgramAndService_Blast3`).
+    /// The request's `program` (`GetRemoteProgramAndService_Blast3` of the kind's handle, which
+    /// no task changes).
     pub fn program(self) -> &'static str {
+        remote_program_and_service(self.factory_program("")).0
+    }
+
+    /// The program whose handle `CBlastOptionsFactory` makes for the kind and `task` (its
+    /// `Create`, or `CreateTask`'s for the tasks that are a program of their own): the handles of
+    /// BLASTN's tasks are those of `blastn`, `megablast` and `dc-megablast`
+    /// (blast_options_handle.cpp:344-380); the setters that the other tasks add are `task_calls`.
+    /// PSI-TBLASTN's handle is not the task's (tblastn_args.cpp:138-149).
+    fn factory_program(self, task: &str) -> EProgram {
         match self {
-            RequestKind::Blastn => "blastn",
-            RequestKind::Blastp
-            | RequestKind::Psiblast
-            | RequestKind::PsiTblastn
-            | RequestKind::Phiblastp
-            | RequestKind::Rpsblast => "blastp",
-            RequestKind::Blastx => "blastx",
-            RequestKind::Tblastn | RequestKind::Rpstblastn => "tblastn",
-            RequestKind::Tblastx => "tblastx",
+            RequestKind::Blastn => match task {
+                "megablast" => EProgram::Megablast,
+                "dc-megablast" => EProgram::DiscMegablast,
+                _ => EProgram::Blastn,
+            },
+            RequestKind::Blastp => EProgram::Blastp,
+            RequestKind::Blastx => EProgram::Blastx,
+            RequestKind::Tblastn => EProgram::Tblastn,
+            RequestKind::Tblastx => EProgram::Tblastx,
+            RequestKind::Psiblast => EProgram::PsiBlast,
+            RequestKind::PsiTblastn => EProgram::PsiTblastn,
+            RequestKind::Phiblastp => EProgram::PhiBlastp,
+            RequestKind::Rpsblast => EProgram::RpsBlast,
+            RequestKind::Rpstblastn => EProgram::RpsTblastn,
         }
     }
 
@@ -227,35 +243,6 @@ impl RequestKind {
                 | RequestKind::PsiTblastn
                 | RequestKind::Tblastx
         )
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-74
-    /// The setters that the handle's constructor calls after defaults mode, after the
-    /// `EvalueThreshold` that every handle records: psiblast's PSSM engine defaults
-    /// (`PSI_INCLUSION_ETHRESH` 0.002, `PSI_PSEUDO_COUNT_CONST` 0), and for PSI-TBLASTN then
-    /// `SetPSITblastnDefaults` (`SmithWatermanMode` FALSE, `DbGeneticCode` 1, `WordThreshold`
-    /// `BLAST_WORD_THRESHOLD_TBLASTN` 13; `SetProgram` records nothing; NCBI 2.17.0
-    /// `tbn.pssm.db.ss` of line RG F1d probe 7).
-    fn constructor_calls(self) -> Vec<Param> {
-        let psi = || {
-            vec![
-                Param::new(fields::INCLUSION_THRESHOLD, ParamValue::Real(0.002)),
-                Param::new(fields::PSEUDO_COUNT, ParamValue::Integer(0)),
-            ]
-        };
-        match self {
-            RequestKind::Psiblast => psi(),
-            RequestKind::PsiTblastn => {
-                let mut calls = psi();
-                calls.extend([
-                    Param::new(fields::SMITH_WATERMAN_MODE, ParamValue::Boolean(false)),
-                    Param::new(fields::DB_GENETIC_CODE, ParamValue::Integer(1)),
-                    Param::new(fields::WORD_THRESHOLD, ParamValue::Integer(13)),
-                ]);
-                calls
-            }
-            _ => Vec::new(),
-        }
     }
 }
 
@@ -332,8 +319,8 @@ pub struct OptionInputs {
     /// psiblast's `-num_iterations`: the request's `Web_StepNumber` with `-db`
     /// (`ArchiveRequest::step_number`).
     pub num_iterations: Option<i32>,
-    /// An imported strategy's parameters as its setters record them, in the file's order
-    /// (`CBlastOptionsBuilder::GetSearchOptions`): they replace the command line's classes.
+    /// The remote options of an imported strategy's handle (`CBlastOptionsBuilder::GetSearchOptions`,
+    /// `RemoteOptions::built`): they replace the handle and the command line's classes.
     pub imported: Option<Vec<Param>>,
     /// NCBI's name of the running application where it is not the kind's: the application of
     /// a command line that imports another program's strategy, whose posts all carry its prefix
@@ -441,7 +428,8 @@ fn is_default_word_threshold(kind: RequestKind, value: i32) -> bool {
     }
 }
 
-/// The setters of the task (`CBlastOptionsFactory::Create` of `task` outside defaults mode).
+/// The setters that `CBlastOptionsFactory::CreateTask` calls for `task` after the handle of its
+/// program (`RequestKind::factory_program`), outside defaults mode.
 fn task_calls(task: &str) -> Vec<Param> {
     use ParamValue::{Boolean, Evalue, Integer, Str};
     let p = Param::new;
@@ -461,12 +449,6 @@ fn task_calls(task: &str) -> Vec<Param> {
         "rmblastn" => vec![
             p(fields::MATCH_REWARD, Integer(0)),
             p(fields::MISMATCH_PENALTY, Integer(0)),
-        ],
-        "dc-megablast" => vec![
-            p(fields::MB_TEMPLATE_TYPE, Integer(0)),
-            p(fields::MB_TEMPLATE_LENGTH, Integer(18)),
-            p(fields::WORD_SIZE, Integer(11)),
-            p(fields::WINDOW_SIZE, Integer(40)),
         ],
         "blastp-fast" | "tblastn-fast" | "blastx-fast" => {
             vec![
@@ -653,19 +635,15 @@ impl ParamList {
 pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
     let kind = inputs.kind;
-    let mut list = ParamList::default();
-    list.set(fields::EVALUE_THRESHOLD, Evalue(10.0));
-    for param in kind.constructor_calls() {
-        list.set(param.field(), param.value);
+    if let Some(imported) = &inputs.imported {
+        return replayed_options(imported, inputs);
     }
+    let mut list = RemoteOptions::create(kind.factory_program(&inputs.task)).list;
     // PSI-TBLASTN's handle is not the task's (`RequestKind`: tblastn_args.cpp:138-149).
     if kind != RequestKind::PsiTblastn {
         for param in task_calls(&inputs.task) {
             list.set(param.field(), param.value);
         }
-    }
-    if let Some(imported) = &inputs.imported {
-        return replayed_options(list, imported, inputs);
     }
     let matrix: Vec<u8> = inputs.matrix.clone().unwrap_or_else(|| {
         if inputs.task == "blastp-short" {
@@ -972,15 +950,16 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3811-3828
-/// The options of an imported strategy: the handle `CBlastOptionsFactory::Create` makes for the
-/// strategy's program (`list`), each setter of the file replayed over it in the file's order,
-/// then the classes `SetOptionsForSavedStrategy` extracts again: `CFormattingArgs` sets the
-/// hitlist size, `CBlastDatabaseArgs` the command line's `-dbsize` (`dbsize` holds it, or the
-/// strategy's value, which then keeps its place) and `CMbIndexArgs` the index.
-fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInputs) -> Vec<Param> {
-    for param in imported {
-        list.set(param.field(), param.value.clone());
-    }
+/// The options of an imported strategy: the remote options of the handle that the strategy's
+/// options build (`imported`: `RemoteOptions::built`, the factory's handle for the strategy's
+/// program with each setter of the file replayed over it in the file's order), then the classes
+/// `SetOptionsForSavedStrategy` extracts again: `CFormattingArgs` sets the hitlist size,
+/// `CBlastDatabaseArgs` the command line's `-dbsize` (`dbsize` holds it, or the strategy's value,
+/// which then keeps its place) and `CMbIndexArgs` the index.
+fn replayed_options(imported: &[Param], inputs: &OptionInputs) -> Vec<Param> {
+    let mut list = ParamList {
+        params: imported.to_vec(),
+    };
     list.set(
         fields::HITLIST_SIZE,
         ParamValue::Integer(inputs.hitlist_size),
@@ -997,6 +976,268 @@ fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInpu
     list.into_params()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:88
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:73,96,118
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/psiblast_options.hpp:84
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/deltablast_options.hpp:94
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_rps_options.hpp:124
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/rpstblastn_options.hpp:76
+/// The `program` and `service` of the handle of `program` (`GetRemoteProgramAndService_Blast3`:
+/// what its constructor's `SetRemoteProgramAndService_Blast3` set), the request's.
+pub(crate) fn remote_program_and_service(program: EProgram) -> (&'static str, &'static str) {
+    match program {
+        EProgram::Blastn | EProgram::Mapper => ("blastn", "plain"),
+        EProgram::Megablast | EProgram::DiscMegablast | EProgram::PhiBlastn => {
+            ("blastn", "megablast")
+        }
+        EProgram::VecScreen => ("blastn", "vecscreen"),
+        EProgram::Blastp | EProgram::PhiBlastp => ("blastp", "plain"),
+        EProgram::Blastx => ("blastx", "plain"),
+        EProgram::Tblastn => ("tblastn", "plain"),
+        EProgram::Tblastx => ("tblastx", "plain"),
+        EProgram::RpsBlast => ("blastp", "rpsblast"),
+        EProgram::RpsTblastn => ("tblastn", "rpsblast"),
+        EProgram::PsiBlast | EProgram::PsiTblastn => ("blastp", "psi"),
+        EProgram::DeltaBlast => ("blastp", "delta_blast"),
+    }
+}
+
+/// The `FilterString` value whose `sscanf` stores nothing, which NCBI's options then hold
+/// (`RemoteOptions::undecided`).
+pub(crate) const UNDECIDED_FILTER_VALUE: &str =
+    "a FilterString number that NCBI's sscanf does not read, leaving its variable unset";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-290,543-555
+/// The remote options of an options handle (`CBlastOptionsRemote` of `CBlastOptions` with locality
+/// `eBoth`): its program's factory handle (`create`) and what each setter of NCBI's
+/// `CBlastOptionsBuilder` records over it (`apply`), the one rebuild of an archive's or a search
+/// strategy's options (`blast_formatter -outfmt 11`, `-import_search_strategy`). A `SetValue` in
+/// defaults mode records only `EvalueThreshold`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RemoteOptions {
+    program: EProgram,
+    defaults_mode: bool,
+    list: ParamList,
+    /// What NCBI's options hold that the input does not decide (a `FilterString` value whose
+    /// `sscanf` stored nothing), where it reaches the remote options.
+    undecided: Option<&'static str>,
+}
+
+impl RemoteOptions {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:124-200
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:70-134
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/disc_nucl_options.cpp:47-74
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-74
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast_options.cpp:45-67
+    /// The remote options of the factory's handle of `program` (`CBlastOptionsFactory::Create`):
+    /// `EvalueThreshold` (10, the
+    /// vector screen's 700), then the setters of the handle's constructor outside defaults mode:
+    /// dc-megablast's template and word (`SetMBTemplateType` 0, `SetMBTemplateLength` 18,
+    /// `SetWordSize` 11, `SetWindowSize` 40), the PSSM engine's defaults of PSI-BLAST
+    /// (`PSI_INCLUSION_ETHRESH` 0.002, `PSI_PSEUDO_COUNT_CONST` 0), PSI-TBLASTN's
+    /// `SetPSITblastnDefaults` after them (`SmithWatermanMode` FALSE, `DbGeneticCode` 1,
+    /// `WordThreshold` `BLAST_WORD_THRESHOLD_TBLASTN` 13; NCBI 2.17.0 `tbn.pssm.db.ss` of line RG
+    /// F1d probe 7) and DELTA-BLAST's (`DELTA_INCLUSION_ETHRESH` 0.05 in the place of PSI-BLAST's).
+    pub(crate) fn create(program: EProgram) -> Self {
+        use ParamValue::{Boolean, Evalue, Integer, Real};
+        let mut options = Self {
+            program,
+            defaults_mode: program == EProgram::VecScreen,
+            list: ParamList::default(),
+            undecided: None,
+        };
+        let evalue = if program == EProgram::VecScreen {
+            700.0
+        } else {
+            10.0
+        };
+        options.set(fields::EVALUE_THRESHOLD, Evalue(evalue));
+        let psi = |options: &mut Self, inclusion: f64| {
+            options.set(fields::INCLUSION_THRESHOLD, Real(inclusion));
+            options.set(fields::PSEUDO_COUNT, Integer(0));
+        };
+        match program {
+            EProgram::DiscMegablast => {
+                options.set(fields::MB_TEMPLATE_TYPE, Integer(0));
+                options.set(fields::MB_TEMPLATE_LENGTH, Integer(18));
+                options.set(fields::WORD_SIZE, Integer(11));
+                options.set(fields::WINDOW_SIZE, Integer(40));
+            }
+            EProgram::PsiBlast => psi(&mut options, 0.002),
+            EProgram::PsiTblastn => {
+                psi(&mut options, 0.002);
+                options.set(fields::SMITH_WATERMAN_MODE, Boolean(false));
+                options.set(fields::DB_GENETIC_CODE, Integer(1));
+                options.set(fields::WORD_THRESHOLD, Integer(13));
+            }
+            // PSI-BLAST's handle first, whose two parameters DELTA-BLAST's then sets again.
+            EProgram::DeltaBlast => psi(&mut options, 0.05),
+            _ => {}
+        }
+        options
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:155-163
+    /// The remote options of the handle that `CBlastOptionsBuilder::GetSearchOptions` builds of
+    /// `options`: the factory's handle for its program, each setter applied in its order.
+    pub(crate) fn built(options: &BuiltOptions) -> Self {
+        let mut remote = Self::create(options.program);
+        for setter in &options.setters {
+            remote.apply(setter);
+        }
+        remote
+    }
+
+    /// The handle's `program` and `service` (`remote_program_and_service`).
+    pub(crate) fn program_and_service(&self) -> (&'static str, &'static str) {
+        remote_program_and_service(self.program)
+    }
+
+    /// `CBlastOptionsRemote::SetValue`: nothing but `EvalueThreshold` in defaults mode.
+    pub(crate) fn set(&mut self, field: Field, value: ParamValue) {
+        if field == fields::EVALUE_THRESHOLD || !self.defaults_mode {
+            self.list.set(field, value);
+        }
+    }
+
+    /// `CBlastOptionsRemote::ResetValue`.
+    fn reset(&mut self, field: Field) {
+        self.list.reset(field);
+    }
+
+    /// What NCBI's options hold that the input does not decide, if it reaches them.
+    pub(crate) fn undecided(&self) -> Option<&'static str> {
+        self.undecided
+    }
+
+    /// The parameters, in their order.
+    pub(crate) fn params(&self) -> &[Param] {
+        self.list.params()
+    }
+
+    pub(crate) fn into_params(self) -> Vec<Param> {
+        self.list.into_params()
+    }
+
+    /// What the `CBlastOptions` setter of `setter` records in the remote options: the parameter
+    /// it names (`import::recorded_params`), but for `SetFilterString` (`apply_filter_string`),
+    /// `SetWindowMaskerTaxId` of 0, which removes the parameter, and `SetUseIndex`, which records
+    /// `MbIndexName` only when the name is not empty.
+    pub(crate) fn apply(&mut self, setter: &Setter) {
+        match setter {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1042-1130
+            Setter::FilterString(text) => self.apply_filter_string(text.as_bytes()),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1352-1364
+            Setter::WindowMaskerTaxId(0) => self.reset(fields::WINDOW_MASKER_TAX_ID),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:561-571
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2634
+            // The builder's `SetUseIndex` (index on, the name, forced) records the force flag
+            // true; the run's loader that uses no index sets it false again (`replayed_options`).
+            Setter::UseIndex { index_name } => {
+                self.set(fields::FORCE_MB_INDEX, ParamValue::Boolean(true));
+                if !index_name.is_empty() {
+                    self.set(
+                        fields::MB_INDEX_NAME,
+                        ParamValue::Str(index_name.as_bytes().to_vec()),
+                    );
+                }
+            }
+            other => {
+                for param in super::read::import::recorded_params(other) {
+                    self.set(param.field(), param.value);
+                }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1022-1130
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:694-728
+    /// `SetFilterString` of `text`, which clears the options first: `ClearFilterOptions`, the
+    /// local options of the string
+    /// (`filter_string::filtering_options_from_string`; a parse error leaves the cleared ones, and
+    /// a repeat filter only BLASTN's and the mapper's), then what the remote options record of
+    /// them: `MaskAtHash`; SEG for a protein or translated query, else its four parameters
+    /// removed; DUST and the repeat filter for a nucleotide query not translated, else their
+    /// six removed; then the values of the filters that are on.
+    fn apply_filter_string(&mut self, text: &[u8]) {
+        use ParamValue::{Boolean, Integer, Real, Str};
+        self.set(fields::DUST_FILTERING, Boolean(false));
+        self.set(fields::SEG_FILTERING, Boolean(false));
+        self.set(fields::REPEAT_FILTERING, Boolean(false));
+        self.set(fields::MASK_AT_HASH, Boolean(false));
+        self.reset(fields::WINDOW_MASKER_TAX_ID);
+        self.reset(fields::WINDOW_MASKER_DATABASE);
+
+        let program = self.program;
+        let blastn_or_mapping = program.blastn_or_mapping();
+        let nucleotide = program.query_is_nucleotide() && !program.query_is_translated();
+        let local = super::filter_string::filtering_options_from_string(text, blastn_or_mapping)
+            .unwrap_or_default();
+        let repeat_db = local.repeat_db.filter(|_| blastn_or_mapping);
+
+        self.set(fields::MASK_AT_HASH, Boolean(local.mask_at_hash));
+        let seg = if nucleotide {
+            for field in [
+                fields::SEG_FILTERING,
+                fields::SEG_FILTERING_WINDOW,
+                fields::SEG_FILTERING_LOCUT,
+                fields::SEG_FILTERING_HICUT,
+            ] {
+                self.reset(field);
+            }
+            None
+        } else {
+            self.set(fields::SEG_FILTERING, Boolean(local.seg.is_some()));
+            local.seg
+        };
+        let (dust, repeat_db) = if nucleotide {
+            self.set(fields::DUST_FILTERING, Boolean(local.dust.is_some()));
+            self.set(fields::REPEAT_FILTERING, Boolean(repeat_db.is_some()));
+            (local.dust, repeat_db)
+        } else {
+            for field in [
+                fields::DUST_FILTERING,
+                fields::DUST_FILTERING_LEVEL,
+                fields::DUST_FILTERING_WINDOW,
+                fields::DUST_FILTERING_LINKER,
+                fields::REPEAT_FILTERING,
+                fields::REPEAT_FILTERING_DB,
+            ] {
+                self.reset(field);
+            }
+            (None, None)
+        };
+        if let Some(values) = dust {
+            let dust_fields = [
+                fields::DUST_FILTERING_LEVEL,
+                fields::DUST_FILTERING_WINDOW,
+                fields::DUST_FILTERING_LINKER,
+            ];
+            for (field, value) in dust_fields.into_iter().zip(values) {
+                self.set_scanned(field, value.map(Integer));
+            }
+        }
+        if let Some(db) = repeat_db {
+            self.set(fields::REPEAT_FILTERING_DB, Str(db));
+        }
+        if let Some(seg) = seg {
+            self.set_scanned(fields::SEG_FILTERING_WINDOW, seg.window.map(Integer));
+            self.set_scanned(fields::SEG_FILTERING_LOCUT, seg.locut.map(Real));
+            self.set_scanned(fields::SEG_FILTERING_HICUT, seg.hicut.map(Real));
+        }
+    }
+
+    /// `SetValue` of a value that `sscanf` read; `None` (it stored nothing) leaves NCBI's
+    /// parameter undecided.
+    fn set_scanned(&mut self, field: Field, value: Option<ParamValue>) {
+        match value {
+            Some(value) => self.set(field, value),
+            None if !self.defaults_mode => self.undecided = Some(UNDECIDED_FILTER_VALUE),
+            None => {}
+        }
+    }
+}
+
 /// The `Blast4-queue-search-request` service of a run: `megablast` for the megablast and
 /// dc-megablast tasks of BLASTN, `psi` for psiblast, `rpsblast` for the RPS searches (the handles'
 /// `SetRemoteProgramAndService_Blast3`, `RequestKind`), `plain` otherwise.
@@ -1005,12 +1246,7 @@ fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInpu
 /// callers set the service from the options: `blastn` task `megablast` and `dc-megablast`
 /// give "megablast", every other task "plain").
 pub fn service(kind: impl Into<RequestKind>, task: &str) -> &'static str {
-    match kind.into() {
-        RequestKind::Blastn if matches!(task, "megablast" | "dc-megablast") => "megablast",
-        RequestKind::Psiblast | RequestKind::PsiTblastn => "psi",
-        RequestKind::Rpsblast | RequestKind::Rpstblastn => "rpsblast",
-        _ => "plain",
-    }
+    remote_program_and_service(kind.into().factory_program(task)).1
 }
 
 #[cfg(test)]

@@ -463,7 +463,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
 | `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of the mapper | Refused. NCBI's programs write none. |
-| A value in an archive's results that LOSAT does not yet write in `-outfmt` `11` or `12`: a NaN or an infinite real number in `12`, a UTF8String, a NULL value or an OCTET STRING | Refused, with the value and the format named. NCBI BLAST+ stops at a NaN or an infinity in `-outfmt` `12` with an error of its JSON stream. |
+| A value in an archive that LOSAT does not yet write in `-outfmt` `11` (request or results) or `12` (results): a NaN or an infinite real number in `12`, a UTF8String, a NULL value or an OCTET STRING | Refused, with the value and the format named. NCBI BLAST+ stops at a NaN or an infinity in `-outfmt` `12` with an error of its JSON stream. |
 | `-outfmt 11` of an archive whose queries are a list of sequence locations (`seq-loc-list`) | Refused. NCBI BLAST+ fetches the sequences through its data loaders. |
 | `-rid` | Refused. It names the results of a search that NCBI's servers ran, as `-remote` does for the search programs. |
 
@@ -539,7 +539,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
   the library and pylosat.
 - The `psiblast` output formats `13` to `16`.
-- `blast_formatter`: the output formats other than `8`, `9`, `11` and `12`, and the values of an archive's results that it does not yet write.
+- `blast_formatter`: the output formats other than `8`, `9`, `11` and `12`, and the values of an archive that it does not yet write (in the request or results of `11`, the results of `12`).
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers

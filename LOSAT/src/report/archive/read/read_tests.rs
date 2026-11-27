@@ -103,15 +103,18 @@ const EDITED: [&str; 2] = [
 /// The archives of blast_formatter's rows that are broken or edited by hand on purpose
 /// (`blast_formatter/cases.tsv`): a line of garbage after the archive, a file cut in its second
 /// object (the rows of NCBI's read errors), a byte that NCBI posts in a title of the first or the
-/// second object (the line of its post), and the review's requests with both taxid lists (written
-/// by hand, a list on one line).
-const BROKEN: [&str; 6] = [
+/// second object (the line of its post), the review's requests with both taxid lists (written
+/// by hand, a list on one line), and two FilterString setters longer than a line, written on one
+/// line (the ends of the 128-byte buffers of NCBI's parser, line RG-F3 P6F).
+const BROKEN: [&str; 8] = [
     "blast_formatter/in/garbage.asn",
     "blast_formatter/in/cut2.asn",
     "blast_formatter/in/bad1.asn",
     "blast_formatter/in/bad2.asn",
     "blast_formatter/in/tax_both.asn",
     "blast_formatter/in/tx5_both.asn",
+    "blast_formatter/in/fs_bn_Rlong.asn",
+    "blast_formatter/in/fs_bn_Dlate.asn",
 ];
 
 /// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an

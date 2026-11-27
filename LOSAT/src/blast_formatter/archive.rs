@@ -1,9 +1,11 @@
 //! blast_formatter's run over the objects of a BLAST archive (`-archive`): NCBI's
 //! `CBlastFormatterApp::Run` with `CRemoteBlast::LoadFromArchive` and `PrintFormattedOutput`
 //! (c++/src/app/blast/blast_formatter.cpp:329-531) over the archive reader
-//! (`report::archive::read`), and the formats 8, 9 and 12, which write each query's Seq-aligns as
+//! (`report::archive::read`): the formats 8, 9 and 12, which write each query's Seq-aligns as
 //! the archive holds them, cut to the hit list size, inside the one Seq-annot wrapper of the
-//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG).
+//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG), and
+//! the format 11, which writes the archive again with the search programs' writer
+//! (`archive_out`, `report::archive::writer::write_archive_document`).
 //!
 //! The object loop keeps what NCBI's `CRemoteBlast` keeps from one object to the next: the
 //! options of the first search object (`GetSearchOptions` builds them once: the program, the
@@ -36,6 +38,8 @@ use crate::cli::{command_line_argument_error, NativeError};
 use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::archive::fields;
+use crate::report::archive::options::{ParamValue, RemoteOptions};
 use crate::report::archive::read::options::{archive_request, BuiltOptions};
 use crate::report::archive::read::request::{ParamSet, Queries, Subject};
 use crate::report::archive::read::{
@@ -109,9 +113,10 @@ struct Run<'r, 'o> {
     /// The options of the first search object (`m_CBOH`, `m_TaxidList`,
     /// `m_DbFilteringAlgorithmId`, `m_Task`), which every later object is formatted with.
     search_options: Option<BuiltOptions>,
-    /// The remote-options state of `m_CBOH` (`-outfmt 11`), built once on the first search object
-    /// and mutated across objects (`HitlistSize`, RPS `MatrixName`).
-    algorithm_options: Option<archive_out::AlgorithmOptions>,
+    /// The remote options of `m_CBOH` (`-outfmt 11`), built once on the first search object
+    /// (`RemoteOptions::built`, `GetSearchOptions`) and set across objects (`HitlistSize`, RPS
+    /// `MatrixName`).
+    algorithm_options: Option<RemoteOptions>,
     /// The options' hit list size: the first object's, then what `ExtractAlgorithmOptions` set
     /// for the last formatted object (`opts.SetHitlistSize` on the kept options).
     hitlist: i32,
@@ -468,7 +473,7 @@ impl<'r, 'o> Run<'r, 'o> {
         if self.search_options.is_none() {
             let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
             self.hitlist = options.hitlist_size();
-            self.algorithm_options = Some(archive_out::AlgorithmOptions::from_built(&options));
+            self.algorithm_options = Some(RemoteOptions::built(&options));
             self.search_options = Some(options);
         }
         let printed = self.print(&search, diag);
@@ -519,10 +524,12 @@ impl<'r, 'o> Run<'r, 'o> {
     /// warnings), the check of SAM, the queries (`check_queries`), the database or the subject
     /// sequences (`subject_database`), the formatter's constructor (`Output::begin_object`), the
     /// check of the XInclude formats (13 and 14 without `-out`); the output formats that LOSAT
-    /// does not write are refused there, after NCBI's errors that come before any output. Then
-    /// the results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
-    /// variable, and the Seq-annot of each query that has alignments (`x_PrintStructuredReport`,
-    /// `Output::write_annot`).
+    /// does not write are refused there, after NCBI's errors that come before any output. The
+    /// format 11 then writes the archive of the object with the hit list size set in its algorithm
+    /// options (`CBlastFormat::WriteArchive`, `archive_out::write_archive`); the others read the
+    /// results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
+    /// variable, and write the Seq-annot of each query that has alignments
+    /// (`x_PrintStructuredReport`, `Output::write_annot`).
     fn print(&mut self, search: &Search, diag: &mut Diag) -> anyhow::Result<()> {
         self.output.open(&self.options.out)?;
         // A negative hit list size (an archive that NCBI's searches do not write, probes
@@ -534,15 +541,6 @@ impl<'r, 'o> Run<'r, 'o> {
         if self.hitlist >= 0 || set_hitlist {
             self.hitlist = i32::try_from(formatting.counts.hitlist_size)
                 .expect("a hit list size that the handler read from an int");
-        }
-        if let Some(algo) = &mut self.algorithm_options {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2990
-            if formatting.choice.number > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES
-                || set_hitlist
-                || self.hitlist <= 500
-            {
-                algo.set_hitlist_size(self.hitlist);
-            }
         }
         let search_options = self
             .search_options
@@ -583,6 +581,10 @@ impl<'r, 'o> Run<'r, 'o> {
                 .algorithm_options
                 .as_mut()
                 .expect("the options of the first search object");
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2978
+            // `ExtractAlgorithmOptions` sets the hit list size in the options of every object
+            // (`SetHitlistSize`), which only this format writes.
+            algo.set(fields::HITLIST_SIZE, ParamValue::Integer(self.hitlist));
             let database = self.database.as_ref().map(|(name, _)| name.as_slice());
             return archive_out::write_archive(
                 search,

@@ -570,7 +570,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 8] = [
+const REFUSED_ROWS: [RefusedRow; 9] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -628,7 +628,9 @@ const REFUSED_ROWS: [RefusedRow; 8] = [
         losat_err: "severity Fatal",
     },
     // A FilterString number that NCBI's `sscanf` does not store (`D abc 64 1`, `S 10 abc 2.5`), where
-    // `-outfmt 11` records it: NCBI writes a variable it never set (its bytes, `ncbi/<name>.out`, vary).
+    // `-outfmt 11` records it and no later setter sets it again (a second FilterString `F` does
+    // not, refused_filter_dust_abc_F_11): NCBI writes a variable it never set (its bytes,
+    // `ncbi/<name>.out`, vary). A later setter of the value decides it (rows fs_*abc_*_11).
     RefusedRow {
         program: "blast_formatter",
         name: "refused_filter_dust_abc_11",
@@ -640,6 +642,14 @@ const REFUSED_ROWS: [RefusedRow; 8] = [
     RefusedRow {
         program: "blast_formatter",
         name: "refused_filter_seg_abc_11",
+        kind: "Undecided",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a FilterString number that NCBI's sscanf does not read",
+    },
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_filter_dust_abc_F_11",
         kind: "Undecided",
         ncbi_status: 0,
         ncbi_err: "",

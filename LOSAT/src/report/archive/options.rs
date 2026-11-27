@@ -1018,9 +1018,10 @@ pub(crate) struct RemoteOptions {
     program: EProgram,
     defaults_mode: bool,
     list: ParamList,
-    /// What NCBI's options hold that the input does not decide (a `FilterString` value whose
-    /// `sscanf` stored nothing), where it reaches the remote options.
-    undecided: Option<&'static str>,
+    /// The parameters whose value the input does not decide: a `FilterString` value whose
+    /// `sscanf` stored nothing, which NCBI's `SetValue` records from its unset variable, until a
+    /// later setter of the parameter replaces it or a reset removes it.
+    undecided: Vec<Field>,
 }
 
 impl RemoteOptions {
@@ -1044,7 +1045,7 @@ impl RemoteOptions {
             program,
             defaults_mode: program == EProgram::VecScreen,
             list: ParamList::default(),
-            undecided: None,
+            undecided: Vec::new(),
         };
         let evalue = if program == EProgram::VecScreen {
             700.0
@@ -1093,21 +1094,29 @@ impl RemoteOptions {
         remote_program_and_service(self.program)
     }
 
-    /// `CBlastOptionsRemote::SetValue`: nothing but `EvalueThreshold` in defaults mode.
+    /// `CBlastOptionsRemote::SetValue`: nothing but `EvalueThreshold` in defaults mode. The value
+    /// decides the parameter.
     pub(crate) fn set(&mut self, field: Field, value: ParamValue) {
         if field == fields::EVALUE_THRESHOLD || !self.defaults_mode {
             self.list.set(field, value);
+            self.decided(field);
         }
     }
 
-    /// `CBlastOptionsRemote::ResetValue`.
+    /// `CBlastOptionsRemote::ResetValue`: the parameter, decided or not, is gone.
     fn reset(&mut self, field: Field) {
         self.list.reset(field);
+        self.decided(field);
     }
 
-    /// What NCBI's options hold that the input does not decide, if it reaches them.
-    pub(crate) fn undecided(&self) -> Option<&'static str> {
+    fn decided(&mut self, field: Field) {
         self.undecided
+            .retain(|undecided| undecided.name() != field.name());
+    }
+
+    /// What NCBI's options hold that the input does not decide, if any parameter still holds it.
+    pub(crate) fn undecided(&self) -> Option<&'static str> {
+        (!self.undecided.is_empty()).then_some(UNDECIDED_FILTER_VALUE)
     }
 
     /// The parameters, in their order.
@@ -1115,7 +1124,10 @@ impl RemoteOptions {
         self.list.params()
     }
 
+    /// The parameters, in their order; an undecided one is refused before (the strategy import
+    /// refuses a `FilterString` by name).
     pub(crate) fn into_params(self) -> Vec<Param> {
+        debug_assert!(self.undecided.is_empty(), "{:?}", self.undecided);
         self.list.into_params()
     }
 
@@ -1214,26 +1226,32 @@ impl RemoteOptions {
                 fields::DUST_FILTERING_LINKER,
             ];
             for (field, value) in dust_fields.into_iter().zip(values) {
-                self.set_scanned(field, value.map(Integer));
+                self.set_scanned(field, value, Integer);
             }
         }
         if let Some(db) = repeat_db {
             self.set(fields::REPEAT_FILTERING_DB, Str(db));
         }
         if let Some(seg) = seg {
-            self.set_scanned(fields::SEG_FILTERING_WINDOW, seg.window.map(Integer));
-            self.set_scanned(fields::SEG_FILTERING_LOCUT, seg.locut.map(Real));
-            self.set_scanned(fields::SEG_FILTERING_HICUT, seg.hicut.map(Real));
+            self.set_scanned(fields::SEG_FILTERING_WINDOW, seg.window, Integer);
+            self.set_scanned(fields::SEG_FILTERING_LOCUT, seg.locut, Real);
+            self.set_scanned(fields::SEG_FILTERING_HICUT, seg.hicut, Real);
         }
     }
 
-    /// `SetValue` of a value that `sscanf` read; `None` (it stored nothing) leaves NCBI's
-    /// parameter undecided.
-    fn set_scanned(&mut self, field: Field, value: Option<ParamValue>) {
-        match value {
-            Some(value) => self.set(field, value),
-            None if !self.defaults_mode => self.undecided = Some(UNDECIDED_FILTER_VALUE),
-            None => {}
+    /// `SetValue` of the variable that `sscanf` scanned into. `None` (it stored nothing) still
+    /// records the parameter at its place, of a value the input does not decide (`undecided`):
+    /// a later setter replaces it there, a reset removes it.
+    fn set_scanned<T: Default>(
+        &mut self,
+        field: Field,
+        value: Option<T>,
+        wrap: fn(T) -> ParamValue,
+    ) {
+        let decided = value.is_some();
+        self.set(field, wrap(value.unwrap_or_default()));
+        if !decided && !self.defaults_mode {
+            self.undecided.push(field);
         }
     }
 }

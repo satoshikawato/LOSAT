@@ -407,8 +407,8 @@ pub(super) fn write_archive(
     if encoding == ArchiveEncoding::Nothing {
         return Ok(());
     }
-    // A `FilterString` value that NCBI's `sscanf` did not store: the options that NCBI writes
-    // hold what its memory held.
+    // A `FilterString` value that NCBI's `sscanf` did not store, which no later setter set again:
+    // the options that NCBI writes hold what its memory held.
     if let Some(what) = algo_opts.undecided() {
         return Err(Refusal::Undecided(what).into());
     }

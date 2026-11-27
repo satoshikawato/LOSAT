@@ -536,6 +536,49 @@ fn an_unread_filter_number_is_undecided_where_it_is_recorded() {
     )));
 }
 
+// A later setter of the parameter replaces an unread `FilterString` number at its place, which
+// decides it (review R6 round 2 N1: `DustFilteringLevel`, `SegFilteringLocut`, a second
+// `FilterString`); a second `FilterString` that does not set it (`F`) leaves it undecided.
+#[test]
+fn a_later_setter_decides_an_unread_filter_number_at_its_place() {
+    let options = |program, setters| RemoteOptions::built(&built(program, setters));
+    let fs = |text: &str| Setter::FilterString(text.to_string());
+    let names = |options: &RemoteOptions| -> Vec<&'static str> {
+        options.params().iter().map(|param| param.name()).collect()
+    };
+    let dust = options(
+        EProgram::Blastn,
+        vec![fs("D abc 64 1;"), Setter::DustFilteringLevel(20)],
+    );
+    assert_eq!(dust.undecided(), None);
+    assert_eq!(
+        names(&dust),
+        names(&options(EProgram::Blastn, vec![fs("D 20 64 1;")]))
+    );
+    assert!(dust.params().contains(&Param::new(
+        fields::DUST_FILTERING_LEVEL,
+        ParamValue::Integer(20)
+    )));
+    let again = options(EProgram::Blastn, vec![fs("D abc 64 1;"), fs("D 20 64 1;")]);
+    assert_eq!(again.undecided(), None);
+    let seg = options(
+        EProgram::Blastp,
+        vec![fs("S 10 abc 2.5;"), Setter::SegFilteringLocut(2.2)],
+    );
+    assert_eq!(seg.undecided(), None);
+    assert_eq!(
+        seg.params(),
+        options(EProgram::Blastp, vec![fs("S 10 2.2 2.5;")]).params()
+    );
+    let again = options(
+        EProgram::Blastp,
+        vec![fs("S 10 abc 2.5;"), fs("S 10 2.2 2.5;")],
+    );
+    assert_eq!(again.undecided(), None);
+    let off = options(EProgram::Blastn, vec![fs("D abc 64 1;"), fs("F")]);
+    assert_eq!(off.undecided(), Some(UNDECIDED_FILTER_VALUE));
+}
+
 // The search programs' handles are the factory's (`RequestKind::factory_program`): dc-megablast's
 // four parameters, PSI-TBLASTN's, and the request's program and service.
 #[test]

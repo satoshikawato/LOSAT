@@ -291,3 +291,9 @@ real_subnormal_11	-archive in/real_subnormal.asn -outfmt 11
 real_subnormal_8	-archive in/real_subnormal.asn -outfmt 8
 real_subnormal_9	-archive in/real_subnormal.asn -outfmt 9
 real_subnormal_12	-archive in/real_subnormal.asn -outfmt 12
+# Rows fs_bn_Dabc_level_11 to fs_ps_Sabc_locut_11 (line RG item F3 PR 6 after review R6 round 2, agent P6Fc of ad-RG-F3-13, 2026-11-28): NCBI BLAST+ 2.17.0, the official release build on the local machine (/home/kawato/tools/ncbi-blast-oracle), by remaining-gaps-20261112/F/f3/tools/fixP6Fc.py, every NCBI run under unshare -rn. The archives of the review: in/fs_bn_Dabc.asn with DustFilteringLevel 20 (fs_bn_Dabc_level) or a second FilterString "D 20 64 1;" (fs_bn_Dabc_D20) or "F" (fs_bn_Dabc_F) after its FilterString, in/fs_ps_Sabc.asn with a second FilterString "S 10 2.2 2.5;" (fs_ps_Sabc_S22) or SegFilteringLocut { 22, 10, -1 } (fs_ps_Sabc_locut) after it. A later setter decides the value that sscanf did not read; "F" does not set it, which LOSAT refuses (refused_filter_dust_abc_F_11, NCBI's bytes in ncbi/<name>.out vary).
+fs_bn_Dabc_level_11	-archive in/fs_bn_Dabc_level.asn -outfmt 11
+fs_bn_Dabc_D20_11	-archive in/fs_bn_Dabc_D20.asn -outfmt 11
+refused_filter_dust_abc_F_11	-archive in/fs_bn_Dabc_F.asn -outfmt 11
+fs_ps_Sabc_S22_11	-archive in/fs_ps_Sabc_S22.asn -outfmt 11
+fs_ps_Sabc_locut_11	-archive in/fs_ps_Sabc_locut.asn -outfmt 11

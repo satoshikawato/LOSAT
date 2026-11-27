@@ -825,3 +825,70 @@ fn the_giim_tree_finds_the_first_handle_not_equal() {
     tree.drop_handle(5, a);
     assert_eq!(tree.find(&id("y")), Some(b2));
 }
+
+#[test]
+fn the_pdb_handle_seq_id_keeps_the_id_but_for_a_normalized_chain() {
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3293-3346
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3408-3464
+    // The handle's Seq-id is the id with the chain that `Normalize` gives where it builds the id
+    // anew. The cases are those of probe 2 of line RG-KB item 12: NCBI BLAST+ 2.17.0 loads the
+    // record whose stored id is its handle's Seq-id, and writes `Unknown` for the others.
+    let chain_of = |id: &ParsedSeqId| match id {
+        P::Pdb(pdb) => pdb_handle_seq_id(pdb).chain,
+        _ => unreachable!(),
+    };
+    let loads = [
+        pdb("1AB1", Some(127), None, None),
+        pdb("1AB1", Some(-128), None, None),
+        pdb("1AB1", Some(-5), None, None),
+        pdb("1AB1", Some(65), None, None),
+        pdb("1AB1", None, None, None),
+        // A chain-id with an upper-case molecule and no date is not built anew.
+        pdb("1AB1", Some(66), None, Some("A")),
+        pdb("1AB1", Some(65), None, Some("a")),
+        // A date that does not normalize keeps the id as it is.
+        pdb("1ab1", Some(66), Some(Date::Str(b("2000"))), Some("A")),
+        pdb("1ab1", Some(66), year(2000, Some(16), None), Some("A")),
+    ];
+    for id in &loads {
+        let P::Pdb(own) = id else { unreachable!() };
+        assert_eq!(chain_of(id), own.chain, "{id:?}");
+        assert_eq!(&P::Pdb(pdb_handle_seq_id(own)), id, "{id:?}");
+    }
+    let unknown = [
+        (pdb("1AB1", Some(321), None, None), 65),
+        (pdb("1AB1", Some(-191), None, None), 65),
+        (pdb("1AB1", Some(383), None, None), 127),
+        (pdb("1AB1", Some(200), None, None), -56),
+        (pdb("1AB1", Some(128), None, None), -128),
+        (pdb("1AB1", Some(255), None, None), -1),
+        (pdb("1AB1", Some(-129), None, None), 127),
+        // A lower-case molecule letter, or a date that normalizes, builds the id anew: the chain
+        // becomes `chain-id[0]`.
+        (pdb("1ab1", Some(66), None, Some("A")), 65),
+        (pdb("1AB1", Some(66), year(2000, None, None), Some("A")), 65),
+        (pdb("1Ab1", Some(5), None, Some("B")), 66),
+    ];
+    for (id, chain) in &unknown {
+        let P::Pdb(own) = id else { unreachable!() };
+        let handle = pdb_handle_seq_id(own);
+        assert_eq!(handle.chain, Some(*chain), "{id:?}");
+        // The rest is the id's own: molecule case, chain-id and date as stored.
+        assert_eq!(
+            P::Pdb(PdbSeqId {
+                chain: own.chain,
+                ..handle
+            }),
+            *id
+        );
+    }
+    // The handle's Seq-id of a handle that another id of the same key made is still the id's own
+    // but for the chain (`handle_seq_id`).
+    assert_eq!(
+        handle_seq_id(
+            &pdb("1AB1", Some(65), None, Some("A")),
+            &pdb("1AB1", Some(321), None, None)
+        ),
+        pdb("1AB1", Some(65), None, None)
+    );
+}

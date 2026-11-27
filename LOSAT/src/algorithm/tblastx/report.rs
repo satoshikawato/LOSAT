@@ -1085,7 +1085,7 @@ impl<'a> PairwiseRows<'a> {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
-            query_left_of_record: false,
+            edge: crate::report::pairwise::PairwiseEdge::Normal,
         }
     }
 }
@@ -1137,14 +1137,16 @@ pub(crate) fn shift_to_records(
 pub(crate) fn write_outfmt7_query_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    database: &str,
+    database: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# TBLASTX {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {database}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(database)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -1168,7 +1170,7 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     comments: bool,
     query_titles: &[&[u8]],
-    database: &str,
+    database: &[u8],
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     loads: &crate::report::db_subject::HitLoads,
@@ -1360,6 +1362,21 @@ impl TblastxOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Tblastx;
+        match self {
+            Self::Seqalign(_) | Self::Archive => true,
+            Self::Tabular | Self::TabularWithComments => tabular_shows(None, program),
+            Self::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
@@ -1375,6 +1392,30 @@ impl TblastxOutputFormat {
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
+    }
+
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
+            Self::Unsupported => None,
+        }
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
@@ -1461,7 +1502,7 @@ impl TblastxOutputFormat {
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
+pub(crate) fn output_format(outfmt: impl AsRef<[u8]>) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
     // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
     if let Ok(choice) = &choice {

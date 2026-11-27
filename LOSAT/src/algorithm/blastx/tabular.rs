@@ -195,16 +195,40 @@ impl SubjectValues<'_> {
     }
 }
 
-/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`; `slen` is the
-/// length of the record, also with `-subject_loc`. The `sall*` of a record are made only for a
-/// report that shows them (`all_deflines`, `TabularNeeds::all_deflines`).
+/// The values of the subject `subject` (rank or index `oid`) of a report of `shown`, in the
+/// report of the reader batch's query `query`; `slen` is the length of the record, also with
+/// `-subject_loc`. The `sall*` of a record are made only for a report that shows them
+/// (`all_deflines`, `TabularNeeds::all_deflines`). A database sequence that NCBI's scope finds as
+/// a query of its batch shows that query's Bioseq (`ReportedSubjects::seen_of`,
+/// `report::query_bioseq`): the query's ids, no title (`N/A`), the query record's length, no
+/// taxonomy.
 fn subject_values<'a>(
     shown: &'a ShownSubjects<'_>,
     subject: &'a FastaRecord,
-    oid: usize,
+    (oid, query): (usize, usize),
     no_taxonomy: &'a TabularTaxonomy,
     all_deflines: bool,
 ) -> SubjectValues<'a> {
+    if let ShownSubjects::Database { reported, .. } = shown {
+        if let Some(bioseq) = reported.seen_of(query, oid) {
+            let [id, accession, accession_version] = bioseq.tabular_ids();
+            return SubjectValues {
+                id: std::borrow::Cow::Borrowed(id.as_slice()),
+                accession: accession.as_slice(),
+                accession_version: accession_version.as_slice(),
+                gi: bioseq.gi(),
+                all_ids: if all_deflines {
+                    std::borrow::Cow::Borrowed(bioseq.all_ids())
+                } else {
+                    std::borrow::Cow::Borrowed(&[])
+                },
+                titles: None,
+                length: bioseq.length(),
+                taxonomy: no_taxonomy,
+                failed: None,
+            };
+        }
+    }
     match shown {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:560-565
         // A FASTA subject has no definition lines: its `sall*` are its own ids (the first
@@ -264,6 +288,7 @@ fn subject_values<'a>(
                         subject_id: true,
                         all_ids: false,
                         thrown: None,
+                        empty_handle: false,
                     }
                 }),
                 id,
@@ -331,6 +356,7 @@ fn subject_values<'a>(
                             subject_id: true,
                             all_ids: true,
                             thrown: None,
+                            empty_handle: false,
                         }
                     }),
                 },
@@ -382,7 +408,7 @@ pub(super) fn write_blastx_tabular(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1311
     let database: Vec<u8> = match shown {
         ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
-        ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
+        ShownSubjects::Database { name, .. } => name.to_vec(),
     };
     let names = match shown {
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
@@ -524,8 +550,13 @@ pub(super) fn write_blastx_tabular(
                         continue;
                     }
                     let subject = &subjects[list.oid];
-                    let values =
-                        subject_values(shown, subject, list.oid, &no_taxonomy, needs.all_deflines);
+                    let values = subject_values(
+                        shown,
+                        subject,
+                        (list.oid, batch.query_ordinal + qidx),
+                        &no_taxonomy,
+                        needs.all_deflines,
+                    );
                     // The subject's Seq-loc as its Seq-align shows it (`SubjectLoc::of_list`).
                     let loc = loc.of_list(list, options.gapped);
                     // The subject's `qcovhsp` rule: its rows only divide.
@@ -589,7 +620,7 @@ pub(super) fn write_blastx_tabular(
                         Some(kept) if table.fails(&tabular_subject) => Some(subject_values(
                             shown,
                             &subjects[kept],
-                            kept,
+                            (kept, batch.query_ordinal + qidx),
                             &no_taxonomy,
                             needs.all_deflines,
                         )),
@@ -921,6 +952,16 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => Some(reported.loads()),
         ShownSubjects::Fasta { .. } => None,
     };
+    // A database sequence that the scope finds as a query of its batch: the query's line
+    // (`ReportedSubjects::seen_of`, by the query of the reader batch).
+    let ordinals: Vec<usize> = batches
+        .iter()
+        .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.query_ordinal + qidx))
+        .collect();
+    let seen = |q_idx: usize, s_idx: usize| match shown {
+        ShownSubjects::Database { reported, .. } => reported.seen_of(*ordinals.get(q_idx)?, s_idx),
+        ShownSubjects::Fasta { .. } => None,
+    };
     let report = report_batch(
         &tax_queries,
         parsed,
@@ -931,6 +972,7 @@ fn write_blastx_tax_report(
         program,
         options.app_name,
         options.is_html,
+        Some(&seen),
     )?;
     let mut q_idx = 0;
     for batch in batches {

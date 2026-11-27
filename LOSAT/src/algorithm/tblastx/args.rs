@@ -1,6 +1,8 @@
 //! Command-line arguments for TBLASTX
 
 use crate::blastinput::value_parsers::*;
+use crate::utils::os_bytes::os_str_bytes;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 // Command-line arguments for TBLASTX (translated DNA vs translated DNA search)
@@ -23,7 +25,7 @@ pub struct TblastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
     // exclusion (`cli::reader`). The database is searched by `tblastx/database.rs`.
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
@@ -52,7 +54,7 @@ pub struct TblastxArgs {
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:624-629 (c++/src/algo/blast/blastinput/tblastx_args.cpp:81
     // adds it)
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     // Option, not a value with a default: whether it was given is what a BLAST archive (outfmt 11)
     // records (`WordSize`, NCBI blast_args.cpp:290-292); the search uses `word_size()` (default 3).
     pub word_size: Option<i32>,
@@ -109,7 +111,7 @@ pub struct TblastxArgs {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`).
-    pub seg: String,
+    pub seg: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // (`CFilteringArgs` of the negation of `kQueryIsProtein`, tblastx_args.cpp:78, takes this
     // protein branch.) Read by `soft_masking`.
@@ -143,7 +145,7 @@ pub struct TblastxArgs {
     pub window_size: Option<i32>,
 
     // Read when NCBI reads it (`blastinput/app.rs` `parse_formatting_string`).
-    pub outfmt: String,
+    pub outfmt: OsString,
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
     /// If the query range of a hit is enveloped by that of at least this many
@@ -163,10 +165,10 @@ pub struct TblastxArgs {
     pub subject_besthit: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`check_ncbi_options`).
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
     /// reads the arguments (`archive::handle_for`).
     pub archive: Option<crate::report::archive::ArchiveHandle>,
@@ -312,13 +314,18 @@ pub enum TblastxMatrix {
 /// and TBLASTN's with `-ungapped`; `TblastxArgs::scoring_matrix` tells the rules): a matrix of the
 /// tables, a name that the matrix loader reads as IDENTITY without a table (NCBI aborts), or a
 /// name that it does not know (looked for as a file).
-pub(crate) fn ungapped_matrix(name: &str) -> TblastxMatrix {
-    if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
+pub(crate) fn ungapped_matrix(name: impl AsRef<[u8]>) -> TblastxMatrix {
+    let name = name.as_ref();
+    if let Ok(matrix) = std::str::from_utf8(name)
+        .ok()
+        .and_then(|s| s.parse::<crate::config::ScoringMatrix>().ok())
+        .ok_or(())
+    {
         return TblastxMatrix::Table(matrix);
     }
     let identity = name
         .get(..8)
-        .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
+        .is_some_and(|start| start.eq_ignore_ascii_case(b"identity"));
     if identity {
         TblastxMatrix::Aborts
     } else {
@@ -329,9 +336,13 @@ pub(crate) fn ungapped_matrix(name: &str) -> TblastxMatrix {
 /// LOSAT's refusal of a search with a batch whose `-matrix` name `name` the matrix loader reads
 /// as IDENTITY without IDENTITY's statistics table (`TblastxMatrix::Aborts`), where NCBI BLAST+
 /// 2.17.0 aborts when it sets up the batch; `program` is the program's name in capitals.
-pub(crate) fn identity_named_matrix_refusal(name: &str, program: &str) -> anyhow::Error {
+pub(crate) fn identity_named_matrix_refusal(
+    name: impl AsRef<[u8]>,
+    program: &str,
+) -> anyhow::Error {
     anyhow::anyhow!(
-        "-matrix {name} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's {program}"
+        "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's {program}",
+        String::from_utf8_lossy(name.as_ref())
     )
 }
 
@@ -348,8 +359,19 @@ impl TblastxArgs {
     }
 
     /// The `-matrix` name as typed, BLOSUM62 when omitted (the pairwise report prints it so).
-    pub fn matrix_name(&self) -> &str {
-        self.matrix.as_deref().unwrap_or("BLOSUM62")
+    pub fn matrix_name(&self) -> std::borrow::Cow<'_, str> {
+        match self.matrix.as_deref() {
+            Some(name) => name.to_string_lossy(),
+            None => std::borrow::Cow::Borrowed("BLOSUM62"),
+        }
+    }
+
+    /// Raw bytes of `-matrix` (BLOSUM62 when omitted).
+    pub fn matrix_name_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        match self.matrix.as_deref() {
+            Some(name) => os_str_bytes(name),
+            None => std::borrow::Cow::Borrowed(b"BLOSUM62"),
+        }
     }
 
     /// The matrix of `-matrix`.
@@ -365,7 +387,7 @@ impl TblastxArgs {
     /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3), which LOSAT
     /// refuses (`matrix_file`).
     pub fn scoring_matrix(&self) -> TblastxMatrix {
-        ungapped_matrix(self.matrix_name())
+        ungapped_matrix(self.matrix_name_bytes())
     }
 
     /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`
@@ -379,7 +401,7 @@ impl TblastxArgs {
     ) -> anyhow::Result<()> {
         if self.scoring_matrix() == TblastxMatrix::Unknown {
             self.matrix_file = search
-                .file(self.matrix_name())
+                .file(self.matrix_name_bytes())
                 .map_err(anyhow::Error::msg)?;
         }
         Ok(())
@@ -400,7 +422,7 @@ impl TblastxArgs {
             }
             crate::stats::protein_options::suggested_threshold(
                 crate::stats::protein_options::SuggestionProgram::TranslatedSubject,
-                self.matrix_name(),
+                self.matrix_name_bytes(),
             )
         })
     }
@@ -415,7 +437,7 @@ impl TblastxArgs {
             if self.import.is_some() {
                 return 40;
             }
-            crate::stats::protein_options::suggested_window_size(self.matrix_name())
+            crate::stats::protein_options::suggested_window_size(self.matrix_name_bytes())
         })
     }
 
@@ -452,7 +474,7 @@ impl TblastxArgs {
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
-        crate::blastinput::app::parse_seg_option(&self.seg)
+        crate::blastinput::app::parse_seg_option(os_str_bytes(&self.seg))
     }
 
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table but
@@ -478,8 +500,10 @@ impl TblastxArgs {
     /// search of `-subject`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-    pub fn database_name(&self) -> Option<&str> {
-        self.db.as_deref().map(crate::seqdb::db_argument_name)
+    pub fn database_name(&self) -> Option<Vec<u8>> {
+        self.db
+            .as_deref()
+            .map(|db| crate::seqdb::db_argument_name_bytes(&os_str_bytes(db)).to_vec())
     }
 
     /// The subject file name as the reports show it.

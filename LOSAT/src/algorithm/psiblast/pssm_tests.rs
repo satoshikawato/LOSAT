@@ -26,13 +26,14 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         save_pssm_after_last_round: save_last,
         save_each_pssm: save_each,
         out_pssm: None,
-        out_ascii_pssm: ascii.map(str::to_string),
+        out_ascii_pssm: ascii.map(std::path::PathBuf::from),
         pseudocount: 0,
         in_pssm: None,
         in_msa: None,
         versions: Default::default(),
         check_scope: Default::default(),
         rounds: None,
+        phi_pattern: None,
     }
 }
 
@@ -67,7 +68,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
     assert!(options(false, false, Some("a.txt")).check().is_ok());
     // `-out_pssm` satisfies both checks too.
     let asn_only = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, true, None)
     };
     assert!(asn_only.check().is_ok());
@@ -87,7 +88,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         request,
         PssmRequest {
             asn_path: None,
-            ascii_path: Some("-".to_string()),
+            ascii_path: Some(std::path::PathBuf::from("-")),
             save_each: true,
             pseudocount: 0,
             versions: Default::default(),
@@ -95,11 +96,14 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
     );
     assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
     let with_asn = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, false, None)
     };
     let request = with_asn.request().unwrap();
-    assert_eq!(request.asn_path.as_deref(), Some("p.asn"));
+    assert_eq!(
+        request.asn_path.as_deref(),
+        Some(std::path::Path::new("p.asn"))
+    );
     assert_eq!(request.ascii_path, None);
     let diagnostics = request.diagnostics();
     assert!(diagnostics.frequency_ratios);
@@ -107,7 +111,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         !diagnostics.information_content && !diagnostics.sigma && !diagnostics.num_matching_seqs
     );
     let no_asn_flag = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(false, false, None)
     };
     assert_eq!(no_asn_flag.request(), None);
@@ -541,7 +545,7 @@ const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
 fn pssm_request(pseudocount: i32) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some("-".to_string()),
+        ascii_path: Some(std::path::PathBuf::from("-")),
         save_each: false,
         pseudocount,
         versions: Default::default(),
@@ -645,7 +649,7 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
     let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let request = PssmRequest {
-        asn_path: Some("p.asn".to_string()),
+        asn_path: Some(std::path::PathBuf::from("p.asn")),
         ascii_path: None,
         save_each: false,
         pseudocount: 0,
@@ -784,7 +788,7 @@ fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
 fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some(path.to_str().unwrap().to_string()),
+        ascii_path: Some(path.to_path_buf()),
         save_each,
         pseudocount: 0,
         versions: Default::default(),
@@ -793,7 +797,7 @@ fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
 
 fn asn_request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
-        asn_path: Some(path.to_str().unwrap().to_string()),
+        asn_path: Some(path.to_path_buf()),
         ascii_path: None,
         save_each,
         pseudocount: 0,
@@ -848,7 +852,7 @@ fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {
     assert!(!missing.exists());
     // The same name for both files: each query's ASN.1 file, then its ASCII one.
     let both = PssmRequest {
-        asn_path: Some(file.to_str().unwrap().to_string()),
+        asn_path: Some(file.clone()),
         ..request(&file, false)
     };
     write_files(&both, &[b"asn 1\n", b"asn 2\n"], &pssms).unwrap();

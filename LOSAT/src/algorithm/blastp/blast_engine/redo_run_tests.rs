@@ -23,6 +23,7 @@ fn an_excluded_list_clears_the_status_unless_the_redo_terminates_early() {
     let mark = |best_evalue| super::super::database::FetchExcludedMatch {
         query: 0,
         position: 0,
+        ordinal: 0,
         best_evalue,
     };
     let empty = [BlastCompoHeap::new(1, 0.002)];
@@ -64,6 +65,7 @@ fn only_excluded_lists_after_the_last_status_count() {
     let mark = |position, best_evalue| super::super::database::FetchExcludedMatch {
         query: 0,
         position,
+        ordinal: 0,
         best_evalue,
     };
     let empty = [BlastCompoHeap::new(1, 0.002)];

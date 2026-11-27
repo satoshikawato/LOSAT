@@ -1,0 +1,1530 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs1"
+                  }
+                }
+              },
+              title "qs1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 180,
+              seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35
+B77A0AFA0EB6D2FF38CFAE00C5ACEFDB7ABFD603A3FA'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 8197200
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 327321650606304, 10, -108 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 171
+          },
+          {
+            id str "blast_score",
+            value int 171
+          },
+          {
+            id str "e_value",
+            value real { 32964550950789, 10, -102 }
+          },
+          {
+            id str "bit_score",
+            value real { 316897384783494, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 178
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            159,
+            159,
+            160,
+            166,
+            -1,
+            167,
+            167
+          },
+          lens {
+            159,
+            1,
+            7,
+            1,
+            13
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 159
+          },
+          {
+            id str "blast_score",
+            value int 159
+          },
+          {
+            id str "e_value",
+            value real { 154457999658281, 10, -96 }
+          },
+          {
+            id str "bit_score",
+            value real { 29473758895544, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 174
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 256
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            159,
+            159,
+            160,
+            166,
+            -1,
+            167,
+            167
+          },
+          lens {
+            159,
+            1,
+            7,
+            1,
+            13
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 141
+          },
+          {
+            id str "blast_score",
+            value int 141
+          },
+          {
+            id str "e_value",
+            value real { 156658970845758, 10, -86 }
+          },
+          {
+            id str "bit_score",
+            value real { 261497895213358, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 168
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 257
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            159,
+            159,
+            160,
+            166,
+            -1,
+            167,
+            167
+          },
+          lens {
+            159,
+            1,
+            7,
+            1,
+            13
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 8197200",
+      "Effective search space used: 8197200",
+      "Length adjustment: 15"
+    }
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0xE9] in string at byte 16 g0 bad a"
+    },
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0x1] in string at byte 16 g1 bad b"
+    },
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0xE9] in string at byte 18 g256 bad a"
+    },
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0x1] in string at byte 18 g257 bad b"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs2"
+                  }
+                }
+              },
+              title "qs2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 180,
+              seq-data ncbi2na '3A33EFEB717FDE76CF4BF9D2CEF59600F3DBFC5E930D35
+B77A0AFA0EB6D2FF38CFAE00C5AFAFFA7BAFFA03A3FA'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 8197200
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 327321650606304, 10, -108 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 256
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 168
+          },
+          {
+            id str "blast_score",
+            value int 168
+          },
+          {
+            id str "e_value",
+            value real { 153369137268007, 10, -101 }
+          },
+          {
+            id str "bit_score",
+            value real { 31135743582648, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 176
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 162
+          },
+          {
+            id str "blast_score",
+            value int 162
+          },
+          {
+            id str "e_value",
+            value real { 331985866921511, 10, -98 }
+          },
+          {
+            id str "bit_score",
+            value real { 300277537912453, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 174
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 257
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 159
+          },
+          {
+            id str "blast_score",
+            value int 159
+          },
+          {
+            id str "e_value",
+            value real { 154457999658281, 10, -96 }
+          },
+          {
+            id str "bit_score",
+            value real { 29473758895544, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 174
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            0,
+            0,
+            159,
+            -1,
+            160,
+            159,
+            -1,
+            166,
+            167,
+            167
+          },
+          lens {
+            159,
+            1,
+            7,
+            1,
+            13
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 8197200",
+      "Effective search space used: 8197200",
+      "Length adjustment: 15"
+    }
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0x1] in string at byte 16 g1 bad b"
+    },
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0x1] in string at byte 18 g257 bad b"
+    },
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0xE9] in string at byte 16 g0 bad a"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs3"
+                  }
+                }
+              },
+              title "qs3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na '00E5B3BE3EE0152CCFDCF1524F38C55B3DE05BF58515EB
+F71409FFEE3AC3FE04AB0124D3E9EEDE8006D6585FD2793EDECE05A378EBCFAE0FE0BEFBD3'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 240
+          },
+          {
+            id str "blast_score",
+            value int 240
+          },
+          {
+            id str "e_value",
+            value real { 195565433470853, 10, -141 }
+          },
+          {
+            id str "bit_score",
+            value real { 444316210794807, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 240
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            240
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0xFF] in string at byte 15 g2 cee"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs4"
+                  }
+                }
+              },
+              title "qs4"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na '3E7EAF0E04C04CE3CECCE6DE3CECFB8D36E080E3C06E0C
+EF59BEEF48383B4B3FE34A33B778E4926EB3E0FEB0CF5AF81E58F9CE1733FBFE3BDB4C3EC3'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 240
+          },
+          {
+            id str "blast_score",
+            value int 240
+          },
+          {
+            id str "e_value",
+            value real { 195565433470853, 10, -141 }
+          },
+          {
+            id str "bit_score",
+            value real { 444316210794807, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 240
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 258
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            240
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs5"
+                  }
+                }
+              },
+              title "qs5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na '00E5B3BE3EE0152CCFDCF1524F38C55B3DE05BF58515EB
+F71409FFEE3AC3FE04AB0124D3E9EEDE8006D6585FD2793EDECE05A378EBCFAE0FE0BEFBD3'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 240
+          },
+          {
+            id str "blast_score",
+            value int 240
+          },
+          {
+            id str "e_value",
+            value real { 195565433470853, 10, -141 }
+          },
+          {
+            id str "bit_score",
+            value real { 444316210794807, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 240
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_5",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            240
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0xFF] in string at byte 15 g2 cee"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs6"
+                  }
+                }
+              },
+              title "qs6"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na 'E833E75A3DEB6EF0D63AB4FFBDEBC3ED2AE06CEBC5CE31
+529E300E016027013EE78206FA000792FC3EDECF77B3AC54DE4C3FDBDE7E963EF0E000E49E'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 240
+          },
+          {
+            id str "blast_score",
+            value int 240
+          },
+          {
+            id str "e_value",
+            value real { 195565433470853, 10, -141 }
+          },
+          {
+            id str "bit_score",
+            value real { 444316210794807, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 240
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_6",
+            general {
+              db "BL_ORD_ID",
+              tag id 3
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            240
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastn] Blast-def-line-set.E.title Bad char
+ [0x7F] in string at byte 15 g3 eta"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_7"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs7"
+                  }
+                }
+              },
+              title "qs7"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na 'BF3FFF143813153DEBFD65BA01EFD3592FD6EF74BB0CE9
+F315648EAFB9C38F7140E83DFFCC3AC05A09D2BD2EBBFCF4CEACE00F39E4F78C08EBDEFFEF'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 5,
+                  to 11,
+                  id local str "Query_7"
+                },
+                {
+                  from 5,
+                  to 11,
+                  id local str "Query_7"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 5,
+              to 11,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_8"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs8"
+                  }
+                }
+              },
+              title "qs8"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 240,
+              seq-data ncbi2na 'E833E75A3DEB6EF0D63AB4FFBDEBC3ED2AE06CEBC5CE31
+529E300E016027013EE78206FA000792FC3EDECF77B3AC54DE4C3FDBDE7E963EF0E000E49E'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/tchar/tc_big_n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 11061120
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 240
+          },
+          {
+            id str "blast_score",
+            value int 240
+          },
+          {
+            id str "e_value",
+            value real { 195565433470853, 10, -141 }
+          },
+          {
+            id str "bit_score",
+            value real { 444316210794807, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 240
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_8",
+            general {
+              db "BL_ORD_ID",
+              tag id 3
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            240
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264206, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 11061120",
+      "Effective search space used: 11061120",
+      "Length adjustment: 16"
+    }
+  }
+}

@@ -2,8 +2,9 @@
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
 //! sequences and `segmasker` those of protein sequences, `windowmasker` masks the over-represented
 //! regions of nucleotide sequences by a counts file, `convert2blastmask` turns the lower case
-//! letters of FASTA input into masking information, and `makembindex` writes the megablast index
-//! of a BLAST database or of FASTA input. They take the command line's words,
+//! letters of FASTA input into masking information, `makembindex` writes the megablast index
+//! of a BLAST database or of FASTA input, and `blast_formatter` writes the reports of a BLAST
+//! archive (`-outfmt 11`) again. They take the command line's words,
 //! read the caller's reader where the command line reads its standard input, and write what it
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
@@ -14,6 +15,7 @@
 //! NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
 //! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
 #![warn(missing_docs, unused)]
 
 use std::ffi::OsString;
@@ -217,6 +219,26 @@ pub fn run_makembindex(
     outcome(status, recorded.bytes)
 }
 
+/// Runs `blast_formatter` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for the reports of a BLAST archive (`-archive`, the file of `-outfmt 11`).
+/// `input` is what the command line reads as standard input (`-archive -`), what it writes to
+/// standard output goes to `output` (`-out` is a file, as there), what it writes to standard error
+/// to `diagnostics`, and a failure is an error whose message is that text.
+pub fn run_blast_formatter(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::blast_formatter::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
 /// Runs `makeblastdb` with the words after the program name, as on the command line, which
@@ -299,7 +321,7 @@ pub fn run_makeblastdb(
     }
     let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(reason) => Err(reason),
-        None => crate::cli::reader::options(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args),
     };
     let args = match converted {
         Ok(Commands::Makedb(args)) => args,

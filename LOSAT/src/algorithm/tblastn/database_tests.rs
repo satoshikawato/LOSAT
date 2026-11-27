@@ -25,7 +25,7 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         format!("{error:#}"),
         "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's TBLASTN"
     );
-    TblastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+    TblastnDatabase::open(path("tests/seqdb/db/nucl_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
 }
 
@@ -72,10 +72,11 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
                 &search,
             )
             .unwrap();
-            db.read_name_records(path.to_str().unwrap(), false).unwrap();
+            db.read_name_records(path.to_str().unwrap().as_bytes(), false)
+                .unwrap();
             db
         },
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: true,
     }
@@ -146,6 +147,8 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             None,
             &[],
             true,
+            false,
+            Default::default(),
         )
         .unwrap()
     };
@@ -204,6 +207,8 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             None,
             &[],
             true,
+            false,
+            Default::default(),
         )
         .unwrap();
         let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);

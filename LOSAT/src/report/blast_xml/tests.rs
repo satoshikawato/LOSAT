@@ -13,7 +13,7 @@ fn run<'a>(matrix: &'a FormattingMatrix) -> XmlRun<'a> {
         app: "blastp",
         version: "BLASTP 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: "",
+        db_name: b"",
         matrix: Some("BLOSUM62"),
         expect: 10.0,
         gap_open: 11,
@@ -190,6 +190,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -336,7 +337,7 @@ fn run_blastn() -> XmlRun<'static> {
         app: "blastn",
         version: "BLASTN 2.17.0+",
         reference: REFERENCE_MEGABLAST,
-        db_name: "db/snucl",
+        db_name: b"db/snucl",
         matrix: None,
         expect: 0.001,
         gap_open: 0,
@@ -692,6 +693,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         taxonomy: crate::report::blast_xml::records::UNNAMED,
         descriptions: &[],
         defline_thrown: false,
+        unloaded: false,
         lookup_throws: Some(&exception),
     };
     let query = XmlQuery {

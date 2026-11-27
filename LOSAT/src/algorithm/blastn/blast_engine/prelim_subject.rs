@@ -172,6 +172,10 @@ pub(super) struct PrelimBatch<'a> {
     /// the preliminary stage).
     pub(super) lcase_masking: bool,
     pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
+    /// The database's ordinal-to-OID map (`None` for a prepared `-subject` set, where the subject
+    /// index is already its sequence number), used to name a sequence by OID in chunk-merge
+    /// refusals (`record_batch_chunk_merge_error`).
+    pub(super) db_oids: Option<crate::seqdb::OidMap<'a>>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
     /// The seeds of the MegaBLAST database index that the batch is searched with (`None`
     /// without one, and for a batch split into query chunks: each chunk has its own), which
@@ -1059,6 +1063,44 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.122 (rule 3): records the earliest subject (by ordinal id,
+// matching `read_db_seq_ranges` and preserving OID order) whose subject-chunk merge produces
+// an undefined scaled score (outside `Int4`) or zero length sum, naming the sequence by its
+// OID (`oid_of(ordinal)`).
+#[cold]
+#[inline(never)]
+fn record_chunk_merge_error(
+    error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+    s_idx: usize,
+    oid_of: impl FnOnce(u32) -> u32,
+) {
+    let ordinal = s_idx as u32;
+    let oid = oid_of(ordinal);
+    let error = crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+        oid, None, "BLASTN",
+    );
+    let mut first = error_cell.lock().expect("the error cell is not poisoned");
+    if first
+        .as_ref()
+        .is_none_or(|(smallest, _)| ordinal < *smallest)
+    {
+        *first = Some((ordinal, error));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-585
+// Wraps `record_chunk_merge_error` with the batch's `OidMap` (or identity for `-subject`).
+#[cold]
+#[inline(never)]
+fn record_batch_chunk_merge_error(batch: &PrelimBatch<'_>, s_idx: usize) {
+    record_chunk_merge_error(batch.db_mask_error, s_idx, |ordinal| {
+        batch
+            .db_oids
+            .map_or(ordinal, |oids| oids.oid(ordinal).get())
+    });
+}
+
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that
 /// `split_state` cuts (`SubjectSplitState::next_chunk`, skipping a chunk without a range), each
 /// searched by `prelim_chunk_hits` with the subject's scratches on this thread, or, with a pool of
@@ -1212,7 +1254,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         let hits = if hits.is_empty() {
                             hits
                         } else {
-                            let hits = merge_prelim_hit_lists(
+                            let hits = match merge_prelim_hit_lists(
                                 &mut combined_prelim_hits,
                                 hits,
                                 HspListSplit::Subject {
@@ -1220,7 +1262,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                                 },
                                 chunk.overlap,
                                 !UNGAPPED,
-                            );
+                            ) {
+                                Ok(hits) => hits,
+                                Err(_) => {
+                                    record_batch_chunk_merge_error(batch, subject.s_idx);
+                                    return Vec::new();
+                                }
+                            };
                             if subject_besthit {
                                 prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                             }
@@ -1280,13 +1328,18 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         if hits.is_empty() {
                             continue;
                         }
-                        let _ = merge_prelim_hit_lists(
+                        if merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
                             HspListSplit::Subject { offset },
                             overlap,
                             !UNGAPPED,
-                        );
+                        )
+                        .is_err()
+                        {
+                            record_batch_chunk_merge_error(batch, subject.s_idx);
+                            return Vec::new();
+                        }
                         if subject_besthit {
                             prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                         }
@@ -1337,7 +1390,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     let hits = if hits.is_empty() {
                         hits
                     } else {
-                        let hits = merge_prelim_hit_lists(
+                        let hits = match merge_prelim_hit_lists(
                             &mut combined_prelim_hits,
                             hits,
                             HspListSplit::Subject {
@@ -1345,7 +1398,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             },
                             chunk.overlap,
                             !UNGAPPED,
-                        );
+                        ) {
+                            Ok(hits) => hits,
+                            Err(_) => {
+                                record_batch_chunk_merge_error(batch, subject.s_idx);
+                                return Vec::new();
+                            }
+                        };
                         if subject_besthit {
                             prelim_subject_best_hit(&mut combined_prelim_hits, query_lengths);
                         }
@@ -1693,10 +1752,6 @@ pub(super) fn finish_ungapped_prelim(
     }
 }
 
-#[cfg(all(
-    test,
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
+#[cfg(test)]
 #[path = "prelim_subject_tests.rs"]
 mod tests;

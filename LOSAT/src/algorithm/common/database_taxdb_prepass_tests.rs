@@ -224,7 +224,7 @@ fn a_later_volume_whose_isam_does_not_open_is_not_read_where_the_lookup_returns_
         subject.found(),
         Some(FoundInstead::Sequence(other)) if other.ordinal() == 0
     ));
-    let thrown = prefetch_reads(&db, 1, &subject, false, "BLASTP")
+    let thrown = prefetch_reads(&db, 1, &subject, false, false, "BLASTP")
         .unwrap()
         .unwrap_err();
     assert!(
@@ -236,9 +236,16 @@ fn a_later_volume_whose_isam_does_not_open_is_not_read_where_the_lookup_returns_
     for taxdb in ["good", "bad_magic"] {
         let db = open("l5c l5e", Some(taxdb));
         for ordinal in [0, 1] {
-            let blob = prefetch_reads(&db, ordinal, &subject_of(&db, ordinal), true, "BLASTP")
-                .unwrap()
-                .unwrap_or_else(|reason| panic!("{taxdb} {ordinal}: {reason}"));
+            let blob = prefetch_reads(
+                &db,
+                ordinal,
+                &subject_of(&db, ordinal),
+                true,
+                false,
+                "BLASTP",
+            )
+            .unwrap()
+            .unwrap_or_else(|reason| panic!("{taxdb} {ordinal}: {reason}"));
             assert_eq!(blob, Some(ordinal), "{taxdb} {ordinal}");
         }
     }
@@ -508,7 +515,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
         };
         match (
-            prefetch_reads(&db, ordinal, &subject, false, "BLASTP").unwrap(),
+            prefetch_reads(&db, ordinal, &subject, false, false, "BLASTP").unwrap(),
             want,
         ) {
             (Ok(got), Ok(want)) => assert_eq!(got, want, "{name} {ordinal}"),
@@ -523,6 +530,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
             &subject,
             crate::report::db_subject::HitLoad::Loaded,
             ordinal,
+            false,
             "BLASTP",
         );
         assert_eq!(
@@ -563,7 +571,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         assert_eq!(shown.len(), 1, "{loads:?}");
         let (ordinal, subject) = shown[0];
         let load = loads[&(*ordinal as usize)];
-        let error = check_prefetched_parsed(&db, subject, load, *ordinal, "BLASTP")
+        let error = check_prefetched_parsed(&db, subject, load, *ordinal, false, "BLASTP")
             .expect_err(&format!("pshare_cd {ordinal}: {load:?}"));
         assert!(format!("{error:#}").contains(stops), "{error:#}");
     }
@@ -583,7 +591,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     };
     assert!(subject.unfetchable());
     assert_eq!(
-        prefetch_reads(&db, 0, &subject, true, "TBLASTX").unwrap(),
+        prefetch_reads(&db, 0, &subject, true, false, "TBLASTX").unwrap(),
         Ok(Some(0))
     );
     let run = TaxdbRun::default();
@@ -3796,7 +3804,7 @@ fn scope_lifetime_audit_invariants_hold() {
     assert_eq!(Throw::scope_flags(Some("5 ")), (true, true));
     assert_eq!(Throw::scope_flags(Some("6")), (false, true));
     assert_eq!(Throw::scope_flags(Some("15")), (false, false));
-    assert_eq!(Throw::scope_flags(None), (false, false));
+    assert_eq!(Throw::scope_flags(None::<&str>), (false, false));
     for outfmt in ["13", "14", "15", "16", "15 "] {
         assert!(Throw::is_xml2(outfmt), "{outfmt}");
     }
@@ -4051,6 +4059,67 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     );
     prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, "BLASTP").unwrap();
     assert!(!pinned_blob(&run_d, 0));
+
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+#[test]
+fn one_by_one_query_reads_stops_at_throw_and_collapses_joined_copies() {
+    use crate::report::db_subject::{
+        AfterThrow, FormatThrow, HitLoads, LoadsBefore, ParsedSubject, RunThrow,
+    };
+    use crate::seqid::defline_set::{BlastDefline, DeflineSet};
+    use crate::seqid::model::ParsedSeqId;
+
+    let cwd = empty_cwd("one_by_one_query_reads");
+    let throwing_db = db_search("t5/ppig1", None, &cwd);
+    let headers = HeaderReader::new(&throwing_db, false);
+    let ReportedHeader::Parsed(throwing) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
+        panic!("t5/ppig1 sequence 0 must be a parsed subject");
+    };
+    let make_gi = |gi: i64| {
+        ParsedSubject::new(DeflineSet::from(vec![BlastDefline {
+            ids: vec![ParsedSeqId::Gi(gi)],
+            ..BlastDefline::default()
+        }]))
+        .unwrap()
+    };
+    // Subjects: 0 = gi|1, 1 = gi|1 (adjacent copy of 0), 2 = throwing (t5/ppig1), 3 = gi|3.
+    let subjects = [make_gi(1), make_gi(1), (*throwing).clone(), make_gi(3)];
+    let parsed = |rank: usize| Some(&subjects[rank]);
+
+    // Query 0 hits [0, 1, 2(throws), 3]; Query 1 hits [3], so run-wide `loads.reached(3)` is
+    // true even though Query 0 stopped at rank 2 under `AfterThrow::EndsReport`.
+    let loads = HitLoads::of(
+        LoadsBefore::default(),
+        FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsReport)),
+        [
+            (true, vec![Some(0), Some(1), Some(2), Some(3)]),
+            (true, vec![Some(3)]),
+        ],
+        parsed,
+        |_, _| 1,
+    );
+    assert!(loads.reached(3));
+    assert!(loads.thrown(2).is_some());
+
+    // XML2/JSON (`joins_copies = true`, `ends_on_throw = true`): collapses adjacent copy 1 and
+    // stops at throwing rank 2 without a phantom read of rank 3.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, true, true),
+        vec![0, 2]
+    );
+    // BLAST XML (`joins_copies = true`, `ends_on_throw = false`): collapses adjacent copy 1 and
+    // continues to rank 3.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, true, false),
+        vec![0, 2, 3]
+    );
+    // Tabular (`joins_copies = false`, `ends_on_throw = false`): reads every reached entry.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, false, false),
+        vec![0, 1, 2, 3]
+    );
 
     std::fs::remove_dir_all(&cwd).unwrap();
 }

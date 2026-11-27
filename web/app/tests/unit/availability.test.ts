@@ -79,7 +79,7 @@ function setup(
         return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
       }, hold.start === true);
     },
-    validate: async () => ({ ok: true, dataLoaders: true }) as const,
+    validate: async () => ({ ok: true, dataLoaders: true, parseDeflines: false }) as const,
     prepare: () => undefined,
   };
   const draft = new SearchDraft({

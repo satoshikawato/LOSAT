@@ -71,9 +71,9 @@ impl GiMaskData {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:279-288
     /// `CWriteDB_GiMaskData`: data volume `index` of `name` with `extension`, created by its
     /// first write, empty, in the byte order `le` (little-endian for the `.gnd` files).
-    fn new(name: &str, extension: &'static str, index: u32, max_file_size: u64, le: bool) -> Self {
+    fn new(name: &[u8], extension: &'static str, index: u32, max_file_size: u64, le: bool) -> Self {
         Self {
-            file: WriteDbFile::lazy(name.as_bytes(), extension, index, max_file_size),
+            file: WriteDbFile::lazy(name, extension, index, max_file_size),
             data_length: 0,
             le,
             index,
@@ -207,7 +207,7 @@ fn index_header(num_vols: u32, num_index: u32, num_gis: u32, desc: &[u8], date: 
 #[derive(Debug)]
 pub(crate) struct GiMask {
     /// `m_MaskName`: empty after a close without GIs.
-    name: String,
+    name: Vec<u8>,
     max_file_size: u64,
     /// `m_DFile`, `m_DFile_LE`.
     data: [GiMaskData; 2],
@@ -229,21 +229,21 @@ impl GiMask {
     /// The files of the algorithm `name` with the description `desc`; `dates` are the dates of
     /// the `.gmi` and the `.gni` file (the current time as `CTime` text, which each of NCBI's
     /// constructors reads; the caller reads them in that order).
-    pub(crate) fn new(name: &str, desc: &[u8], max_file_size: u64, dates: [Vec<u8>; 2]) -> Self {
+    pub(crate) fn new(name: &[u8], desc: &[u8], max_file_size: u64, dates: [Vec<u8>; 2]) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_vec(),
             max_file_size,
             data: [
                 GiMaskData::new(name, "gmd", 0, max_file_size, false),
                 GiMaskData::new(name, "gnd", 0, max_file_size, true),
             ],
             offset_files: [
-                WriteDbFile::lazy_unindexed(name.as_bytes(), "gmo", max_file_size),
-                WriteDbFile::lazy_unindexed(name.as_bytes(), "gno", max_file_size),
+                WriteDbFile::lazy_unindexed(name, "gmo", max_file_size),
+                WriteDbFile::lazy_unindexed(name, "gno", max_file_size),
             ],
             index_files: [
-                WriteDbFile::lazy_unindexed(name.as_bytes(), "gmi", max_file_size),
-                WriteDbFile::lazy_unindexed(name.as_bytes(), "gni", max_file_size),
+                WriteDbFile::lazy_unindexed(name, "gmi", max_file_size),
+                WriteDbFile::lazy_unindexed(name, "gni", max_file_size),
             ],
             desc: desc.to_vec(),
             dates,
@@ -252,8 +252,8 @@ impl GiMask {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:251-253
-    /// `GetName`: the name, or `""` after a close without GIs.
-    pub(crate) fn name(&self) -> &str {
+    /// `GetName`: the name, or empty after a close without GIs.
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -335,7 +335,7 @@ impl GiMask {
 pub(crate) struct GiMasks {
     masks: Vec<GiMask>,
     /// The place of each mask's files (`files_place`), in the order of `masks`.
-    places: Vec<Option<(PathBuf, String)>>,
+    places: Vec<Option<(PathBuf, Vec<u8>)>>,
     /// `m_MaskAlgoMap`: the position in `masks` of each algorithm id.
     algo_map: BTreeMap<i32, usize>,
 }
@@ -347,7 +347,7 @@ impl GiMasks {
     pub(crate) fn add(
         &mut self,
         algorithm_id: i32,
-        name: &str,
+        name: &[u8],
         desc: &[u8],
         max_file_size: u64,
         dates: [Vec<u8>; 2],
@@ -400,32 +400,46 @@ impl GiMasks {
     }
 
     /// `GetName` of every GI mask, in the order of registration.
-    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn names(&self) -> impl Iterator<Item = &[u8]> {
         self.masks.iter().map(GiMask::name)
     }
+}
+
+/// Lower-cases every valid UTF-8 chunk of `bytes` while preserving invalid byte sequences
+/// verbatim, so distinct non-UTF-8 file names (`a\xff`, `a\xfe`) do not collide under case folding.
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))]
+fn lowercase_utf8_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        out.extend_from_slice(chunk.valid().to_lowercase().as_bytes());
+        out.extend_from_slice(chunk.invalid());
+    }
+    out
 }
 
 /// The directory of the files of the GI mask `name` (resolved through symbolic links) and the
 /// last part of the name, which with a dot and an extension names each file; on the platforms
 /// whose file systems ignore case by default (Windows, macOS), both in lower case. `None` when
 /// the directory does not exist: nothing is written there (survey D9).
-fn files_place(name: &str) -> Option<(PathBuf, String)> {
-    let is_separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
-    let (dir, file) = match name.rfind(is_separator) {
+fn files_place(name: &[u8]) -> Option<(PathBuf, Vec<u8>)> {
+    let is_separator = |&b: &u8| b == b'/' || (cfg!(windows) && (b == b'\\' || b == b':'));
+    let (dir, file) = match name.iter().rposition(is_separator) {
         Some(at) => (&name[..=at], &name[at + 1..]),
-        None => (".", name),
+        None => (b".".as_slice(), name),
     };
-    let dir = std::fs::canonicalize(dir).ok()?;
+    let dir = std::fs::canonicalize(crate::utils::os_bytes::path_of_bytes(dir)).ok()?;
     if cfg!(any(windows, target_os = "macos")) {
         let dir = PathBuf::from(dir.to_string_lossy().to_lowercase());
-        return Some((dir, file.to_lowercase()));
+        return Some((dir, lowercase_utf8_bytes(file)));
     }
-    Some((dir, file.to_string()))
+    Some((dir, file.to_vec()))
 }
 
 /// The refusal of the algorithm `second`, whose next record would open a GI-mask data file that
 /// the algorithm `first` has open.
-fn shared_files_refusal(first: &str, second: &str) -> WriteDbError {
+fn shared_files_refusal(first: &[u8], second: &[u8]) -> WriteDbError {
+    let first = String::from_utf8_lossy(first);
+    let second = String::from_utf8_lossy(second);
     let same = if first == second {
         format!("\"{first}\"")
     } else {

@@ -40,7 +40,7 @@ struct App {
     default: &'static [&'static str],
     cases: &'static [Case],
     /// The application's options and its `-db` from a parsed command line.
-    inputs: fn(Commands) -> (OptionInputs, Option<String>),
+    inputs: fn(Commands) -> (OptionInputs, Option<Vec<u8>>),
 }
 
 fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
@@ -52,12 +52,17 @@ fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
 }
 
 /// The request's options, `HitlistSize` included, and `Web_StepNumber` last.
-fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
+fn render(inputs: &OptionInputs, database: Option<&[u8]>) -> Vec<String> {
     let request = ArchiveRequest::for_inputs(inputs, database);
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
-        .map(|param| format!("{}={:?}", param.name(), param.value))
+        .map(|param| match &param.value {
+            super::options::ParamValue::Str(bytes) => {
+                format!("{}=Str({:?})", param.name(), String::from_utf8_lossy(bytes))
+            }
+            other => format!("{}={:?}", param.name(), other),
+        })
         .collect();
     if let Some(step) = request.step_number {
         listed.push(format!("Web_StepNumber=Integer({step})"));
@@ -146,15 +151,17 @@ fn walk(app: &App) {
 }
 
 fn hitlist(
-    outfmt: &str,
+    outfmt: &std::ffi::OsStr,
     max_target_seqs: Option<usize>,
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> i32 {
     hitlist_size(
-        crate::blastinput::app::parse_formatting_string(outfmt)
-            .expect("outfmt")
-            .number,
+        crate::blastinput::app::parse_formatting_string(
+            crate::utils::os_bytes::os_str_bytes(outfmt).as_ref(),
+        )
+        .expect("outfmt")
+        .number,
         HitlistArgs {
             max_target_seqs,
             num_descriptions,
@@ -439,6 +446,27 @@ const PSIBLAST: &[Case] = &[
         &["-in_msa", "m.aln", "-ignore_msa_master"],
         &[At("IgnoreMsaMaster", "Boolean(true)")],
     ),
+    // A pattern (`-phi_pattern`, line PS item PS8a) makes the handle PHI-BLAST's
+    // (`RequestKind::Phiblastp`): no composition-based statistics or Smith-Waterman mode, psiblast's
+    // own options after the window and gap trigger ones, and the pattern as the file gives it last
+    // (NCBI BLAST+ 2.17.0 `fi.export.it1`, PS/ncbi8/ws).
+    (
+        "phi_pattern",
+        &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+        &[
+            Drop("InclusionThreshold"),
+            Drop("PseudoCountWeight"),
+            Drop("CompositionBasedStats"),
+            Drop("SmithWatermanMode"),
+            After("IgnoreMsaMaster", "PseudoCountWeight", "Integer(0)"),
+            After("PseudoCountWeight", "InclusionThreshold", "Real(0.002)"),
+            After(
+                "InclusionThreshold",
+                "PHIPattern",
+                "Str(\"[AG]-x(4)-G-K-[ST]\")",
+            ),
+        ],
+    ),
 ];
 
 /// psiblast's request of the base command line (`p9.ps.q.db.itdef.f6`, `p9.pp.db.itdef.f6`).
@@ -458,7 +486,7 @@ const PSIBLAST_DEFAULT: &[&str] = &[
     "Web_StepNumber=Integer(1)",
 ];
 
-fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<String>) {
+fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<Vec<u8>>) {
     match command {
         Commands::Psiblast(args) => {
             let mut inputs = args.option_inputs();
@@ -468,7 +496,12 @@ fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<String>) {
                 args.num_descriptions,
                 args.num_alignments,
             );
-            (inputs, args.db.clone())
+            (
+                inputs,
+                args.db
+                    .as_deref()
+                    .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+            )
         }
         _ => unreachable!(),
     }
@@ -523,6 +556,10 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
                 ("in_msa", &["-in_msa", "m.aln"]),
                 ("msa_master_idx", &["-msa_master_idx", "2"]),
                 ("ignore_msa_master", &["-ignore_msa_master"]),
+                (
+                    "phi_pattern",
+                    &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+                ),
             ],
         ),
         inputs: psiblast_inputs,
@@ -672,7 +709,12 @@ fn every_rpsblast_argument_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },
@@ -732,7 +774,12 @@ fn every_rpstblastn_argument_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },
@@ -981,7 +1028,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },

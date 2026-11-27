@@ -300,15 +300,16 @@ fn run_inner(
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
     // The `-out` file, where NCBI opens it (`cli::create_out_file`, one owner with the library).
-    let create = |path: &Path| crate::cli::create_out_file(path, None);
+    let create = |path: &Path| crate::cli::create_out_file(path);
     let mut held = None;
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     let device = crate::cli::ReportStream::of_cli(
         out_file.map(create).transpose()?,
         program.lower,
-        &args.outfmt,
+        &outfmt_bytes,
         strategy.as_ref(),
     );
     let stream = match structured_xml {
@@ -358,13 +359,13 @@ fn run_inner(
         )?,
     };
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
-    let choice = choice.at_formatting_handler(&args.outfmt)?;
+    let choice = choice.at_formatting_handler(&outfmt_bytes)?;
     app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
     let html = app::html_links(
         args.html,
         args.app_request_kind(),
         args.request_kind(),
-        args.database_name(),
+        args.database_name().as_deref(),
         &[choice.number],
     )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
@@ -385,9 +386,9 @@ fn run_inner(
     let database = match args.database_name() {
         Some(name) => {
             let (keeps_scope, separate_xml2) =
-                crate::report::db_subject::FormatThrow::scope_flags(Some(&args.outfmt));
+                crate::report::db_subject::FormatThrow::scope_flags(Some(outfmt_bytes.as_ref()));
             let database = BlastxDatabase::open_restricted(
-                name,
+                &name,
                 &settings,
                 list.as_ref(),
                 args.db_mask.option().as_ref(),
@@ -401,7 +402,7 @@ fn run_inner(
                 keeps_scope,
                 separate_xml2,
                 crate::report::db_subject::FormatThrow::record_keeps_scope(std::iter::once(
-                    args.outfmt.as_str(),
+                    crate::utils::os_bytes::os_str_bytes(&args.outfmt),
                 )),
             );
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
@@ -424,7 +425,7 @@ fn run_inner(
                 || database.pairwise_database(),
                 // The command line's one format fails the call.
                 [(
-                    args.outfmt.as_str(),
+                    outfmt_bytes.as_ref(),
                     &mut crate::api::local_blast::FormatRefusal::FailsCall,
                 )],
                 program.upper,
@@ -693,7 +694,7 @@ fn run_inner(
         // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
         // database knows its volumes' costs and its units' database length.
         if let Some(handle) = handle {
-            handle.set_search_sets(Vec::new(), search.handle_sets())?;
+            handle.set_search_sets(Vec::new(), search.handle_sets(), Vec::new())?;
         }
         options.rpstblastn = Some(search);
     }
@@ -763,17 +764,19 @@ fn run_inner(
     // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
     // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
     // NCBI maps the volume files.
+    let allow_long = options.db_mask.as_ref().is_some_and(|mask| mask.is_hard());
     let (x_longest, unreadable) = match &database {
         None => (None, None),
-        Some(database) => match database.x_open_stream() {
+        Some(database) => match database.x_open_stream_with_long(allow_long) {
             Ok(longest) => (Some(longest), None),
             Err(error) => (None, Some(error)),
         },
     };
     let x_stream = match (&database, x_longest) {
-        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
+        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new_with_long(
             database.x_seqdb(),
             longest,
+            allow_long,
         )),
         _ => None,
     };
@@ -879,7 +882,7 @@ fn run_inner(
                 results,
                 options.gapped,
                 asks,
-                &mut posts,
+                (&mut posts, None),
             )
             .inspect_err(drop_held)?,
             None => None,
@@ -1061,6 +1064,9 @@ pub(super) struct ReportedAsks {
     /// Whether a report writes otherwise where every load of a subject with a positive taxid
     /// throws (not `report::db_subject::unchanged_by_load_throws`), for the batches' prefetch.
     changed_by_load_throws: bool,
+    /// What the reports read of a definition line besides the Seq-aligns
+    /// (`common::database::TitleReads`; by default the prefetch or a formatter).
+    titles: crate::algorithm::common::database::TitleReads,
 }
 
 impl ReportedAsks {
@@ -1124,6 +1130,23 @@ impl ReportedAsks {
                     crate::blastinput::app::Program::Blastx,
                 )
             }),
+            titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                options.request_kind(),
+                [i32::from(options.outfmt)],
+            ),
+        }
+    }
+
+    /// What the BLAST archive (outfmt 11) asks, written from the batch's Seq-aligns: nothing of
+    /// the reported sequences but their titles' reads by the Seq-aligns
+    /// (`common::database::TitleReads::SeqAligns` for BLASTX; `Reports` for RPSTBLASTN).
+    pub(super) fn of_archive(options: &super::args::ResolvedOptions) -> Self {
+        Self {
+            titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                options.request_kind(),
+                [11],
+            ),
+            ..Self::default()
         }
     }
 
@@ -1140,10 +1163,14 @@ impl ReportedAsks {
             .map(Self::of)
             .reduce(Self::or)
             .unwrap_or_default();
+        let app = options.first().map_or(
+            crate::report::archive::options::RequestKind::Blastx,
+            super::args::ResolvedOptions::request_kind,
+        );
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,
-            crate::report::archive::options::RequestKind::Blastx,
+            app,
             options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
@@ -1152,6 +1179,10 @@ impl ReportedAsks {
         asks.one_by_one = options
             .first()
             .is_some_and(|options| Self::of(options).one_by_one);
+        asks.titles = crate::algorithm::common::database::TitleReads::of_outfmts(
+            app,
+            options.iter().map(|options| i32::from(options.outfmt)),
+        );
         asks
     }
 
@@ -1170,6 +1201,11 @@ impl ReportedAsks {
             one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
+            titles: if self.titles == other.titles {
+                self.titles
+            } else {
+                crate::algorithm::common::database::TitleReads::Reports
+            },
         }
     }
 }
@@ -1196,14 +1232,20 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// read (the batch's search failed with that error).
 /// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
 /// failed read) is written to `diagnostics` there: after the batch's reader messages and request
-/// posts, before its prefetch.
+/// posts, before its prefetch; then NCBI's posts of the titles that the batch's Seq-aligns read
+/// (`common::database::batch_title_posts`, or those before a failed read,
+/// `ErrorAfterBatchReports::title_posts`), each one message of the run's BLAST archive (`archive`,
+/// `diag_log::Posts::write`).
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
     results: &mut [BatchResults],
     gapped: bool,
     asks: ReportedAsks,
-    diagnostics: &mut dyn Write,
+    (diagnostics, archive): (
+        &mut dyn Write,
+        Option<&crate::report::archive::ArchiveHandle>,
+    ),
 ) -> Result<Option<super::database::BatchTitles>> {
     use super::x_timing::Run as XRun;
     if matches!(search_subjects, Subjects::Unreadable) {
@@ -1219,16 +1261,56 @@ pub(super) fn batch_titles(
     let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
     let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
+    let titles = ReportedSubjects::read_titles(
+        database,
+        results,
+        gapped,
+        (asks.pairwise, asks.titles),
+        earlier,
+    );
     super::x_timing::run(XRun::Titles, x_t);
-    if let Some(posts) = Utf8Read::post_of(
+    let utf8 = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
         &database.db,
         &database.post_prefix(),
-    ) {
+    );
+    if let Some(posts) = &utf8 {
         posts.write(diagnostics, None)?;
     }
-    titles.map(Some).map_err(reported_error)
+    // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+    let aligned = results.iter().flat_map(|batch| {
+        batch.queries.iter().flat_map(|lists| {
+            lists
+                .iter()
+                .filter(move |list| super::report::reported(list, gapped))
+                .filter_map(|list| u32::try_from(list.oid).ok())
+        })
+    });
+    let titles = match titles {
+        Ok(titles) => titles,
+        Err(error) => {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error =
+                crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(error, aligned);
+            if let Some(failure) =
+                error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+            {
+                failure
+                    .title_posts(&database.db, utf8.is_some(), database.program)?
+                    .write(diagnostics, archive)?;
+            }
+            return Err(reported_error(error));
+        }
+    };
+    crate::algorithm::common::database::batch_title_posts(
+        &database.db,
+        aligned,
+        utf8.is_some(),
+        database.program,
+    )?
+    .write(diagnostics, archive)?;
+    Ok(Some(titles))
 }
 
 /// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, cited at `reported_batch`) does
@@ -1474,8 +1556,30 @@ pub(super) fn reported_batch(
         reported.read_db_masks(database, mask.id)?;
     }
     if let Some(scopes) = query_scopes {
-        reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
+        // The reader batch's queries (`queries`): the scope's span, to the run's last searched
+        // query where the span is the last (`QueryScopes::span_of`).
+        let first = scopes.first();
+        let record = |query: usize| {
+            let record = queries.get(query.checked_sub(first)?)?;
+            Some(crate::report::query_bioseq::QueryRecordRef {
+                believed: record.believed()?,
+                title: &record.title,
+                length: record.sequence.len(),
+            })
+        };
+        let run = crate::report::query_bioseq::SeenRun {
+            shows: super::report::shows_query_bioseqs(options) && !database.loads_write_texts(),
+            known: first..if scopes.run().span_of(first).end == usize::MAX {
+                usize::MAX
+            } else {
+                first + queries.len()
+            },
+            record: &record,
+            protein: false,
+        };
+        reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
     }
+    reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database
@@ -1549,6 +1653,14 @@ pub(super) fn reported_batch(
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
+            let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
+            let ends_on_throw = asks.throw.run().is_some_and(|run| {
+                matches!(
+                    run.after,
+                    crate::report::db_subject::AfterThrow::EndsReport
+                        | crate::report::db_subject::AfterThrow::EndsRun
+                )
+            });
             reported.fetch_by_query(
                 database,
                 results,
@@ -1557,6 +1669,7 @@ pub(super) fn reported_batch(
                 places,
                 row_lookups,
                 pairwise,
+                (options.shown_lists(), joins_copies, ends_on_throw),
             )?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
@@ -2452,14 +2565,18 @@ fn write_run_error_archive(
         return;
     };
     let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-        Some(path) => match crate::cli::create_out_file(path, None) {
+        Some(path) => match crate::cli::create_out_file(path) {
             Ok(file) => Some(file),
             Err(_) => return,
         },
         None => None,
     };
-    let mut report =
-        crate::cli::ReportStream::of_cli(out_file, args.program().lower, &args.outfmt, None);
+    let mut report = crate::cli::ReportStream::of_cli(
+        out_file,
+        args.program().lower,
+        crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+        None,
+    );
     let _ =
         crate::report::archive::write_error_archive_after_post(handle, error, &lines, &mut report);
     let _ = report.finish(Ok(()));

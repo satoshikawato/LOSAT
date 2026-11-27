@@ -1,0 +1,203 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            inst {
+              repr raw,
+              mol dna,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data gene { locus-tag "AXBT_0001" },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            inst {
+              repr raw,
+              mol dna,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "ignored prot" } },
+                    location null NULL
+                  },
+                  {
+                    data gene { locus "abc" },
+                    location null NULL
+                  },
+                  {
+                    data gene { desc "dnagene" },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            inst {
+              repr raw,
+              mol dna,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data gene { desc "" },
+                    location null NULL
+                  },
+                  {
+                    data gene { desc "later gene" },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            inst {
+              repr raw,
+              mol rna,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "ignored" } },
+                    location null NULL
+                  },
+                  {
+                    data gene { desc "rna gene" },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data prot { name { "ignored" } },
+                    location null NULL
+                  },
+                  {
+                    data gene { desc "na gene" },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            inst {
+              repr raw,
+              mol not-set,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data gene { desc "ignored gene" },
+                    location null NULL
+                  },
+                  {
+                    data prot { name { "notset prot" } },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          },
+          seq {
+            id {
+              local str "Query_7"
+            },
+            inst {
+              repr raw,
+              mol other,
+              length 12,
+              seq-data iupacna "ATGAAAGCATTT"
+            },
+            annot {
+              {
+                data ftable {
+                  {
+                    data gene { desc "ignored gene" },
+                    location null NULL
+                  },
+                  {
+                    data prot { name { "other prot" } },
+                    location null NULL
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      subject database "Cdd",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -2 }
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    }
+  }
+}

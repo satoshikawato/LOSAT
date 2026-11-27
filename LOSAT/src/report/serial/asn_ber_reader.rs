@@ -788,7 +788,6 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.src.byte_at(self.at).is_none()
     }
@@ -1218,8 +1217,14 @@ pub(crate) fn tag_to_string(byte: u8) -> String {
 // `EndOfTag`: the position is the byte after the string. `SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_
 // READING` is 0.)
 /// `FixVisibleChars` of the string `s`, read up to `end`: each byte outside `' '..='~'`
-/// becomes `#`, posted with the string as fixed so far (the bytes before it already `#`).
-fn fix_visible_chars(s: &mut [u8], end: StreamPosition, posts: &mut dyn FnMut(StringPost<'_>)) {
+/// becomes `#`, posted with the string as fixed so far (the bytes before it already `#`). The one
+/// port of its posts: the binary object stream's and the header reader of a BLAST database's
+/// (`seqid::ber::title_replaced_chars`).
+pub(crate) fn fix_visible_chars(
+    s: &mut [u8],
+    end: StreamPosition,
+    posts: &mut dyn FnMut(StringPost<'_>),
+) {
     for i in 0..s.len() {
         let byte = s[i];
         if !(b' '..=b'~').contains(&byte) {

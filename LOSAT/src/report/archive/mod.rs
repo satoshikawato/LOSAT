@@ -146,7 +146,7 @@ impl ArchiveEncoding {
     /// Whether the string values of `params` are written as they are (`writes_text`).
     pub fn writes_params(self, params: &[options::Param]) -> bool {
         params.iter().all(|param| match &param.value {
-            options::ParamValue::Str(value) => self.writes_text(value.as_bytes()),
+            options::ParamValue::Str(value) => self.writes_text(value),
             _ => true,
         })
     }
@@ -159,9 +159,9 @@ impl ArchiveEncoding {
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
 /// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
-pub fn writes_error_archive(outfmt: &str) -> bool {
+pub fn writes_error_archive(outfmt: impl AsRef<[u8]>) -> bool {
     use crate::ncbi_str::{string_to_int, truncate_spaces};
-    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+    string_to_int(truncate_spaces(outfmt.as_ref()), 0)
         .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
@@ -191,7 +191,7 @@ pub struct ArchiveRequest {
 impl ArchiveRequest {
     /// The request of a run of `inputs.kind`: `database` is the `-db` argument as typed (`None`
     /// for `-subject`).
-    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
+    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&[u8]>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
@@ -206,7 +206,7 @@ impl ArchiveRequest {
                 .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
-            database: database.map(|name| name.as_bytes().to_vec()),
+            database: database.map(<[u8]>::to_vec),
             step_number,
         }
     }
@@ -321,6 +321,8 @@ struct SearchSets {
     before_batches: Vec<options::Param>,
     /// Set by each batch's set-up, before its search space.
     each_batch: Vec<options::Param>,
+    /// Set by the application after each batch, after its search space.
+    after_batch: Vec<options::Param>,
 }
 
 /// What the searches of the batches that one writer of a run's requests (the archive, the search
@@ -375,20 +377,24 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:532
     /// The parameters that the run sets in the handle after the command line's options and
     /// besides the batches' `EffectiveSearchSpace`: `before_batches` once, before the first batch
-    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios), and
+    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios),
     /// `each_batch` at each batch's set-up (the RPS database's length and `.aux` costs,
-    /// `rps_search::volumes::search_sets`). Set once per run, where the database is opened; a
-    /// second setting is LOSAT's internal error.
+    /// `rps_search::volumes::search_sets`), and `after_batch` after each batch (psiblast's reset of
+    /// the composition-based statistics after PHI-BLAST's batch, `phi_hooks::note_handle_sets`).
+    /// Set once per run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_search_sets(
         &self,
         before_batches: Vec<options::Param>,
         each_batch: Vec<options::Param>,
+        after_batch: Vec<options::Param>,
     ) -> anyhow::Result<()> {
         let set = self.0.search.set(SearchSets {
             before_batches,
             each_batch,
+            after_batch,
         });
         anyhow::ensure!(
             set.is_ok(),
@@ -454,7 +460,7 @@ impl OptionsHandle {
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
     /// context 0 (the option is the search's own value, or what `RequestLength` makes of it),
     /// `None` for a batch NCBI does not search, which leaves the option as the batch before left
-    /// it.
+    /// it; then what the application sets after the batch (`after_batch`).
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
@@ -471,6 +477,11 @@ impl OptionsHandle {
                 fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
+        }
+        if let Some(search) = self.0.search.get() {
+            for param in &search.after_batch {
+                carry.0.set(param.field(), param.value.clone());
+            }
         }
     }
 
@@ -531,7 +542,7 @@ impl ArchiveHandle {
     /// (made once per run; its search strategy shares it).
     pub fn for_program(
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, options)
@@ -541,7 +552,7 @@ impl ArchiveHandle {
     pub fn for_encoding(
         encoding: ArchiveEncoding,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::new(
@@ -576,7 +587,7 @@ impl ArchiveHandle {
     /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
     /// The archives of the batches are not affected.
     #[must_use]
-    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+    pub fn with_outfmt_text(self, outfmt: impl AsRef<[u8]>) -> Self {
         self.0
             .error_archive
             .store(writes_error_archive(outfmt), Ordering::Relaxed);

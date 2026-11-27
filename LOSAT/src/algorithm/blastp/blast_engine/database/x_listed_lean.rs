@@ -101,6 +101,8 @@ impl ListedSubjects {
             parsed: parsed.by_rank,
             program: database.program,
             utf8: headers.first_utf8(),
+            seen: Default::default(),
+            seen_first: 0,
         })
     }
 }

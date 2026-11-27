@@ -153,6 +153,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("blastdbcheck") {
         std::process::exit(crate::blastdbcheck::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
+    // `losat blast_formatter` too.
+    if let Some(start) = started("blast_formatter") {
+        std::process::exit(crate::blast_formatter::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
     // (`cli::top_level`), which has no options of its own.
     if argv
@@ -298,7 +303,7 @@ fn run_main_entry() -> Result<()> {
     // the terminal's standard error (`Error: ` and the text, exit status 1; line RG DECISIONS 32).
     let command = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(refusal) => Err(refusal),
-        None => crate::cli::reader::options(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args),
     };
     let command = match command {
         Ok(command) => command,
@@ -327,7 +332,12 @@ fn run_main_entry() -> Result<()> {
     // refuses come first, in its own arm below).
     if let Ok(settings) = start.settings() {
         let number = search_outfmt(&cli.command)
-            .and_then(|outfmt| crate::blastinput::app::parse_formatting_string(outfmt).ok())
+            .and_then(|outfmt| {
+                crate::blastinput::app::parse_formatting_string(
+                    crate::utils::os_bytes::os_str_bytes(outfmt),
+                )
+                .ok()
+            })
             .map(|choice| choice.number);
         if let Some(refusal) =
             crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
@@ -583,7 +593,7 @@ fn import_strategy(
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
 /// The `-outfmt` value of a search program's command line; `None` for the other programs.
-fn search_outfmt(command: &Commands) -> Option<&str> {
+fn search_outfmt(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastx(args) => Some(&args.outfmt),
         Commands::Blastn(args) => Some(&args.outfmt),

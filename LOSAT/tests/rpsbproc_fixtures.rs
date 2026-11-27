@@ -334,7 +334,7 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
 
 #[test]
 fn rpsbproc_gives_ncbis_bytes() {
-    assert_eq!(compare_rows("compare", "compare", "oracle"), 383);
+    assert_eq!(compare_rows("compare", "compare", "oracle"), 386);
 }
 
 // The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.67, the Owner's decision
@@ -736,15 +736,15 @@ fn rpsbproc_refuses_what_it_does_not_give() {
         assert_same(&expected, &case, &out, &err, status);
         refused += 1;
     }
-    assert_eq!(refused, 14);
+    assert_eq!(refused, 16);
 }
 
 // The command line outside NCBI's report (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): `-version`
 // prints rpsbproc's version (NCBI: `rpsbproc: 0.5.1`), so does `-version-full` in NCBI's form
 // with LOSAT's values (line RG item E3), `-help` NCBI's help in LOSAT's words, the argument
 // errors are NCBI's reader's (status 1: `-dryrun=1` is the unknown `dryrun`, as `-dryrun` is not
-// an argument of the reader, `--i` is the unknown `-i`; line RG item K4i-2b), and a file name that is not UTF-8 is refused before anything is
-// written.
+// an argument of the reader, `--i` is the unknown `-i`; line RG item K4i-2b), and a file name
+// that is not UTF-8 keeps its raw bytes as in NCBI's rpsbproc (item K10c).
 #[test]
 fn rpsbproc_command_line() {
     let run_dir = RunDir::new("cli");
@@ -805,24 +805,62 @@ fn rpsbproc_command_line() {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        let name = std::ffi::OsStr::from_bytes(b"x\xff.asn");
-        for option in ["-i", "-o", "-d"] {
-            let output = command(dir)
-                .args(["-t", "doms", option])
-                .arg(name)
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            let err = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(output.status.code(), Some(1), "{option}: {err}");
-            assert!(output.stdout.is_empty());
-            assert!(
-                err.starts_with(&format!("Error: the -{} file name ", &option[1..]))
-                    && err.contains("is not UTF-8")
-                    && err.ends_with("not supported by LOSAT's rpsbproc\n"),
-                "{option}: {err}"
-            );
-        }
+        // Non-UTF-8 paths are preserved verbatim as raw bytes (missing `-i`, unwritable `-o`,
+        // missing `-d` each report NCBI's diagnostic with the exact byte).
+        let missing_in = std::ffi::OsStr::from_bytes(b"x\xff.asn");
+        let out_in = command(dir)
+            .args(["-t", "doms", "-i"])
+            .arg(missing_in)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out_in.status.code(), Some(5));
+        assert!(out_in.stdout.is_empty());
+        assert!(
+            out_in
+                .stderr
+                .windows(b"Input file does not exist: x\xff.asn\n".len())
+                .any(|w| w == b"Input file does not exist: x\xff.asn\n"),
+            "{:?}",
+            out_in.stderr
+        );
+
+        let bad_out = std::ffi::OsStr::from_bytes(b"nodir\xff/out.txt");
+        let out_o = command(dir)
+            .args(["-t", "doms", "-i", "arch/one.asn", "-d", "data", "-o"])
+            .arg(bad_out)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out_o.status.code(), Some(4));
+        assert!(
+            out_o
+                .stderr
+                .windows(b"Unable to open output file: nodir\xff/out.txt\n".len())
+                .any(|w| w == b"Unable to open output file: nodir\xff/out.txt\n"),
+            "{:?}",
+            out_o.stderr
+        );
+
+        let bad_dir = std::ffi::OsStr::from_bytes(b"nodir\xff");
+        let out_d = command(dir)
+            .args(["-t", "doms", "-i", "arch/one.asn", "-d"])
+            .arg(bad_dir)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out_d.status.code(), Some(2));
+        assert!(
+            out_d
+                .stderr
+                .windows(
+                    b"Specified data location (nodir\xff) does not exist or does not contain data files\n".len()
+                )
+                .any(|w| w
+                    == b"Specified data location (nodir\xff) does not exist or does not contain data files\n"),
+            "{:?}",
+            out_d.stderr
+        );
     }
 }
 

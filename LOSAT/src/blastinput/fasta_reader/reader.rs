@@ -156,12 +156,13 @@ enum CharType {
     Bad,
 }
 
-/// The character types of a data line for nucleotide (`fAssumeNuc`) or protein
-/// (`fAssumeProt`) input, without `fParseGaps` (no gap characters).
+/// The character types of a data line for nucleotide (`bIsNuc`) or protein
+/// parsing, without `fParseGaps` (no gap characters).
 ///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:854-935
-/// `bIsNuc` is `fAssumeNuc` (the molecule is not set before `AssembleSeq` with
-/// `fNoParseID`), `bAllowLetterGaps` and `bHyphensAreGaps` are false (no `fParseGaps`),
+/// `bIsNuc` comes from the molecule set by `xSetSeqMol` under `-parse_deflines`, else
+/// `fAssumeNuc`; `bAllowLetterGaps` and `bHyphensAreGaps` are false (no `fParseGaps`),
 /// `bHyphensIgnoreAndWarn` is true. LOSAT looks the type up in a table (speed only).
 const fn char_types(protein: bool) -> [CharType; 256] {
     let mut table = [CharType::Bad; 256];
@@ -716,7 +717,8 @@ impl<R: Read> FastaReader<R> {
         if let Some(refusal) = refusal {
             return Err(ReadError::Unsupported(refusal));
         }
-        let believed = BelievedIds::new(ids, self.config.strand);
+        let believed =
+            BelievedIds::new(ids, self.config.strand).with_named_molecule(self.believed_molecule);
         self.local_id = Some(believed.bare_id());
         self.believed = Some(std::sync::Arc::new(believed));
         Ok(())
@@ -730,9 +732,9 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:713-772
-    /// `bIsNuc` is false (no `fForceType`; the molecule is set in `AssembleSeq`), so no
-    /// letter counts as ambiguous, and the warning (an ignored problem) needs `good == 0`,
-    /// which the error before has already thrown.
+    /// `bIsNuc` only feeds `eProblem_TooManyAmbiguousResidues`, which `CBlastFastaInputSource`
+    /// ignores (`blast_fasta_input.cpp:360`), and the other warning needs `good == 0`, which
+    /// the format error before has already thrown.
     fn check_data_line(&self, s: &[u8]) -> Result<(), ReadError> {
         if !self.seq_data.is_empty() {
             return Ok(());
@@ -762,29 +764,17 @@ impl<R: Read> FastaReader<R> {
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-1016 (the
     /// character switch is cited at `char_types`)
     /// `CloseGap` does nothing (no gap characters without `fParseGaps`, and
-    /// `CCustomizedFastaReader::x_CloseGap` is empty); `x_NucOrProt()` is empty, because
-    /// the molecule is set only in `AssembleSeq`. The fast copy of `fSkipCheck` is not
-    /// taken (no `fSkipCheck`).
+    /// `CCustomizedFastaReader::x_CloseGap` is empty); `x_NucOrProt()` names the molecule set
+    /// by `xSetSeqMol` under `-parse_deflines` and is empty otherwise. The fast copy of
+    /// `fSkipCheck` is not taken (no `fSkipCheck`).
     fn parse_data_line(&mut self, s: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
         if s.starts_with(b">?") {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
-        if self
-            .believed_molecule
-            .is_some_and(|named| named != self.config.protein)
-            && !super::believed::reads_the_same_in_both(s)
-        {
-            return Err(ReadError::Unsupported(anyhow::anyhow!(
-                "the Seq-id of the {} on line {} names the other molecule under -parse_deflines \
-                 (NCBI BLAST+ reads its letters as that molecule); this is not supported by \
-                 LOSAT's {}",
-                self.config.role,
-                self.line_number(),
-                self.config.program
-            )));
-        }
-        let (types, residues, masked) = if self.config.protein {
+        let parse_protein =
+            DataLineAlphabet::new(self.believed_molecule, self.config.protein).is_protein();
+        let (types, residues, masked) = if parse_protein {
             (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
         } else {
             (
@@ -808,7 +798,7 @@ impl<R: Read> FastaReader<R> {
                     let rest = &s[pos + 1..];
                     let run = if !bulk {
                         0
-                    } else if self.config.protein {
+                    } else if parse_protein {
                         run_length(rest, residues, sure_protein)
                     } else {
                         run_length(rest, residues, sure_nucleotide)
@@ -822,7 +812,7 @@ impl<R: Read> FastaReader<R> {
                     let rest = &s[pos + 1..];
                     let run = if !bulk {
                         0
-                    } else if self.config.protein {
+                    } else if parse_protein {
                         run_length(rest, masked, sure_protein_masked)
                     } else {
                         run_length(rest, masked, sure_nucleotide_masked)
@@ -923,8 +913,10 @@ impl<R: Read> FastaReader<R> {
     /// after this point. Without `fNoSplit` (`BLASTINPUT_GEN_DELTA_SEQ` set) the gaps have
     /// already become residues, so the record is the same sequence in delta pieces.
     /// `CSeqportUtil::Pack` packs nucleotides into `ncbi2na`/`ncbi4na`, where `U` and `T`
-    /// are the same code, so LOSAT stores `U` as `T`. The residues in the lowercase mask
-    /// are returned in lower case (LOSAT's representation of the mask).
+    /// are the same code and any non-IUPACna byte read under a protein Seq-id maps to `N`
+    /// (`CIupacnaTo4na::scm_Table`, `sequtil_tables.cpp:392-457`), so LOSAT stores `U` as `T`.
+    /// The residues in the lowercase mask are returned in lower case (LOSAT's representation of
+    /// the mask), or as mask intervals when `upper_masks` is `Some`.
     fn assemble_seq(
         &mut self,
         upper_masks: Option<bool>,
@@ -939,6 +931,9 @@ impl<R: Read> FastaReader<R> {
             self.parse_title(title, warn)?;
         }
         self.titles = titles;
+        if !self.config.protein && self.believed_molecule == Some(true) {
+            pack_protein_read_nucleotide(&mut self.seq_data);
+        }
         self.add_to_id_scope()?;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
         // EXPERIMENT (LOSAT_X_BNQPACK): the letters the branches below would give, packed from the
@@ -1098,6 +1093,47 @@ impl<R: Read> FastaReader<R> {
             self.post_warning(problem, message, warn)?;
         }
         Ok(())
+    }
+}
+
+/// The alphabet molecule `CFastaReader::ParseDataLine` checks a line against: the Seq-id's
+/// named molecule when set (`xSetSeqMol`), otherwise the program's.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
+#[derive(Clone, Copy)]
+pub struct DataLineAlphabet {
+    parse_protein: bool,
+}
+
+impl DataLineAlphabet {
+    #[inline]
+    pub fn new(believed_molecule: Option<bool>, program_protein: bool) -> Self {
+        Self {
+            parse_protein: believed_molecule.unwrap_or(program_protein),
+        }
+    }
+
+    #[inline]
+    pub fn is_protein(self) -> bool {
+        self.parse_protein
+    }
+}
+
+/// How `CSeqportUtil::Pack` maps upper-case residues read under a protein Seq-id into a
+/// nucleotide sequence (`CIupacnaTo4na::scm_Table`): IUPACna letters stay, `U` becomes `T`,
+/// and every other byte (`E`, `F`, `I`, `J`, `L`, `O`, `P`, `Q`, `X`, `Z`, `*`) becomes `N`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-457
+#[inline]
+pub fn pack_protein_read_nucleotide(seq_data: &mut [u8]) {
+    for residue in seq_data.iter_mut() {
+        *residue = match *residue {
+            b'A' | b'B' | b'C' | b'D' | b'G' | b'H' | b'K' | b'M' | b'N' | b'R' | b'S' | b'T'
+            | b'V' | b'W' | b'Y' => *residue,
+            b'U' => b'T',
+            _ => b'N',
+        };
     }
 }
 

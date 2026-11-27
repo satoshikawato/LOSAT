@@ -31,8 +31,9 @@ use crate::report::serial::encoder::{Encoder, ReplacedChar, Traced};
 use crate::report::serial::pssm::PssmWithParameters;
 use crate::report::serial::xml::XmlEncoder;
 
-/// The bytes that an encoder holds before its buffer is handed to the sink.
-const FLUSH_BYTES: usize = 32 * 1024;
+/// The bytes that an encoder holds before its buffer is handed to the sink (also
+/// blast_formatter's Seq-annots, `blast_formatter::archive`).
+pub(crate) const FLUSH_BYTES: usize = 32 * 1024;
 
 /// A Karlin-Altschul block of the results (`Blast4-ka-block`); `-1` three times is the block
 /// that does not exist.
@@ -290,7 +291,7 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
         ParamValue::BigInteger(value) => enc.big_int(*value),
         ParamValue::Boolean(value) => enc.boolean(*value),
         ParamValue::Real(value) => enc.real(*value),
-        ParamValue::Str(value) => enc.visible_str(value.as_bytes()),
+        ParamValue::Str(value) => enc.visible_str(value),
         ParamValue::IntegerList(values) => {
             enc.begin_list(false);
             for &value in values {

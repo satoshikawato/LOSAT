@@ -2115,7 +2115,7 @@ fn nonasc_protein_scan_stop_before_empty_or_missing_sequence_file() {
     let negative = |pin: &Path, oid: usize| {
         let mut bytes = fs::read(pin).unwrap();
         let (count, _, seq, _) = nin_v4_layout(&bytes);
-        assert!(oid + 1 <= count);
+        assert!(oid < count);
         let start: [u8; 4] = bytes[seq + 4 * oid..seq + 4 * oid + 4].try_into().unwrap();
         bytes[seq + 4 * (oid + 1)..seq + 4 * (oid + 1) + 4].copy_from_slice(&start);
         fs::write(pin, bytes).unwrap();

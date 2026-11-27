@@ -490,6 +490,84 @@ fn object_manager_address_and_crash_cases_are_refused() {
     assert!(checked >= 45, "expected >= 45 refused cases, got {checked}");
 }
 
+/// An object refused after a sequence was written leaves no file of the build: neither those of
+/// NCBI's `ListFiles` nor the others that a failed build of NCBI's leaves (the LMDB writers'
+/// `.nos`, `.not`, `.ntf` and `.nto`, the GI-mask files and the alias file of a single volume
+/// with GI masks; `WriteDb::every_file`). The build of the first object alone shows that each
+/// of them is written.
+#[test]
+fn a_refused_object_after_a_written_sequence_leaves_no_file() {
+    use crate::objmgr::annot_index::Refusal;
+    let first =
+        "Seq-entry ::= seq {\n  id { gi 5 },\n  descr { title \"t\" },\n  inst { repr raw, \
+                 mol dna, length 60, seq-data iupacna \
+                 \"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\" }\n}\n";
+    let refused = "Seq-entry ::= seq {\n  id { local str \"s2\" },\n  descr { title \"t\" },\n  \
+                   inst { repr raw, mol dna, length 60, seq-data iupacna \
+                   \"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\" },\n  annot { { \
+                   data ftable {\n    { data imp { key \"misc_feature\" }, location mix { empty \
+                   local str \"X\", int { from 0, to 29, id local str \"s2\" } } }\n  } } }\n}\n";
+    let masks = "Blast-db-mask-info ::= {\n  algo-id 0,\n  algo-program dust,\n  algo-options \
+                 \"window=64; level=20; linker=1\",\n  masks {\n    masks {\n      int { from 10, \
+                 to 40, id gi 5 }\n    },\n    more FALSE\n  }\n}\n";
+    let inputs = TempDir::unique("asn1-refused-every-file-in");
+    std::fs::write(inputs.join("one.asn"), first).unwrap();
+    std::fs::write(inputs.join("two.asn"), [first, refused].concat()).unwrap();
+    std::fs::write(inputs.join("masks.asn"), masks).unwrap();
+    let path = |dir: &Path, name: &str| dir.join(name).to_string_lossy().into_owned();
+    let build = |input: &str| {
+        let out = TempDir::unique(&format!("asn1-refused-every-file-{input}"));
+        let words: Vec<String> = vec![
+            "-in".into(),
+            path(&inputs, input),
+            "-input_type".into(),
+            "asn1_txt".into(),
+            "-dbtype".into(),
+            "nucl".into(),
+            "-parse_seqids".into(),
+            "-mask_data".into(),
+            path(&inputs, "masks.asn"),
+            "-gi_mask".into(),
+            "-gi_mask_name".into(),
+            path(&out, "gm"),
+            "-title".into(),
+            "T".into(),
+            "-out".into(),
+            path(&out, "db"),
+        ];
+        let env = MakedbEnv {
+            skip_unverified: false,
+            scan_cfastareader: true,
+        };
+        let (rc, _, stderr) = run_case(&words, env, &[]);
+        let mut files: Vec<String> = std::fs::read_dir(&*out)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.ends_with("-lock"))
+            .collect();
+        files.sort();
+        (rc, String::from_utf8_lossy(&stderr).into_owned(), files)
+    };
+    let (rc, stderr, files) = build("one.asn");
+    assert_eq!(rc, 0, "{stderr}");
+    for name in [
+        "db.nal", "db.nos", "db.not", "db.ntf", "db.nto", "gm.gmd", "gm.gmi", "gm.gmo", "gm.gnd",
+        "gm.gni", "gm.gno",
+    ] {
+        assert!(files.iter().any(|file| file == name), "{name}: {files:?}");
+    }
+    let (rc, stderr, files) = build("two.asn");
+    assert_eq!(rc, 1, "{stderr}");
+    assert_eq!(
+        stderr,
+        format!(
+            "losat makeblastdb: {} is not supported by LOSAT's makeblastdb\n",
+            Refusal::EmptyRegion.text(crate::writedb::asn_source::ASN_OBJECT)
+        )
+    );
+    assert!(files.is_empty(), "{files:?}");
+}
+
 #[test]
 fn text_and_binary_asn1_produce_identical_databases() {
     let (fix_a, fix_m, fix_a_str, fix_m_str) = asn1_fixture_paths();

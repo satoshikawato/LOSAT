@@ -315,4 +315,11 @@ impl MaskWriter {
     pub(crate) fn gi_mask_names(&self) -> impl Iterator<Item = &[u8]> {
         self.gi_masks.iter().flat_map(GiMasks::names)
     }
+
+    /// The files that the GI masks have written, appended to `files` (`WriteDb::every_file`).
+    pub(crate) fn gi_mask_files(&self, files: &mut Vec<Vec<u8>>) {
+        if let Some(gi_masks) = &self.gi_masks {
+            gi_masks.files(files);
+        }
+    }
 }

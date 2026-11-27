@@ -698,7 +698,7 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         match self.close(err) {
             Err(Closed::Serial(exc)) => {
                 let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}"), &msg, true);
+                self.post(err, &format!("Error: ({kind}) {tag}"), msg, true);
                 let header = format!("Error: ({SERIAL_IO_ERROR}) {tag}");
                 self.post(err, &header, &exc.msg, true);
                 let line = format!(
@@ -729,7 +729,7 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         match self.output.close() {
             Err(BufferError::Io(exc)) => {
                 let (kind, msg) = (exc.type_and_code(), exc.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}"), &msg, true);
+                self.post(err, &format!("Error: ({kind}) {tag}"), msg, true);
                 let line = format!("~COStreamBuffer: exception while closing ({kind}) {msg}");
                 self.post(err, &format!("Error: (205.2) {tag}"), &line, true);
             }

@@ -137,7 +137,7 @@ fn refused<T>(result: &Result<T, MaskFileError>) -> bool {
     matches!(
         result,
         Err(MaskFileError::Ncbi(
-            WriteDbError::Exception(_) | WriteDbError::OutOfMemory | WriteDbError::Other(_)
+            WriteDbError::Exception(_) | WriteDbError::OutOfMemory | WriteDbError::Std(_)
         ))
     )
 }

@@ -1304,6 +1304,36 @@ impl WriteDb {
         }
         files
     }
+
+    /// Every file of the build written so far: those of `list_files` and those that NCBI's
+    /// `ListFiles` leaves out (the other files of the LMDB writers, the alias file of a single
+    /// volume with GI masks, the GI-mask files). A build that LOSAT refuses removes them all
+    /// (`BuildDatabase::erase_after_refusal`); a failed build of NCBI's leaves the others.
+    pub(crate) fn every_file(&self) -> Vec<Vec<u8>> {
+        let mut files = self.list_files();
+        if self.version == DbVersion::V5 {
+            if let Ok(lmdb) = build_lmdb_file_name(&self.dbname, self.protein) {
+                let lmdb = crate::utils::os_bytes::path_of_bytes(&lmdb);
+                let taxdb = lmdb_file_name(&lmdb, "tf");
+                let others = [
+                    lmdb_file_name(&lmdb, "os"),
+                    lmdb_file_name(&lmdb, "ot"),
+                    lmdb_file_name(&taxdb, "to"),
+                    taxdb,
+                ];
+                files.extend(
+                    others
+                        .iter()
+                        .map(|name| crate::utils::os_bytes::path_bytes(name).into_owned()),
+                );
+            }
+        }
+        if self.volumes.len() == 1 && self.mask.uses_gi_masks() {
+            files.push(self.alias_name());
+        }
+        self.mask.gi_mask_files(&mut files);
+        files
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1032-1041

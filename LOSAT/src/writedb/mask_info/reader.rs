@@ -56,7 +56,7 @@ pub(crate) enum MaskFileError {
     /// `CInvalidDataException` of the format guess, and what NCBI's serial reader throws for a
     /// file it cannot read: its `CSerialException` or `CUtilException` (`Exception`, "Error: "
     /// and the report, status 255), `std::bad_alloc` of a string's length (`OutOfMemory`,
-    /// status 4) or `std::length_error` (`Other` with its `what()`, status 255).
+    /// status 4) or `std::length_error` (`Std` with its `what()`, status 255).
     Ncbi(WriteDbError),
     /// NCBI reads it; LOSAT does not.
     Unsupported(String),

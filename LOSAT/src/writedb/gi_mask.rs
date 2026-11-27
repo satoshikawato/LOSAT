@@ -221,6 +221,8 @@ pub(crate) struct GiMask {
     dates: [Vec<u8>; 2],
     /// `m_GiOffset`.
     gi_offset: Vec<GiOffset>,
+    /// The data volumes closed for the next one, by name: those that a record created.
+    closed_volumes: Vec<Vec<u8>>,
 }
 
 impl GiMask {
@@ -248,6 +250,7 @@ impl GiMask {
             desc: desc.to_vec(),
             dates,
             gi_offset: Vec::new(),
+            closed_volumes: Vec::new(),
         }
     }
 
@@ -282,6 +285,9 @@ impl GiMask {
             for (data, (extension, le)) in self.data.iter_mut().zip([("gmd", false), ("gnd", true)])
             {
                 data.file.close();
+                if data.file.created() {
+                    self.closed_volumes.push(data.file.filename().to_vec());
+                }
                 *data = GiMaskData::new(&self.name, extension, index, self.max_file_size, le);
             }
         }
@@ -325,6 +331,18 @@ impl GiMask {
         for (file, le) in self.offset_files.iter_mut().zip([false, true]) {
             write_offset_file(file, &self.gi_offset, le);
             file.close();
+        }
+    }
+
+    /// The files of the algorithm that a record or the close created, appended to `files`
+    /// (`GiMasks::files`).
+    fn files(&self, files: &mut Vec<Vec<u8>>) {
+        files.extend(self.closed_volumes.iter().cloned());
+        let open = self.data.iter().map(|data| &data.file);
+        for file in open.chain(&self.offset_files).chain(&self.index_files) {
+            if file.created() {
+                files.push(file.filename().to_vec());
+            }
         }
     }
 }
@@ -402,6 +420,14 @@ impl GiMasks {
     /// `GetName` of every GI mask, in the order of registration.
     pub(crate) fn names(&self) -> impl Iterator<Item = &[u8]> {
         self.masks.iter().map(GiMask::name)
+    }
+
+    /// The files that the GI masks created, appended to `files`
+    /// (`mask_data::MaskWriter::gi_mask_files`).
+    pub(crate) fn files(&self, files: &mut Vec<Vec<u8>>) {
+        for mask in &self.masks {
+            mask.files(files);
+        }
     }
 }
 

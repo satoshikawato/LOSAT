@@ -1348,17 +1348,19 @@ impl<'a> BuildDatabase<'a> {
         messages
     }
 
-    /// Closes the writer and removes any partial files already opened without writing `EndBuild`'s
-    /// log lines, used when a LOSAT refusal stops an ASN.1 build so stdout matches what NCBI wrote
-    /// before that point and no partial database files remain.
+    /// Closes the writer and removes every file of the build without writing `EndBuild`'s log
+    /// lines, used when a LOSAT refusal stops an ASN.1 build so stdout matches what NCBI wrote
+    /// before that point and no file of the build remains: those that NCBI's `ListFiles` leaves
+    /// out too (`WriteDb::every_file`; the LMDB writers' other files of a version 5 database
+    /// that has a sequence).
     pub(crate) fn erase_after_refusal(&mut self) {
-        let close_error = self.output_db.close().err();
-        let files = self.output_db.list_files();
-        for file in &files {
-            let _ = dir_entry::remove(&path_of_bytes(file));
-        }
-        if close_error.is_some() {
+        // The writers that a failed close left alive write their files when they are destroyed:
+        // before the removal, so that none of them remains.
+        if self.output_db.close().is_err() {
             let _ = self.output_db.destroy_after_failed_close();
+        }
+        for file in &self.output_db.every_file() {
+            let _ = dir_entry::remove(&path_of_bytes(file));
         }
     }
 

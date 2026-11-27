@@ -12,7 +12,9 @@
 //!
 //! What the switch changes (read once per process, `mode`), when the caller gives a pool of two
 //! threads or more (`pool`: the search's pool), there is no format observer (`FormatProbe`, which
-//! flushes around every row; the Web adapter) and the BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
+//! flushes around every row; the Web adapter), the BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order) and no subject's
+//! rows are written as a failed lookup leaves them or stop (a load that throws, an id that fails:
+//! `write_query_rows`, which carries the result set's rows from one to the next): the rows are cut
 //! into pieces (`Piece`) of at most `PIECE_ROWS` rows of one query, the first piece of each query
 //! with its outfmt 7 header (a query without rows is one piece of no row); the pieces are taken in
 //! windows of at least `ROWS_PER_THREAD` rows per thread of the pool (a piece of no row counts as
@@ -34,7 +36,7 @@
 //!
 //! Off (the serial writer): the switch off (`LOSAT_X_BNTABPAR=0`); no pool or one of one thread
 //! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); a format
-//! observer; the BLASTN trace.
+//! observer; the BLASTN trace; a subject whose load throws or whose id fails.
 //!
 //! Memory: the formatted rows of one window (`ROWS_PER_THREAD` x threads rows plus one piece,
 //! about 6 MiB at 32 threads with the ~100-byte rows of the cDNA input), also for one query of
@@ -113,15 +115,16 @@ pub(crate) fn write_output<W: crate::report::ostream::ReportWrite>(
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut QueryWarnings<'_>>,
     left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
-) -> io::Result<()> {
+) -> io::Result<Option<crate::report::tabular::RowStop>> {
     match pool {
-        // The serial writer writes the rows of subjects whose load throws
-        // (`write_output_blastn_hitlists_to_writer`) and reports with a `-db` HSP starting left
-        // of its query record.
+        // The serial writer writes the rows of subjects whose load throws or whose id fails, the
+        // rows that stop (`write_output_blastn_hitlists_to_writer`), and reports with a `-db` HSP
+        // starting left of its query record.
         Some(pool)
             if probe.is_none()
                 && !super::tracing::enabled()
                 && !loads.any_throws()
+                && !subject_ids.iter().any(Option::is_none)
                 && left_of_record.is_none() =>
         {
             if !hit_lists.is_empty() {
@@ -140,6 +143,7 @@ pub(crate) fn write_output<W: crate::report::ostream::ReportWrite>(
                 epilog,
                 warnings,
             )
+            .map(|()| None)
         }
         _ => {
             if mode() && !hit_lists.is_empty() {

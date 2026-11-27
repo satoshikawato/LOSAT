@@ -583,7 +583,8 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 
 /// The strategy file of a run's `-export_search_strategy` argument (`path`), created where NCBI
 /// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
-/// UTF-8 is refused first (`check_utf8_file_name`). `label` names the program in a refusal.
+/// UTF-8 keeps its bytes, as NCBI's (frozen cases `K10c_*_strategy`). `label` names the program
+/// in a refusal.
 ///
 /// With a strategy file NCBI skips its early reading of `-outfmt` (blast_args.cpp:3624-3627,
 /// cited at `create_strategy_file`'s callers): a value its parser refuses (`99`, `abc`) fails

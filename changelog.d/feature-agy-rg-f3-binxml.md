@@ -1,0 +1,1 @@
+- `blast_formatter`: `-archive` now reads ASN.1 binary (`ARCHIVE_FORMAT=bin`) and ASN.1-style XML (`ARCHIVE_FORMAT=xml`) BLAST archives in addition to ASN.1 text, matching NCBI BLAST+ 2.17.0 for `-outfmt` `8`, `9` and `12` (including multi-object streams, diagnostic positions across objects, and end-of-input handling).

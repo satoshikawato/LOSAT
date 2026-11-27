@@ -704,9 +704,15 @@ fn invalid_queries_meet_no_search_space_overflow() {
         &[],
     );
     assert_eq!(run.code, Some(0), "{}", run.stderr);
+    // An invalid query's outfmt 7 report is its header lines (no hit count), as NCBI's.
     assert_eq!(
-        run.stdout.matches("# 0 hits found").count(),
+        run.stdout.matches("\n# Query: x").count(),
         6,
+        "{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.ends_with("# BLAST processed 6 queries\n"),
         "{}",
         run.stdout
     );

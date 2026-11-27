@@ -119,3 +119,10 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   subject and letters 101-192 with a `W` after letter 132 (with `-evalue 1e-10`, the two HSPs order their shared
   segments in two ways), `tk195` letters 195-313 (at `-num_iterations 2`, round 2's two HSPs leave a segment's
   start behind its row's end when NCBI orders the segments: NCBI reads past the row's end, `CObject is corrupted`).
+- `ps15b4_*.faa` (line PS, PS15b-4, rows `db.ps15b4.*` of psiblast's outfmt 13 to 16): `ps15b4_q3nh.faa`
+  (`tk.faa`, a query without hits, `rnd.faa`), `ps15b4_esc.faa` (`tk.faa`'s letters with the title
+  `a "quoted" \back & <lt> title`, the escapes of XML2 and JSON), `ps15b4_phi_two.faa` (`tk.faa` and BDT63550.1 of
+  `tests/fasta/PajaWSV.faa`, two queries with the pattern of `tests/fixtures/phi/ploop.pat`), `ps15b4_phi_gap.faa`
+  (a record without letters, then `tk.faa`: PHI-BLAST reports the batch under the first) and `ps15b4_nzp_self.faa`
+  (`sM_nz_p` of `tests/db_search/nz_p.faa`: with `-parse_deflines` the database holds the query's Seq-id, which
+  LOSAT refuses in psiblast's outfmt 13 to 16).

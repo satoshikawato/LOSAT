@@ -1,0 +1,436 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "phiblastp",
+      "version": "PHIBLASTP 2.17.0+",
+      "reference": "Zheng Zhang, Alejandro A. Sch&auml;ffer, Webb Miller, Thomas L. Madden, David J. Lipman, Eugene V. Koonin, and Stephen F. Altschul (1998), \"Protein sequence similarity searches using patterns as seeds\", Nucleic Acids Res. 26:3986-3990.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35",
+          "Subject_36",
+          "Subject_37",
+          "Subject_38",
+          "Subject_39",
+          "Subject_40",
+          "Subject_41",
+          "Subject_42",
+          "Subject_43",
+          "Subject_44",
+          "Subject_45",
+          "Subject_46",
+          "Subject_47",
+          "Subject_48",
+          "Subject_49",
+          "Subject_50",
+          "Subject_51",
+          "Subject_52",
+          "Subject_53",
+          "Subject_54",
+          "Subject_55",
+          "Subject_56",
+          "Subject_57",
+          "Subject_58",
+          "Subject_59",
+          "Subject_60",
+          "Subject_61",
+          "Subject_62",
+          "Subject_63",
+          "Subject_64",
+          "Subject_65",
+          "Subject_66",
+          "Subject_67",
+          "Subject_68",
+          "Subject_69",
+          "Subject_70",
+          "Subject_71",
+          "Subject_72",
+          "Subject_73",
+          "Subject_74",
+          "Subject_75",
+          "Subject_76",
+          "Subject_77",
+          "Subject_78",
+          "Subject_79",
+          "Subject_80",
+          "Subject_81",
+          "Subject_82",
+          "Subject_83",
+          "Subject_84",
+          "Subject_85",
+          "Subject_86"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "pattern": "[AG]-x(4)-G-K-[ST]"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]",
+            "query_len": 398,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63550.1",
+                    "title": "BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 197,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 116.119,
+                    "score": 312,
+                    "evalue": 1.55158e-34,
+                    "identity": 79,
+                    "positive": 105,
+                    "query_from": 10,
+                    "query_to": 191,
+                    "hit_from": 4,
+                    "hit_to": 188,
+                    "align_len": 188,
+                    "gaps": 9,
+                    "qseq": "TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDC",
+                    "hseq": "TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQTIRDCVATS---VLSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQQLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTETYCAVCIGC",
+                    "midline": "T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +QQ+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E Y A C  C"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT63556.1",
+                    "title": "BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1890,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 3.59027,
+                    "score": 12,
+                    "evalue": 1.16238,
+                    "identity": 6,
+                    "positive": 9,
+                    "query_from": 20,
+                    "query_to": 33,
+                    "hit_from": 113,
+                    "hit_to": 126,
+                    "align_len": 14,
+                    "gaps": 0,
+                    "qseq": "GPMFAGKSTYLKNI",
+                    "hseq": "GLAGAGKTTMVKEL",
+                    "midline": "G   AGK+T +K +"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 1.31259,
+                    "score": 3,
+                    "evalue": 5.63635,
+                    "identity": 3,
+                    "positive": 7,
+                    "query_from": 18,
+                    "query_to": 29,
+                    "hit_from": 828,
+                    "hit_to": 839,
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "VTGPMFAGKSTY",
+                    "hseq": "LSGEDNEGKTLH",
+                    "midline": "++G    GK+ +"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT63554.1",
+                    "title": "BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 595,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 2.72754,
+                    "score": 9,
+                    "evalue": 2.11376,
+                    "identity": 4,
+                    "positive": 8,
+                    "query_from": 14,
+                    "query_to": 28,
+                    "hit_from": 407,
+                    "hit_to": 421,
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "RVELVTGPMFAGKST",
+                    "hseq": "QVTIKNAWVSTGKTT",
+                    "midline": "+V +    +  GK+T"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT63566.1",
+                    "title": "BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1045,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1.31259,
+                    "score": 3,
+                    "evalue": 5.63635,
+                    "identity": 4,
+                    "positive": 5,
+                    "query_from": 18,
+                    "query_to": 27,
+                    "hit_from": 101,
+                    "hit_to": 110,
+                    "align_len": 10,
+                    "gaps": 0,
+                    "qseq": "VTGPMFAGKS",
+                    "hseq": "IVAPNLKGKS",
+                    "midline": "+  P   GKS"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 8,
+              "eff_space": 66050,
+              "kappa": 0.047,
+              "lambda": 0.27,
+              "entropy": 1
+            }
+          },
+          {
+            "query_id": "Query_1",
+            "query_title": "YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]",
+            "query_len": 398,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT63556.1",
+                    "title": "BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1890,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 5.78514,
+                    "score": 19,
+                    "evalue": 0.25388,
+                    "identity": 16,
+                    "positive": 35,
+                    "query_from": 207,
+                    "query_to": 284,
+                    "hit_from": 828,
+                    "hit_to": 912,
+                    "align_len": 85,
+                    "gaps": 7,
+                    "qseq": "LEGGDRCGKSTQAKLLLTNKNSPLYG----GEYMCFPDRSSHTGKLINDYL---TKKIELDDHAAHLLFSANRWEVCSKIKQLLD",
+                    "hseq": "LSGEDNEGKTLHEEYWMRALSMPVSSVGDTNQNMLLSAYSSLLSAVSRTYIISSLKRVDVIKHAYSLMYGVSLLDMTVSLPDLID",
+                    "midline": "L G D  GK+   +  +   + P+       + M     SS    +   Y+    K++++  HA  L++  +  ++   +  L+D"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 4.50663,
+                    "score": 15,
+                    "evalue": 0.615881,
+                    "identity": 7,
+                    "positive": 9,
+                    "query_from": 207,
+                    "query_to": 223,
+                    "hit_from": 111,
+                    "hit_to": 127,
+                    "align_len": 17,
+                    "gaps": 0,
+                    "qseq": "LEGGDRCGKSTQAKLLL",
+                    "hseq": "LGGLAGAGKTTMVKELI",
+                    "midline": "L G    GK+T  K L+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT63554.1",
+                    "title": "BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 595,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 4.82102,
+                    "score": 16,
+                    "evalue": 0.495288,
+                    "identity": 8,
+                    "positive": 11,
+                    "query_from": 197,
+                    "query_to": 217,
+                    "hit_from": 400,
+                    "hit_to": 421,
+                    "align_len": 22,
+                    "gaps": 1,
+                    "qseq": "KKKNKGKLVVLE-GGDRCGKST",
+                    "hseq": "KKINSGTQVTIKNAWVSTGKTT",
+                    "midline": "KK N G  V ++      GK+T"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT63550.1",
+                    "title": "BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 197,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 3.89073,
+                    "score": 13,
+                    "evalue": 0.943846,
+                    "identity": 7,
+                    "positive": 11,
+                    "query_from": 200,
+                    "query_to": 217,
+                    "hit_from": 5,
+                    "hit_to": 22,
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "NKGKLVVLEGGDRCGKST",
+                    "hseq": "NIGKIHLVIGPMFAGKSS",
+                    "midline": "N GK+ ++ G    GKS+"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT63523.1",
+                    "title": "BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 1243,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 2.72754,
+                    "score": 9,
+                    "evalue": 2.11376,
+                    "identity": 8,
+                    "positive": 9,
+                    "query_from": 197,
+                    "query_to": 216,
+                    "hit_from": 648,
+                    "hit_to": 667,
+                    "align_len": 20,
+                    "gaps": 0,
+                    "qseq": "KKKNKGKLVVLEGGDRCGKS",
+                    "hseq": "KKAVYDGLLTSEGMIHPGKS",
+                    "midline": "KK     L+  EG    GKS"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "BDT63510.1",
+                    "title": "BDT63510.1 wsv045-like protein [Pasiphaea japonica whispovirus]"
+                  }
+                ],
+                "len": 826,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1.31259,
+                    "score": 3,
+                    "evalue": 5.63635,
+                    "identity": 5,
+                    "positive": 7,
+                    "query_from": 208,
+                    "query_to": 222,
+                    "hit_from": 97,
+                    "hit_to": 111,
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "EGGDRCGKSTQAKLL",
+                    "hseq": "KASALSGKSGIAGLV",
+                    "midline": "+     GKS  A L+"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 8,
+              "eff_space": 66050,
+              "kappa": 0.047,
+              "lambda": 0.27,
+              "entropy": 1
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -1519,3 +1519,51 @@ fn even_gap_translated_linking_keeps_each_hsps_frame_and_context() {
     assert!(empty.hsps.is_empty());
     assert_eq!(empty.best_evalue.to_bits(), 0.0f64.to_bits());
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1893
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
+// Without a Gumbel block (`-searchsp` or `OLD_FSC`), an invalid Karlin block (e.g. from
+// `tblastn -in_pssm` with negative gapped Lambda, K, or H) returns -1.0 from
+// `BLAST_KarlinStoE_simple`, divided by `gap_decay_divisor(gap_decay_rate, 1)`.
+#[test]
+fn uneven_gap_link_negative_karlin_block_matches_ncbi_guard() {
+    let base = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
+    let lengths = [LocalContextLength {
+        length_adjustment: 0,
+        eff_searchsp: 10_000,
+        subject_stat_length: 30,
+    }];
+    let link = LocalLinkParameters {
+        gap_decay_rate: 0.5,
+        gap_size: 40,
+        overlap_size: 9,
+        longest_intron: 40,
+        cutoff_small_gap: 0,
+    };
+    let hsp = GappedHsp {
+        frame: 1,
+        score: 49,
+        q_start: 0,
+        q_end: 6,
+        q_gapped_start: 0,
+        s_start: 0,
+        s_end: 6,
+        s_gapped_start: 0,
+    };
+    let expected = -1.0 / gap_decay_divisor(link.gap_decay_rate, 1);
+    for invalid in [
+        KarlinParams {
+            lambda: -base.lambda,
+            ..base
+        },
+        KarlinParams { k: -base.k, ..base },
+        KarlinParams { h: -base.h, ..base },
+    ] {
+        let linked =
+            link_preliminary_hsps(&[(0, hsp)], &[30], &lengths, 18, &[invalid], None, &link)
+                .unwrap();
+        assert_eq!(linked.hsps.len(), 1);
+        assert_eq!(linked.hsps[0].evalue.to_bits(), expected.to_bits());
+        assert_eq!(linked.best_evalue.to_bits(), expected.to_bits());
+    }
+}

@@ -421,7 +421,8 @@ fn the_posts_of_the_title_reads_come_where_the_serial_writer_reads_the_titles() 
         }
         warnings.after_last_query(3, &mut report).unwrap();
         drop(warnings);
-        String::from_utf8(log.0.lock().unwrap().clone()).unwrap()
+        let text = log.0.lock().unwrap().clone();
+        String::from_utf8(text).unwrap()
     };
     let serial = run(None);
     assert!(

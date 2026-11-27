@@ -1035,9 +1035,8 @@ fn write_after<R: Write + ?Sized>(
 /// sink that a caller sets apart for them (`ReportOutputs::html_posts` of a library call's later
 /// search, the diagnostics of a later format of BLASTX), else `diagnostics`, the run's. The one
 /// owner of that rule, for the reports' writers (`QueryWarnings::html_posts_sink`) and for the
-/// prologs' references that post before a search or with its first batch (blastx's
-/// `report::write_prolog`, tblastn's and tblastx's prolog writers; line RG T4a2 fix round 3,
-/// review e N1).
+/// prologs' references, which every program writes before its search (each program's prolog
+/// writers; line RG T4a2 fix round 3, review e N1; line RG item T4b-f).
 pub(crate) fn html_posts_sink<'s, W: Write + ?Sized>(
     posts: Option<&'s mut W>,
     diagnostics: &'s mut W,
@@ -1071,7 +1070,7 @@ pub(crate) fn write_html_post<R: Write + ?Sized>(
 /// between the report's bytes without a writer's place for them (BLASTX's reads of a batch's
 /// titles and its prefetch, before the batch's reports), which NCBI posts to `cerr`, tied to
 /// `cout`: after the report written before, the prolog that `-html` keeps in `cout`'s buffer too
-/// (`pairwise::flushes_after_prolog`; review 1 of line DBID pf7, H2).
+/// (`report::ostream::NcbiOstream`; review 1 of line DBID pf7, H2).
 pub(crate) struct PostsAfterReport<'w> {
     report: &'w mut dyn Write,
     posts: &'w mut dyn Write,
@@ -1221,8 +1220,8 @@ impl<'a> QueryWarnings<'a> {
     }
 
     /// These warnings with `posts` (`Some`) as the sink of the posts of a `-html` report's reads
-    /// of NCBI's formatter registries (`html_post`, `html_stderr_line`, the prolog's references:
-    /// `pairwise::html_with_diagnostics`), where `sink` takes texts that the call writes elsewhere:
+    /// of NCBI's formatter registries (`html_post`, `html_stderr_line`; the prologs' references
+    /// post through `html_posts_sink`), where `sink` takes texts that the call writes elsewhere:
     /// the repeats of a later search of a library call (`ReportOutputs::html_posts`) and the
     /// standard error of a later format of BLASTX (`algorithm::blastx::local`), so that each
     /// report posts what a run of its format alone posts, also in a call of several formats

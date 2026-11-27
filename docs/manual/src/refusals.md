@@ -10,7 +10,7 @@ There are five reasons for a refusal:
 - The option is not implemented yet.
 - The option is not part of what v0.2.0 provides.
 
-A refusal comes before the first byte of output unless an item says otherwise. In several items LOSAT first writes what NCBI writes before it fails (apart from the version line, which names LOSAT), and then stops with the error.
+A refusal comes before the first byte of output unless an item says otherwise. With `-outfmt` 0 to 4, every program writes the start of the report (the program and version line, the references and the database lines) before it reads the first query batch (with `-in_pssm`, after it reads the PSSM), as NCBI BLAST+ does, so a refusal found in a query batch, in the search or in the report comes after it. In several items LOSAT first writes what NCBI writes before it fails (apart from the version line, which names LOSAT), and then stops with the error.
 
 ## What you see
 
@@ -326,7 +326,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-comp_based_stats 0` with a hit on a profile whose consensus letters in `.psq` are fewer than its score columns, where an alignment starts at or past those letters | Refused, for the query batch of that hit. NCBI prints alignments there whose positions, scores and identities disagree, or crashes when such an alignment then meets a letter of 28 or more. |
 | `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`), except for a query batch that ends at a header NCBI cannot read (which writes NCBI's messages for the titles read before it, then NCBI's error, in any format). |
 
-NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search.
+NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come where `rpsblast`'s come (before the first byte of output, or with `-outfmt` 0 to 4 after the start of the report for one found in the search), also for queries without a valid frame, which NCBI does not search.
 
 ## rpsbproc
 

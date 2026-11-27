@@ -23,7 +23,7 @@ use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-639
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:620-621
 /// Parses Linux `/sys/devices/system/cpu/online` CPU lists (for example `0`, `0-31`, `0,2-5`).
 #[cfg(any(target_os = "linux", test))]
 fn parse_linux_cpu_list(text: &str) -> Option<usize> {
@@ -92,7 +92,7 @@ fn ncbi_online_cpu_count() -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-639
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-638
 /// Requested `-num_threads` capped at the host's online CPU count, matching NCBI's
 /// `CMTArgs::x_ExtractAlgorithmOptions` (`CSystemInfo::GetCpuCount`).
 ///

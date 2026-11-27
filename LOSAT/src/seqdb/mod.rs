@@ -2854,7 +2854,7 @@ impl SeqDb {
         self.mt_stop_at_negative
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
     /// Checks raw OIDs in `start_oid..end_oid` for the first negative-length OID (and validates
     /// each scanned nucleotide's tail byte against its readable length).
     fn x_has_negative_in_oid_range(

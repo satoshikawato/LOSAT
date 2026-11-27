@@ -1577,9 +1577,7 @@ fn subject_header_texts(
             index = 0;
         }
         let Some(id) = subject.best_id() else {
-            return Err(refused(
-                "a subject Bioseq without an id that FindBestChoice ranks",
-            ));
+            return Err(refused("a subject Bioseq without an id that names it"));
         };
         let shown = match scope.queries_holding(id).as_slice() {
             [at] => scope.queries[*at].bioseq().expect("a query Bioseq"),

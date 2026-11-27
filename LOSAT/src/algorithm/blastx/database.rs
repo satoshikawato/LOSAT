@@ -1528,25 +1528,24 @@ impl ReportedSubjects {
         )
     }
 
-    /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each reported sequence
-    /// with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists named by
-    /// their ranks, `for_batch`), with the scope that `scopes` (numbered from the reader batch's
-    /// first query) gives the query of its report (`BatchResults::query_ordinal`, which counts
-    /// from the reader batch, and the query's index), where the reports resolve the subjects'
-    /// Seq-align ids (`resolves_subjects`). Where the scope finds a query for the sequence and the
-    /// reports show NCBI's bytes for it (`run`), that query is noted in `seen` instead
-    /// (`report::query_bioseq::note_or_refuse`).
+    /// The check of line RG item X7 (`report::query_bioseq::check` with `run`) of each reported
+    /// sequence with parsed Seq-ids of the batches `batches` of one reader batch (their hit lists
+    /// named by their ranks, `for_batch`), against the queries that NCBI's scope holds for the
+    /// batch (`queries`, with the run's number of the reader batch's first query `first`; the
+    /// query of a report is `BatchResults::query_ordinal`, which counts from the reader batch, and
+    /// the query's index), where the reports resolve the subjects' Seq-align ids
+    /// (`resolves_subjects`).
     pub(crate) fn refuse_ids_of_queries(
         &mut self,
         batches: &[BatchResults],
         gapped: bool,
-        scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+        (first, queries): (usize, &crate::blastinput::query_batch::BatchQueries<'_>),
         run: &crate::report::query_bioseq::SeenRun<'_, '_>,
     ) -> Result<()> {
         if self.parsed.is_empty() || !self.resolves_subjects {
             return Ok(());
         }
-        self.seen_first = scopes.first();
+        self.seen_first = first;
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -1557,13 +1556,12 @@ impl ReportedSubjects {
                         continue;
                     };
                     let oid = self.oids[list.oid];
-                    crate::report::query_bioseq::note_or_refuse(
+                    crate::report::query_bioseq::check(
                         &mut self.seen,
                         subject,
                         || oid,
-                        scopes.first() + batch.query_ordinal + qidx,
-                        self.ordinals[list.oid],
-                        scopes.run(),
+                        (first + batch.query_ordinal + qidx, self.ordinals[list.oid]),
+                        queries,
                         run,
                         PROGRAM,
                     )?;

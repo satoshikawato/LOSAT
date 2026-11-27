@@ -2286,35 +2286,56 @@ impl BlastpReport {
             || round.is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next)
     }
 
+    /// The call's reports `formats` as line RG item X7 sorts them
+    /// (`report::query_bioseq::FoundWriters`): psiblast's rounds that make the next round's PSSM
+    /// (`round`, `PsiRoundIo::may_make_next`) read the found query's letters for it.
+    fn found_writers(
+        formats: &[BlastpReport],
+        round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    ) -> crate::report::query_bioseq::FoundWriters<'static> {
+        use crate::report::query_bioseq::FoundWriter;
+        crate::report::query_bioseq::FoundWriters {
+            program: crate::blastinput::app::Program::Blastp,
+            writers: formats
+                .iter()
+                .map(|format| match *format {
+                    BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise) => {
+                        FoundWriter::Pairwise
+                    }
+                    BlastpReport::Pairwise(_) => FoundWriter::Anchored,
+                    BlastpReport::Text(
+                        OutputFormat::Tabular | OutputFormat::TabularWithComments,
+                    ) => FoundWriter::Table(None),
+                    BlastpReport::CustomTabular(spec) => FoundWriter::Table(Some(spec)),
+                    BlastpReport::Seqalign(_) | BlastpReport::Archive => FoundWriter::Annots,
+                    BlastpReport::Text(_) | BlastpReport::Xml | BlastpReport::Xml2(_) => {
+                        FoundWriter::Structured
+                    }
+                })
+                .collect(),
+            search_reads: round
+                .is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next),
+        }
+    }
+
     /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
-    /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
-    /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
-    /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
-    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters),
-    /// search one (`-in_pssm`), or search a pattern (`-phi_pattern`, whose occurrence tables key
-    /// rows by occurrence index), keep LOSAT's refusal.
+    /// scope finds as a query of its batch by its `-parse_deflines` id (`report::query_bioseq`,
+    /// `FoundWriters::shows_shown`): blastp's, and psiblast's calls that cannot make a PSSM
+    /// (`psi_reads`, which reads the found Bioseq's letters), search none (`-in_pssm`) and no
+    /// pattern (`-phi_pattern`, whose occurrence tables key rows by occurrence index). The other
+    /// programs keep LOSAT's refusal.
     fn shows_query_bioseqs(
         formats: &[BlastpReport],
         args: &ResolvedBlastpArgs,
         psi_reads: bool,
     ) -> bool {
-        use crate::report::query_bioseq::tabular_shows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2057
         (args.app == BlastpApp::Blastp
             || (args.app == BlastpApp::Psiblast
                 && !psi_reads
                 && args.psi_search.is_none()
                 && args.phi.is_none()))
-            && formats.iter().all(|format| match *format {
-                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
-                BlastpReport::CustomTabular(spec) => {
-                    tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
-                }
-                BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
-                    tabular_shows(None, crate::blastinput::app::Program::Blastp)
-                }
-                _ => false,
-            })
+            && Self::found_writers(formats, None).shows_shown()
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
@@ -10048,6 +10069,8 @@ fn resolve_seen_queries(
         },
         record: &record,
         protein: true,
+        writers: &crate::report::query_bioseq::FoundWriters::NONE,
+        taxdb: false,
     };
     titles.refuse_ids_of_queries(hit_lists, scopes, &run)
 }

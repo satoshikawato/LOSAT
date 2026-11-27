@@ -1384,9 +1384,17 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
         .unwrap()
     };
     let csv = |fields: &str| spec(20, ReportFormat::CommaSeparatedValuesWithHeader, fields);
-    let refuses = |fields: &str, program, ident, taxid| {
-        csv(fields).refuses_generated_id(program, ident, taxid)
+    let differs = |spec: &TabularSpec, program, ident, taxid, taxdb| {
+        crate::report::query_bioseq::tabular_differs_for_generated_id(
+            Some(spec),
+            program,
+            ident,
+            taxid,
+            taxdb,
+        )
     };
+    let refuses =
+        |fields: &str, program, ident, taxid| differs(&csv(fields), program, ident, taxid, true);
     for program in [Program::Blastp, Program::Blastx] {
         // The profile's own ids and the scores: NCBI's bytes.
         for fields in [
@@ -1417,16 +1425,32 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
         // `nident` where the block opens for it (identities).
         assert!(!refuses("qseqid nident", program, 0, false));
         assert!(refuses("qseqid nident", program, 1, false));
-        // The organism report: only a profile with a taxid; outfmt 6, 7 and 10 are line RG X7's.
+        // The organism report: only a profile with a taxid that the taxonomy database names
+        // (probe `tx.bp.qid.f18` of line RG item X7-1: without one NCBI lists neither); outfmt 6, 7
+        // and 10 as 20 (line RG item X7-1).
         let report = spec(18, ReportFormat::TaxFormat, "");
-        assert!(!report.refuses_generated_id(program, 5, false));
-        assert!(report.refuses_generated_id(program, 5, true));
+        assert!(!differs(&report, program, 5, false, true));
+        assert!(!differs(&report, program, 5, true, false));
+        assert!(differs(&report, program, 5, true, true));
         for (number, format) in [
             (6, ReportFormat::Tabular),
             (7, ReportFormat::TabularWithComments),
             (10, ReportFormat::CommaSeparatedValues),
         ] {
-            assert!(!spec(number, format, "qseqid stitle").refuses_generated_id(program, 5, true));
+            assert!(differs(
+                &spec(number, format, "qseqid stitle"),
+                program,
+                5,
+                true,
+                true
+            ));
+            assert!(!differs(
+                &spec(number, format, "qseqid sseqid"),
+                program,
+                5,
+                true,
+                true
+            ));
         }
     }
     // RPSBLAST: the query's letters and the strand; RPSTBLASTN: the alignment block throws.

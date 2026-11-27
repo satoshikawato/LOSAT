@@ -305,3 +305,126 @@ fn tblastx_qseq_throws_matches_seqvector_clipping() {
     assert!(tblastx_qseq_throws(true, 250, 400, 300)); // 50 % 3 == 2
     assert!(tblastx_qseq_throws(true, 251, 401, 300)); // 49 % 3 == 1
 }
+
+/// A reported database sequence with the ids `text` and no taxid (`ParsedSubject::of_record`).
+fn subject(text: &str) -> ParsedSubject {
+    ParsedSubject::of_record(&believed(text), b"db sequence")
+}
+
+// Line RG item X7-1 (probes `x71/probe2`, 2026-11-27): what each report does with a sequence that
+// NCBI's scope finds by a generated id, and `generated_number`.
+#[test]
+fn a_generated_id_is_refused_where_a_report_differs() {
+    use crate::blastinput::app::Program;
+    let spec = |text: &str, kind| {
+        let choice = crate::blastinput::app::parse_formatting_string(text).unwrap();
+        crate::report::tabular::TabularSpec::of_app(
+            crate::blastinput::app::ReportFormat::from_number(choice.number).unwrap(),
+            &choice,
+            kind,
+        )
+        .expect("a field list")
+    };
+    fn writers(program: Program, writers: Vec<FoundWriter<'_>>) -> FoundWriters<'_> {
+        FoundWriters {
+            program,
+            writers,
+            search_reads: false,
+        }
+    }
+    let found = subject("lcl|Query_1");
+    let effect =
+        |program, writer| writers(program, vec![writer]).generated_effect(&found, 1, false);
+    // Outfmt 0 to 5 and 13 to 16 show the query's title and letters (`bp.qid.f0`, `.f5`).
+    for program in [Program::Blastp, Program::Blastn, Program::Tblastx] {
+        assert_eq!(
+            effect(program, FoundWriter::Pairwise),
+            Some(PAIRWISE_EFFECT)
+        );
+        assert_eq!(
+            effect(program, FoundWriter::Anchored),
+            Some(QUERY_ANCHORED_EFFECT)
+        );
+        assert_eq!(effect(program, FoundWriter::Structured), Some(XML_EFFECT));
+        // The Seq-annots, the archive and SAM write the Seq-align id (`bp.qid.f8`, `bn.qid.f17`).
+        assert_eq!(effect(program, FoundWriter::Annots), None);
+        assert_eq!(effect(program, FoundWriter::Sam), None);
+        // No taxid: the organism report is NCBI's (`tx.bp.qid.f18` without a taxonomy database).
+        assert_eq!(effect(program, FoundWriter::TaxReport), None);
+    }
+    // The default fields: BLASTN's read nothing of the found query (`bn.qid.f6`); `pident` does
+    // elsewhere (`bp.qid.f6`); BLASTX's alignment block throws (`bx.qid.f6`).
+    assert_eq!(effect(Program::Blastn, FoundWriter::Table(None)), None);
+    assert_eq!(
+        effect(Program::Blastp, FoundWriter::Table(None)),
+        Some(TABLE_EFFECT)
+    );
+    assert_eq!(
+        effect(Program::Blastx, FoundWriter::Table(None)),
+        Some(TABLE_EFFECT)
+    );
+    let kind = crate::report::archive::options::RequestKind::Blastn;
+    let ids = spec("6 qseqid sseqid sacc evalue", kind);
+    let titled = spec("6 qseqid sseqid stitle", kind);
+    assert_eq!(
+        effect(Program::Blastn, FoundWriter::Table(Some(&ids))),
+        None
+    );
+    assert_eq!(
+        effect(Program::Blastn, FoundWriter::Table(Some(&titled))),
+        Some(TABLE_EFFECT)
+    );
+    // The first report that differs names the effect; psiblast's rounds that make a PSSM differ
+    // in every format (`it2.ps.qid`).
+    let both = writers(
+        Program::Blastp,
+        vec![FoundWriter::Annots, FoundWriter::Structured],
+    );
+    assert_eq!(both.generated_effect(&found, 1, false), Some(XML_EFFECT));
+    let rounds = FoundWriters {
+        program: Program::Blastp,
+        writers: vec![FoundWriter::Annots],
+        search_reads: true,
+    };
+    assert_eq!(
+        rounds.generated_effect(&found, 1, false),
+        Some(SEARCH_EFFECT)
+    );
+    assert!(!rounds.shows_shown());
+    // KB-12's substitution of a `-parse_deflines` id: the tables of ids and the Seq-annots.
+    assert!(writers(
+        Program::Blastn,
+        vec![FoundWriter::Table(Some(&ids)), FoundWriter::Annots]
+    )
+    .shows_shown());
+    assert!(!writers(Program::Blastn, vec![FoundWriter::Sam]).shows_shown());
+}
+
+#[test]
+fn a_generated_number_is_a_local_query_id_in_any_case() {
+    let number =
+        |text: &str| crate::blastinput::query_batch::generated_number(&believed(text).ids[0]);
+    assert_eq!(number("lcl|Query_1"), Some(1));
+    assert_eq!(number("lcl|query_27"), Some(27));
+    assert_eq!(number("lcl|QUERY_3"), Some(3));
+    assert_eq!(number("lcl|Query_01"), None);
+    assert_eq!(number("lcl|Query_"), None);
+    assert_eq!(number("lcl|Query_1a"), None);
+    assert_eq!(number("lcl|Subject_1"), None);
+    assert_eq!(number("ref|NP_1.1|"), None);
+}
+
+#[test]
+fn the_generated_ids_of_a_batch_find_a_local_id_of_its_queries() {
+    use crate::blastinput::query_batch::{GeneratedQueries, QueryScope};
+    let make = || QueryScope::of_generated_ids(["Query_1", "Query_2"]);
+    let batch = GeneratedQueries::new(&make, None);
+    assert!(batch.finds(&subject("lcl|Query_2")));
+    assert!(batch.finds(&subject("lcl|query_1")));
+    assert!(!batch.finds(&subject("lcl|Query_3")));
+    assert!(!batch.finds(&subject("gi|5|ref|NP_1.1|")));
+    // Outfmt 5 with records not read yet: their numbers (`b1.bp.q2x.f5`).
+    let kept = GeneratedQueries::new(&make, Some(3..5));
+    assert!(kept.finds(&subject("lcl|Query_4")));
+    assert!(!kept.finds(&subject("lcl|Query_5")));
+}

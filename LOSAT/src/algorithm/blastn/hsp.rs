@@ -226,20 +226,22 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
-    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
-    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
-    /// archive (which write the Seq-align id alone).
-    pub(crate) fn shows_query_bioseqs(self) -> bool {
-        use crate::report::query_bioseq::tabular_shows;
-        let program = crate::blastinput::app::Program::Blastn;
+    /// What the report shows of a reported sequence that NCBI's scope finds as a query
+    /// (`report::query_bioseq::FoundWriter`, line RG item X7).
+    pub(crate) fn found_writer(self) -> crate::report::query_bioseq::FoundWriter<'static> {
+        use crate::report::query_bioseq::FoundWriter;
         match self {
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
-            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
-                tabular_shows(None, program)
+            BlastnOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise) => {
+                FoundWriter::Pairwise
             }
-            BlastnOutputFormat::CustomTabular(spec) => tabular_shows(Some(spec), program),
-            _ => false,
+            BlastnOutputFormat::Pairwise(_) => FoundWriter::Anchored,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                FoundWriter::Table(None)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => FoundWriter::Table(Some(spec)),
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FoundWriter::Annots,
+            BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_) => FoundWriter::Structured,
+            BlastnOutputFormat::Sam(_) => FoundWriter::Sam,
         }
     }
 

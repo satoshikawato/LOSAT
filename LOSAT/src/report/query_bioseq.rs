@@ -15,7 +15,7 @@
 //! query whose Bioseq the scope finds ([`QueryBioseq`], the record as NCBI's scope holds it: a
 //! Bioseq of those ids without a Blast-def-line, as a `-subject` record read under
 //! `-parse_deflines`, `ParsedSubject::of_record`). The programs fill it where they check the
-//! reported sequences against the batch's scope (`note_or_refuse`), and the
+//! reported sequences against the batch's scope (`check`), and the
 //! reports that read the sequence's Bioseq ask it by the query and the ordinal id
 //! ([`SeenFrom::of`]); runs without such a sequence keep it empty and ask nothing else.
 //!
@@ -340,8 +340,183 @@ pub fn tblastx_qseq_throws(plus: bool, start0: usize, end: usize, seen_len: usiz
 /// query's Bioseq fails, so the check's `failure` gives `None` for it.
 pub(crate) const SEEN_ROW: usize = usize::MAX;
 
+/// One report of a run as the table of line RG item X7 sorts it: what it shows of a reported
+/// database sequence that NCBI's scope finds as a query (`FoundWriters`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FoundWriter<'s> {
+    /// The pairwise report (outfmt 0, also with `-html`): the found query's title and letters.
+    Pairwise,
+    /// The query-anchored formats (outfmt 1 to 4): the found query's title and letters.
+    Anchored,
+    /// BLAST XML, XML2 and JSON (outfmt 5, 13 to 16): the found query's title and letters.
+    Structured,
+    /// A table (outfmt 6, 7, 10 and 20) or the organism report (outfmt 18, a `TabularSpec` of
+    /// `TabularKind::TaxReport`) of these fields (`None`: the program's default fields of outfmt
+    /// 6, 7 and 10).
+    Table(Option<&'s crate::report::tabular::TabularSpec>),
+    /// The organism report (outfmt 18) of a program that keeps no field list for it.
+    TaxReport,
+    /// SAM (outfmt 17), which reads the Seq-align and the query.
+    Sam,
+    /// The Seq-annots and the archive (outfmt 8, 9, 11 and 12), which write the Seq-align id alone.
+    Annots,
+}
+
+/// A run's reports as one owner of what they show for a reported database sequence that NCBI's
+/// scope finds as a query (line RG item X7, decision XT-X7-1b): by the query's Seq-align id
+/// (`query_batch::BatchQueries`) under `-parse_deflines` (`shows_shown`: KB-12's substitution,
+/// `QueryBioseqs::note`) or by a generated id (`generated_effect`).
+#[derive(Clone, Debug)]
+pub(crate) struct FoundWriters<'s> {
+    pub program: crate::blastinput::app::Program,
+    pub writers: Vec<FoundWriter<'s>>,
+    /// Whether the search itself reads the found query's letters: psiblast's calls that make a
+    /// PSSM of a round's alignments, whose next round then differs in every format.
+    pub search_reads: bool,
+}
+
+impl FoundWriters<'static> {
+    /// No report: a run whose reports keep LOSAT's refusal of every such sequence (`SeenRun::REFUSED`).
+    pub(crate) const NONE: Self = FoundWriters {
+        program: crate::blastinput::app::Program::Blastp,
+        writers: Vec::new(),
+        search_reads: true,
+    };
+}
+
+/// What NCBI does with a sequence found by a generated id in the pairwise report.
+pub(crate) const PAIRWISE_EFFECT: &str =
+    "shows that query in its place in the pairwise report (outfmt 0)";
+
+/// What NCBI does with it in the query-anchored formats.
+pub(crate) const QUERY_ANCHORED_EFFECT: &str =
+    "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
+
+/// What NCBI does with it in BLAST XML, XML2 and JSON (RPSBLAST gets the query's title for the
+/// entry, BLASTX and RPSTBLASTN an exception from the Seq-align's conversion and half a document
+/// or none; PS15a-1, PS15a-2); with outfmt 5 the formatter keeps its scope for the run, where a
+/// later batch's query with that id is searched as the database sequence (`b1.bp.q2x.f5`).
+pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML, XML2 and JSON (outfmt \
+     5, 13 to 16), and with outfmt 5, whose scope it keeps for the run, searches a later batch's \
+     query with that id as the database sequence";
+
+/// What NCBI does with it in the tables and the organism report where they differ
+/// (`tabular_differs_for_generated_id`).
+pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the tables (outfmt 6, 7, 10 and \
+     20) whose fields show what it finds by that id and in the organism report (outfmt 18) of a \
+     sequence with a taxid that the taxonomy database names (BLASTX's and RPSTBLASTN's tables can \
+     stop with an exception)";
+
+/// What NCBI does with it in psiblast's rounds after the first.
+pub(crate) const SEARCH_EFFECT: &str =
+    "makes the next round's PSSM from that query's letters in its place (psiblast)";
+
+impl FoundWriters<'_> {
+    /// Whether every report shows NCBI's bytes for a sequence that the scope finds by its own
+    /// Seq-align id under `-parse_deflines` (KB-12, `QueryBioseqs::note`): a table that reads no
+    /// letter of the found Bioseq and the organism report (`tabular_shows`), the Seq-annots and
+    /// the archive. The callers add their programs' conditions.
+    pub(crate) fn shows_shown(&self) -> bool {
+        !self.search_reads
+            && self.writers.iter().all(|writer| match *writer {
+                FoundWriter::Annots | FoundWriter::TaxReport => true,
+                FoundWriter::Table(spec) => tabular_shows(spec, self.program),
+                _ => false,
+            })
+    }
+
+    /// What NCBI does that LOSAT does not for the reported database sequence `subject` that the
+    /// scope finds by a generated id (`query_batch::GeneratedQueries`), with the Seq-align's
+    /// identities `num_ident` (1 where the caller does not have them: `nident` then counts as
+    /// read) and the taxonomy database found (`taxdb`): the effect of the first report that
+    /// differs, `None` where every report is NCBI's bytes (the Seq-annots and the archive, SAM,
+    /// tables of fields that read nothing of the found query, the organism report of a sequence
+    /// without a taxid the taxonomy database names; probes of line RG item X7, `x71/probe2`).
+    pub(crate) fn generated_effect(
+        &self,
+        subject: &ParsedSubject,
+        num_ident: usize,
+        taxdb: bool,
+    ) -> Option<&'static str> {
+        if self.search_reads {
+            return Some(SEARCH_EFFECT);
+        }
+        let taxid = subject.first_source_taxid().is_some();
+        self.writers.iter().find_map(|writer| match *writer {
+            FoundWriter::Pairwise => Some(PAIRWISE_EFFECT),
+            FoundWriter::Anchored => Some(QUERY_ANCHORED_EFFECT),
+            FoundWriter::Structured => Some(XML_EFFECT),
+            FoundWriter::Table(spec) => {
+                tabular_differs_for_generated_id(spec, self.program, num_ident, taxid, taxdb)
+                    .then_some(TABLE_EFFECT)
+            }
+            FoundWriter::TaxReport => (taxid && taxdb).then_some(TABLE_EFFECT),
+            FoundWriter::Sam | FoundWriter::Annots => None,
+        })
+    }
+}
+
+/// What a table's fields read of a reported database sequence that NCBI's scope finds as a
+/// query (one field rule for both kinds of ids, `tabular_shows` and
+/// `tabular_differs_for_generated_id`).
+struct FoundFields {
+    /// Fields that show what the scope finds beyond the Seq-align id: its ids and titles
+    /// (`sallseqid`, `sallacc`, `stitle`, `salltitles`), `staxids` (`N/A` for a query), `slen`,
+    /// and in TBLASTN and TBLASTX the frame of the found Bioseq's length (`sframe`, `frames`).
+    names: bool,
+    /// Fields that read the found Bioseq's letters (`tabular_shows`).
+    letters: bool,
+    /// Fields of the taxonomy of the sequence's taxid (`staxid`, the names, the kingdoms).
+    taxonomy: bool,
+    /// In BLASTX (and RPSTBLASTN, whose driver is BLASTX's) a field that enters the alignment
+    /// block, which throws (`TabularSpec::opens_counts`).
+    throws: bool,
+}
+
+/// `FoundFields` of `spec` (`Some`) in `program`, with the Seq-align's identities `num_ident`.
+fn found_fields(
+    spec: &crate::report::tabular::TabularSpec,
+    program: crate::blastinput::app::Program,
+    num_ident: usize,
+) -> FoundFields {
+    use crate::blastinput::app::Program;
+    use crate::report::tabular::TabularField::*;
+    let translated = matches!(program, Program::Tblastn | Program::Tblastx);
+    FoundFields {
+        names: spec.has_any(&[
+            SubjectAllSeqIds,
+            SubjectAllAccessions,
+            SubjectTitle,
+            SubjectAllTitles,
+            SubjectTaxIds,
+            SubjectLength,
+        ]) || (translated && spec.has_any(&[SubjectFrame, Frames])),
+        letters: spec.has_any(&[SubjectSeq, Positives, PercentPositives, Btop])
+            || (program != Program::Blastn
+                && (spec.has_any(&[Mismatches, PercentIdentical])
+                    || (spec.has(NumIdentical) && num_ident > 0)))
+            || (program == Program::Blastn
+                && spec.has(QuerySeq)
+                && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
+            || (program == Program::Tblastn && spec.has(QuerySeq)),
+        taxonomy: spec.has_any(&[
+            SubjectTaxId,
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+            SubjectSciNames,
+            SubjectCommonNames,
+            SubjectBlastNames,
+            SubjectSuperKingdoms,
+        ]),
+        throws: program == Program::Blastx && spec.opens_counts(&num_ident),
+    }
+}
+
 /// Whether `program`'s tabular report of `spec` (`None`: the default fields; the organism report
-/// too) shows NCBI's bytes for a database sequence that the scope finds as a query:
+/// too) shows NCBI's bytes for a database sequence that the scope finds as a query by its own
+/// Seq-align id under `-parse_deflines` (KB-12's substitution, `FoundWriters::shows_shown`):
 /// - In BLASTX, every field that enters the alignment block (`TabularSpec::opens_counts`:
 ///   `qstart`, `qend`, `sstart`, `send`, `length`, `gapopen`, `gaps`, `qframe`, `sstrand`, and
 ///   the letter-reading fields) converts the alignment with `CreateTranslatedDensegFromNADenseg`,
@@ -363,7 +538,6 @@ pub(crate) fn tabular_shows(
     program: crate::blastinput::app::Program,
 ) -> bool {
     use crate::blastinput::app::Program;
-    use crate::report::tabular::TabularField::*;
     let Some(spec) = spec else {
         // `6 qaccver saccver pident length mismatch ...`: BLASTN alone does not read letters.
         return program == Program::Blastn;
@@ -371,30 +545,66 @@ pub(crate) fn tabular_shows(
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
         return true;
     }
+    let fields = found_fields(spec, program, 1);
     if program == Program::Blastx {
-        return !spec.opens_counts(&1);
+        return !fields.throws;
     }
-    let reads_subject_letters = spec.has_any(&[SubjectSeq, Positives, PercentPositives, Btop])
-        || (program != Program::Blastn
-            && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
-        || (program == Program::Blastn
-            && spec.has(QuerySeq)
-            && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
-        || (program == Program::Tblastn && spec.has(QuerySeq));
-    !reads_subject_letters
+    !fields.letters
 }
 
-/// What `note_or_refuse` reads of a run besides the sequence: whether its reports show NCBI's
-/// bytes for a sequence that the scope finds as a query (`shows`, `tabular_shows` of every
-/// report, and no text that the taxonomy database writes at a load,
-/// `common::database::TaxdbRun::loads_write_texts`), the queries the caller has (`known`, ends
-/// `usize::MAX` where they reach the run's last searched query) and `record(h)` of each, and
-/// whether the queries are proteins (`protein`).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-924
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:964-968
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+/// Whether `program`'s table of `spec` (`None`: the default fields of outfmt 6, 7 and 10) or
+/// organism report differs for an HSP with the Seq-align's identities `num_ident` whose subject's
+/// Seq-align id is a generated id (`lcl|Query_N`, or a PSSM query's local id) of a query of its
+/// batch (`program` is the driver's: BLASTP for RPSBLAST and PSIBLAST, BLASTX for RPSTBLASTN).
+/// NCBI's formatter finds that query by the id, so its row differs where it shows what it found
+/// beyond the id (`FoundFields::names`), the found query's letters (`letters`; `nident` where the
+/// block opens for it, `num_ident > 0`), and the taxonomy where the subject has a taxid
+/// (`subject_taxid`; a query has none); in BLASTX and RPSTBLASTN, whose found query is nucleotide,
+/// every row that enters the alignment block ends the run with an exception of the Seq-align's
+/// conversion. The organism report differs for a subject with a taxid where the taxonomy
+/// database (`taxdb`) names it: without one, NCBI lists neither (probe `tx.bp.qid.f18`). The
+/// subject's own ids (`sseqid`, `sacc`, `saccver`, `sgi`, `sallgi`), the query's letters, the
+/// scores and the coordinates are NCBI's bytes (review S1 of PS15a-2; probes of line RG item X7,
+/// `x71/probe2`: BLASTN's default fields are, its `sallseqid` and `stitle` are not).
+pub(crate) fn tabular_differs_for_generated_id(
+    spec: Option<&crate::report::tabular::TabularSpec>,
+    program: crate::blastinput::app::Program,
+    num_ident: usize,
+    subject_taxid: bool,
+    taxdb: bool,
+) -> bool {
+    use crate::blastinput::app::Program;
+    let Some(spec) = spec else {
+        return program != Program::Blastn;
+    };
+    if spec.kind == crate::report::tabular::TabularKind::TaxReport {
+        return subject_taxid && taxdb;
+    }
+    let mut fields = found_fields(spec, program, num_ident);
+    // TBLASTX's `qseq` translates the found Bioseq where an HSP straddles its length
+    // (`tblastx_qseq_throws`), which a generated id's caller does not check.
+    fields.letters |=
+        program == Program::Tblastx && spec.has(crate::report::tabular::TabularField::QuerySeq);
+    fields.names || fields.letters || (subject_taxid && fields.taxonomy) || fields.throws
+}
+
+/// What `check` reads of a run besides the sequence: whether its reports show NCBI's bytes for a
+/// sequence that the scope finds as a query by its `-parse_deflines` id (`shows`,
+/// `FoundWriters::shows_shown` of the run's reports, and no text that the taxonomy database
+/// writes at a load, `common::database::TaxdbRun::loads_write_texts`), the queries the caller has
+/// (`known`, ends `usize::MAX` where they reach the run's last searched query) and `record(h)` of
+/// each, whether the queries are proteins (`protein`), the run's reports (`writers`) and whether
+/// its taxonomy database is found (`taxdb`), for a sequence found by a generated id.
 pub(crate) struct SeenRun<'s, 'r> {
     pub shows: bool,
     pub known: std::ops::Range<usize>,
     pub record: &'s dyn Fn(usize) -> Option<QueryRecordRef<'r>>,
     pub protein: bool,
+    pub writers: &'s FoundWriters<'s>,
+    pub taxdb: bool,
 }
 
 impl SeenRun<'static, 'static> {
@@ -404,6 +614,8 @@ impl SeenRun<'static, 'static> {
         known: 0..0,
         record: &no_record,
         protein: false,
+        writers: &FoundWriters::NONE,
+        taxdb: false,
     };
 }
 
@@ -412,26 +624,51 @@ fn no_record(_: usize) -> Option<QueryRecordRef<'static>> {
     None
 }
 
-/// `common::database::refuse_id_of_a_query` of the reported database sequence `subject` (`oid`
-/// its OID, `ordinal` its ordinal id) of the run's searched query `query`, unless the scope of the
-/// query (`scopes`) finds a query of its batch for it by its own Seq-align id and the run's
-/// reports show NCBI's bytes for such a sequence (`run.shows`, `SeenRun`): that query is then
-/// noted in `seen` ([`QueryBioseqs::note`]) and the reports take its Bioseq for the sequence.
-/// LOSAT keeps its refusal where the sequence's load posts the warning of a UTF8String header
-/// (`ParsedSubject::scope_utf8_read`: NCBI loads nothing of a sequence that its scope finds as a
-/// query), where the id matches a query weakly, and where the holder is not one searched query
-/// of the scope that the caller has, or LOSAT does not write its tabular ids ([`NotNoted`]).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn note_or_refuse(
+/// The one check of line RG item X7 (decision XT-X7-1b) of the reported database sequence
+/// `subject` (`oid` its OID, `ordinal` its ordinal id) of the run's searched query `query`, against
+/// the queries that NCBI's scope holds for the query's batch (`queries`):
+/// - `-parse_deflines` (`BatchQueries::Shown`): `common::database::refuse_id_of_a_query`, unless
+///   the scope finds a query of its batch for it by its own Seq-align id and the run's reports
+///   show NCBI's bytes for such a sequence (`run.shows`, `SeenRun`): that query is then noted in
+///   `seen` ([`QueryBioseqs::note`]) and the reports take its Bioseq for the sequence. LOSAT
+///   keeps its refusal where the sequence's load posts the warning of a UTF8String header
+///   (`ParsedSubject::scope_utf8_read`: NCBI loads nothing of a sequence that its scope finds as
+///   a query), where the id matches a query weakly, and where the holder is not one searched
+///   query of the scope that the caller has, or LOSAT does not write its tabular ids
+///   ([`NotNoted`]).
+/// - A generated id (`BatchQueries::Generated`): LOSAT's refusal where a report differs for it
+///   (`FoundWriters::generated_effect`), or where the sequence's load posts the warning of a
+///   UTF8String header; else nothing (every report is NCBI's bytes).
+pub(crate) fn check(
     seen: &mut QueryBioseqs,
     subject: &ParsedSubject,
     oid: impl Fn() -> crate::seqdb::Oid,
-    query: usize,
-    ordinal: u32,
-    scopes: &crate::blastinput::query_batch::QueryScopes,
+    (query, ordinal): (usize, u32),
+    queries: &crate::blastinput::query_batch::BatchQueries<'_>,
     run: &SeenRun<'_, '_>,
     program: &str,
 ) -> anyhow::Result<()> {
+    use crate::blastinput::query_batch::BatchQueries;
+    let scopes = match queries {
+        BatchQueries::Shown(scopes) => scopes,
+        BatchQueries::Generated(generated) => {
+            if !generated.finds(subject) {
+                return Ok(());
+            }
+            let effect = run
+                .writers
+                .generated_effect(subject, 1, run.taxdb)
+                .or_else(|| {
+                    subject.scope_utf8_read().is_some().then_some(
+                        "loads nothing of it where LOSAT posts the warning of its header",
+                    )
+                });
+            return match effect {
+                Some(effect) => Err(generated_refusal(subject, oid(), program, effect)),
+                None => Ok(()),
+            };
+        }
+    };
     let scope = scopes.of_query(query);
     let keys = &subject.query_scope_keys().own;
     if run.shows
@@ -452,6 +689,31 @@ pub(crate) fn note_or_refuse(
         return Ok(());
     }
     crate::algorithm::common::database::refuse_id_of_a_query(subject, oid, scope, program)
+}
+
+/// What the refusals of a sequence found by a generated id call that id: the local id that LOSAT
+/// generates for a FASTA query read without `-parse_deflines` (`Query_N`), or the id of the PSSM
+/// query of `-in_pssm` that a report shows as a local id (`lcl|myprot`).
+pub(crate) const GENERATED_QUERY_ID: &str = "the id of a query (generated, or the PSSM's)";
+
+/// LOSAT's refusal of the reported database sequence `subject` (OID `oid`) whose Seq-align id
+/// NCBI's scope finds as the generated id of a query of the batch that reports it, where NCBI
+/// does `effect` with it (`FoundWriters::generated_effect`).
+pub(crate) fn generated_refusal(
+    subject: &ParsedSubject,
+    oid: crate::seqdb::Oid,
+    program: &str,
+    effect: &str,
+) -> anyhow::Error {
+    crate::algorithm::common::database::parsed_refusal(
+        oid,
+        &format!(
+            "has the Seq-id {}, {GENERATED_QUERY_ID} in the query batch that reports it: NCBI \
+             BLAST+ {effect}",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        ),
+        program,
+    )
 }
 
 #[cfg(test)]

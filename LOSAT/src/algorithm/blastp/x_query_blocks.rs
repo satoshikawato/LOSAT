@@ -71,7 +71,7 @@
 //!   search of all queries, `x_query_block_plan`), and outfmt 1 to 4's refusal of such a record's section
 //!   that NCBI BLAST+ aborts on (`pairwise::blastp_section_aborts`; what NCBI writes before its
 //!   abort depends on its buffers). The refusals of a database sequence that NCBI shows as a
-//!   query (`ListedTitles::refuse_generated_query_ids`, `refuse_display_ids_of_queries`) sit at
+//!   query (`ListedTitles::refuse_generated_ids`, `refuse_display_ids_of_queries`) sit at
 //!   the same place, but run only in the search of all queries: such a sequence has parsed
 //!   Seq-ids, whose definition lines `database::x_titles_allow_blocks` never takes.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and

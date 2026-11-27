@@ -72,72 +72,6 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
-/// RPSTBLASTN: the scopes of the batches (`AnchoredBatchScopes`) where a profile of the database
-/// can have the generated id (`lcl|Query_N`) of a query of the batch that reports it, which NCBI's
-/// scope finds as that query (PS15a-1, PS15a-2, followup `rps_lcl_query_title.md`); `None` for
-/// every other program, a subject set and queries read with `-parse_deflines`.
-pub(super) fn rps_generated_scopes(
-    options: &ResolvedOptions,
-    queries: &[FastaRecord],
-    shown: &ShownSubjects<'_>,
-    batches: &[BatchResults],
-) -> Option<crate::blastinput::query_batch::AnchoredBatchScopes> {
-    if options.rpstblastn.is_none() || !matches!(shown, ShownSubjects::Database { .. }) {
-        return None;
-    }
-    let ids: Vec<(
-        &str,
-        Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
-    )> = queries
-        .iter()
-        .map(|query| (query.internal_id.as_str(), query.believed()))
-        .collect();
-    let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
-        &ids,
-        batches
-            .iter()
-            .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
-            .collect(),
-    );
-    scopes.generated().then_some(scopes)
-}
-
-/// The refusal of a reported list of the query `ordinal` (`lists`, those that `reported` keeps
-/// and where the format differs for its profile, `differs`) whose profile has the generated id of
-/// a query of its batch (`rps_generated_scopes`, `common::database::refuse_generated_query_id`),
-/// with what NCBI does with it in the format asked for (`effect`).
-pub(super) fn refuse_rps_generated_ids(
-    scopes: &crate::blastinput::query_batch::AnchoredBatchScopes,
-    shown: &ShownSubjects<'_>,
-    lists: &[super::results::HspList],
-    ordinal: usize,
-    options: &ResolvedOptions,
-    differs: impl Fn(&super::results::HspList, &crate::report::db_subject::ParsedSubject) -> bool,
-    effect: &str,
-) -> Result<()> {
-    let ShownSubjects::Database {
-        reported: names, ..
-    } = shown
-    else {
-        return Ok(());
-    };
-    for list in lists.iter().filter(|list| reported(list, options.gapped)) {
-        if let Some(subject) = names
-            .parsed_subject(list.oid)
-            .filter(|subject| differs(list, subject))
-        {
-            crate::algorithm::common::database::refuse_generated_query_id(
-                subject,
-                names.oid(list.oid),
-                scopes.of_query(ordinal),
-                options.program().upper,
-                effect,
-            )?;
-        }
-    }
-    Ok(())
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (cited at
 // `report::tabular::TabularSpec::subject_fetch`)
 /// Whether a report whose batch's prefetch is off reads the subject of the hit list `list`: one
@@ -612,22 +546,34 @@ pub(super) fn sort_lists(batches: &mut [BatchResults], loc: SubjectLoc) {
     }
 }
 
+/// The report of `options` as line RG item X7 sorts it (`report::query_bioseq::FoundWriters`;
+/// RPSTBLASTN's driver is BLASTX's).
+pub(super) fn found_writers(
+    options: &ResolvedOptions,
+) -> crate::report::query_bioseq::FoundWriters<'static> {
+    use crate::report::query_bioseq::FoundWriter;
+    crate::report::query_bioseq::FoundWriters {
+        program: crate::blastinput::app::Program::Blastx,
+        writers: vec![match options.outfmt {
+            0 => FoundWriter::Pairwise,
+            1..=4 => FoundWriter::Anchored,
+            8 | 9 | 11 | 12 => FoundWriter::Annots,
+            18 => FoundWriter::TaxReport,
+            6 | 7 | 10 | 20 => FoundWriter::Table(options.tabular),
+            17 => FoundWriter::Sam,
+            _ => FoundWriter::Structured,
+        }],
+        search_reads: false,
+    }
+}
+
 /// Whether the reports of `options` show NCBI's bytes for a reported sequence that the scope finds
-/// as a query of its batch (`report::query_bioseq`): BLASTX's tables that read no letter of the
-/// found Bioseq (`query_bioseq::tabular_shows`), the organism report, the Seq-annots and the
-/// archive (which write the Seq-align id alone), without `-query_loc`. RPSTBLASTN keeps LOSAT's
-/// refusal.
+/// as a query of its batch by its `-parse_deflines` id (`report::query_bioseq`,
+/// `FoundWriters::shows_shown`), without `-query_loc`. RPSTBLASTN keeps LOSAT's refusal.
 pub(super) fn shows_query_bioseqs(options: &ResolvedOptions) -> bool {
     options.rpstblastn.is_none()
         && options.query_range.is_none()
-        && match options.outfmt {
-            8 | 9 | 11 | 12 | 18 => true,
-            6 | 7 | 10 | 20 => crate::report::query_bioseq::tabular_shows(
-                options.tabular,
-                crate::blastinput::app::Program::Blastx,
-            ),
-            _ => false,
-        }
+        && found_writers(options).shows_shown()
 }
 
 /// The number of HSPs that the reports of `batches` show (`has_seqalign`).
@@ -923,38 +869,6 @@ pub(super) fn render_queries_with(
             options.outfmt
         )
     })?;
-    // RPSTBLASTN's organism report (outfmt 18) and comma-separated values with a header line
-    // (outfmt 20, item PS15a-2): a profile whose Seq-align id is the generated id of a query of
-    // its batch is that query for NCBI's formatter, whose rows then differ or stop with an
-    // exception (`TabularSpec::refuses_generated_id`). Refused before any byte, as the documents
-    // above; outfmt 6, 7 and 10 of the same rows are line RG item X7's.
-    if spec.refuses_generated_id(crate::blastinput::app::Program::Blastx, 1, true) {
-        if let Some(scopes) = rps_generated_scopes(options, queries, shown, batches) {
-            for batch in batches.iter() {
-                for qidx in 0..batch.queries.len() {
-                    refuse_rps_generated_ids(
-                        &scopes,
-                        shown,
-                        batch.shown_lists(qidx, options),
-                        batch.query_ordinal + qidx,
-                        options,
-                        |list, subject| {
-                            let taxid = subject.first_source_taxid().is_some();
-                            list.hsps.iter().any(|hsp| {
-                                has_seqalign(hsp, options.gapped)
-                                    && spec.refuses_generated_id(
-                                        crate::blastinput::app::Program::Blastx,
-                                        hsp.identity,
-                                        taxid,
-                                    )
-                            })
-                        },
-                        crate::algorithm::common::database::TABLE_EFFECT,
-                    )?;
-                }
-            }
-        }
-    }
     super::tabular::write_blastx_tabular(
         writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
     )
@@ -1087,11 +1001,11 @@ fn write_pairwise(
     // before, are NCBI's own prefix), the refusals of what the description lines show
     // (`common::database::refuse_described_lines`, line RG-KB item 12 review 1; of the `-subject`
     // records whose ids `-parse_deflines` read, `refuse_described_records`, review 2) and those of
-    // the query-anchored formats (outfmt 1 to 4, line RG T3c): a reported database sequence that
-    // NCBI's scope finds as a query of its batch, by its Seq-align id (a generated `lcl|Query_N`)
-    // or, in a description line, by its display id
-    // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's and TBLASTN's): NCBI
-    // shows the query in its place.
+    // the description lines of outfmt 0 to 4 (line RG T3c, item X7-1): a reported database
+    // sequence whose display id NCBI's scope finds as a query of its batch
+    // (`common::database::refuse_display_ids_of_queries`, as BLASTN's and TBLASTN's): NCBI
+    // shows the query's title there. The Seq-align ids are checked per batch
+    // (`report::query_bioseq::check`, `native::reported_batch`).
     if !records_parsed.is_empty() {
         crate::algorithm::common::database::refuse_described_records(
             queries.len(),
@@ -1169,7 +1083,7 @@ fn write_pairwise(
                 .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
                 .collect(),
         );
-        crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+        crate::algorithm::common::database::refuse_display_ids_of_queries(
             queries.len(),
             |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
             described,
@@ -1177,7 +1091,6 @@ fn write_pairwise(
             |rank| reported.oid(rank as usize),
             |q_idx| scopes.of_query(q_idx),
             scopes.generated(),
-            view != crate::report::pairwise::PairwiseView::Pairwise,
             options.program().upper,
         )?;
     }

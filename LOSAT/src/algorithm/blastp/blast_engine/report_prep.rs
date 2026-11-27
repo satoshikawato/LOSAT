@@ -1074,127 +1074,75 @@ pub(super) fn refuse_unreportable(
         }
         Ok(described)
     };
-    // Outfmt 1 to 4 of a database search whose queries are read without `-parse_deflines`: a
-    // reported database sequence whose Seq-align id is the generated id (`lcl|Query_N`) of a query
-    // of the batch that reports it is that query's own Bioseq for NCBI's scope, which shows the
-    // query's title and letters in its place and can abort on its merge (review 2 of line RG
-    // T3a, D2), and one whose description line shows such an id as its display id gets the
-    // query's title there (review 3 of T3a, D1): refused here, with the abort above
-    // (`ListedTitles::refuse_generated_query_ids`). Under `-parse_deflines` every query has a
-    // believed id (generated for a record without one) and the refusal of a reported sequence with
-    // a query's id is the scopes' of the batches, by its Seq-align id where the reports resolve
-    // it (`ListedTitles::refuse_ids_of_queries` above, `BlastpReport::resolve_subjects`) and for
-    // outfmt 0 to 4 by its display id
-    // (below). A `-subject` search cannot meet it: without `-parse_deflines` the subjects are
-    // `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
-    // (`id_scope`) unless it is the query's own record (the abort above). NCBI's display of such a
-    // sequence in outfmt 0, 6 and 7 (the query's title and letters) is line RG item X7's, the
-    // owner of this behaviour for every format. The refusal runs in the search of all queries,
-    // before any byte of the call's reports (in a psiblast round after the first, after the
-    // earlier rounds' output): such a sequence has parsed Seq-ids, and the block
-    // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
-    // search to reach it, it would refuse in the call of the query's block as the abort above,
-    // after the reports of the blocks before (NCBI's bytes for their queries).
-    // rpsblast's BLAST XML, XML2 and JSON (outfmt 5, 13 to 16): the same collision of an entry's
-    // generated id with a query of its batch, where NCBI's documents take the query's title for
-    // the entry (the archive, outfmt 11, and the Seq-annots, 8, 9 and 12, are NCBI's bytes with
-    // it): refused here before any byte, for the reported entries only
-    // (`ListedTitles::refuse_generated_ids`; PS15a-1 and PS15a-2, followup
-    // `rps_lcl_query_title.md`). Outfmt 0, 6, 7 and 10 are line RG item X7's.
-    let rps_xml = args.rps_search.is_some()
-        && format_plans
+    // A database search whose queries are read without `-parse_deflines` (line RG item X7,
+    // decision XT-X7-1b; T3a review 2 D2 and D1, PS15a-1, PS15a-2): a reported database sequence
+    // whose Seq-align id is the generated id (`lcl|Query_N`, or the local id of a PSSM's query) of
+    // a query of the batch that reports it (in outfmt 5, whose scope NCBI's formatter keeps, of
+    // the run) is that query's own Bioseq for NCBI's scope, which shows the query's title and
+    // letters in its place where a report reads them, can abort on its query-anchored merge, and
+    // in psiblast makes the next round's PSSM from its letters: refused here where a report
+    // differs for it (`FoundWriters::generated_effect`; the Seq-annots, the archive, tables of
+    // fields that read nothing of it and the organism report of a sequence without a taxid that
+    // the taxonomy database names are NCBI's bytes), and one whose description line shows such an
+    // id as its display id (outfmt 0 to 4: NCBI shows the query's title there,
+    // `ListedTitles::refuse_display_ids`). Under `-parse_deflines` (or a PSSM query shown with its
+    // ids) the scopes of the batches refuse (`ListedTitles::refuse_ids_of_queries`, and below by
+    // the display id). A `-subject` search cannot meet it: without `-parse_deflines` the subjects
+    // are `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
+    // (`id_scope`) unless it is the query's own record (the abort above). The refusal runs in the
+    // search of all queries, before any byte of the call's reports (in a psiblast round after the
+    // first, after the earlier rounds' output): such a sequence has parsed Seq-ids, and the block
+    // search never takes a database with them (`database::x_titles_allow_blocks`).
+    if let (None, Some(titles)) = (reports.query_scopes, listed_titles.as_ref()) {
+        let xml = format_plans
             .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Xml | BlastpReport::Xml2(_)));
-    // rpsblast's organism report (outfmt 18) and comma-separated values with a header line
-    // (outfmt 20) where NCBI's rows show what its formatter finds by such an id, the query
-    // (`TabularSpec::refuses_generated_id`, PS15a-2): refused as the documents above; a table of
-    // other fields, and the organism report of a profile without a taxid, are NCBI's bytes.
-    // The reports that can refuse (an HSP with identities, a profile with a taxid).
-    let rps_tables: Vec<&crate::report::tabular::TabularSpec> = if args.rps_search.is_some() {
-        format_plans
-            .iter()
-            .filter_map(|outfmt| match outfmt {
-                BlastpReport::CustomTabular(spec)
-                    if spec.refuses_generated_id(
-                        crate::blastinput::app::Program::Blastp,
-                        1,
-                        true,
-                    ) =>
-                {
-                    Some(*spec)
-                }
-                _ => None,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if let (true, false, Some(titles)) = (
-        anchored_view.is_some() || rps_xml || !rps_tables.is_empty(),
-        args.parse_deflines,
-        listed_titles.as_ref(),
-    ) {
-        let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
-            .iter()
-            .map(|batch| {
-                (
-                    batch.searched.end,
-                    crate::blastinput::query_batch::QueryScope::of_generated_ids(
-                        ranges.input_records[batch.input.clone()]
-                            .iter()
-                            .map(|record| record.local_id.as_str()),
-                    ),
-                )
-            })
-            .collect();
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+        let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = if xml {
+            vec![(
+                usize::MAX,
+                crate::blastinput::query_batch::QueryScope::of_shown_records(ranges.input_records),
+            )]
+        } else {
+            query_batches
+                .iter()
+                .map(|batch| {
+                    (
+                        batch.searched.end,
+                        crate::blastinput::query_batch::QueryScope::of_shown_records(
+                            &ranges.input_records[batch.input.clone()],
+                        ),
+                    )
+                })
+                .collect()
+        };
         let none = crate::blastinput::query_batch::QueryScope::default();
         let scope_of = |query: usize| {
             scopes
                 .get(scopes.partition_point(|&(end, _)| end <= query))
                 .map_or(&none, |(_, scope)| scope)
         };
-        if rps_xml {
-            titles.refuse_generated_ids(
-                hit_lists,
-                &scope_of,
-                |_, _, _| true,
-                crate::algorithm::common::database::XML_EFFECT,
-            )?;
-        }
-        if !rps_tables.is_empty() {
-            titles.refuse_generated_ids(
-                hit_lists,
-                &scope_of,
-                |query, list_index, subject| {
-                    let taxid = subject.first_source_taxid().is_some();
-                    let Some(Some(hit_list)) = hit_lists.get(query) else {
-                        return false;
-                    };
-                    hit_list.hsplist_array[list_index]
-                        .hsps
-                        .iter()
-                        .enumerate()
-                        .any(|(index_in_list, hsp)| {
-                            // The Seq-align's `num_ident` (`EngineCounts`).
-                            let num_ident = engine_counts.num_ident(
-                                (query as u32, list_index as u32, index_in_list as u32),
-                                hsp.num_ident,
-                            );
-                            rps_tables.iter().any(|spec| {
-                                spec.refuses_generated_id(
-                                    crate::blastinput::app::Program::Blastp,
-                                    num_ident,
-                                    taxid,
-                                )
-                            })
-                        })
-                },
-                crate::algorithm::common::database::TABLE_EFFECT,
-            )?;
-        }
-        if anchored_view.is_some() {
+        let writers = BlastpReport::found_writers(format_plans, reports.psi_round);
+        let taxdb = database.is_some_and(database::BlastpDatabase::taxdb_found);
+        titles.refuse_generated_ids(hit_lists, &scope_of, |query, list_index, subject| {
+            let Some(Some(hit_list)) = hit_lists.get(query) else {
+                return None;
+            };
+            // The first HSP whose report differs, by its Seq-align's `num_ident` (`EngineCounts`).
+            hit_list.hsplist_array[list_index]
+                .hsps
+                .iter()
+                .enumerate()
+                .find_map(|(index_in_list, hsp)| {
+                    let num_ident = engine_counts.num_ident(
+                        (query as u32, list_index as u32, index_in_list as u32),
+                        hsp.num_ident,
+                    );
+                    writers.generated_effect(subject, num_ident, taxdb)
+                })
+        })?;
+        if !pairwise_views.is_empty() {
             titles
-                .refuse_generated_query_ids(hit_lists, scope_of, |q_idx| described(q_idx, true))?;
+                .refuse_display_ids(hit_lists, scope_of, true, |q_idx| described(q_idx, false))?;
         }
     }
     // Outfmt 0 to 4 of a database search with queries whose ids the reports show

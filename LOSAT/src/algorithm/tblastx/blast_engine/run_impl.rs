@@ -2570,7 +2570,6 @@ fn write_tblastx_outputs(
                     run,
                     &hits,
                     seqalign_identities.as_deref(),
-                    *view,
                     view.report_sort(args.formatting.report_sort()),
                     args.report_counts.num_descriptions,
                     &records_parsed,
@@ -3651,6 +3650,81 @@ fn x_pipe_plan(
     plan
 }
 
+/// The check of line RG item X7 (`common::database::refuse_reported_ids_of_queries`) of the
+/// reported sequences of the batch of the searched queries `start..end` (`queries`, the run's
+/// searched query records; `ranged`: a `-query_loc` range cuts them) whose hits are `ordered`,
+/// against the queries that NCBI's scope holds for the batch: under `-parse_deflines` the run's
+/// scopes (`BatchReports::query_scopes`), then `refuse_tblastx_qseq_past_seen_query_len`; else the
+/// generated ids of the batch's input records (`generated`).
+fn check_found_queries(
+    database: &super::super::database::TblastxDatabase,
+    outputs: &[crate::api::local_blast::FormatOutput<'_>],
+    reports: &BatchReports<'_>,
+    (start, end, query_records, ranged): (usize, usize, &[FastaRecord], bool),
+    generated: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
+    ordered: &[super::TblastxHsp],
+    prefetch_format: crate::algorithm::common::database::PrefetchFormat,
+) -> Result<()> {
+    let formats: Vec<report::TblastxOutputFormat> = outputs
+        .iter()
+        .map(|format| report::output_format(format.outfmt))
+        .collect();
+    let writers = crate::report::query_bioseq::FoundWriters {
+        program: crate::blastinput::app::Program::Tblastx,
+        writers: formats.iter().map(|format| format.found_writer()).collect(),
+        search_reads: false,
+    };
+    let query_scopes = reports.query_scopes.borrow();
+    let scopes = query_scopes.as_ref();
+    // The batch's searched queries (`start..end`), the scope's span.
+    let record = |query: usize| {
+        crate::report::query_bioseq::QueryRecordRef::of(
+            query_records.get(query).filter(|_| query < end)?,
+        )
+    };
+    let run = crate::report::query_bioseq::SeenRun {
+        shows: writers.shows_shown() && !ranged && !database.loads_write_texts(),
+        known: start..match scopes {
+            Some(scopes) if scopes.span_of(start).end != usize::MAX => end,
+            _ => usize::MAX,
+        },
+        record: &record,
+        protein: false,
+        writers: &writers,
+        taxdb: database.taxdb_found(),
+    };
+    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+        &reports.titles.borrow(),
+        ordered
+            .iter()
+            .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+        database.oid_map(),
+        &crate::blastinput::query_batch::BatchQueries::of(scopes, generated, None),
+        super::super::database::parsed_shown(&formats, prefetch_format),
+        &mut reports.seen.borrow_mut(),
+        &run,
+        "TBLASTX",
+    )?;
+    let Some(scopes) = scopes else {
+        return Ok(());
+    };
+    refuse_tblastx_qseq_past_seen_query_len(
+        &formats,
+        reports,
+        ordered.iter().map(|hsp| {
+            (
+                start + hsp.hit.q_idx as usize,
+                hsp.hit.s_idx,
+                hsp.subject_frame > 0,
+                hsp.hit.s_start.min(hsp.hit.s_end).saturating_sub(1),
+                hsp.hit.s_start.max(hsp.hit.s_end),
+            )
+        }),
+        scopes,
+        |ordinal| database.oid_map().oid(ordinal),
+    )
+}
+
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:288-310
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:631-644,720-728
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-901
@@ -4242,58 +4316,21 @@ fn run_batch_loop(
         }
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let ordered = batch.hits.as_slice();
-            if let Some(scopes) = query_scopes.borrow().as_ref() {
-                let formats: Vec<report::TblastxOutputFormat> = outputs
-                    .formats
-                    .iter()
-                    .map(|format| report::output_format(format.outfmt))
-                    .collect();
-                // The batch's searched queries (`start..end`), the scope's span.
-                let record = |query: usize| {
-                    crate::report::query_bioseq::QueryRecordRef::of(
-                        query_records.get(query).filter(|_| query < end)?,
-                    )
-                };
-                let run = crate::report::query_bioseq::SeenRun {
-                    shows: formats.iter().all(|format| format.shows_query_bioseqs())
-                        && !input.placements.ranged()
-                        && !database.loads_write_texts(),
-                    known: start..if scopes.span_of(start).end == usize::MAX {
-                        usize::MAX
+            check_found_queries(
+                database,
+                &outputs.formats,
+                reports,
+                (start, end, query_records, input.placements.ranged()),
+                &|| {
+                    batch_scope(if xml_scope {
+                        0..query_runs.input_records.len()
                     } else {
-                        end
-                    },
-                    record: &record,
-                    protein: false,
-                };
-                crate::algorithm::common::database::refuse_reported_ids_of_queries(
-                    &reports.titles.borrow(),
-                    ordered
-                        .iter()
-                        .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
-                    database.oid_map(),
-                    scopes,
-                    super::super::database::parsed_shown(&formats, prefetch_format),
-                    &mut reports.seen.borrow_mut(),
-                    &run,
-                    "TBLASTX",
-                )?;
-                refuse_tblastx_qseq_past_seen_query_len(
-                    &formats,
-                    reports,
-                    ordered.iter().map(|hsp| {
-                        (
-                            start + hsp.hit.q_idx as usize,
-                            hsp.hit.s_idx,
-                            hsp.subject_frame > 0,
-                            hsp.hit.s_start.min(hsp.hit.s_end).saturating_sub(1),
-                            hsp.hit.s_start.max(hsp.hit.s_end),
-                        )
-                    }),
-                    scopes,
-                    |ordinal| database.oid_map().oid(ordinal),
-                )?;
-            }
+                        input_start..input_end
+                    })
+                },
+                ordered,
+                prefetch_format,
+            )?;
             // The sequences that the batch reports, read once each where NCBI fetches them before
             // the batch's reports (`BlastFormatter_PreFetchSequenceData`, below), when a report
             // reads their letters, else their lengths alone (the index and the last byte of each):

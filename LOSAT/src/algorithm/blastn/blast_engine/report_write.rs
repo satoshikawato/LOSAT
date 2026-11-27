@@ -42,11 +42,12 @@ pub(super) fn refuse_anchored_reports(
     // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
     // written, as BLASTP's (`blast_engine::run_call`): a query whose own record is one of the
     // subjects (`-subject`, `-parse_deflines`) and whose section NCBI BLAST+ aborts on
-    // (`pairwise::section_aborts`, PD-LOSAT-NCBI-DEFECTS rule 3), and a reported database sequence
-    // that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
-    // `lcl|Query_N`) or, in a description line, by its display id
-    // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
-    // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
+    // (`pairwise::section_aborts`, PD-LOSAT-NCBI-DEFECTS rule 3), and in outfmt 0 to 4 a reported
+    // database sequence whose display id NCBI's scope finds as a query of its batch
+    // (`common::database::refuse_display_ids_of_queries`, line RG item X7-1): NCBI shows the
+    // query's title in its description line. The Seq-align ids are checked per batch
+    // (`report::query_bioseq::check`). NCBI's bytes before an abort depend on its buffers, so
+    // LOSAT writes none of the call's.
     let sort = report.formatting.report_sort();
     let rows_of_query = |q_idx: usize| query_rows(pairwise_hits, rows_of, q_idx);
     let reported_ranks = |q_idx: usize| reported_subjects(hit_lists, q_idx);
@@ -68,7 +69,7 @@ pub(super) fn refuse_anchored_reports(
         ))
     };
     // The description lines of outfmt 0 to 4 (line RG-KB item 12 review 1) and the display id
-    // lookup of outfmt 0 (`refuse_query_ids_of_anchored_reports` with `anchored = false`).
+    // lookup of outfmt 0 too (`refuse_display_ids_of_queries`).
     if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
         let oids = reader.oid_map();
         let mut pairwise_batches = None;
@@ -93,7 +94,7 @@ pub(super) fn refuse_anchored_reports(
                         },
                     )
                 });
-                crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                crate::algorithm::common::database::refuse_display_ids_of_queries(
                     hit_lists.len(),
                     reported_ranks,
                     |q_idx| described(*view, q_idx),
@@ -101,7 +102,6 @@ pub(super) fn refuse_anchored_reports(
                     |rank| oids.oid(ordinals[rank as usize]),
                     |q_idx| batches.of_query(q_idx),
                     batches.generated(),
-                    *view != crate::report::pairwise::PairwiseView::Pairwise,
                     "BLASTN",
                 )?;
             }

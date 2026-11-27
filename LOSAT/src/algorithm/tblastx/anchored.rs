@@ -116,18 +116,17 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 }
 
-/// The refusals of a pairwise format of a TBLASTX report call (outfmt 0 to 4, `view`), before
+/// The refusals of a pairwise format of a TBLASTX report call (outfmt 0 to 4), before
 /// any byte of it that is not NCBI's own prefix (the prolog, and with the stream of
 /// `report_stream` the earlier batches) (`run`, its final hits `hits` in report order with record coordinates and their
 /// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): a
 /// description line that shows what LOSAT does not write as NCBI
 /// (`common::database::refuse_described_lines`, line RG-KB item 12 review 1; of the `-subject`
 /// records whose ids `-parse_deflines` read, `records`, `refuse_described_records`, review 2),
-/// and with `-db` in the
-/// query-anchored formats (outfmt 1 to 4) a reported sequence that NCBI's scope finds as a query
-/// of its batch, by its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its
-/// display id (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's
-/// and BLASTX's): NCBI shows the query in its place. With the stream of `report_stream` a call is
+/// and with `-db` a reported sequence whose display id NCBI's scope finds as a query of its batch
+/// (`common::database::refuse_display_ids_of_queries`, as BLASTN's, TBLASTN's and BLASTX's;
+/// line RG item X7-1; the Seq-align ids are checked per batch, `report::query_bioseq::check`):
+/// NCBI shows the query's title in its description line. With the stream of `report_stream` a call is
 /// one query batch (NCBI's scope is the batch's), so the refusal of a generated id comes after the
 /// reports of the batches before; a description line that LOSAT refuses turns that stream off
 /// (`common::database::reports_may_refuse`), as does, under `-parse_deflines`, a database sequence
@@ -143,7 +142,6 @@ pub(crate) fn refuse_pairwise_reports(
     run: &super::blast_engine::TblastxReportRun<'_>,
     hits: &[super::blast_engine::TblastxHsp],
     seqalign_identities: Option<&[u32]>,
-    view: crate::report::pairwise::PairwiseView,
     sort: crate::report::hit_sort::ReportSort,
     num_descriptions: usize,
     records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
@@ -226,7 +224,7 @@ pub(crate) fn refuse_pairwise_reports(
         run.queries,
         run.archive_spans.to_vec(),
     );
-    crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+    crate::algorithm::common::database::refuse_display_ids_of_queries(
         run.queries.len(),
         reported_ranks,
         described,
@@ -234,7 +232,6 @@ pub(crate) fn refuse_pairwise_reports(
         oid_of,
         |q_idx| scopes.of_query(q_idx),
         scopes.generated(),
-        view != crate::report::pairwise::PairwiseView::Pairwise,
         "TBLASTX",
     )
 }

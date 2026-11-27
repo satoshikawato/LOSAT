@@ -1123,6 +1123,10 @@ pub(super) struct QueryScan {
     /// Under `-parse_deflines`, the scopes of the queries read, in the search's batches
     /// (`prescan_queries`; `QueryScopes::read_ahead`).
     pub query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    /// The queries of the batches read (every query of the run where the read ends at the end of
+    /// the file): with outfmt 5 NCBI's scope keeps their generated ids `Query_1` to `Query_N` for
+    /// the run (`native::reported_batch`, line RG item X7-1).
+    pub queries: usize,
 }
 
 /// Reads the query file once before the search (`scan_queries`), with the search's reader
@@ -1311,6 +1315,7 @@ pub(super) fn scan_queries(
         Ok(())
     });
     scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusals));
+    scan.queries = written;
     match scanned {
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
@@ -1553,12 +1558,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         ShownSubjects::Database { reported, .. } => reported.loads(),
         ShownSubjects::Fasta { .. } => &every_loaded,
     };
-    // RPSTBLASTN: an entry of the profile database whose Seq-align id is the generated id
-    // (`lcl|Query_N`) of a query of the batch that reports it is that query for NCBI's scope: its
-    // Seq-align conversion raises an exception after half a document. Refused before the reports
-    // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
-    // (`report::rps_generated_scopes`, `common::database::refuse_generated_query_id`).
-    let generated_scopes = super::report::rps_generated_scopes(options, queries, shown, batches);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
     // Every document writes the lists of each query that the cut to the hit list size keeps
@@ -1571,17 +1570,6 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 break 'batches;
             }
             let lists = batch.shown_lists(qidx, options);
-            if let Some(scopes) = &generated_scopes {
-                super::report::refuse_rps_generated_ids(
-                    scopes,
-                    shown,
-                    lists,
-                    batch.query_ordinal + qidx,
-                    options,
-                    |_, _| true,
-                    crate::algorithm::common::database::XML_EFFECT,
-                )?;
-            }
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(

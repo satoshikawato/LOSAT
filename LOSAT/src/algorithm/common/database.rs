@@ -3646,12 +3646,6 @@ fn query_with_shown_ids(program: &str) -> &'static str {
     }
 }
 
-/// What the refusals of the query-anchored formats (`refuse_generated_query_id`,
-/// `refuse_display_id_of_a_query`) call the id of a query that NCBI's scope finds: the local id
-/// that LOSAT generates for a FASTA query read without `-parse_deflines` (`Query_N`), or the id of
-/// the PSSM query of `-in_pssm` that a report shows as a local id (`lcl|myprot`).
-const GENERATED_QUERY_ID: &str = "the id of a query (generated, or the PSSM's)";
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1589, 432-433, 497-498
 /// LOSAT's refusal of a database sequence that a description table shows (outfmt 0 to 4, the
 /// first `-num_descriptions` subjects) whose display id (`ParsedSubject::display_id`, the id of its
@@ -3661,8 +3655,8 @@ const GENERATED_QUERY_ID: &str = "the id of a query (generated, or the PSSM's)";
 /// and NCBI's scope finds the query, so NCBI BLAST+ shows the query's title there (`gi|779|lcl|abc`
 /// and a query `lcl|abc`; review 3 of line RG item T3a). `queries` holds the ids of queries read
 /// with `-parse_deflines` (or of the PSSM query of `-in_pssm`), or, with `generated`, the local
-/// ids `Query_N` of queries read without it, which BLASTP refuses in outfmt 1 to 4 only (line RG
-/// item X7 owns NCBI's behaviour for them in outfmt 0).
+/// ids `Query_N` of queries read without it (`report::query_bioseq::GENERATED_QUERY_ID`; line RG
+/// item X7-1: in outfmt 0 too, probe `bp.qgi.f0`).
 pub(crate) fn refuse_display_id_of_a_query(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: crate::seqdb::Oid,
@@ -3678,17 +3672,12 @@ pub(crate) fn refuse_display_id_of_a_query(
         crate::seqid::label::fasta(id, &mut display);
     }
     let shown = format!("the id of {}", query_with_shown_ids(program));
-    let (queries, weak, formats) = if generated {
-        (
-            GENERATED_QUERY_ID,
-            "",
-            "the query-anchored formats, outfmt 1 to 4",
-        )
+    let (queries, weak) = if generated {
+        (crate::report::query_bioseq::GENERATED_QUERY_ID, "")
     } else {
         (
             shown.as_str(),
             ", or an id that NCBI BLAST+'s scope matches weakly to it",
-            "outfmt 0 to 4",
         )
     };
     Err(parsed_refusal(
@@ -3696,76 +3685,25 @@ pub(crate) fn refuse_display_id_of_a_query(
         &format!(
             "has the display id {} (the id of its description line), {queries} in the query \
              batch that reports it{weak}: NCBI BLAST+ shows that query's title in its \
-             description line ({formats})",
+             description line (outfmt 0 to 4)",
             String::from_utf8_lossy(&display)
         ),
         program,
     ))
 }
 
-/// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
-/// refusal of a reported database sequence `subject` whose Seq-align id is the generated id
-/// (`lcl|Query_N`) of a query of the batch that reports it (`scope`, `QueryScope::of_generated_ids`,
-/// as NCBI's scope finds an id: the keys of `refuse_id_of_a_query`). NCBI's formatter adds the
-/// batch's queries to its scope before their reports and empties it after them and finds such a
-/// subject there: its reports show the query's title and letters in the subject's place, and the
-/// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
-/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's. `effect` says what NCBI
-/// does with it: `QUERY_ANCHORED_EFFECT`, `XML_EFFECT` for the RPS programs' BLAST XML, XML2
-/// and JSON (`-outfmt 5`, 13 to 16: RPSBLAST gets the query's title for the entry, RPSTBLASTN an
-/// exception from its Seq-align conversion and half a document or none; PS15a-1, PS15a-2), or
-/// `TABLE_EFFECT` for their outfmt 18 and 20 (PS15a-2).
-pub(crate) fn refuse_generated_query_id(
-    subject: &crate::report::db_subject::ParsedSubject,
-    oid: crate::seqdb::Oid,
-    scope: &crate::blastinput::query_batch::QueryScope,
-    program: &str,
-    effect: &str,
-) -> Result<()> {
-    if !scope.has_key(&subject.query_scope_keys().own) {
-        return Ok(());
-    }
-    Err(parsed_refusal(
-        oid,
-        &format!(
-            "has the Seq-id {}, {GENERATED_QUERY_ID} in the query batch that reports it: NCBI \
-             BLAST+ {effect}",
-            String::from_utf8_lossy(&subject.alignment_fasta())
-        ),
-        program,
-    ))
-}
-
-/// What NCBI does with such a sequence in the query-anchored formats (`refuse_generated_query_id`).
-pub(crate) const QUERY_ANCHORED_EFFECT: &str =
-    "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
-
-/// What NCBI does with it in the BLAST XML, XML2 and JSON documents of the RPS programs
-/// (`refuse_generated_query_id`).
-pub(crate) const XML_EFFECT: &str =
-    "takes that query for it in BLAST XML, XML2 and JSON (outfmt 5, 13 to 16)";
-
-/// What NCBI does with it in the organism report and in the comma-separated values with a header
-/// line of the RPS programs where they differ for it (`report::tabular::TabularSpec::
-/// refuses_generated_id`, `refuse_generated_query_id`).
-pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the organism report (outfmt \
-     18) of a profile with a taxid and in comma-separated values with a header line (outfmt 20) \
-     whose fields show what it finds by that id (RPSTBLASTN's outfmt 20 can stop with an \
-     exception)";
-
-/// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
-/// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same
-/// refusals): for each query `0..num_queries`, the sequences of its final hit list (`reported`,
-/// by rank) with parsed Seq-ids (`parsed`, by rank; `oid_of` a rank's OID), with the scope of the
-/// query's batch (`scope_of`): queries read without `-parse_deflines` (`generated`, their
-/// `lcl|Query_N`): `refuse_generated_query_id` of each; then, for a query that reports a sequence
-/// whose display id its scope has (`QueryScopeKeys::display`), `refuse_display_id_of_a_query` of
-/// each sequence whose description line its report shows (`described`, by rank: the description
-/// line looks the title up again by that id and NCBI shows the query's title there). A query read
-/// with `-parse_deflines` whose id a reported sequence has as its Seq-align id is refused in every
-/// format by `refuse_reported_ids_of_queries` (line RG X7).
+/// The description tables (outfmt 0 to 4) of a program whose reports name a database's
+/// sequences by rank (BLASTN, TBLASTN, TBLASTX, BLASTX: line RG T3b; BLASTP's `ListedTitles` asks
+/// the same refusals): for each query `0..num_queries` that reports a sequence (`reported`, by
+/// rank) with parsed Seq-ids (`parsed`, by rank; `oid_of` a rank's OID) whose display id the
+/// scope of the query's batch has (`scope_of`; `QueryScopeKeys::display`), with queries read
+/// without `-parse_deflines` (`generated`, their `lcl|Query_N`) or with it,
+/// `refuse_display_id_of_a_query` of each sequence whose description line its report shows
+/// (`described`, by rank: the description line looks the title up again by that id and NCBI shows
+/// the query's title there). A sequence whose Seq-align id is a query's is refused in every format
+/// that shows it by the batch's check (`report::query_bioseq::check`, line RG item X7-1).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
+pub(crate) fn refuse_display_ids_of_queries<'s>(
     num_queries: usize,
     mut reported: impl FnMut(usize) -> Vec<u32>,
     mut described: impl FnMut(usize) -> Result<Vec<u32>>,
@@ -3773,30 +3711,15 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
     oid_of: impl Fn(u32) -> crate::seqdb::Oid,
     scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
     generated: bool,
-    anchored: bool,
     program: &str,
 ) -> Result<()> {
-    if parsed.is_empty() || (!anchored && generated) {
+    if parsed.is_empty() {
         return Ok(());
     }
     let parsed_of = |rank: u32| parsed.get(rank as usize).and_then(Option::as_deref);
     for query in 0..num_queries {
         let scope = scope_of(query);
-        let ranks = reported(query);
-        if anchored && generated {
-            for &rank in &ranks {
-                if let Some(subject) = parsed_of(rank) {
-                    refuse_generated_query_id(
-                        subject,
-                        oid_of(rank),
-                        scope,
-                        program,
-                        QUERY_ANCHORED_EFFECT,
-                    )?;
-                }
-            }
-        }
-        if !ranks.iter().any(|&rank| {
+        if !reported(query).iter().any(|&rank| {
             parsed_of(rank)
                 .is_some_and(|subject| scope.has_key(&subject.query_scope_keys().display))
         }) {
@@ -3811,20 +3734,19 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
     Ok(())
 }
 
-/// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
-/// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
-/// whose header `titles` holds with parsed Seq-ids, with the scope of that query, where the
-/// reports `shown` resolve the sequences' Seq-align ids (`ParsedShown::resolves_subject`), unless
-/// the scope finds a query of its batch for the sequence and the reports show NCBI's bytes for it:
-/// that query is noted in `seen` (`report::query_bioseq::note_or_refuse` with `run`). A program
-/// calls it for each query batch after it reads the batch's titles: its cache of the titles keeps
-/// those of the batches before.
+/// The check of line RG item X7 (`report::query_bioseq::check` with `run`) of each reported
+/// sequence of `reported` (a searched query, by its index in the run, and a sequence that its
+/// report names, by ordinal id; `oids` the database's OIDs) whose header `titles` holds with
+/// parsed Seq-ids, against the queries that NCBI's scope holds for that query's batch
+/// (`queries`), where the reports `shown` resolve the sequences' Seq-align ids
+/// (`ParsedShown::resolves_subject`). A program calls it for each query batch after it reads the
+/// batch's titles: its cache of the titles keeps those of the batches before.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_reported_ids_of_queries(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
     reported: impl IntoIterator<Item = (usize, u32)>,
     oids: crate::seqdb::OidMap<'_>,
-    scopes: &crate::blastinput::query_batch::QueryScopes,
+    queries: &crate::blastinput::query_batch::BatchQueries<'_>,
     shown: ParsedShown,
     seen: &mut crate::report::query_bioseq::QueryBioseqs,
     run: &crate::report::query_bioseq::SeenRun<'_, '_>,
@@ -3835,13 +3757,12 @@ pub(crate) fn refuse_reported_ids_of_queries(
     }
     for (query, ordinal) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
-            crate::report::query_bioseq::note_or_refuse(
+            crate::report::query_bioseq::check(
                 seen,
                 subject,
                 || oids.oid(ordinal),
-                query,
-                ordinal,
-                scopes,
+                (query, ordinal),
+                queries,
                 run,
                 program,
             )?;
@@ -6579,7 +6500,7 @@ impl TaxdbRun {
     /// ([`PrefetchTexts`] of a damaged taxonomy database, [`TaxdbRun::load_throws`]): where NCBI's
     /// scope finds a query for a reported sequence it loads nothing of that sequence, which LOSAT's
     /// loads do not follow, so such a run keeps LOSAT's refusal of it
-    /// (`report::query_bioseq::note_or_refuse`).
+    /// (`report::query_bioseq::check`).
     pub(crate) fn loads_write_texts(&self, db: &SeqDb) -> bool {
         self.prefetch_texts(db) != PrefetchTexts::default() || self.load_throws(db)
     }

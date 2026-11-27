@@ -833,7 +833,7 @@ fn write_run(
                 search_options,
                 asks,
                 results,
-                (queries, queries_before),
+                (queries, queries_before, Some(query_records.len())),
                 query_scopes
                     .borrow()
                     .as_ref()

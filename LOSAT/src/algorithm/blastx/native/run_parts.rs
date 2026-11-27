@@ -291,7 +291,10 @@ impl ArchiveBatch<'_> {
                         reported.refuse_ids_of_queries(
                             results,
                             options.gapped,
-                            scopes.numbered_from(queries_before),
+                            (
+                                queries_before,
+                                &crate::blastinput::query_batch::BatchQueries::Shown(scopes),
+                            ),
                             &crate::report::query_bioseq::SeenRun::REFUSED,
                         )?;
                     }

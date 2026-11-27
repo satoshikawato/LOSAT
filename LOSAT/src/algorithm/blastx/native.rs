@@ -499,6 +499,8 @@ fn run_inner(
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     // The run stops at a batch after this many queries (`blast_xml::QueryScan::stops_after`).
     let mut stops_after = None;
+    // The run's queries that the read before the search counts (`QueryScan::queries`).
+    let mut scanned_queries = None;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5
     // and 13 to 16 the read before the search makes them (`QueryScopes::read_ahead`), else the
     // batches add theirs where the loop takes them (`take`, `add_batch_scope`). Either way LOSAT's
@@ -579,6 +581,7 @@ fn run_inner(
         )?;
         query_file = file;
         stops_after = scan.stops_after;
+        scanned_queries = Some(scan.queries);
         read_ahead_scopes = scan.query_scopes;
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
         // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
@@ -900,7 +903,7 @@ fn run_inner(
                     &options,
                     asks,
                     results,
-                    (queries, queries_before),
+                    (queries, queries_before, scanned_queries),
                     query_scopes
                         .borrow()
                         .as_ref()
@@ -1503,7 +1506,9 @@ impl<'a> BatchScopes<'a> {
 /// prefetch does not stop is recorded in the run (`ReportedSubjects::note_loaded`), without the
 /// loads of an outfmt 5 report that NCBI's XML stream cuts before its hits (`queries`, the reader
 /// batch's records: `XmlCuts`), as the loads of the batch numbered `queries_before` (the queries
-/// of the run before it), in whose scope its reports read (`ReportedSubjects::for_batch`).
+/// of the run before it), in whose scope its reports read (`ReportedSubjects::for_batch`); with
+/// outfmt 5 the run's queries number `run_queries` where the caller has counted them (the check of
+/// line RG item X7-1).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1511,7 +1516,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
-    (queries, queries_before): (&[FastaRecord], usize),
+    (queries, queries_before, run_queries): (&[FastaRecord], usize, Option<usize>),
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     prefetch_queries: &crate::algorithm::common::database::PrefetchQueries<'_>,
     diagnostics: &mut dyn Write,
@@ -1555,10 +1560,12 @@ pub(super) fn reported_batch(
     if let Some(mask) = options.db_mask.as_ref().filter(|_| asks.pairwise) {
         reported.read_db_masks(database, mask.id)?;
     }
-    if let Some(scopes) = query_scopes {
-        // The reader batch's queries (`queries`): the scope's span, to the run's last searched
-        // query where the span is the last (`QueryScopes::span_of`).
-        let first = scopes.first();
+    // The check of line RG item X7: under `-parse_deflines` the run's scopes; else the generated
+    // ids of the reader batch's records, in outfmt 5, whose scope the formatter keeps, those of
+    // the run's queries (`run_queries`: the batches before and after this one, which the reader
+    // has not read yet; every `Query_N` where the caller has not counted them).
+    {
+        let first = query_scopes.map_or(queries_before, |scopes| scopes.first());
         let record = |query: usize| {
             let record = queries.get(query.checked_sub(first)?)?;
             Some(crate::report::query_bioseq::QueryRecordRef {
@@ -1567,17 +1574,29 @@ pub(super) fn reported_batch(
                 length: record.sequence.len(),
             })
         };
+        let writers = super::report::found_writers(options);
         let run = crate::report::query_bioseq::SeenRun {
             shows: super::report::shows_query_bioseqs(options) && !database.loads_write_texts(),
-            known: first..if scopes.run().span_of(first).end == usize::MAX {
-                usize::MAX
-            } else {
-                first + queries.len()
+            known: first..match query_scopes {
+                Some(scopes) if scopes.run().span_of(first).end != usize::MAX => {
+                    first + queries.len()
+                }
+                _ => usize::MAX,
             },
             record: &record,
             protein: false,
+            writers: &writers,
+            taxdb: database.taxdb_found(),
         };
-        reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
+        let generated = || {
+            crate::blastinput::query_batch::QueryScope::of_shown(super::input::shown_ids(queries))
+        };
+        let queries = crate::blastinput::query_batch::BatchQueries::of(
+            query_scopes.map(|scopes| scopes.run()),
+            &generated,
+            (options.outfmt == 5).then(|| 1..run_queries.map_or(usize::MAX, |queries| queries + 1)),
+        );
+        reported.refuse_ids_of_queries(results, options.gapped, (first, &queries), &run)?;
     }
     reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291

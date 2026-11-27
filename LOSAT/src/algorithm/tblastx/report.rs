@@ -1362,18 +1362,22 @@ impl TblastxOutputFormat {
         }
     }
 
-    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
-    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
-    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
-    /// archive (which write the Seq-align id alone).
-    pub(crate) fn shows_query_bioseqs(self) -> bool {
-        use crate::report::query_bioseq::tabular_shows;
-        let program = crate::blastinput::app::Program::Tblastx;
+    /// What the report shows of a reported sequence that NCBI's scope finds as a query
+    /// (`report::query_bioseq::FoundWriter`, line RG item X7).
+    pub(crate) fn found_writer(self) -> crate::report::query_bioseq::FoundWriter<'static> {
+        use crate::report::query_bioseq::FoundWriter;
         match self {
-            Self::Seqalign(_) | Self::Archive => true,
-            Self::Tabular | Self::TabularWithComments => tabular_shows(None, program),
-            Self::CustomTabular(spec) => tabular_shows(Some(spec), program),
-            _ => false,
+            Self::Pairwise(crate::report::pairwise::PairwiseView::Pairwise) => {
+                FoundWriter::Pairwise
+            }
+            Self::Pairwise(_) => FoundWriter::Anchored,
+            Self::Tabular | Self::TabularWithComments => FoundWriter::Table(None),
+            Self::CustomTabular(spec) => FoundWriter::Table(Some(spec)),
+            Self::Seqalign(_) | Self::Archive => FoundWriter::Annots,
+            Self::Xml | Self::Xml2(_) => FoundWriter::Structured,
+            Self::Sam(_) => FoundWriter::Sam,
+            // Refused before the search (`ReportFormat::writes`).
+            Self::Unsupported => FoundWriter::Structured,
         }
     }
 

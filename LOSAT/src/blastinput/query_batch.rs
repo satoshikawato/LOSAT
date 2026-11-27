@@ -578,7 +578,7 @@ impl QueryScope {
 }
 
 /// The scopes of the query batches of one report, for the refusals of the query-anchored formats
-/// (outfmt 1 to 4; `common::database::refuse_query_ids_of_anchored_reports`), one owner for
+/// (outfmt 0 to 4; `common::database::refuse_display_ids_of_queries`), one owner for
 /// BLASTN's and TBLASTN's reports: the scope of each batch (`spans`: the query records, by index,
 /// that NCBI's formatter adds to its scope for the batch's reports) holds the generated local
 /// ids (`QueryScope::of_generated_ids`) of queries read without `-parse_deflines` (`generated`:
@@ -655,6 +655,101 @@ impl AnchoredBatchScopes {
             .position(|span| span.contains(&query))
             .map_or(&self.none, |batch| &self.scopes[batch])
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:395 (the reader
+// adds each record to its scope, priority 9, kPriority_Entry)
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313 (the formatter
+// empties the scope after each batch, outfmt 5 excepted)
+/// The queries that NCBI's scope holds where a batch's reports look a reported database sequence
+/// up by its Seq-align id (line RG item X7, `report::query_bioseq::check`): it finds the query
+/// before the BLAST database's loader (priority 80), so a sequence with a query's id shows as
+/// that query. One owner of both kinds of such ids:
+/// - `Shown`: under `-parse_deflines` (or with a PSSM query shown with its ids,
+///   `believed_queries`), the run's scopes (`QueryScopes`), which hold the ids that the reports
+///   show.
+/// - `Generated`: otherwise, the local ids of the batch's records (`Query_N`, which the reader
+///   generates, or the local id of a PSSM's query; `QueryScope::of_generated_ids`).
+pub(crate) enum BatchQueries<'a> {
+    Shown(&'a QueryScopes),
+    Generated(GeneratedQueries<'a>),
+}
+
+impl<'a> BatchQueries<'a> {
+    /// `Shown` of `scopes`, else `Generated` of `make` (`GeneratedQueries::new`).
+    pub(crate) fn of(
+        scopes: Option<&'a QueryScopes>,
+        make: &'a dyn Fn() -> QueryScope,
+        later: Option<std::ops::Range<usize>>,
+    ) -> Self {
+        match scopes {
+            Some(scopes) => BatchQueries::Shown(scopes),
+            None => BatchQueries::Generated(GeneratedQueries::new(make, later)),
+        }
+    }
+}
+
+/// The generated local ids that NCBI's scope holds for a batch's reports (`BatchQueries`), made
+/// at the first reported sequence with a local Seq-align id (a generated id is local, so the
+/// sequences of a database with parsed ids of other kinds ask nothing more): `make` gives the
+/// scope of the batch's input records (those that `-query_loc` skips included, each with its
+/// `Query_N` of the run, `FastaRecord::local_id`), in outfmt 5, whose scope the formatter keeps,
+/// those of the whole run where the caller has them. `later`: in outfmt 5 where the caller does
+/// not have the later records, the numbers `N` of their generated ids `Query_N` (to `usize::MAX`
+/// where the caller does not know how many follow): such a sequence is a later batch's query,
+/// which NCBI's kept scope then searches as that sequence (probe `b1.bp.q2x.f5` of line RG item
+/// X7-1, 2026-11-27); LOSAT refuses it as a query of the scope.
+pub(crate) struct GeneratedQueries<'a> {
+    make: &'a dyn Fn() -> QueryScope,
+    scope: std::cell::OnceCell<QueryScope>,
+    later: Option<std::ops::Range<usize>>,
+}
+
+impl<'a> GeneratedQueries<'a> {
+    pub(crate) fn new(
+        make: &'a dyn Fn() -> QueryScope,
+        later: Option<std::ops::Range<usize>>,
+    ) -> Self {
+        Self {
+            make,
+            scope: std::cell::OnceCell::new(),
+            later,
+        }
+    }
+
+    /// Whether the scope finds a query for the reported database sequence `subject` by its
+    /// Seq-align id (`QueryScopeKeys::own`; a local id has no weak keys).
+    pub(crate) fn finds(&self, subject: &crate::report::db_subject::ParsedSubject) -> bool {
+        if !subject.alignment_id_is_local() {
+            return false;
+        }
+        if self
+            .scope
+            .get_or_init(|| (self.make)())
+            .has_key(&subject.query_scope_keys().own)
+        {
+            return true;
+        }
+        self.later.as_ref().is_some_and(|later| {
+            generated_number(subject.alignment_id()).is_some_and(|number| later.contains(&number))
+        })
+    }
+}
+
+/// The number `N` of a local Seq-id `Query_N` as NCBI's scope finds a generated id: a local string
+/// id in any case (`defline_set::scope_keys`), `N` decimal without a leading zero.
+pub(crate) fn generated_number(id: &crate::seqid::ParsedSeqId) -> Option<usize> {
+    let crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(text)) = id else {
+        return None;
+    };
+    let digits = text
+        .get(..6)
+        .filter(|prefix| prefix.eq_ignore_ascii_case(b"query_"))
+        .map(|_| &text[6..])?;
+    if digits.is_empty() || digits[0] == b'0' || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(digits).ok()?.parse().ok()
 }
 
 /// Whether the reports of a search show the ids of its query records `records`: under

@@ -1600,6 +1600,33 @@ fn pairwise_reading(
     ))
 }
 
+/// The queries that NCBI's scope holds for the reports of the batch of the searched queries
+/// `searched` without `-parse_deflines` (`query_batch::GeneratedQueries`): the PSSM's query of
+/// `-in_pssm` (`PsiSearch::query_scope`), else the generated ids of the batch's input records
+/// (`input_records`, cut into batches by `query_input`), in outfmt 5 (`xml`) the whole run's.
+fn generated_scope(
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    input_records: &[FastaRecord],
+    query_input: &crate::blastinput::seq_range::QueryInput,
+    batch_size: u32,
+    xml: bool,
+    searched: &std::ops::Range<usize>,
+) -> crate::blastinput::query_batch::QueryScope {
+    if let Some(psi) = pssm {
+        return psi.query_scope();
+    }
+    let input = if xml {
+        0..input_records.len()
+    } else {
+        query_input
+            .batches(batch_size)
+            .into_iter()
+            .find(|batch| batch.searched == *searched)
+            .map_or(0..0, |batch| batch.input)
+    };
+    crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
+}
+
 fn search(
     args: &TblastnArgs,
     resolved: ResolvedTblastnArgs,
@@ -2216,32 +2243,49 @@ fn search(
                 failed = Some((range, error));
                 break;
             }
-            // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
-            // NCBI's own errors of the batch: the reports would show it (the prefetch's error
-            // above comes first).
-            if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+            // LOSAT's refusal of a reported sequence with the id of a query of its scope (line RG
+            // item X7: a `-parse_deflines` id, or a generated one), after NCBI's own errors of the
+            // batch: the reports would show it (the prefetch's error above comes first).
+            if let Some(database) = database {
                 // The batch's searched queries (`range`), the scope's span.
                 let record = |query: usize| {
                     crate::report::query_bioseq::QueryRecordRef::of(
                         queries.get(query).filter(|_| query < range.end)?,
                     )
                 };
-                let shows = outputs
-                    .formats
-                    .iter()
-                    .all(|format| super::stage_e_report::shows_query_bioseqs(format.outfmt))
-                    && resolved.query_range.is_none()
-                    && !database.loads_write_texts();
+                let formats = super::stage_e_report::found_formats(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                );
+                let writers = super::stage_e_report::found_writers(&formats);
+                let scopes = batches.query_scopes.as_ref();
                 let run = crate::report::query_bioseq::SeenRun {
-                    shows,
-                    known: range.start..if scopes.span_of(range.start).end == usize::MAX {
-                        usize::MAX
-                    } else {
-                        range.end
+                    shows: writers.shows_shown()
+                        && resolved.query_range.is_none()
+                        && !database.loads_write_texts(),
+                    known: range.start..match scopes {
+                        Some(scopes) if scopes.span_of(range.start).end != usize::MAX => range.end,
+                        _ => usize::MAX,
                     },
                     record: &record,
                     protein: true,
+                    writers: &writers,
+                    taxdb: database.taxdb_found(),
                 };
+                let xml = crate::blastinput::query_batch::outfmts_have_xml(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                );
+                let generated = || {
+                    generated_scope(
+                        pssm.as_deref(),
+                        input_records,
+                        &query_input,
+                        batch_size,
+                        xml,
+                        &range,
+                    )
+                };
+                let batch_queries =
+                    crate::blastinput::query_batch::BatchQueries::of(scopes, &generated, None);
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
@@ -2253,7 +2297,7 @@ fn search(
                             })
                         }),
                     database.oid_map(),
-                    scopes,
+                    &batch_queries,
                     super::database::parsed_shown(&outputs.formats),
                     &mut query_bioseqs,
                     &run,

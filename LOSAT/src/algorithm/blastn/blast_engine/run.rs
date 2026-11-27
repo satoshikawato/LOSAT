@@ -9279,10 +9279,11 @@ fn run_in_pool(
             warnings[start].write(&mut *outputs.diagnostics, archive)?;
             return Err(error);
         }
-        // LOSAT's refusal of a reported sequence with the id of a query of its scope, after
-        // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
-        // so far, as for a refusal of a title (above).
-        if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
+        // LOSAT's refusal of a reported sequence with the id of a query of its scope (line RG
+        // item X7: a `-parse_deflines` id, or a generated one), after NCBI's own errors of the
+        // batch (the prefetch's above): the warnings of the batches read so far, as for a refusal
+        // of a title (above).
+        if let SubjectSource::Database(database) = source {
             let searched = batch_records.searched();
             let record = |query: usize| {
                 // `batch_records.batch_queries()` drops `record.sequence` under `LOSAT_X_BNQPACK`,
@@ -9294,21 +9295,38 @@ fn run_in_pool(
                     length: *lengths.get(query)?,
                 })
             };
+            let writers = found_writers(&output_formats);
             let run = crate::report::query_bioseq::SeenRun {
-                shows: output_formats
-                    .iter()
-                    .all(|format| format.shows_query_bioseqs())
+                shows: writers.shows_shown()
                     && !query_input.placements.ranged()
                     && !database.loads_write_texts(),
                 // The batch's searched queries: the scope's span (`QueryScopes::span_of`).
-                known: start..if scopes.span_of(start).end == usize::MAX {
-                    usize::MAX
-                } else {
-                    start + searched.len()
+                known: start..match query_scopes.as_ref() {
+                    Some(scopes) if scopes.span_of(start).end != usize::MAX => {
+                        start + searched.len()
+                    }
+                    _ => usize::MAX,
                 },
                 record: &record,
                 protein: false,
+                writers: &writers,
+                taxdb: database.taxdb_found(),
             };
+            // Without `-parse_deflines`, the generated ids of the batch's input records, in outfmt
+            // 5 those of the whole run (of a stream of records by their numbers, `Query_N`).
+            let generated = || {
+                crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                    x_query_stream::Queries::Records { input, .. } if xml => input,
+                    _ => batch_records.input(),
+                })
+            };
+            let later = (xml && !matches!(queries, x_query_stream::Queries::Records { .. }))
+                .then(|| 1..query_input.input_lengths.len() + 1);
+            let batch_queries = crate::blastinput::query_batch::BatchQueries::of(
+                query_scopes.as_ref(),
+                &generated,
+                later,
+            );
             let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                 &titles,
                 batch_hit_lists
@@ -9323,7 +9341,7 @@ fn run_in_pool(
                         })
                     }),
                 database.oid_map(),
-                scopes,
+                &batch_queries,
                 database::parsed_shown(&output_formats),
                 &mut query_bioseqs,
                 &run,
@@ -12269,3 +12287,17 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod tests;
+
+/// The run's reports as line RG item X7 sorts them (`report::query_bioseq::FoundWriters`).
+fn found_writers(
+    output_formats: &[BlastnOutputFormat],
+) -> crate::report::query_bioseq::FoundWriters<'static> {
+    crate::report::query_bioseq::FoundWriters {
+        program: crate::blastinput::app::Program::Blastn,
+        writers: output_formats
+            .iter()
+            .map(|format| format.found_writer())
+            .collect(),
+        search_reads: false,
+    }
+}

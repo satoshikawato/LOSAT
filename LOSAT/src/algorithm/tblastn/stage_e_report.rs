@@ -180,19 +180,41 @@ pub(super) fn xml2_kind(outfmt: impl AsRef<[u8]>) -> Option<crate::report::blast
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
 }
 
-/// Whether the report of a checked `-outfmt` value shows NCBI's bytes for a reported sequence
-/// that the scope finds as a query of its batch (`report::query_bioseq`): a table that reads no
-/// letter of the found Bioseq and the organism report (`query_bioseq::tabular_shows`), the
-/// Seq-annots and the archive (which write the Seq-align id alone).
-pub(super) fn shows_query_bioseqs(outfmt: impl AsRef<[u8]>) -> bool {
-    let outfmt = outfmt.as_ref();
-    match format_number(outfmt) {
-        8 | 9 | 11 | 12 => true,
-        6 | 7 | 10 | 18 | 20 => crate::report::query_bioseq::tabular_shows(
-            super::tabular::tabular_spec(outfmt).as_ref(),
-            crate::blastinput::app::Program::Tblastn,
-        ),
-        _ => false,
+/// The number and the table (`tabular::tabular_spec`) of each checked `-outfmt` value `outfmts`,
+/// for `found_writers`.
+pub(super) fn found_formats<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
+) -> Vec<(i32, Option<crate::report::tabular::TabularSpec>)> {
+    outfmts
+        .into_iter()
+        .map(|outfmt| {
+            let outfmt = outfmt.as_ref();
+            (format_number(outfmt), super::tabular::tabular_spec(outfmt))
+        })
+        .collect()
+}
+
+/// The reports `formats` (`found_formats`) as line RG item X7 sorts them
+/// (`report::query_bioseq::FoundWriters`).
+pub(super) fn found_writers(
+    formats: &[(i32, Option<crate::report::tabular::TabularSpec>)],
+) -> crate::report::query_bioseq::FoundWriters<'_> {
+    use crate::report::query_bioseq::FoundWriter;
+    crate::report::query_bioseq::FoundWriters {
+        program: crate::blastinput::app::Program::Tblastn,
+        writers: formats
+            .iter()
+            .map(|(number, spec)| match number {
+                0 => FoundWriter::Pairwise,
+                1..=4 => FoundWriter::Anchored,
+                8 | 9 | 11 | 12 => FoundWriter::Annots,
+                18 if spec.is_none() => FoundWriter::TaxReport,
+                6 | 7 | 10 | 18 | 20 => FoundWriter::Table(spec.as_ref()),
+                17 => FoundWriter::Sam,
+                _ => FoundWriter::Structured,
+            })
+            .collect(),
+        search_reads: false,
     }
 }
 
@@ -718,11 +740,10 @@ pub(super) fn render(
     }
     // Before any format of the call is written, the refusals of what the description lines show
     // (outfmt 0 to 4, `common::database::refuse_described_lines`, line RG-KB item 12 review 1),
-    // and those of the query-anchored formats (outfmt 1 to 4, line RG T3b): a reported database
-    // sequence that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
-    // `lcl|Query_N`) or, in a description line, by its display id
-    // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's): NCBI shows the
-    // query in its place (with the protein query's letters translated as nucleotides).
+    // and of a reported database sequence whose display id NCBI's scope finds as a query of its
+    // batch (`common::database::refuse_display_ids_of_queries`, as BLASTN's, line RG T3b and
+    // item X7-1): NCBI shows the query's title in its description line. The Seq-align ids are
+    // checked per batch (`report::query_bioseq::check`).
     let pairwise_views: Vec<crate::report::pairwise::PairwiseView> = outputs
         .formats
         .iter()
@@ -822,7 +843,7 @@ pub(super) fn render(
                     batch_starts,
                 )
             });
-            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+            crate::algorithm::common::database::refuse_display_ids_of_queries(
                 query_records.len(),
                 reported_ranks,
                 |q_idx| Ok(described(view, q_idx)),
@@ -830,7 +851,6 @@ pub(super) fn render(
                 oid_of,
                 |q_idx| batches.of_query(q_idx),
                 batches.generated(),
-                view != crate::report::pairwise::PairwiseView::Pairwise,
                 program,
             )?;
         }

@@ -1,0 +1,235 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/tchar/tc_p"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q1 query one",
+          "query_len": 60,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "a1 alpha#one"
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 127.872,
+                  "score": 320,
+                  "evalue": 1.40094e-45,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 1,
+                  "hit_to": 60,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "a2 clean two"
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 120.168,
+                  "score": 300,
+                  "evalue": 1.78929e-42,
+                  "identity": 57,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 1,
+                  "hit_to": 59,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGF K+I"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "a3 b#t#a two hsps"
+                }
+              ],
+              "len": 160,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 115.161,
+                  "score": 287,
+                  "evalue": 2.75574e-39,
+                  "identity": 55,
+                  "positive": 56,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 1,
+                  "hit_to": 59,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFWLWFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMF L F K+I"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 107.457,
+                  "score": 267,
+                  "evalue": 2.46858e-36,
+                  "identity": 52,
+                  "positive": 53,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 101,
+                  "hit_to": 159,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGWNWGWFWLWFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIG N G F L F K+I"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|3",
+                  "accession": "3",
+                  "title": "a4 gamma##"
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 105.916,
+                  "score": 263,
+                  "evalue": 7.3823e-37,
+                  "identity": 50,
+                  "positive": 52,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 1,
+                  "hit_to": 59,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFWDWGWNWGWFWLWFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQF+D G N G F L F K+I"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "#a6 first"
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 94.3597,
+                  "score": 233,
+                  "evalue": 2.96122e-32,
+                  "identity": 46,
+                  "positive": 48,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 1,
+                  "hit_to": 59,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLWGANWRWFWDWGWNWGWFWLWFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSL G N R F+D G N G F L F K+I"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|6",
+                  "accession": "6",
+                  "title": "a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#"
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 89.7373,
+                  "score": 221,
+                  "evalue": 1.86032e-30,
+                  "identity": 44,
+                  "positive": 46,
+                  "query_from": 1,
+                  "query_to": 59,
+                  "hit_from": 1,
+                  "hit_to": 59,
+                  "align_len": 59,
+                  "gaps": 0,
+                  "qseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI",
+                  "hseq": "MDIVWSTFSARIQFAQYVPPKIIRFTWHNWPWLWGANWRWFWDWGWNWGWFWLWFWKWI",
+                  "midline": "MDIVWSTFSARIQFAQYVPPKIIRFTWHN P L G N R F+D G N G F L F K+I"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 520,
+            "hsp_len": 16,
+            "eff_space": 17952,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

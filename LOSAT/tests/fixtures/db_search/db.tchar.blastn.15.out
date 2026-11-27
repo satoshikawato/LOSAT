@@ -1,0 +1,485 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/tchar/tc_n"
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q1 query one",
+          "query_len": 180,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "a1 alpha#one"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 333.517,
+                  "score": 180,
+                  "evalue": 1.00078e-95,
+                  "identity": 180,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "hit_strand": "Plus",
+                  "align_len": 180,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "a2 clean two"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 307.664,
+                  "score": 166,
+                  "evalue": 6.06589e-88,
+                  "identity": 170,
+                  "query_from": 1,
+                  "query_to": 172,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 172,
+                  "hit_strand": "Plus",
+                  "align_len": 172,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAAT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTTGGAAAT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||  |||||"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "a3 b#t#a two hsps"
+                }
+              ],
+              "len": 480,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 291.044,
+                  "score": 157,
+                  "evalue": 6.10895e-83,
+                  "identity": 168,
+                  "query_from": 1,
+                  "query_to": 172,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 172,
+                  "hit_strand": "Plus",
+                  "align_len": 173,
+                  "gaps": 2,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAAT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTTGGCTGTGGTTTTG-GAAAT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| | ||| ||||||  |||||"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 250.418,
+                  "score": 135,
+                  "evalue": 1.03681e-70,
+                  "identity": 135,
+                  "query_from": 1,
+                  "query_to": 135,
+                  "query_strand": "Plus",
+                  "hit_from": 301,
+                  "hit_to": 435,
+                  "hit_strand": "Plus",
+                  "align_len": 135,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|3",
+                  "accession": "3",
+                  "title": "a4 gamma##"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 230.105,
+                  "score": 124,
+                  "evalue": 1.35072e-64,
+                  "identity": 124,
+                  "query_from": 1,
+                  "query_to": 124,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 124,
+                  "hit_strand": "Plus",
+                  "align_len": 124,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "#a6 first"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 183.939,
+                  "score": 99,
+                  "evalue": 1.06657e-50,
+                  "identity": 99,
+                  "query_from": 1,
+                  "query_to": 99,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 99,
+                  "hit_strand": "Plus",
+                  "align_len": 99,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|6",
+                  "accession": "6",
+                  "title": "a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 161.779,
+                  "score": 87,
+                  "evalue": 4.99749e-44,
+                  "identity": 87,
+                  "query_from": 1,
+                  "query_to": 87,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 87,
+                  "hit_strand": "Plus",
+                  "align_len": 87,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAAT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAAT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 1560,
+            "hsp_len": 11,
+            "eff_space": 250627,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/tchar/tc_n"
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q2 query two",
+          "query_len": 180,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "a2 clean two"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 322.437,
+                  "score": 174,
+                  "evalue": 2.1663e-92,
+                  "identity": 178,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "hit_strand": "Plus",
+                  "align_len": 180,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATGGATTTGG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTTGGAAATGGATTTGG",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||  |||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "a1 alpha#one"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 318.744,
+                  "score": 172,
+                  "evalue": 2.80229e-91,
+                  "identity": 172,
+                  "query_from": 1,
+                  "query_to": 172,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 172,
+                  "hit_strand": "Plus",
+                  "align_len": 172,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAAT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAAT",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "a3 b#t#a two hsps"
+                }
+              ],
+              "len": 480,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 305.817,
+                  "score": 165,
+                  "evalue": 2.18168e-87,
+                  "identity": 176,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "hit_strand": "Plus",
+                  "align_len": 181,
+                  "gaps": 2,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAATGGATTTGG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTTGGCTGTGGTTTTG-GAAATGGATTTGG",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| | ||| ||||||  |||||||||||||"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 261.498,
+                  "score": 141,
+                  "evalue": 4.7898e-74,
+                  "identity": 168,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "query_strand": "Plus",
+                  "hit_from": 301,
+                  "hit_to": 480,
+                  "hit_strand": "Plus",
+                  "align_len": 181,
+                  "gaps": 2,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAATGGATTTGG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTTGGAATTGGGGTTGGTTTTGGCTGTGGTTTTG-GAAATGGATTTGG",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||   |||   |||  |||| | ||| ||||||  |||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|3",
+                  "accession": "3",
+                  "title": "a4 gamma##"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 233.798,
+                  "score": 126,
+                  "evalue": 1.04417e-65,
+                  "identity": 163,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "hit_strand": "Plus",
+                  "align_len": 181,
+                  "gaps": 2,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAATGGATTTGG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTGGGATTGGGGTTGGAATTGGGGTTGGTTTTGGCTGTGGTTTTG-GAAATGGATTTGG",
+                  "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||  |||   |||   |||   |||  |||| | ||| ||||||  |||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "#a6 first"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 183.939,
+                  "score": 99,
+                  "evalue": 1.06657e-50,
+                  "identity": 99,
+                  "query_from": 1,
+                  "query_to": 99,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 99,
+                  "hit_strand": "Plus",
+                  "align_len": 99,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|6",
+                  "accession": "6",
+                  "title": "a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 161.779,
+                  "score": 87,
+                  "evalue": 4.99749e-44,
+                  "identity": 87,
+                  "query_from": 1,
+                  "query_to": 87,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 87,
+                  "hit_strand": "Plus",
+                  "align_len": 87,
+                  "gaps": 0,
+                  "qseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAAT",
+                  "hseq": "ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAAT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 1560,
+            "hsp_len": 11,
+            "eff_space": 250627,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+]
+}

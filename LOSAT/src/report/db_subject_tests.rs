@@ -3300,8 +3300,9 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     );
     assert_eq!(held_first.load(1), held);
     assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
-    // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
-    assert!(!held_first.loaded(1));
+    // Its record is the holder's, which the writers read (line DBID hr-2: the taxonomy texts are
+    // the holder's too), so it counts as loaded.
+    assert!(held_first.loaded(1) && held_first.writes_shown_records(1));
     // A table of `sacc` whose report's first row throws: NCBI's run ends there (the null pointer,
     // which `tabular::check_failed_lookups` refuses), so no later report holds the subject; at a
     // later row the run goes on and the next report holds it.

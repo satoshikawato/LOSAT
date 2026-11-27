@@ -1,5 +1,6 @@
 - `losat blast_formatter`: writes tabular reports (`-outfmt 6`, `7`, `10` and `20`, with default
-  or custom field lists and delimiters) from ASN.1 text BLAST archives of `blastn` (all tasks),
+  or custom field lists and delimiters) from BLAST archives (ASN.1 text, ASN.1 binary or XML) of
+  `blastn` (all tasks),
   `blastp` (gapped and ungapped), `psiblast` (all iterations, `-in_msa`, `-in_pssm`), `deltablast`,
   PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`, for both `-db` and
   `-subject` searches, batch archives, and `-max_target_seqs`, `-parse_deflines` and `-out`,

@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Input
 
 - `-archive` names the BLAST archive: the file that a search wrote with `-outfmt 11`, from LOSAT or from NCBI BLAST+. `-archive -` reads the standard input.
-- The archive must be in ASN.1 text, which is the default of `-outfmt 11`.
+- The archive may be in ASN.1 text (the default of `-outfmt 11`), ASN.1 binary (`ARCHIVE_FORMAT=bin`) or XML (`ARCHIVE_FORMAT=xml`).
 - The reports are written for each query batch of the archive, one after another.
 
 ## Common options
@@ -49,7 +49,6 @@ None that change the output of a normal run. The options, NCBI's help and usage 
 
 - `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `11`, `13`, `14`, `15`, `16`, `17` and `18`.
 - The tabular formats (`6`, `7`, `10`, `20`) of an archive of a translated search (`blastx`, `tblastn`, `tblastx`, `rpstblastn`) or of queries given as locations, `-subject` sequences with `BL2SEQ_LEGACY` set in `-outfmt 7`, and Seq-aligns whose sequences NCBI BLAST+'s scope may find otherwise; each with the case named.
-- An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`).
 - A database named in the archive that cannot be opened here as NCBI opens it. NCBI BLAST+ then asks NCBI's servers for its sequences.
 - `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12`: NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one.
 - Archives that NCBI's own programs do not write and on which NCBI BLAST+ has no defined result, a stored message of severity Fatal, and archives of the mapper.

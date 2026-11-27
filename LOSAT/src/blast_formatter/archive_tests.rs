@@ -291,7 +291,7 @@ fn non_utf8_outfmt_argument_preserves_raw_bytes_in_error() {
 
 /// `psi_round`, the one check of the round of the formats: a `Web_StepNumber` that is no integer
 /// throws at the first result set (NCBI rows of7_psiblast_step_string and of7/of6/of20/of8
-/// _ps_zero_step_str, a query without hits), and not where an object has no result set.
+/// _ps_none_step_str, a query without hits), and not where an object has no result set.
 #[test]
 fn a_step_that_is_no_integer_throws_at_the_first_result_set() {
     assert_eq!(psi_round(Ok(Some(2)), 1).unwrap(), Some(2));
@@ -303,4 +303,47 @@ fn a_step_that_is_no_integer_throws_at_the_first_result_set() {
         format!("{}", invalid_archive()),
         "the archive's error"
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
+#[test]
+fn binary_and_xml_archives_format_identical_to_text_and_match_truncation_quirks() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/blast_formatter/in/");
+    let text = std::fs::read(format!("{dir}bn.asn")).unwrap();
+    let binary = std::fs::read(format!("{dir}bn.asnb")).unwrap();
+    let xml = std::fs::read(format!("{dir}bn.xml")).unwrap();
+    let run_bytes = |bytes: &[u8], outfmt: &str| {
+        let line: Vec<OsString> = ["-archive", "-", "-outfmt", outfmt]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = super::super::run_with(&line, &mut &bytes[..], &mut out, &mut err);
+        (status, out, String::from_utf8(err).unwrap())
+    };
+    for outfmt in ["8", "9", "12", "6", "7", "10", "20", "6 std qseq sseq"] {
+        let expected = run_bytes(&text, outfmt);
+        assert_eq!(expected.0, 0, "text outfmt {outfmt}");
+        assert_eq!(run_bytes(&binary, outfmt), expected, "bin outfmt {outfmt}");
+        assert_eq!(run_bytes(&xml, outfmt), expected, "xml outfmt {outfmt}");
+    }
+    // Binary archive missing only its last byte is skipped silently with rc 0 (F3-6 (3), P3.104).
+    assert_eq!(
+        run_bytes(&binary[..binary.len() - 1], "8"),
+        (0, Vec::new(), String::new())
+    );
+    // Binary archive missing its last 2 bytes is NCBI's invalid input (rc 1).
+    let invalid = format!(
+        "LOSAT query/options error: Invalid input format for BLAST Archive.\n{}\n",
+        crate::wording::USER_MANUAL_FOOTER
+    );
+    assert_eq!(
+        run_bytes(&binary[..binary.len() - 2], "8"),
+        (1, Vec::new(), invalid.clone())
+    );
+    // XML archive with trailing `<junk/>` formats object 1 then reports invalid input (P3.092).
+    let (status, out, err) = run_bytes(&[&xml[..], b"<junk/>"].concat(), "8");
+    assert_eq!((status, out, err), (1, run_bytes(&text, "8").1, invalid));
 }

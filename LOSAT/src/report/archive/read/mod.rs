@@ -32,7 +32,9 @@ mod strategy_tests;
 use std::io::Read;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_types::stream::TextStream;
+use crate::report::serial::asn_input::Input;
+use crate::report::serial::asn_types::read::ObjectStream;
+use crate::report::serial::asn_types::stream::{BinaryStream, TextStream, XmlStream};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::{member_index, Post, ReadError, Value};
@@ -120,28 +122,66 @@ pub(crate) struct Search {
     pub(crate) results: Results,
 }
 
+/// The underlying object stream of an archive, by its encoding (`CRemoteBlast::x_Init`,
+/// c++/src/algo/blast/api/remote_blast.cpp:796-818).
+enum ArchiveStream<R: Read> {
+    Text(TextStream<R>),
+    Binary(BinaryStream<R>),
+    Xml(XmlStream<R>),
+}
+
 /// The objects of an archive stream (the `CRemoteBlast` made of a stream, with its object
-/// stream), one at a time.
+/// stream in ASN.1 text, ASN.1 binary or XML), one at a time.
 pub(crate) struct ArchiveReader<R: Read> {
-    objects: TextStream<R>,
+    objects: ArchiveStream<R>,
 }
 
 impl<R: Read> ArchiveReader<R> {
-    /// The archive objects of a text stream.
+    /// The archive objects of an ASN.1 text stream.
     pub(crate) fn new(objects: TextStream<R>) -> Self {
-        ArchiveReader { objects }
+        ArchiveReader {
+            objects: ArchiveStream::Text(objects),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:802-804
+    /// The archive objects of an ASN.1 binary stream.
+    pub(crate) fn binary(objects: BinaryStream<R>) -> Self {
+        ArchiveReader {
+            objects: ArchiveStream::Binary(objects),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:810-812
+    /// The archive objects of an XML stream.
+    pub(crate) fn xml(objects: XmlStream<R>) -> Self {
+        ArchiveReader {
+            objects: ArchiveStream::Xml(objects),
+        }
     }
 
     /// `LoadFromArchive()`: `None` at the end of the data (`EndOfData`), else the next object
     /// read (or the reader's error, after which the stream ends) and the messages the reader
     /// posted while it read.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1657-1665
     pub(crate) fn next_archive(&mut self) -> Option<(Result<Archive, ReadError>, Vec<Post>)> {
-        if self.objects.end_of_data() {
-            return None;
+        match &mut self.objects {
+            ArchiveStream::Text(objects) => next_from(objects),
+            ArchiveStream::Binary(objects) => next_from(objects),
+            ArchiveStream::Xml(objects) => next_from(objects),
         }
-        let (value, posts) = self.objects.read_object(named::BLAST4_ARCHIVE);
-        Some((value.map(Archive::from_value), posts))
     }
+}
+
+/// Reads the next `Blast4-archive` from `objects`, or returns `None` at `EndOfData`.
+fn next_from<I: Input>(
+    objects: &mut ObjectStream<I>,
+) -> Option<(Result<Archive, ReadError>, Vec<Post>)> {
+    if objects.end_of_data() {
+        return None;
+    }
+    let (value, posts) = objects.read_object(named::BLAST4_ARCHIVE);
+    Some((value.map(Archive::from_value), posts))
 }
 
 impl Archive {

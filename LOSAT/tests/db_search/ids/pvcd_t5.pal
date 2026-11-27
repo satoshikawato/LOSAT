@@ -1,0 +1,5 @@
+#
+# Alias file of line NP, item O4b2-10
+#
+TITLE pvcd_t5 (two databases, parsed Seq-ids, taxid 99990)
+DBLIST pvc_t5 pvd_t5

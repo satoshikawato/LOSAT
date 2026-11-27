@@ -1162,10 +1162,18 @@ impl BlastpArgs {
         // (`ResolvedBlastpArgs::phi`).
         let phi = match phi_file.filter(|_| read_files) {
             Some(path) => {
-                let bytes = crate::algorithm::pssm_search::in_pssm::read_input_argument(
-                    "phi_pattern",
-                    path,
-                )?;
+                // The library API gives the file's bytes (`api::Inputs::phi_pattern`).
+                let given = self
+                    .psiblast_pssm
+                    .as_ref()
+                    .and_then(|pssm| pssm.phi_pattern_bytes.as_deref());
+                let bytes = match given {
+                    Some(bytes) => bytes.to_vec(),
+                    None => crate::algorithm::pssm_search::in_pssm::read_input_argument(
+                        "phi_pattern",
+                        path,
+                    )?,
+                };
                 let raw = crate::algorithm::phi_search::file::read_pattern(&bytes)
                     .map_err(crate::algorithm::phi_search::file::PatternFileError::into_error)?;
                 Some(std::sync::Arc::new(

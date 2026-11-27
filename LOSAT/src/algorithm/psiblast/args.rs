@@ -163,6 +163,10 @@ pub struct PsiblastArgs {
     // options (`algorithm::phi_search::file`) and its pattern compiled before the search
     // (`ResolvedBlastpArgs::phi`).
     pub phi_pattern: Option<PathBuf>,
+    /// The library API's pattern file bytes (`api::Inputs::phi_pattern`, item PS8b), which the
+    /// options read in place of `phi_pattern`'s file (`PsiblastPssmOptions::phi_pattern_bytes`).
+    /// `None` on the command line. Not a public option.
+    pub(crate) phi_pattern_bytes: Option<std::sync::Arc<[u8]>>,
 
     /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
     /// that starts there (`api::run_batches`). 0 on the command line.
@@ -248,6 +252,7 @@ impl PsiblastArgs {
             msa_master_idx: args.given_option("msa_master_idx")?,
             ignore_msa_master: args.flag("ignore_msa_master"),
             phi_pattern: args.given_option("phi_pattern")?,
+            phi_pattern_bytes: None,
             first_query_ordinal: Default::default(),
             scope_refusal: Default::default(),
             pssm_versions: Default::default(),
@@ -369,6 +374,7 @@ impl PsiblastArgs {
                 check_scope: self.pssm_check,
                 run_files: crate::report::run_files::RunFiles::Disk,
                 phi_pattern: self.phi_pattern,
+                phi_pattern_bytes: self.phi_pattern_bytes,
             }),
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
             // The line length only: `-sorthits` and `-sorthsps` are read with their warnings

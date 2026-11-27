@@ -10951,10 +10951,11 @@ fn run_call(
             && format_plans
                 .iter()
                 .any(|report| matches!(report, BlastpReport::Pairwise(_))));
-    let pairwise_hits = if rows_up_front {
-        Some(rows_of(0..hit_lists.len())?)
-    } else {
-        None
+    // PHI-BLAST's rows by occurrence (`PhiCall::library_rows`).
+    let pairwise_hits = match phi_call.as_ref().filter(|_| rows_up_front) {
+        Some(phi) => Some(phi.library_rows(&rows_of_lists, outputs.observer.as_deref_mut())?),
+        None if rows_up_front => Some(rows_of(0..hit_lists.len())?),
+        None => None,
     };
 
     if let Some(timing) = timing.as_ref() {

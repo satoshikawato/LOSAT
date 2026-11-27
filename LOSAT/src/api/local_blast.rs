@@ -588,6 +588,15 @@ pub trait FormatObserver {
     /// below `-inclusion_ethresh` in its last round was below it in the round before too. It
     /// comes after the query's last round, whatever the formats.
     fn rounds_converged(&mut self, _query: usize) {}
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3632
+    // NCBI's PHI-BLAST search gives one result set per pattern occurrence of a query
+    // (`PHIBlast_HSPResultsSplit`); the call's hit list (`ReportOutputs::hits`) holds them one
+    // after the other.
+    /// psiblast's PHI-BLAST search (`-phi_pattern`; item PS8b): the pattern occurrence (1-based)
+    /// of each HSP of the call's hit list (`ReportOutputs::hits`), by its index there. The call
+    /// comes before the hit list is handed over, only in a PHI-BLAST call.
+    fn phi_occurrences(&mut self, _occurrences: Vec<u32>) {}
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973

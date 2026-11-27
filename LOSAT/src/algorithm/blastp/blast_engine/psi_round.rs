@@ -308,6 +308,8 @@ fn run_queries(
     // `PrintOneResultSet`; not PHI-BLAST's round 1, `PrintPhiResult`).
     let mut calls = 0usize;
     let mut formatted = 0usize;
+    // The result sets of the rounds so far (BLAST XML's `Iteration`s, `RoundOutcome::result_sets`).
+    let mut result_sets = 0usize;
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
@@ -555,7 +557,7 @@ fn run_queries(
                     x_prolog: calls == 0,
                     // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
                     // each round's `Iteration` after them and writes its header with the first.
-                    x_queries_before: calls,
+                    x_queries_before: result_sets,
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: Some(&io),
@@ -630,6 +632,7 @@ fn run_queries(
                 .expect("the round's outcome")
                 .take()
                 .expect("every round's search reaches its outcome hook");
+            result_sets += outcome.result_sets;
             if !outcome.has_alignments {
                 if round == 1 {
                     searched_input = outcome.searched;
@@ -678,7 +681,14 @@ fn run_queries(
         }
     }
     if epilog {
-        write_round_epilogs(args, subject_source, subject_label, outputs, formatted)?;
+        write_round_epilogs(
+            args,
+            subject_source,
+            subject_label,
+            outputs,
+            formatted,
+            result_sets,
+        )?;
     }
     Ok(())
 }
@@ -880,13 +890,15 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
 /// The epilog of each report after the last round: outfmt 0's (also that of the query-anchored
 /// reports 1 to 4), outfmt 7's `# BLAST processed R queries` (R the rounds formatted,
-/// `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt 6, 8 to 12, 18 and 20.
+/// `m_QueriesFormatted`), BLAST XML's end after its `result_sets` `Iteration`s, nothing for
+/// outfmt 6, 8 to 12, 18 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     rounds: usize,
+    result_sets: usize,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
@@ -920,7 +932,7 @@ fn write_round_epilogs(
             5 => {
                 let mut bytes = Vec::new();
                 crate::report::blast_xml::StructuredXml::finish(
-                    &mut crate::report::blast_xml::BlastXmlWriter::new(rounds),
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(result_sets),
                     &mut bytes,
                 )?;
                 let mut writer = format.sink.open()?;
@@ -1011,10 +1023,11 @@ pub(super) fn round_outcome(
     contexts: &[QueryContext],
     gapped: &KarlinParams,
     keys: SubjectKeys<'_>,
+    phi: Option<&super::phi_hooks::PhiCall<'_>>,
 ) -> Result<Option<FoundBefore>> {
     let key = |s_idx: u32| keys.key(s_idx);
     // PHI-BLAST's round 1 (item PS8b): the round's outcome is its first occurrence's result.
-    let first_occurrence = args.phi.is_some().then(|| phi_first_occurrence(hit_lists));
+    let first_occurrence = phi.map(|phi| phi_first_occurrence(hit_lists, phi));
     let hit_lists = first_occurrence
         .as_ref()
         .map_or(hit_lists, std::slice::from_ref);
@@ -1105,6 +1118,7 @@ pub(super) fn round_outcome(
         next,
         next_warnings,
         searched,
+        result_sets: phi.map_or(1, |phi| phi.occurrences(0)),
     });
     Ok(found_before)
 }
@@ -1116,17 +1130,12 @@ pub(super) fn round_outcome(
 /// part.
 #[cold]
 #[inline(never)]
-fn phi_first_occurrence(hit_lists: &[Option<BlastpHitList>]) -> Option<BlastpHitList> {
+fn phi_first_occurrence(
+    hit_lists: &[Option<BlastpHitList>],
+    phi: &super::phi_hooks::PhiCall<'_>,
+) -> Option<BlastpHitList> {
     let mut list = hit_lists.first().cloned().flatten()?;
-    let count = list.hsplist_count.min(list.hsplist_array.len());
-    let occurrences = list.hsplist_array[..count]
-        .iter()
-        .flat_map(|hsp_list| &hsp_list.hsps)
-        .filter_map(|hsp| hsp.clone().take_phi_occurrence())
-        .map(|occurrence| occurrence.index() + 1)
-        .max()
-        .unwrap_or(0);
-    super::phi_hooks::split_hit_list_by_occurrence(Some(&mut list), occurrences, |_, hsp| {
+    super::phi_hooks::split_hit_list_by_occurrence(Some(&mut list), phi.occurrences(0), |_, hsp| {
         hsp.take_phi_occurrence()
             .expect("every PHI HSP carries a PhiOccurrenceIndex from phi_traceback")
             .index()

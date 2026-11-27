@@ -1790,6 +1790,7 @@ pub(super) fn report_values(
             contexts,
             gapped_params,
             subject_keys,
+            setup.phi,
         )?,
         None => None,
     };

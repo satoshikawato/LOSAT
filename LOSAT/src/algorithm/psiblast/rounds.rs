@@ -297,6 +297,9 @@ pub(crate) struct RoundOutcome {
     /// come after the round's report, before the PSSM's error.
     pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
+    /// The result sets of the round (BLAST XML's `Iteration`s): 1, or PHI-BLAST's pattern
+    /// occurrences (item PS8b).
+    pub(crate) result_sets: usize,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's

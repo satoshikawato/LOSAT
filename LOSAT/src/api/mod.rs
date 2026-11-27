@@ -143,6 +143,10 @@
 //!   query 0 of the results, in one batch of [`run_batches`]. `-msa_master_idx` and
 //!   `-ignore_msa_master` are options of the argv ([`validate`] takes them; a search of other
 //!   inputs fails with the parser's message, as the command line does without `-in_msa`).
+//! - psiblast's PHI-BLAST pattern (the command line's `-phi_pattern FILE`) is an input too:
+//!   [`Inputs::phi_pattern`] gives the pattern file's bytes, which the search reads as the command
+//!   line reads the file; round 1 reports one result per pattern occurrence of the query, and
+//!   each of its HSP records names its occurrence ([`HspRecord::occurrence`]).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //!   A search strategy file is an input of the API: [`Search::read_strategy`] reads its bytes (the

@@ -6,7 +6,8 @@
 //!
 //! Reads the query and subject files into memory (not for `-dryrun`, as the command line; a PSSM
 //! query, `-in_pssm`, is the file's name, `Inputs::pssm`; so is psiblast's alignment query,
-//! `-in_msa`, `Inputs::msa`), searches with `losat::api::run`, or
+//! `-in_msa`, `Inputs::msa`; psiblast's PHI-BLAST pattern file, `-phi_pattern`, is read into
+//! memory, `Inputs::phi_pattern`), searches with `losat::api::run`, or
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to standard
 //! error, so that a run compares with `losat <program>` with the same arguments
 //! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd`, `dustmasker`,
@@ -103,7 +104,7 @@ fn search() -> Result<(), Error> {
 fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
     let program: Program = program.parse()?;
     let (mut db, mut subject, mut query, mut out, mut outfmt) = (None, None, None, None, "0");
-    let (mut pssm, mut msa) = (None, None);
+    let (mut pssm, mut msa, mut pattern) = (None, None, None);
     let mut options: Vec<&str> = Vec::new();
     let mut words = words.iter().map(String::as_str);
     while let Some(word) = words.next() {
@@ -113,6 +114,7 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
             "-query" => query = words.next(),
             "-in_pssm" => pssm = words.next(),
             "-in_msa" => msa = words.next(),
+            "-phi_pattern" => pattern = words.next(),
             "-out" => out = words.next(),
             "-outfmt" => outfmt = words.next().unwrap_or(outfmt),
             option => options.push(option),
@@ -176,6 +178,20 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
         (None, None, _) => {
             return Err(Error::Argv("-db or -subject is required".into()));
         }
+    };
+    // The pattern file's bytes (`Inputs::phi_pattern`); one that cannot be read is the command
+    // line's error for it.
+    let pattern_bytes = match pattern {
+        Some(file) => Some(std::fs::read(file).map_err(|_| {
+            Error::Argv(
+                format!("Argument \"phi_pattern\". File is not accessible:  `{file}'").into(),
+            )
+        })?),
+        None => None,
+    };
+    let inputs = match pattern_bytes.as_deref() {
+        Some(bytes) => inputs.phi_pattern(bytes),
+        None => inputs,
     };
     let mut stderr = std::io::stderr();
     match out {

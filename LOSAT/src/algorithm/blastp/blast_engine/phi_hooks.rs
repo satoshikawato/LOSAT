@@ -257,6 +257,53 @@ impl PhiCall<'_> {
             .collect();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3632 (cited at
+    // `split_occurrences`)
+    /// The rows of the call's hit list that the library's records read (`ReportOutputs::hits`,
+    /// item PS8b): each batch's occurrences' lists one after the other, as the reports write them
+    /// (`report::phi_round`), and the occurrence of each row for the records
+    /// (`FormatObserver::phi_occurrences`).
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::type_complexity)]
+    pub(super) fn library_rows(
+        &self,
+        rows_of_lists: &dyn Fn(
+            &[Option<BlastpHitList>],
+            usize,
+        ) -> Result<Vec<crate::report::PairwiseHit>>,
+        observer: Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
+    ) -> Result<Vec<crate::report::PairwiseHit>> {
+        let (mut rows, mut occurrences) = (Vec::new(), Vec::new());
+        for batch in self
+            .batches
+            .iter()
+            .filter(|batch| self.search_of(batch).is_some())
+        {
+            for (occurrence, list) in self.occurrence_lists(batch.searched).iter().enumerate() {
+                if list.is_none() {
+                    continue;
+                }
+                let part = rows_of_lists(std::slice::from_ref(list), batch.searched)?;
+                let number = u32::try_from(occurrence + 1).unwrap_or(u32::MAX);
+                occurrences.extend(std::iter::repeat_n(number, part.len()));
+                rows.extend(part);
+            }
+        }
+        if let Some(observer) = observer {
+            observer.phi_occurrences(occurrences);
+        }
+        Ok(rows)
+    }
+
+    /// The pattern occurrences of query `q_idx` (0 for a query that is not searched).
+    pub(super) fn occurrences(&self, q_idx: usize) -> usize {
+        self.searches
+            .get(q_idx)
+            .and_then(Option::as_ref)
+            .map_or(0, |search| search.occurrences.len())
+    }
+
     /// The per-occurrence final hit lists of query `q_idx` (`split_occurrences`).
     pub(super) fn occurrence_lists(&self, q_idx: usize) -> &[Option<BlastpHitList>] {
         self.occurrence_lists.get(q_idx).map_or(&[], Vec::as_slice)

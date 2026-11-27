@@ -30,6 +30,9 @@ struct Part {
     query_stats: Vec<Option<QueryStats>>,
     /// The sequences that a database search's hit list names, by the call's ranks.
     database_subjects: Option<Vec<ReportedSubject>>,
+    /// PHI-BLAST's pattern occurrence of each HSP of the call's hit list
+    /// (`FormatObserver::phi_occurrences`); `None` for a call without a pattern.
+    occurrences: Option<Vec<u32>>,
 }
 
 impl Part {
@@ -39,6 +42,7 @@ impl Part {
             query,
             query_stats: Vec::new(),
             database_subjects: None,
+            occurrences: None,
         }
     }
 }
@@ -122,6 +126,14 @@ impl Parts {
         self.pssm_query = Some(query.clone());
     }
 
+    /// `FormatObserver::phi_occurrences`.
+    pub(super) fn phi_occurrences(&mut self, occurrences: Vec<u32>) {
+        self.parts
+            .last_mut()
+            .expect("a search has a part")
+            .occurrences = Some(occurrences);
+    }
+
     /// The records of the parts, from the hit lists that the calls handed over (`hits`, one per
     /// call, in the order of the calls), with `index` counted from `first_index`; the statistics
     /// and rounds of each query of `inputs`, whose searched queries are `ordinals`
@@ -168,9 +180,13 @@ impl Parts {
                 part.database_subjects.as_deref(),
                 part.query,
             );
-            for record in &mut records {
+            for (at, record) in records.iter_mut().enumerate() {
                 record.index += first_index + hsps.len();
                 record.round = part.round;
+                record.occurrence = part
+                    .occurrences
+                    .as_ref()
+                    .and_then(|occurrences| occurrences.get(at).copied());
             }
             lengths.push(records.len());
             hsps.append(&mut records);

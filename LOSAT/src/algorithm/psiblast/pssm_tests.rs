@@ -35,6 +35,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         rounds: None,
         run_files: Default::default(),
         phi_pattern: None,
+        phi_pattern_bytes: None,
     }
 }
 

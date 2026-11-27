@@ -61,8 +61,9 @@ pub(crate) fn alignment_owned(program: Program) -> &'static [&'static str] {
 }
 
 /// The option of `program`'s command line that gives a PHI-BLAST pattern file (psiblast's
-/// `-phi_pattern`, item PS8a): the library API will give the pattern as an input (item PS8b), so
-/// `validate` refuses the option until then and `describe` leaves it out.
+/// `-phi_pattern`, item PS8a): the library API gives the pattern as the inputs
+/// (`Inputs::phi_pattern`, item PS8b), so `validate` refuses the option and `describe` leaves it
+/// out.
 pub(crate) fn pattern_owned(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => &["phi_pattern"],
@@ -236,14 +237,42 @@ impl Search {
             }
             None => (QUERY, std::ffi::OsStr::new(inputs.query_name)),
         };
-        parse(
+        // psiblast's pattern (`Inputs::phi_pattern`): the parser takes `-phi_pattern` with the
+        // argv, so that it checks the options against it as on the command line, and the options
+        // read the bytes in place of a file (`PsiblastArgs::phi_pattern_bytes`).
+        let Some(pattern) = inputs.phi_pattern else {
+            return parse(
+                self.program,
+                &self.argv,
+                query,
+                [subject_flag, inputs.subject_name],
+                self.out.as_deref(),
+                target,
+            );
+        };
+        if self.program != Program::Psiblast {
+            return Err(Error::Argv(
+                format!(
+                    "a PHI-BLAST pattern (Inputs::phi_pattern) is searched by psiblast, not by {}",
+                    self.program.name()
+                )
+                .into(),
+            ));
+        }
+        let mut argv = self.argv.clone();
+        argv.extend([PATTERN.to_string(), "phi_pattern".to_string()]);
+        let mut commands = parse(
             self.program,
-            &self.argv,
+            &argv,
             query,
             [subject_flag, inputs.subject_name],
             self.out.as_deref(),
             target,
-        )
+        )?;
+        if let Commands::Psiblast(args) = &mut commands {
+            args.phi_pattern_bytes = Some(pattern.into());
+        }
+        Ok(commands)
     }
 }
 
@@ -251,6 +280,7 @@ impl Search {
 const QUERY: &str = "-query";
 const PSSM: &str = "-in_pssm";
 const MSA: &str = "-in_msa";
+const PATTERN: &str = "-phi_pattern";
 const SUBJECT: &str = "-subject";
 const DATABASE: &str = "-db";
 
@@ -405,12 +435,9 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             ).into()));
         }
         if pattern_owned(program).contains(&name) {
-            return Err(Error::Argv(
-                format!(
-                    "{key} (a PHI-BLAST pattern file) is not supported by LOSAT's library API yet"
-                )
-                .into(),
-            ));
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: a PHI-BLAST pattern is given as the inputs (Inputs::phi_pattern)"
+            ).into()));
         }
         if name == "import_search_strategy" {
             return Err(Error::Argv(format!(

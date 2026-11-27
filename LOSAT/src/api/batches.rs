@@ -178,6 +178,10 @@ impl FormatObserver for BatchObserver {
     fn pssm_query(&mut self, query: &FastaRecord) {
         self.parts.pssm_query(query);
     }
+
+    fn phi_occurrences(&mut self, occurrences: Vec<u32>) {
+        self.parts.phi_occurrences(occurrences);
+    }
 }
 
 /// The search of one query batch at a time (`run_batches`). Each `next` searches one batch; a

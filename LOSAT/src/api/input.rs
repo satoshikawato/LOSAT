@@ -538,6 +538,8 @@ pub struct Inputs<'a> {
     /// How the reading of the query records ended (`Inputs::query_end`); `None`: at the end of
     /// the input.
     pub(crate) query_end: Option<&'a QueryEnd>,
+    /// psiblast's PHI-BLAST pattern file, its bytes (`Inputs::phi_pattern`).
+    pub(crate) phi_pattern: Option<&'a [u8]>,
 }
 
 impl<'a> Inputs<'a> {
@@ -552,6 +554,7 @@ impl<'a> Inputs<'a> {
             query_file: None,
             strategy: None,
             query_end: None,
+            phi_pattern: None,
         }
     }
 
@@ -569,6 +572,7 @@ impl<'a> Inputs<'a> {
             query_file: None,
             strategy: None,
             query_end: None,
+            phi_pattern: None,
         }
     }
 
@@ -636,6 +640,7 @@ impl<'a> Inputs<'a> {
             query_file: None,
             strategy: Some(strategy),
             query_end: Some(strategy.query_end()),
+            phi_pattern: None,
         }
     }
 
@@ -646,6 +651,20 @@ impl<'a> Inputs<'a> {
     pub fn query_end(self, end: &'a QueryEnd) -> Self {
         Self {
             query_end: Some(end),
+            ..self
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1366-1411
+    /// The same inputs, searched with the PHI-BLAST pattern of the pattern file whose bytes are
+    /// `pattern`: the command line's `-phi_pattern FILE` of psiblast (round 1 a PHI-BLAST search
+    /// of the pattern's occurrences in each query, `HspRecord::occurrence`). The search reads the
+    /// bytes as the command line reads the file, with its messages and errors; the argv takes
+    /// the options that NCBI's parser checks against `-phi_pattern` as the command line does.
+    /// Only psiblast searches a pattern.
+    pub fn phi_pattern(self, pattern: &'a [u8]) -> Self {
+        Self {
+            phi_pattern: Some(pattern),
             ..self
         }
     }

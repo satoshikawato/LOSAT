@@ -54,6 +54,9 @@ pub struct PsiblastPssmOptions {
     /// `-phi_pattern`: the pattern file of a PHI-BLAST round 1 (`algorithm::phi_search`), read
     /// with the options (`BlastpArgs::check_options`).
     pub phi_pattern: Option<std::path::PathBuf>,
+    /// The library API's pattern (`api::Inputs::phi_pattern`, item PS8b): the bytes of the
+    /// pattern file, read in place of `phi_pattern`'s file (the parser's name for it).
+    pub phi_pattern_bytes: Option<std::sync::Arc<[u8]>>,
 }
 
 impl PartialEq for PsiblastPssmOptions {
@@ -69,6 +72,7 @@ impl PartialEq for PsiblastPssmOptions {
             && self.check_scope == other.check_scope
             && self.rounds == other.rounds
             && self.phi_pattern == other.phi_pattern
+            && self.phi_pattern_bytes == other.phi_pattern_bytes
     }
 }
 

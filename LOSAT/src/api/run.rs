@@ -106,6 +106,11 @@ pub struct HspRecord {
     /// `# Iteration: N`); 1 in a search without rounds. The HSPs of each round of a query follow
     /// those of the round before, each round's in the order of its own hit list.
     pub round: u32,
+    /// psiblast's PHI-BLAST round (`Inputs::phi_pattern`): the pattern occurrence in the query
+    /// whose result holds the HSP (1-based, NCBI's `Significant alignments for pattern occurrence
+    /// N`); each occurrence's HSPs follow those of the occurrence before, as the reports write
+    /// them. `None` in every other search and round.
+    pub occurrence: Option<u32>,
     /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
     /// title, and with `-parse_deflines` the accession and version of its id; the bytes of the
     /// reports, also those that are not UTF-8 ([`Id`]). Cloning is cheap; it does not copy the
@@ -450,6 +455,10 @@ impl FormatObserver for RangeRecorder {
 
     fn pssm_query(&mut self, query: &FastaRecord) {
         self.parts.pssm_query(query);
+    }
+
+    fn phi_occurrences(&mut self, occurrences: Vec<u32>) {
+        self.parts.phi_occurrences(occurrences);
     }
 }
 
@@ -1265,6 +1274,7 @@ pub(super) fn records(
                 s_idx: subject_index,
                 rank: this_rank,
                 round: 1,
+                occurrence: None,
                 query_id: shared_id(&mut query_ids, q_idx, || {
                     inputs.query[q_idx].shown_id().to_vec()
                 }),

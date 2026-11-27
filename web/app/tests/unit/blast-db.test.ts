@@ -7,8 +7,11 @@ import { ResultsBrowser } from '../../src/application/results';
 import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from 'losat/domain';
 import {
   assembleSearchDirectory,
+  chooseAgainMessage,
+  databasePickKind,
   databaseTaxonomy,
   DB_HARD_MASK_FLAG,
+  defaultDatabase,
   DB_SOFT_MASK_FLAG,
   dbMaskMissingMessage,
   dbMaskPlaceholder,
@@ -26,7 +29,10 @@ import {
   normalizeRunPath,
   parseAliasMetadata,
   pickedFilePath,
+  pickedFolder,
   primaryBlastDbName,
+  readingDatabaseMessage,
+  rememberedPickKind,
 } from '../../src/domain/blast-db';
 import { hspTable } from '../../src/domain/hsp-table';
 import { approvedExceptions } from '../../src/domain/verification';
@@ -124,6 +130,52 @@ describe('blast-db domain discovery & directory assembly', () => {
     ]);
     expect(matchingDatabases(discovery, 'nucleotide').map((d) => d.name)).toEqual(['dbdir/multi']);
     expect(matchingDatabases(discovery, 'protein').map((d) => d.name)).toEqual(['dbdir/prot']);
+  });
+
+  it('offers every database an alias lists in its DBLIST, and hides only the numbered volumes of one database (S4-1)', async () => {
+    const files = [
+      fileWithRelPath('alias/na.nin', 'x'),
+      fileWithRelPath('alias/nb.nin', 'x'),
+      fileWithRelPath('alias/nab.nal', 'TITLE both\nDBLIST na nb\n'),
+      fileWithRelPath('alias/multi.00.nin', 'x'),
+      fileWithRelPath('alias/multi.01.nin', 'x'),
+      fileWithRelPath('alias/multi.nal', 'TITLE m\nDBLIST multi.00 multi.01\n'),
+    ];
+    const discovery = await discoverBlastDatabases(files);
+    expect(discovery.databases.map((db) => db.name)).toEqual(['alias/multi', 'alias/na', 'alias/nab', 'alias/nb']);
+    expect(discovery.databases.find((db) => db.name === 'alias/nab')).toMatchObject({ entry: 'alias', volumes: ['na', 'nb'] });
+    expect(matchingDatabases(discovery, 'nucleotide').map((db) => db.name)).toEqual(['alias/multi', 'alias/na', 'alias/nab', 'alias/nb']);
+    // The alias, not a database it lists, is what the pick starts with (as before the members were choices).
+    expect(defaultDatabase(matchingDatabases(discovery, 'nucleotide'))?.name).toBe('alias/multi');
+    expect(discovery.databases.filter((db) => db.listed).map((db) => db.name)).toEqual(['alias/na', 'alias/nb']);
+    // A files pick (no folder in the paths) gives the same choices.
+    const flat = await discoverBlastDatabases([
+      diskFile('na.nin', 'x'),
+      diskFile('nb.nin', 'x'),
+      diskFile('nab.nal', 'DBLIST na nb\n'),
+    ]);
+    expect(flat.databases.map((db) => db.name)).toEqual(['na', 'nab', 'nb']);
+    expect(defaultDatabase(flat.databases)?.name).toBe('nab');
+    // A database an alias lists by a path in another folder stays a choice as well.
+    const nested = await discoverBlastDatabases([
+      fileWithRelPath('d/sub/na.nin', 'x'),
+      fileWithRelPath('d/top.nal', 'DBLIST sub/na\n'),
+    ]);
+    expect(nested.databases.map((db) => db.name)).toEqual(['d/sub/na', 'd/top']);
+  });
+
+  it('says what the user picked: a folder or files (S4-5)', () => {
+    expect(pickedFolder([fileWithRelPath('nuc5/a.nin'), fileWithRelPath('nuc5/b.nhr')])).toBe('nuc5');
+    expect(pickedFolder([fileWithRelPath('nuc5/a.nin'), fileWithRelPath('other/b.nhr')])).toBeUndefined();
+    expect(pickedFolder([diskFile('a.nin', 'x')])).toBeUndefined();
+    expect(databasePickKind([fileWithRelPath('nuc5/a.nin')])).toBe('folder');
+    expect(databasePickKind([diskFile('a.nin', 'x')])).toBe('files');
+    expect(rememberedPickKind({ folder: 'nuc5' })).toBe('folder');
+    expect(rememberedPickKind({})).toBe('files');
+    expect(chooseAgainMessage('folder')).toBe('Choose the folder again.');
+    expect(chooseAgainMessage('files')).toBe('Choose the files again.');
+    expect(readingDatabaseMessage('database', 'files')).toBe('Reading the database files.');
+    expect(readingDatabaseMessage('repeats database', 'folder')).toBe('Reading the repeats database folder.');
   });
 
   it('reports clear molecule-type mismatch or missing database messages', async () => {
@@ -556,6 +608,34 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     await draft.idle();
     expect(draft.state.get().database.selected).toBeUndefined();
     expect(draft.readiness()).toBe('Found nucleotide database (nucdb/nt), not a protein database for BLASTP.');
+  });
+
+  it('asks for the files again after a reload when files were chosen, in Run LOSAT and while reading (S4-5)', async () => {
+    const memory = memoryStore({ subject: { name: 'nuc5' } });
+    const { draft } = setup(memory);
+    await draft.idle();
+    pasteQuery(draft);
+    await draft.idle();
+    expect(draft.state.get().database.remembered).toEqual({ name: 'nuc5' });
+    expect(draft.readiness()).toBe('Choose the files again.');
+
+    let release!: (text: string) => void;
+    const alias = diskFile('nuc5.nal', 'DBLIST nuc5\n');
+    alias.text = () => new Promise<string>((resolve) => (release = resolve));
+    const picking = draft.setSubjectDatabaseFiles([diskFile('nuc5.nin', 'x'), alias]);
+    expect(draft.state.get().database.scanning).toBe('files');
+    expect(draft.readiness()).toBe('Reading the database files.');
+    release('DBLIST nuc5\n');
+    await picking;
+  });
+
+  it('says folder in the same places when a folder was chosen (S4-5)', async () => {
+    const memory = memoryStore({ subject: { name: 'nuc5/nuc5', folder: 'nuc5' }, filtering: { name: 'rep/r', folder: 'rep' } });
+    const { draft } = setup(memory);
+    await draft.idle();
+    pasteQuery(draft);
+    await draft.idle();
+    expect(draft.readiness()).toBe('Choose the folder again.');
   });
 
   it('supports BLASTN -filtering_db with both -subject and -db and clears on resetFields', async () => {

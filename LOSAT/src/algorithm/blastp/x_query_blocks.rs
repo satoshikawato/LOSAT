@@ -704,8 +704,10 @@ pub(crate) fn x_block_seg_store(
 // changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the words of the block whose queries are `query_records` (the
 /// same slice), the most appends of its compressed table's build (a table of a block holds at most
-/// the words its batches' offsets add, `CompressedWordCount`); 0 outside the block search or for a
-/// slice that is no block's.
+/// the words its batches' offsets add, `CompressedWordCount`), or the most overflow entries of its
+/// standard table (`XWideWordCount`; LOSAT_X_BPLKPAHEAD's room for either,
+/// `blast_engine/x_lookup_ahead.rs` `x_room_of`); 0 outside the block search or for a slice that is
+/// no block's.
 pub(crate) fn x_block_appends(pool: &SearchPool<'_>, query_records: &[FastaRecord]) -> usize {
     let key = (query_records.as_ptr() as usize, query_records.len());
     pool.x_ext::<XBlockSubjects>()
@@ -900,8 +902,8 @@ impl<'a> XLookupFlat<'a> {
     /// `finish` sets after the build (`XKarlinTasks`); another matrix's come with theirs, before the
     /// build (no extra tasks). The spare vectors are the same for every matrix (item SC2d-2): a query
     /// chunk of a split batch (`XLookupFor::QueryChunk`, a search that ends after its preliminary
-    /// stage, inside its block's search, and drops its table there) takes none: the block's table
-    /// keeps them. The build of the next block's table ahead of it (`XLookupFor::Ahead`,
+    /// stage, inside its block's search, and drops its table there, or gives its vectors to the next
+    /// block's build where it is the block's last table, `XAheadBlock::x_last_table`) takes none. The build of the next block's table ahead of it (`XLookupFor::Ahead`,
     /// LOSAT_X_BPLKPAHEAD) takes the second spare's.
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],

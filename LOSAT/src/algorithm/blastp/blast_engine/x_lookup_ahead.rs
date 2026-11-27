@@ -23,9 +23,13 @@
 //! starts when block i's table is ready, beside block i's scan; part 2 (`x_flat_ahead_table`: the
 //! stripes pass, which writes the table) runs on the vectors of block i's table, which block i's
 //! thread gives to the second spare after block i's preliminary stage (`XAheadBlock::after_prelim`,
-//! `x_make_room_flat`), when nothing of block i reads its table any more (where a batch of block i
-//! is split, after block i's scan, before the batch's query chunks build their own tables, which
-//! take no spare vectors: `x_lookup_after_prelim`). The two meet without a
+//! `x_make_room_flat`), when nothing of block i reads its table any more. Where a searched batch of
+//! block i is split, block i's last table is that of the batch's last query chunk, which builds its
+//! own after block i's scan (`search_split_query_batches`; the call's table, which holds none of the
+//! batch's words, is freed before the chunks, as NCBI frees each table before it builds the next):
+//! part 1 starts when that chunk's table is ready and part 2 takes that table's vectors after the
+//! chunk's preliminary stage (`XAheadBlock::x_last_table`), so that no build of the next block runs
+//! beside a chunk's build. The two meet without a
 //! wait (`x_run_with_split_build_ahead`): the side that comes second starts part 2 (part 1's task
 //! goes on into it, or block i's thread spawns it as one more task of the scope).
 //!
@@ -61,8 +65,9 @@
 //! table of `LOSAT_X_BPCLUT` (on, `x_query_blocks::x_bp_lookup_spare`); for exact blastp
 //! (`AaLookupTable`) where its table is built in place (`x_query_blocks::x_bp_aa_spares`), not
 //! with `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases, which would come earlier).
-//! Not at one thread, for the search of all queries, or for the query chunks of a split batch (each builds its own table inside its block's search). The last block
-//! starts no build.
+//! Not at one thread or for the search of all queries. The query chunks of a split batch build their
+//! own tables inside their block's search; the last of a block's chunks starts the next block's
+//! build (above). The last block starts no build.
 //!
 //! Errors and refusals: the task keeps nothing but a table. A build that fails or refuses (its
 //! `Err` is dropped), that the reference builder would make (`TooLarge`), or whose vectors lack the
@@ -105,7 +110,9 @@
 //! tables and the appends at the end of the build. All of the table's vectors are allocated by the block
 //! search's thread, never by the pool's task (a pool thread's allocations stay in its own glibc
 //! arena, which keeps them resident after they are freed): that thread makes the second spare hold
-//! vectors with the room for the largest table so far plus a half (`x_room_of`): for blastp-fast
+//! vectors with the room for the next block's table: the most hits (exact blastp: overflow entries)
+//! its words can add, as the block plan counted them (`x_query_blocks::x_block_appends`), and at
+//! least the largest table so far plus a half (`x_room_of`): for blastp-fast
 //! after block i's preliminary stage, block i's table's vectors (`x_make_room_flat`,
 //! `XFlatSpare::x_make_room`: `hits` grown in place where short, to twice the largest table's hits;
 //! a PV array where the spare has none); for exact blastp when block i's table is ready
@@ -234,7 +241,7 @@ pub(super) struct XAheadBlock<'a> {
     table_taken_later: bool,
 }
 
-impl XAheadBlock<'_> {
+impl<'a> XAheadBlock<'a> {
     // No NCBI counterpart: chooses LOSAT's path; it changes no value NCBI computes.
     /// Nothing built ahead and nothing to start: the search as without the switch.
     pub(super) fn none() -> Self {
@@ -284,6 +291,27 @@ impl XAheadBlock<'_> {
             }
             (lookup, _) => Some(lookup),
         }
+    }
+
+    // No NCBI counterpart: scheduling and memory only (module header, item SC2d); it changes no
+    // value NCBI computes.
+    /// What the search of the block's last table gets where that table is not the block's own: the
+    /// last query chunk of a split batch of the block (`search_split_query_batches`), whose table is
+    /// ready after the block's scan and the other chunks' builds: the start of the next block's build
+    /// (`lookup_ready`) and the second part's vectors (`after_prelim`), nothing built ahead.
+    pub(super) fn x_last_table(&self) -> XAheadBlock<'a> {
+        XAheadBlock {
+            prebuilt: None,
+            start_next: self.start_next,
+            after_prelim_flat: self.after_prelim_flat,
+            table_taken_later: self.table_taken_later,
+        }
+    }
+
+    // No NCBI counterpart: scheduling only; it changes no value NCBI computes.
+    /// Whether this search's table starts the next block's build (`lookup_ready`).
+    pub(super) fn x_starts_next(&self) -> bool {
+        self.start_next.is_some()
     }
 
     // No NCBI counterpart: memory only (LOSAT_X_BPLKDROP); it changes no value NCBI computes.
@@ -531,21 +559,27 @@ const X_MIN_HITS_ROOM: usize = 1 << 18;
 
 // No NCBI counterpart: the room for the next table's hits (module header); it changes no value NCBI
 // computes.
-/// The room for the next block's table, from a table of `hits` hits (exact blastp: overflow entries)
-/// and the most of a table so far (`largest_hits`, raised to `hits`): the room asked (the largest
-/// plus a half, at least `X_MIN_HITS_ROOM`) and the capacity a vector short of it is given (twice
-/// the largest, at least the room).
-fn x_room_of(largest_hits: &Cell<usize>, hits: usize) -> (usize, usize) {
+/// The room for the next block's table, from a table of `hits` hits (exact blastp: overflow entries),
+/// the most of a table so far (`largest_hits`, raised to `hits`) and the next block's words
+/// (`next_words`: the most hits or overflow entries its table can hold, as the block plan counted
+/// them, `x_query_blocks::x_block_appends`; 0 where it counted none): the room asked (the next
+/// block's words, and at least the largest plus a half and `X_MIN_HITS_ROOM`) and the capacity a
+/// vector short of it is given (twice the largest, at least the room). The next block's words bound
+/// its table whatever the tables before it hold: a block whose batch is split holds none of that
+/// batch's words in its own table (`CallTableWords`), so the next block's table can pass the
+/// largest so far by more than a half.
+fn x_room_of(largest_hits: &Cell<usize>, hits: usize, next_words: usize) -> (usize, usize) {
     let largest = largest_hits.get().max(hits);
     largest_hits.set(largest);
-    let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+    let room = (largest + largest / 2).max(X_MIN_HITS_ROOM).max(next_words);
     (room, (2 * largest).max(room))
 }
 
 // No NCBI counterpart: which thread allocates the next table's vectors (module header); it changes
 // no value NCBI computes.
 /// On the block's thread, when its exact table `lookup` is ready: makes `XAaSpares` hold vectors with
-/// the room for the next block's table (`x_room_of`), allocating here what is short. `false` where
+/// the room for the next block's table (`x_room_of`, of the next block's `next_words`), allocating
+/// here what is short. `false` where
 /// the block's table is not an exact one with its spares (no build ahead then; a flat table's room is
 /// made after the block's preliminary stage, `x_make_room_flat`).
 #[cfg_attr(
@@ -562,6 +596,7 @@ fn x_make_room(
     pool: &SearchPool<'_>,
     lookup: &BlastpRuntimeLookup,
     largest_hits: &Cell<usize>,
+    next_words: usize,
 ) -> bool {
     match lookup {
         // Exact blastp: the backbone and the pv array have the sizes of the block's own table (fixed
@@ -575,7 +610,7 @@ fn x_make_room(
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let (room, grown) = x_room_of(largest_hits, table.overflow.len());
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_words);
             spares.x_make_room(table.backbone.len(), table.pv.len(), room, grown);
             true
         }
@@ -585,7 +620,7 @@ fn x_make_room(
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let (room, grown) = x_room_of(largest_hits, table.overflow.len());
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_words);
             spares.x_make_room16(table.backbone.len(), table.pv.len(), room, grown);
             true
         }
@@ -597,7 +632,8 @@ fn x_make_room(
 // value NCBI computes.
 /// On the block's thread, after its preliminary stage: the second spare takes the `starts` and
 /// `hits` of the block's flat table `table` (which nothing reads any more) and gets the room for the
-/// next block's table as `x_make_room` makes it (the hits grown in place where short). `false` where
+/// next block's table of `next_words` as `x_make_room` makes it (the hits grown in place where
+/// short). `false` where
 /// the block search has no spares (the table is dropped).
 #[cfg_attr(
     not(all(
@@ -613,12 +649,13 @@ fn x_make_room_flat(
     pool: &SearchPool<'_>,
     table: XFlatCompressedLookup,
     largest_hits: &Cell<usize>,
+    next_words: usize,
 ) -> bool {
     let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
         return false;
     };
     let backbone_size = table.starts.len().saturating_sub(1);
-    let (room, grown) = x_room_of(largest_hits, table.hits.len());
+    let (room, grown) = x_room_of(largest_hits, table.hits.len(), next_words);
     ahead.give(table);
     ahead.x_make_room(block, backbone_size, room, grown);
     true
@@ -912,23 +949,26 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         if let Some(next) = next {
             let (args, pool, batch_size, largest_hits) =
                 (self.args, self.pool, self.batch_size, &self.largest_hits);
+            // The most hits (exact blastp: overflow entries) of the next block's table (`x_room_of`).
+            let next_words = crate::algorithm::blastp::x_query_blocks::x_block_appends(pool, next);
             // Item SC2d: blastp-fast's flat table in two parts (module header).
             if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
                 let (result, built) = x_run_with_split_build_ahead(
                     move || x_flat_ahead_appends(args, next, batch_size, pool),
                     |part| x_flat_ahead_table(part, pool),
                     |start, vectors| {
-                        // On this thread, when the block's flat table is ready: part 1 (the appends
+                        // On this thread, when the block's last flat table is ready (its own, or
+                        // its last query chunk's, `XAheadBlock::x_last_table`): part 1 (the appends
                         // pass) is spawned.
                         let start_next = |lookup: &BlastpRuntimeLookup| {
                             if matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
                                 start();
                             }
                         };
-                        // After the block's preliminary stage: its table's vectors go to part 2
-                        // (the stripes pass).
+                        // After the block's preliminary stage (that of its last query chunk): the
+                        // last table's vectors go to part 2 (the stripes pass).
                         let after_prelim_flat = |table: XFlatCompressedLookup| {
-                            if x_make_room_flat(pool, table, largest_hits) {
+                            if x_make_room_flat(pool, table, largest_hits, next_words) {
                                 vectors();
                             }
                         };
@@ -953,10 +993,11 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             let (result, built) = x_run_with_build_ahead(
                 move || x_build_ahead(args, next, batch_size, pool),
                 |spawn| {
-                    // On this thread, when the block's table is ready: the next table's vectors are
-                    // made ready here, then its build is spawned.
+                    // On this thread, when the block's last table is ready (its own, or its last
+                    // query chunk's): the next table's vectors are made ready here, then its build
+                    // is spawned.
                     let start_next = |lookup: &BlastpRuntimeLookup| {
-                        if x_make_room(pool, lookup, largest_hits) {
+                        if x_make_room(pool, lookup, largest_hits, next_words) {
                             spawn();
                         }
                     };

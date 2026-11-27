@@ -834,7 +834,7 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
                         0 => {
                             let part = x_flat_ahead_appends(&args, &next, batch_size, &pool);
                             assert!(
-                                x_make_room_flat(&pool, first_table, &largest),
+                                x_make_room_flat(&pool, first_table, &largest, 0),
                                 "{no_spares}"
                             );
                             values(part.and_then(|part| x_flat_ahead_table(part, &pool)))
@@ -842,7 +842,7 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
                         // The vectors, then part 1 and part 2.
                         1 => {
                             assert!(
-                                x_make_room_flat(&pool, first_table, &largest),
+                                x_make_room_flat(&pool, first_table, &largest, 0),
                                 "{no_spares}"
                             );
                             let part = x_flat_ahead_appends(&args, &next, batch_size, &pool);
@@ -855,7 +855,7 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
                                 |start, vectors| {
                                     start();
                                     assert!(
-                                        x_make_room_flat(&pool, first_table, &largest),
+                                        x_make_room_flat(&pool, first_table, &largest, 0),
                                         "{no_spares}"
                                     );
                                     vectors();
@@ -869,7 +869,7 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
                 // build is spawned.
                 first_lookup => {
                     assert!(
-                        x_make_room(&pool, &first_lookup, &Cell::new(0)),
+                        x_make_room(&pool, &first_lookup, &Cell::new(0), 0),
                         "{no_spares}"
                     );
                     x_run_with_build_ahead(

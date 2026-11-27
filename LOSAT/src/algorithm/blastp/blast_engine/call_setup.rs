@@ -591,8 +591,14 @@ pub(super) fn call_lookup(
         },
     };
     // EXPERIMENT (LOSAT_X_BPLKPAHEAD): this block's table is ready; the build of the next block's
-    // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`).
-    x_ahead.lookup_ready(&lookup);
+    // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`). Where a
+    // searched batch is split, the block's last table is its last chunk's, which starts it
+    // (`XAheadBlock::x_last_table`).
+    if !CallTableWords::of(args, &query_batches, query_lengths, query_chunk)
+        .is_ok_and(|words| words.splits())
+    {
+        x_ahead.lookup_ready(&lookup);
+    }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     // EXPERIMENT (LOSAT_X_BPQBLOCK): with the preliminary stage in blocks (`x_blocks`) this call
     // scans no subject (each block's call makes its own query and table), so it makes neither

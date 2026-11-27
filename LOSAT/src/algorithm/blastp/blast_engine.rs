@@ -7745,7 +7745,9 @@ fn x_block_search_refuses_nothing(
 // counter whose kept counts serve them all. Each block comes with its words (the sum of its
 // batches'), the most appends of its table's build (`x_query_blocks::x_block_appends`).
 // The standard table (`AaLookupTable`) has no overflow banks; its blocks are closed on their words
-// too (`x_aa_word_blocks`, item SC8b), and come with no words (its builds reserve nothing).
+// too (`x_aa_word_blocks`, item SC8b), and come with their words, which bound the overflow entries
+// of the block's table (the room of its build ahead, `x_lookup_ahead.rs` `x_room_of`; its builds
+// reserve nothing).
 // No NCBI counterpart: chooses LOSAT's path and blocks; it does not change any value NCBI computes.
 fn x_word_blocks(
     args: &ResolvedBlastpArgs,
@@ -7761,11 +7763,10 @@ fn x_word_blocks(
         CompressedWordCount, COMPRESSED_HITS_PER_BACKBONE_CELL,
     };
     if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable {
-        return Some((
+        return Some(
             x_aa_word_blocks(args, queries, query_input, batch_size, pool)
-                .unwrap_or_else(|| blocks.to_vec()),
-            Vec::new(),
-        ));
+                .unwrap_or_else(|| (blocks.to_vec(), Vec::new())),
+        );
     }
     // The threshold as the table is built (`run_call`), with the words of the search's
     // matrix (`blastp_matrix_compressed_lookup` builds another matrix's table).
@@ -7826,16 +7827,28 @@ fn x_word_blocks(
         super::x_query_blocks::x_bp_qblock()?,
         Some((&batch_words, most)),
     )?;
-    // A block is whole batches, in order (`x_query_blocks`).
+    let block_words = x_block_words_of(&query_batches, &batch_words, &blocks);
+    Some((blocks, block_words))
+}
+
+// No NCBI counterpart: the sums of `x_word_blocks` and `x_aa_word_blocks`; they change no value NCBI
+// computes.
+/// The words of each of `blocks`, from those of each of `query_batches` (`batch_words`). A block is
+/// whole batches, in order (`x_query_blocks`).
+fn x_block_words_of(
+    query_batches: &[seq_range::RangedBatch],
+    batch_words: &[u64],
+    blocks: &[std::ops::Range<usize>],
+) -> Vec<u64> {
     let mut block_words = vec![0u64; blocks.len()];
     let mut block = 0;
-    for (batch, &words) in query_batches.iter().zip(&batch_words) {
+    for (batch, &words) in query_batches.iter().zip(batch_words) {
         while blocks[block].end < batch.searched.end {
             block += 1;
         }
         block_words[block] = block_words[block].saturating_add(words);
     }
-    Some((blocks, block_words))
+    block_words
 }
 
 // No NCBI counterpart: where the counts of `x_word_blocks` run; it changes no value NCBI computes.
@@ -7889,8 +7902,9 @@ const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
 // table takes at most 16 MiB of offsets ends on its letters (BLOSUM62's words of 2 and 3 at their
 // default thresholds: below 2 million words in 50,000 letters, 7-9 MiB); a table of 4-letter words
 // takes one batch or a few. A plan of one block of letters comes here too where its words pass the
-// most (`x_aa_one_block_splits`). `None` where the word size has no counter (none of the standard
-// table's).
+// most (`x_aa_one_block_splits`). Each block comes with its words (the sum of its batches'), which
+// bound its table's overflow entries. `None` where the word size has no counter (none of the
+// standard table's).
 // No NCBI counterpart: chooses LOSAT's blocks; it does not change any value NCBI computes.
 fn x_aa_word_blocks(
     args: &ResolvedBlastpArgs,
@@ -7898,7 +7912,7 @@ fn x_aa_word_blocks(
     query_input: &seq_range::QueryInput,
     batch_size: u32,
     pool: &crate::utils::threading::SearchPool<'_>,
-) -> Option<Vec<std::ops::Range<usize>>> {
+) -> Option<(Vec<std::ops::Range<usize>>, Vec<u64>)> {
     let counter = x_aa_word_counter(args)?;
     let query_batches = query_input.batches(batch_size);
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
@@ -7911,12 +7925,14 @@ fn x_aa_word_blocks(
             0
         }
     });
-    super::x_query_blocks::x_query_blocks(
+    let blocks = super::x_query_blocks::x_query_blocks(
         &query_batches,
         &lengths,
         super::x_query_blocks::x_bp_qblock()?,
         Some((&batch_words, x_aa_most_words(&counter, &batch_words))),
-    )
+    )?;
+    let block_words = x_block_words_of(&query_batches, &batch_words, &blocks);
+    Some((blocks, block_words))
 }
 
 // No NCBI counterpart: the counts of `x_aa_word_blocks`; they change no value NCBI computes.
@@ -9077,7 +9093,9 @@ fn check_blastp_environment(app: BlastpApp, fasta_subjects: bool) -> Result<()> 
 // Spouge's FSC the preliminary cutoffs and E-values do not read them; psiblast's `-sum_stats
 // true` links with them, and without the Gumbel block (`OLD_FSC`) the cutoffs read them. A
 // chunk whose contexts all fail the Karlin-Altschul setup finds nothing, as NCBI ignores its
-// error.
+// error. EXPERIMENT (LOSAT_X_BPLKPAHEAD): in the block search the last chunk searched here has the
+// block's last table, whose search starts the next block's build (`x_ahead`,
+// `XAheadBlock::x_last_table`).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-221
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:173-181
@@ -9098,6 +9116,7 @@ fn search_split_query_batches(
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     x_prolog: bool,
     call: Option<&CallRequests<'_>>,
+    x_ahead: &x_lookup_ahead::XAheadBlock<'_>,
 ) -> Result<()> {
     use crate::algorithm::blastp::protein_query_split::{
         split_protein_batch, ChunkStep, SplitBatchSteps,
@@ -9112,13 +9131,22 @@ fn search_split_query_batches(
     // split by the lengths of its searched queries (their intervals with `-query_loc`). A batch of
     // invalid queries only is not searched (local_blast.cpp:177-180, cited at
     // `split_steps::call_steps`), so it is not split either.
-    for range in query_input
+    let batches: Vec<_> = query_input
         .batches(batch_size)
         .into_iter()
         .map(|batch| batch.searched)
         .filter(|searched| !searched.is_empty() && !query_batch_skipped[searched.start])
-    {
-        let Some(chunks) = split_protein_batch(&query_lengths[range.clone()], sizes) else {
+        .map(|range| {
+            let chunks = split_protein_batch(&query_lengths[range.clone()], sizes);
+            (range, chunks)
+        })
+        .collect();
+    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): the last chunk of the last split batch (its batch's index).
+    let last_split = batches
+        .iter()
+        .rposition(|(_, chunks)| chunks.as_ref().is_some_and(|chunks| !chunks.is_empty()));
+    for (index, (range, chunks)) in batches.into_iter().enumerate() {
+        let Some(chunks) = chunks else {
             // A later round that the round driver split (`psi_round::run_queries`, the same
             // lengths and sizes) has no PSSM words to search: its chunks must run here.
             anyhow::ensure!(
@@ -9148,7 +9176,7 @@ fn search_split_query_batches(
             .clone()
             .map(option_space_of_query)
             .collect::<Result<_>>()?;
-        for chunk in &chunks {
+        for (chunk_index, chunk) in chunks.iter().enumerate() {
             let parts = split_steps::chunk_parts(
                 args,
                 (query_records, input_records),
@@ -9191,7 +9219,11 @@ fn search_split_query_batches(
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): a chunk of a block after the first follows the
                 // first block's outfmt 0 prolog (`preliminary_search_error`).
                 &BlastpReports::prelim_only(x_prolog),
-                x_lookup_ahead::XAheadBlock::none(),
+                if Some(index) == last_split && chunk_index + 1 == chunks.len() {
+                    x_ahead.x_last_table()
+                } else {
+                    x_lookup_ahead::XAheadBlock::none()
+                },
             );
             // A chunk's search that fails is its batch's (`preliminary_search_error`): the
             // requests of the call's batches up to it come before the error (NCBI searched the
@@ -9731,9 +9763,7 @@ fn x_bp_aa_vectors_reused(table: &crate::algorithm::tblastx::lookup::BlastAaLook
 /// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
 /// redo, instead of at the search's end. Item SC2d: first, where the next block's flat table is built
 /// ahead, the table's vectors go to that build, which goes on beside the rest of this block's search
-/// (`XAheadBlock::after_prelim`; `None`). Called once per call (`run_call`): where a searched batch
-/// is split, after the call's scan and before the batch's chunks build their own tables (the call's
-/// table holds none of their words, `CallTableWords`), else after the preliminary stage.
+/// (`XAheadBlock::after_prelim`; `None`).
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -10472,6 +10502,14 @@ fn run_call(
     // lists merge into the batch's (`search_split_query_batches`).
     if let Some(prelim) = prelim {
         prelim.hand_off(preliminary_hit_lists, x_compact_hit_lists);
+        // EXPERIMENT (LOSAT_X_BPLKPAHEAD), item SC2d: the last query chunk of its block's split batch
+        // (`XAheadBlock::x_last_table`): no scan of the block runs any more; the pool's arrays of
+        // initial hits are freed and the chunk's flat table's vectors go to the next block's build,
+        // as a block's own do below. Another chunk's table is freed here.
+        if x_ahead.x_starts_next() {
+            x_ih_pool::release();
+        }
+        drop(x_ahead.after_prelim(lookup));
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
         return Ok(());
     }
@@ -10493,17 +10531,12 @@ fn run_call(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
     // NCBI frees each table before it builds the next. Where a searched batch of the call is split,
     // its chunks build their own tables now (`search_split_query_batches`) and the call's scan is
-    // over: nothing reads the call's table any more (it holds no word of that batch,
-    // `CallTableWords`), so it is done with here, before the chunks' tables, as it is after the
-    // preliminary stage below where no searched batch is split (`x_lookup_after_prelim`: freed, or
-    // its vectors given to the next block's build ahead, or kept for a later block's build).
-    let chunks_follow = CallTableWords::of(&args, &query_batches, &query_lengths, false)
-        .is_ok_and(|words| words.splits());
-    let lookup = if chunks_follow {
-        x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead)
-    } else {
-        Some(lookup)
-    };
+    // over, so the call's table goes first (it holds no word of that batch, `CallTableWords`).
+    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): the call's last table is then its last chunk's, whose search
+    // starts the next block's build and gives it its table's vectors (`XAheadBlock::x_last_table`).
+    let lookup = (!CallTableWords::of(&args, &query_batches, &query_lengths, false)
+        .is_ok_and(|words| words.splits()))
+    .then_some(lookup);
     search_split_query_batches(
         &args,
         query_records,
@@ -10520,6 +10553,7 @@ fn run_call(
         &mut x_compact_hit_lists,
         reports.x_prolog,
         reports.call_requests,
+        &x_ahead,
     )?;
     prelim_run::close_stream(&args, &mut preliminary_hit_lists, &mut x_compact_hit_lists);
     let t_search = crate::utils::xtiming::clock();
@@ -10608,13 +10642,10 @@ fn run_call(
     x_ih_pool::release();
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
-    // Item SC2d: a flat table's vectors go to the next block's build here. Where a searched batch
-    // is split, this was done before its chunks (above).
-    let lookup = if chunks_follow {
-        lookup
-    } else {
-        lookup.and_then(|lookup| x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead))
-    };
+    // Item SC2d: a flat table's vectors go to the next block's build here (where a searched batch is
+    // split, the call's table went before the chunks and the last chunk's goes to that build).
+    let lookup =
+        lookup.and_then(|lookup| x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead));
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every

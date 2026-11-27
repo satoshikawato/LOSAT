@@ -1776,8 +1776,7 @@ pub(super) fn write_custom_tabular(
     // its own (the values of the batch's first query repeated for each of its occurrences, the
     // rows its query with letters', `PhiBatch`; without NCBI's Karlin block one result without a
     // Seq-align set); outfmt 20's line of the field names once, and outfmt 7's last line counts 0
-    // queries. The texts of the subjects' loads are not written there (an open point of PS8a:
-    // they are keyed by query).
+    // queries. The formatter of each occurrence writes its taxonomy warning and its rows' texts.
     if let Some(phi) = phi.as_ref() {
         // Outfmt 20's line of the field names is the prolog's, before the first query's messages.
         if tab.prolog {
@@ -1875,11 +1874,19 @@ pub(super) fn write_custom_tabular(
                 epilog: (reports.epilog && last).then_some(0),
                 ..tab
             };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2049-2054
+            // Each occurrence's report is made by a formatter of its own, which writes the
+            // taxonomy database's warning when it is made and the texts of its rows' lookups;
+            // the queries' own posts were written above (`before_query`), none is keyed by an
+            // occurrence.
+            let mut occurrence_posts = warnings
+                .as_mut()
+                .map(|warnings| QueryWarnings::of_posts(&[], None, &mut *warnings.sink));
             tabular::write_blastp_tabular(
                 &phi_tab,
                 &shown,
                 &mut writer,
-                None,
+                occurrence_posts.as_mut(),
                 probe.as_mut(),
                 rows.as_mut(),
             )?;

@@ -1862,8 +1862,13 @@ pub fn write_hsp_info<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3598
     // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
     let expect = expect_label(hit.sum_n);
-    // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
-    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
+    // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise, and the
+    // rounds after PHI-BLAST's round 1 (`phiblastp`, item PS8b) have the composition-based methods
+    // of the command line.
+    if matches!(
+        config.program.as_str(),
+        "blastp" | "psiblast" | "rpsblast" | "phiblastp"
+    ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
         let method = match hit.comp_adjust_method {
             Some(1) => ", Method: Composition-based stats.",

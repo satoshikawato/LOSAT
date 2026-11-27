@@ -2311,7 +2311,9 @@ impl BlastpReport {
         (args.app == BlastpApp::Blastp
             || (args.app == BlastpApp::Psiblast && !psi_reads && args.psi_search.is_none()))
             && formats.iter().all(|format| match *format {
-                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
+                BlastpReport::Seqalign(_) => true,
+                // PHI-BLAST's archive is its round's outfmt 0 report (`write_phi_archive_round`).
+                BlastpReport::Archive => args.phi.is_none(),
                 BlastpReport::CustomTabular(spec) => {
                     tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
                 }
@@ -10031,10 +10033,13 @@ fn resolve_seen_queries(
     can_show: bool,
 ) -> Result<()> {
     let psi_reads = BlastpReport::psi_reads(args, reports.psi_round);
+    // PHI-BLAST's archive is its round's outfmt 0 report (`write_phi_archive_round`), which reads
+    // the subjects' Bioseqs.
+    let phi_archive = args.phi.is_some() && requested_formats.contains(&BlastpReport::Archive);
     let (Some(titles), Some(scopes), true) = (
         listed_titles,
         reports.query_scopes,
-        BlastpReport::resolve_subjects(requested_formats, args.app, psi_reads),
+        phi_archive || BlastpReport::resolve_subjects(requested_formats, args.app, psi_reads),
     ) else {
         return Ok(());
     };

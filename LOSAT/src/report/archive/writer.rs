@@ -383,8 +383,15 @@ fn write_request_body<E: Encoder>(
     out.enc.member("program", 0);
     out.enc.visible_str(request.program.as_bytes());
     out.enc.end_member();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:535-560
+    // A request of a PSSM is a `psi` request whatever its handle's service (`x_Process_Pssm`):
+    // also psiblast `-phi_pattern`'s later rounds, whose handle is PHI-BLAST's (item PS8b).
+    let service = match batch.queries {
+        RequestQueries::Pssm(_) => "psi",
+        _ => request.service,
+    };
     out.enc.member("service", 1);
-    out.enc.visible_str(request.service.as_bytes());
+    out.enc.visible_str(service.as_bytes());
     out.enc.end_member();
 
     out.enc.member("queries", 2);

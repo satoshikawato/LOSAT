@@ -1360,6 +1360,8 @@ pub(super) fn read_shown_residues(
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which
     // read the letters only to recount the HSPs whose query or subject has an O, those of the
     // subjects with an O and of the HSPs whose query has one; every final subject's otherwise.
+    // PHI-BLAST's archive is its round's outfmt 0 report (`write_phi_archive_round`), which renders
+    // the alignments.
     if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
         let residues = if !x_listed_lean {
             database::XShownResidues::Listed
@@ -1367,15 +1369,15 @@ pub(super) fn read_shown_residues(
             && args.psi_pssm.is_none()
             && args.rps_search.is_none()
             && reports.psi_round.is_none()
-            && requested_formats.iter().all(|outfmt| {
-                matches!(
+            && requested_formats.iter().all(|outfmt| match outfmt {
+                BlastpReport::Archive => setup.phi.is_none(),
+                _ => matches!(
                     outfmt,
                     BlastpReport::Seqalign(_)
-                        | BlastpReport::Archive
                         | BlastpReport::Text(
                             OutputFormat::Tabular | OutputFormat::TabularWithComments
                         )
-                )
+                ),
             })
         {
             database::XShownResidues::WithO

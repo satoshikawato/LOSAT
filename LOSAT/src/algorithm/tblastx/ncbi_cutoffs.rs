@@ -148,9 +148,9 @@ pub fn try_compute_eff_lengths_tblastx(
 /// CRITICAL: Uses ceil() rounding, NOT trunc.
 ///
 /// `BlastKarlinEtoS_simple`, with its check of the block: a negative Lambda, K or H gives
-/// `BLAST_SCORE_MIN`, which no caller's cutoff of 1 is raised to (`BLAST_Cutoffs`, blast_stat.c:4126-4129).
-/// A PSSM's file can give such a block (`tblastn -in_pssm`, psiblast's `-in_pssm`); the other
-/// blocks are valid.
+/// `BLAST_SCORE_MIN`, below the cutoff of 1 that `BLAST_Cutoffs` starts from, so the cutoff stays 1
+/// (blast_stat.c:4126-4129). A PSSM's file can give such a block (`tblastn -in_pssm`, psiblast's
+/// `-in_pssm`); the other blocks are valid.
 ///
 /// # Arguments
 /// * `evalue` - Expected value threshold

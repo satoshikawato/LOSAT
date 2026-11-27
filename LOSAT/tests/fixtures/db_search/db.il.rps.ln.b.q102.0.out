@@ -1,0 +1,58 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= q102
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 Unknown                                                       341     3e-126
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.0    5.4   
+
+
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.0 bits (25),  Expect = 5.4, Method: Composition-based stats.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 1/14 (7%)
+
+Query  50   DLFPAIWVSDLFME  63
+            D FP I V D+ M+
+Sbjct  103  DYFPEI-VCDINMQ  115
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.402    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0500    0.140     1.90     42.6     43.6 
+
+Effective search space used: 74228
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

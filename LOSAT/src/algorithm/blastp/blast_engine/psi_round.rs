@@ -101,16 +101,11 @@ pub(super) fn search_rounds(
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
-            // The request of a batch that NCBI made a query factory of, before any output; NCBI's
-            // stream that throws while it writes the request (`encoder::NullElement`) ends the
-            // run after the prolog (psiblast_app.cpp:506, 340).
-            if let Err(error) = write_stop_request() {
-                if error.is::<crate::cli::NativeError>() {
-                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
-                }
-                return Err(error);
-            }
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+            // The prologs of the first report, then the request of a batch that NCBI made a query
+            // factory of; NCBI's stream that throws while it writes the request
+            // (`encoder::NullElement`) ends the run after the prolog (psiblast_app.cpp:506, 340).
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+            write_stop_request()?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
             // of `-in_pssm` in round 1)
@@ -355,7 +350,13 @@ fn run_queries(
                         });
                     if let Err(error) = written {
                         if calls == 0 {
-                            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                            write_pairwise_prologs(
+                                args,
+                                subject_source,
+                                subject_label,
+                                outputs,
+                                false,
+                            )?;
                         }
                         return Err(error);
                     }
@@ -512,13 +513,29 @@ fn run_queries(
                     let failure = error
                         .downcast::<ErrorAfterBatchReports>()
                         .expect("the error was checked to be an ErrorAfterBatchReports");
+                    if calls == 0 {
+                        write_pairwise_prologs(
+                            args,
+                            subject_source,
+                            subject_label,
+                            outputs,
+                            false,
+                        )?;
+                    }
+                    if round == 1 {
+                        outputs.diagnostics.write_all(&batches.warnings[query])?;
+                        // NCBI's posts of the bytes replaced in the query's request, which
+                        // round 1's report did not place.
+                        super::write_request_posts(args, &mut *outputs.diagnostics)?;
+                    }
                     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262, 572-576
                     // NCBI's warning of its first read of a UTF8String header, where the round's
                     // Seq-aligns made it before the failure (once per run: a round before posted
                     // its own), then the posts of the titles that its Seq-aligns read before the
-                    // failure. Checked before the round writes its prolog or warnings so a refusal
-                    // of the failed round's title posts (e.g. both 803.10 and 803.7 in one round)
-                    // stops cleanly when nothing has been written yet.
+                    // failure. Made after the prolog, the warnings and the request's posts, as
+                    // the search of one round makes them (`search`): LOSAT's refusal of the
+                    // failed round's title posts (e.g. both 803.10 and 803.7 in one round) comes
+                    // where its other refusals at a query batch come, after what NCBI writes first.
                     let database = subject_source.database();
                     let utf8 = database.and_then(|database| {
                         failure
@@ -530,15 +547,6 @@ fn run_queries(
                         Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
                         None => Default::default(),
                     };
-                    if calls == 0 {
-                        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
-                    }
-                    if round == 1 {
-                        outputs.diagnostics.write_all(&batches.warnings[query])?;
-                        // NCBI's posts of the bytes replaced in the query's request, which
-                        // round 1's report did not place.
-                        super::write_request_posts(args, &mut *outputs.diagnostics)?;
-                    }
                     for posts in utf8.iter().chain([&titled]) {
                         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     }

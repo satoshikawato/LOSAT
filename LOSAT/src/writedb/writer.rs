@@ -1306,9 +1306,10 @@ impl WriteDb {
     }
 
     /// Every file of the build written so far: those of `list_files` and those that NCBI's
-    /// `ListFiles` leaves out (the other files of the LMDB writers, the alias file of a single
-    /// volume with GI masks, the GI-mask files). A build that LOSAT refuses removes them all
-    /// (`BuildDatabase::erase_after_refusal`); a failed build of NCBI's leaves the others.
+    /// `ListFiles` leaves out (the other files of the LMDB writers and their lock files, the
+    /// alias file of a single volume with GI masks, the GI-mask files). A build that LOSAT
+    /// refuses removes them all (`BuildDatabase::erase_after_refusal`); a failed build of
+    /// NCBI's leaves the others.
     pub(crate) fn every_file(&self) -> Vec<Vec<u8>> {
         let mut files = self.list_files();
         if self.version == DbVersion::V5 {
@@ -1319,6 +1320,8 @@ impl WriteDb {
                     lmdb_file_name(&lmdb, "os"),
                     lmdb_file_name(&lmdb, "ot"),
                     lmdb_file_name(&taxdb, "to"),
+                    lmdb_file_name(&lmdb, "db-lock"),
+                    lmdb_file_name(&lmdb, "tf-lock"),
                     taxdb,
                 ];
                 files.extend(

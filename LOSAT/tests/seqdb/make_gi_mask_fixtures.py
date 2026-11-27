@@ -30,7 +30,8 @@ JSON writer that makeblastdb's own metadata step runs). Everything else is NCBI'
 Output files:
   in/                         the inputs: FASTA files (deterministic, from fixed seeds) and the mask
                               files that dustmasker, segmasker and convert2blastmask 2.17.0 wrote
-                              for them (`-parse_seqids`, ASN.1 binary or text); `acc_dup.asnt` is
+                              for them (`-parse_seqids`, ASN.1 binary or text); `nucl.asn` is
+                              nucl.fa as ASN.1 text (`asn_of_records`); `acc_dup.asnt` is
                               written by hand; `ncbi_single.nal` is the alias file that makeblastdb
                               wrote for a single-volume database with `-gi_mask` (`{C}` for its
                               directory), which LOSAT never writes: the cases x10 put it beside
@@ -99,6 +100,34 @@ def wrap(s, w=60):
     return "\n".join(s[i:i + w] for i in range(0, len(s), w))
 
 
+def asn_of_records(records):
+    """The records (FASTA definition line, sequence) as one Bioseq-set of raw DNA Bioseqs in ASN.1
+    text: the Seq-ids of the first definition line (gi, gb, emb, ref, lcl), its title, the
+    sequence. The input of the twin of a FASTA case as `-input_type asn1_txt` (w25a)."""
+    kinds = {"gb": "genbank", "emb": "embl", "ref": "other"}
+    items = []
+    for line, seq in records:
+        head, _, title = line.split("\x01")[0].partition(" ")
+        parts = head.split("|")
+        ids = []
+        i = 0
+        while i < len(parts):
+            if parts[i] == "gi":
+                ids.append(f"gi {parts[i + 1]}")
+                i += 2
+            elif parts[i] == "lcl":
+                ids.append(f'local str "{parts[i + 1]}"')
+                i += 2
+            else:
+                acc, _, ver = parts[i + 1].partition(".")
+                ids.append(f'{kinds[parts[i]]} {{ accession "{acc}", version {ver} }}')
+                i += 3
+        items.append(f"    seq {{\n      id {{ {', '.join(ids)} }},\n      descr {{ title \"{title}\" }},\n"
+                     f"      inst {{ repr raw, mol dna, length {len(seq)}, seq-data iupacna \"{seq}\" }}\n"
+                     "    }")
+    return "Bioseq-set ::= {\n  seq-set {\n" + ",\n".join(items) + "\n  }\n}\n"
+
+
 def write_inputs(d):
     """The FASTA inputs of the survey (M/m4c/scripts/mkinputs.py, seed 4; b2.sh, seed 7)."""
     rng = random.Random(4)
@@ -124,6 +153,7 @@ def write_inputs(d):
     with open(d / "nucl.fa", "w") as f:
         for h, s in nucl:
             f.write(">" + h + "\n" + wrap(s) + "\n")
+    (d / "nucl.asn").write_text(asn_of_records(nucl))
     # nucl2.fa and the next records of mkinputs.py keep the generator's sequence.
     rnd(150), rnd(150), rnd(150), rnd(150)
     with open(d / "nogi.fa", "w") as f:
@@ -291,6 +321,9 @@ CASES = [
                                 "-gi_mask_name", "x,x"]),
     ("w25b", "refuse", DN2, N + ["-mask_data", "dust_nucl.asnb,dust10_nucl.asnb", "-gi_mask",
                                  "-gi_mask_name", "x,./x"]),
+    ("w25a", "refuse", "nucl.asn dust_nucl.asnb dust10_nucl.asnb",
+     ["-in", "nucl.asn", "-input_type", "asn1_txt"] + N[2:]
+     + ["-mask_data", "dust_nucl.asnb,dust10_nucl.asnb", "-gi_mask", "-gi_mask_name", "x,x"]),
     ("w26", "same", DN, N + ["-mask_data", "dust_nucl.asnb,dust_nucl.asnb"] + GM),
     ("w27", "same", DN, N + ["-mask_data", "dust_nucl.asnb", "-gi_mask", "-gi_mask_name", ""]),
     ("w28", "same", DN, N + ["-mask_data", "dust_nucl.asnb", "-gi_mask", "-gi_mask_name", "a,"]),

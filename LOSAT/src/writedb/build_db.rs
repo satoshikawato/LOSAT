@@ -928,7 +928,15 @@ impl<'a> BuildDatabase<'a> {
         };
         match result {
             Err(error) if !error.is_closed_pipe() => match self.end_build(true, warn) {
-                Err(stop) if stop.is_closed_pipe() => Err(stop),
+                Err(stop) if stop.is_closed_pipe() => {
+                    // A refusal of LOSAT's leaves no file of the build, also where a closed pipe
+                    // ends the run at the log of that `EndBuild` (makeblastdb removes them
+                    // after the refusal it returns otherwise).
+                    if error.is_losat_own() {
+                        self.erase_after_refusal();
+                    }
+                    Err(stop)
+                }
                 // The error of the build is the one already in hand.
                 _ => Err(error),
             },
@@ -1348,11 +1356,10 @@ impl<'a> BuildDatabase<'a> {
         messages
     }
 
-    /// Closes the writer and removes every file of the build without writing `EndBuild`'s log
-    /// lines, used when a LOSAT refusal stops an ASN.1 build so stdout matches what NCBI wrote
-    /// before that point and no file of the build remains: those that NCBI's `ListFiles` leaves
-    /// out too (`WriteDb::every_file`; the LMDB writers' other files of a version 5 database
-    /// that has a sequence).
+    /// Closes the writer, when it is open, without writing `EndBuild`'s log lines, and removes
+    /// every file of the build: those that NCBI's `ListFiles` leaves out too
+    /// (`WriteDb::every_file`). The end of a build that LOSAT refuses, whatever its input and
+    /// wherever the refusal comes (`makeblastdb::is_losat_error`): no file of the build remains.
     pub(crate) fn erase_after_refusal(&mut self) {
         // The writers that a failed close left alive write their files when they are destroyed:
         // before the removal, so that none of them remains.
@@ -1466,7 +1473,12 @@ impl<'a> BuildDatabase<'a> {
             .filter(|_| !erase && close_error.is_none());
         let erase = erase || close_error.is_some() || refusal.is_some();
         let vols = self.output_db.list_volumes();
-        let files = self.output_db.list_files();
+        // A build that LOSAT refuses leaves no file of its own (`erase_after_refusal`); NCBI's
+        // `EndBuild` removes those of `ListFiles`.
+        let files = match refusal {
+            Some(_) => self.output_db.every_file(),
+            None => self.output_db.list_files(),
+        };
         // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
         let remove_files = || {
             for file in &files {

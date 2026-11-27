@@ -181,6 +181,18 @@ impl WriteDbError {
         matches!(self, WriteDbError::ClosedPipe)
     }
 
+    /// Whether this is LOSAT's own error (a refusal, a failed write of LOSAT's), not one of
+    /// NCBI's: a build that ends with it leaves no file (`BuildDatabase::erase_after_refusal`).
+    pub(crate) fn is_losat_own(&self) -> bool {
+        matches!(
+            self,
+            WriteDbError::Unsupported(_)
+                | WriteDbError::OrdinalIdWithoutIds
+                | WriteDbError::Other(_)
+                | WriteDbError::Io { .. }
+        )
+    }
+
     /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
     pub(crate) fn creation(message: Vec<u8>) -> Self {
         match String::from_utf8(message) {

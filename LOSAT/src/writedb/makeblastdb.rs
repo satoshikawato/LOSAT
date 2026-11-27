@@ -304,20 +304,16 @@ fn raw_copy_error(error: RawCopyError) -> MakedbError {
     }
 }
 
-/// Whether `error` is LOSAT's own (a refusal, a failed write of LOSAT's), which removes the
-/// files of the build, rather than an error of NCBI's, after which makeblastdb's writer is
-/// closed when it is destroyed (`BuildDatabase::close_at_destruction`).
+/// Whether `error` is LOSAT's own (a refusal, a failed write of LOSAT's), which removes every
+/// file of the build (`BuildDatabase::erase_after_refusal`), rather than an error of NCBI's,
+/// after which makeblastdb's writer is closed when it is destroyed
+/// (`BuildDatabase::close_at_destruction`) and the files that NCBI leaves stay.
 fn is_losat_error(error: &MakedbError) -> bool {
-    matches!(
-        error,
-        MakedbError::Unsupported(_)
-            | MakedbError::Build(
-                WriteDbError::Unsupported(_)
-                    | WriteDbError::OrdinalIdWithoutIds
-                    | WriteDbError::Other(_)
-                    | WriteDbError::Io { .. }
-            )
-    )
+    match error {
+        MakedbError::Unsupported(_) => true,
+        MakedbError::Build(error) => error.is_losat_own(),
+        _ => false,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807
@@ -898,7 +894,7 @@ fn build_database_with_log(
         .as_deref()
         .map(crate::utils::os_bytes::os_str_bytes);
     let user_path = metadata_user_path(metadata_prefix.as_deref());
-    if blastdb_input {
+    let result = if blastdb_input {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
         // The seed of `-randomize` is the seconds of the clock (`time` with a null pointer), which
         // `mt19937` takes modulo 2^32. NCBI reads the clock again when the copy starts, after the
@@ -906,7 +902,7 @@ fn build_database_with_log(
         // whose clock is fixed (the tests) has one instant. Under a clock that runs, the two may
         // take different seconds.
         let randomize = args.randomize.then_some(now.unix_seconds as u32);
-        let result = copy_input_databases(
+        copy_input_databases(
             &mut db,
             &names,
             &user_path,
@@ -915,32 +911,21 @@ fn build_database_with_log(
             &settings.read_verification,
             randomize,
             err,
-        );
-        *end_messages = destructor_messages(&db, result.as_ref().err());
-        if result
-            .as_ref()
-            .is_err_and(|error| !is_losat_error(error) && !error.is_closed_pipe())
-        {
-            end_messages.extend(db.close_at_destruction());
-        }
-        return result;
-    }
-    if names.is_empty() {
+        )
+    } else if names.is_empty() {
         let what = if asn_format.is_some() {
             "ASN.1"
         } else {
             "FASTA"
         };
-        return Err(unsupported(format!(
+        Err(unsupported(format!(
             "-in names no input file; losat makeblastdb reads {what} files or the standard input"
-        )));
-    }
-    let from_stdin = names[0] == b"-";
-    if let Some(format) = asn_format {
-        let result = add_asn_and_close(
+        )))
+    } else if let Some(format) = asn_format {
+        add_asn_and_close(
             &mut db,
             &names,
-            from_stdin.then_some(stdin_map),
+            (names[0] == b"-").then_some(stdin_map),
             format,
             env,
             &user_path,
@@ -949,27 +934,34 @@ fn build_database_with_log(
             &settings.read_verification,
             stdin,
             err,
-        );
-        *end_messages = destructor_messages(&db, result.as_ref().err());
-        if result
+        )
+    } else {
+        add_input_and_close(
+            &mut db,
+            &names,
+            (names[0] == b"-").then_some(stdin_map),
+            &user_path,
+            is_protein,
+            registry_blastdb,
+            stdin,
+            err,
+        )
+    };
+    // One rule for every input and every point of a refusal: a build that LOSAT refuses leaves
+    // no file of its own.
+    if result.as_ref().is_err_and(is_losat_error) {
+        db.erase_after_refusal();
+    }
+    *end_messages = destructor_messages(&db, result.as_ref().err());
+    // NCBI's error ends a copy or an ASN.1 build without `EndBuild`: the writer is closed when
+    // it is destroyed. A FASTA input's error has ended the build (`AddFasta`).
+    if (blastdb_input || asn_format.is_some())
+        && result
             .as_ref()
             .is_err_and(|error| !is_losat_error(error) && !error.is_closed_pipe())
-        {
-            end_messages.extend(db.close_at_destruction());
-        }
-        return result;
+    {
+        end_messages.extend(db.close_at_destruction());
     }
-    let result = add_input_and_close(
-        &mut db,
-        &names,
-        from_stdin.then_some(stdin_map),
-        &user_path,
-        is_protein,
-        registry_blastdb,
-        stdin,
-        err,
-    );
-    *end_messages = destructor_messages(&db, result.as_ref().err());
     result
 }
 
@@ -1075,9 +1067,11 @@ fn copy_input_databases(
         let error = raw_copy_error(error);
         if is_losat_error(&error) {
             let mut warn = warn_to(err);
-            // A closed pipe at the log of that `EndBuild` ends the run there (`endl`).
+            // A closed pipe at the log of that `EndBuild` ends the run there (`endl`); the
+            // refused build leaves no file all the same (`build_database_with_log`).
             if let Err(stop) = db.end_build(true, &mut warn) {
                 if stop.is_closed_pipe() {
+                    db.erase_after_refusal();
                     return Err(stop.into());
                 }
             }
@@ -1197,9 +1191,9 @@ fn add_input_and_close(
 /// `x_ProcessInputData` + `EndBuild` + `open_new_database` for `-input_type asn1_txt` and
 /// `-input_type asn1_bin`. Unlike FASTA (`AddFasta`), an error from NCBI leaves the build open so
 /// `build_database_with_log` runs `close_at_destruction` (writing any sequences already added);
-/// LOSAT refusals (including `read_verification` refusals for `SERIAL_VERIFY_DATA_READ` and
-/// `SERIAL_VERIFY_DATA_GET`) erase any partial files via `erase_after_refusal` without writing
-/// `EndBuild` log lines.
+/// a refusal of LOSAT's (including `read_verification` refusals for `SERIAL_VERIFY_DATA_READ` and
+/// `SERIAL_VERIFY_DATA_GET`) writes no `EndBuild` log line, and `build_database_with_log` removes
+/// every file of the build (`erase_after_refusal`).
 #[allow(clippy::too_many_arguments)]
 fn add_asn_and_close(
     db: &mut BuildDatabase<'_>,
@@ -1214,13 +1208,6 @@ fn add_asn_and_close(
     stdin: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    let erase_if_losat = |db: &mut BuildDatabase<'_>, error: MakedbError| {
-        if is_losat_error(&error) {
-            db.erase_after_refusal();
-        }
-        error
-    };
-
     let feed_one = |db: &mut BuildDatabase<'_>,
                     reader: &mut dyn Read,
                     err: &mut dyn Write|
@@ -1247,7 +1234,7 @@ fn add_asn_and_close(
                 },
                 other => MakedbError::Build(other),
             };
-            erase_if_losat(db, error)
+            error
         })
     };
 
@@ -1276,8 +1263,7 @@ fn add_asn_and_close(
                     let mut input = CompressedInput::new(file, compression);
                     let res = feed_one(db, &mut input, err);
                     if let Some(fault) = input.fault() {
-                        let error = compressed_fault_error(name, compression, fault);
-                        return Err(erase_if_losat(db, error));
+                        return Err(compressed_fault_error(name, compression, fault));
                     }
                     res?;
                 }

@@ -17,6 +17,7 @@ w23	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-
 w24	same	nucl.fa dust_nucl.asnb dust_nucl.asnb>dust_copy.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust_copy.asnb	-gi_mask	-gi_mask_name	x,x
 w25	refuse	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	x,x
 w25b	refuse	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	x,./x
+w25a	refuse	nucl.asn dust_nucl.asnb dust10_nucl.asnb	-in	nucl.asn	-input_type	asn1_txt	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	x,x
 w26	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust_nucl.asnb	-gi_mask
 w27	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	
 w28	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	a,

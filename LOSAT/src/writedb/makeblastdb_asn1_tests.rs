@@ -281,6 +281,17 @@ fn snapshot_dir(
     map
 }
 
+/// The names of every entry of `dir`, sorted: the lock files of the LMDB writers too, which
+/// `snapshot_dir` leaves out.
+fn files_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
 fn run_case(args_words: &[String], env: MakedbEnv, stdin_bytes: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
     let args = parse_makedb_words(args_words);
     let mut stdin = std::io::Cursor::new(stdin_bytes);
@@ -481,9 +492,10 @@ fn object_manager_address_and_crash_cases_are_refused() {
             String::from_utf8_lossy(&expected_out),
             "case {name}: the log before the refusal"
         );
+        let left = files_in(&tmp);
         assert!(
-            snapshot_dir(&tmp, &dir_str, &fix_a_str, &fix_m_str).is_empty(),
-            "case {name}: files of the database were left"
+            left.is_empty(),
+            "case {name}: files of the database were left: {left:?}"
         );
         checked += 1;
     }
@@ -492,8 +504,8 @@ fn object_manager_address_and_crash_cases_are_refused() {
 
 /// An object refused after a sequence was written leaves no file of the build: neither those of
 /// NCBI's `ListFiles` nor the others that a failed build of NCBI's leaves (the LMDB writers'
-/// `.nos`, `.not`, `.ntf` and `.nto`, the GI-mask files and the alias file of a single volume
-/// with GI masks; `WriteDb::every_file`). The build of the first object alone shows that each
+/// `.nos`, `.not`, `.ntf` and `.nto` and their lock files, the GI-mask files and the alias file
+/// of a single volume with GI masks; `WriteDb::every_file`). The build of the first object alone shows that each
 /// of them is written but `.nos`, which a database of GIs alone does not have (the refused row
 /// `d3c6a_x42_two_objects_second_empty` has it).
 #[test]
@@ -541,13 +553,11 @@ fn a_refused_object_after_a_written_sequence_leaves_no_file() {
             scan_cfastareader: true,
         };
         let (rc, _, stderr) = run_case(&words, env, &[]);
-        let mut files: Vec<String> = std::fs::read_dir(&*out)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|name| !name.ends_with("-lock"))
-            .collect();
-        files.sort();
-        (rc, String::from_utf8_lossy(&stderr).into_owned(), files)
+        (
+            rc,
+            String::from_utf8_lossy(&stderr).into_owned(),
+            files_in(&out),
+        )
     };
     let (rc, stderr, files) = build("one.asn");
     assert_eq!(rc, 0, "{stderr}");
@@ -567,6 +577,63 @@ fn a_refused_object_after_a_written_sequence_leaves_no_file() {
         )
     );
     assert!(files.is_empty(), "{files:?}");
+}
+
+/// The refusal at the close of a build whose masks NCBI writes in the order of memory addresses
+/// (`address_order_refusal`) leaves no file of the build, from FASTA and from ASN.1 input alike
+/// (one rule for every refusal of LOSAT's). NCBI's makeblastdb 2.17.0 builds both (exit status 0).
+#[test]
+fn the_address_order_refusal_leaves_no_file_from_fasta_or_asn1() {
+    let seq = "ACGT".repeat(25);
+    let fasta = format!(">gi|5|gb|AY000005.1| ao\n{seq}\n");
+    let asn = format!(
+        "Bioseq-set ::= {{\n  seq-set {{\n    seq {{\n      id {{ gi 5, genbank {{ accession \
+         \"AY000005\", version 1 }} }},\n      descr {{ title \"ao\" }},\n      inst {{ repr raw, \
+         mol dna, length 100, seq-data iupacna \"{seq}\" }}\n    }}\n  }}\n}}\n"
+    );
+    // Masks of both Seq-ids of the sequence on the plus strand: NCBI orders them by the
+    // addresses of their handles.
+    let masks = "Blast-db-mask-info ::= {\n  algo-id 0,\n  algo-program dust,\n  algo-options \
+                 \"window=64; level=20; linker=1\",\n  masks {\n    masks {\n      int { from 10, \
+                 to 40, id gi 5 },\n      int { from 50, to 60, id genbank { accession \"AY000005\", \
+                 version 1 } }\n    },\n    more FALSE\n  }\n}\n";
+    let inputs = TempDir::unique("address-order-in");
+    std::fs::write(inputs.join("ao.fa"), fasta).unwrap();
+    std::fs::write(inputs.join("ao.asn"), asn).unwrap();
+    std::fs::write(inputs.join("masks.asn"), masks).unwrap();
+    for (input, input_type) in [("ao.fa", "fasta"), ("ao.asn", "asn1_txt")] {
+        let out = TempDir::unique(&format!("address-order-{input_type}"));
+        let words: Vec<String> = vec![
+            "-in".into(),
+            inputs.join(input).to_string_lossy().into_owned(),
+            "-input_type".into(),
+            input_type.into(),
+            "-dbtype".into(),
+            "nucl".into(),
+            "-parse_seqids".into(),
+            "-mask_data".into(),
+            inputs.join("masks.asn").to_string_lossy().into_owned(),
+            "-title".into(),
+            "t".into(),
+            "-out".into(),
+            out.join("db").to_string_lossy().into_owned(),
+        ];
+        let env = MakedbEnv {
+            skip_unverified: false,
+            scan_cfastareader: true,
+        };
+        let (rc, _, stderr) = run_case(&words, env, &[]);
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(rc, 1, "{input_type}: {stderr}");
+        assert!(
+            stderr.starts_with(
+                "losat makeblastdb: the masks of the Seq-ids gi|5 and gb|AY000005.1| "
+            ) && stderr.ends_with("LOSAT does not write this database\n"),
+            "{input_type}: {stderr}"
+        );
+        let left = files_in(&out);
+        assert!(left.is_empty(), "{input_type}: {left:?}");
+    }
 }
 
 #[test]

@@ -19,8 +19,9 @@
 //! earlier case of its directory did) has it masked.
 //!
 //! The cases of the column `losat` other than `same`: `refuse` (two algorithms that would write
-//! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it:
-//! exit status 1, and what an error of NCBI's `SetMaskData` leaves, `REFUSED_LEFTOVERS`) and
+//! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it,
+//! from a FASTA input and from its twin in ASN.1 text, w25a: exit status 1 and no file of the
+//! build, where NCBI's makeblastdb writes the database) and
 //! `parser` (an argument rule of NCBI's argument reader, which LOSAT's makeblastdb reads with:
 //! makeblastdb's usage and posts, exit status 1 and no file, compared as `same`; line RG item
 //! K4i-2b).
@@ -487,11 +488,10 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
                 if got.0 != 1 || !got.2.starts_with(refusal) || got.2.lines().count() != 1 {
                     problems.push(format!("not refused: {got:?}"));
                 }
-                let files: Vec<String> = listing(&case_dir, &put)
-                    .into_iter()
-                    .map(|line| line.split('\t').next().unwrap().to_string())
-                    .collect();
-                if files != REFUSED_LEFTOVERS {
+                // A refusal of LOSAT's leaves no file of the build (the lock files of its LMDB
+                // writers included), whatever the input.
+                let files = listing(&case_dir, &put);
+                if !files.is_empty() {
                     problems.push(format!("files left: {files:?}"));
                 }
                 problems
@@ -521,19 +521,10 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
     );
     // Every kind of case is there (the table was read whole).
     assert!(
-        counts[0] >= 75 && counts[1] >= 3 && counts[2] >= 9,
+        counts[0] >= 75 && counts[1] >= 4 && counts[2] >= 9,
         "{counts:?}"
     );
 }
-
-/// What a refused case leaves (`refuse`): the build ends at the refused record as an error of
-/// NCBI's `SetMaskData` ends it (case `x03gi`): the files that `ListFiles` names are removed, and
-/// the GI-mask files of the algorithm that wrote first (closed with the build), the alias file
-/// and the files of the version 5 LMDB step that `ListFiles` does not name stay.
-const REFUSED_LEFTOVERS: [&str; 11] = [
-    "db.nal", "db.nos", "db.not", "db.ntf", "db.nto", "x.gmd", "x.gmi", "x.gmo", "x.gnd", "x.gni",
-    "x.gno",
-];
 
 /// `losat <command>` in `dir` (`command`: the program and its words, separated by single spaces),
 /// with the environment of `run`: exit status, standard output and error.

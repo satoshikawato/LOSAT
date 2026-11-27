@@ -46,7 +46,7 @@ pub enum SourceErrorKind {
     /// status for that.
     OutOfMemory,
     /// Another standard exception (`message` is its `what()`), which makeblastdb's general
-    /// handler prints after "Error: " (`WriteDbError::Other`): the `std::out_of_range` of a
+    /// handler prints after "Error: " (`WriteDbError::Std`): the `std::out_of_range` of a
     /// record past NCBI's 32-bit positions (`reader::ReadError::OutOfRange`).
     Std,
     /// LOSAT's refusal (`message` ends with "is not supported by LOSAT's makeblastdb";

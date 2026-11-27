@@ -2932,6 +2932,84 @@ impl SeqDb {
         self.mt_gap_stopped_before_at(range, first_oid)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1802
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1838
+    // In a multithreaded DB-split scan of a list-filtered database, NCBI hands out chunks of raw
+    // OIDs until the iteration range's end and reads every OID of a chunk, so it also reads the
+    // excluded OIDs after the last included one, up to the first negative length. A negative
+    // length there changes nothing (no included OID is left), so only the reads' errors matter:
+    // a nucleotide's read of its last byte (`file[start + whole_bytes]`), which LOSAT checks
+    // against the readable length (`Volume::x_first_negative_nucleotide_in`). A protein's read
+    // reads no byte of the sequence file (pointer arithmetic on the index's offsets), so a
+    // protein database has nothing to check here.
+    /// The errors of NCBI's reads of the excluded OIDs `from_oid..end` of a list-filtered
+    /// nucleotide database (`end` the iteration range's end), up to the first negative length,
+    /// when [`Self::mt_stop_at_negative`] is enabled; `Ok` in every other case.
+    fn mt_check_trailing_excluded(&self, from_oid: u32) -> Result<(), SeqDbError> {
+        if !self.mt_stop_at_negative || self.seqtype != SeqType::Nucleotide {
+            return Ok(());
+        }
+        let Some(filter) = self.filter.as_deref() else {
+            return Ok(());
+        };
+        let (_, end) = filter.range();
+        self.x_has_negative_in_oid_range(from_oid, end).map(|_| ())
+    }
+
+    /// [`Self::mt_check_trailing_excluded`] after the block `range` that holds the last included
+    /// ordinal id (`range.end_ordinal()` is the number of included OIDs) and read `block`
+    /// without stopping at a negative length: NCBI reads on from the OID after the block.
+    fn mt_check_after_last_block(
+        &self,
+        range: BlockRange,
+        first_oid: u32,
+        block: SequenceBlock,
+    ) -> SeqBlockResult {
+        if block.stopped_at_negative()
+            || self
+                .filter
+                .as_deref()
+                .is_none_or(|filter| range.end_ordinal() != filter.count())
+        {
+            return Ok(block);
+        }
+        self.mt_check_trailing_excluded(first_oid + range.len())?;
+        Ok(block)
+    }
+
+    /// The errors of NCBI's multithreaded DB-split scan of a list-filtered nucleotide database
+    /// whose list includes no OID: the scan reads the raw OIDs of the whole iteration range
+    /// (`mt_check_trailing_excluded` from its start), where LOSAT has no block to read. `Ok`
+    /// when an OID is included (the block that holds the last one checks the OIDs after it),
+    /// without a list, or without [`Self::mt_stop_at_negative`].
+    pub fn mt_check_scan_without_blocks(&self) -> Result<(), SeqDbError> {
+        match self.filter.as_deref() {
+            Some(filter) if filter.count() == 0 => {
+                self.mt_check_trailing_excluded(filter.range().0)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    /// The search block of `range` that `read` reads from the volume (given the OID of the
+    /// block's first sequence): empty and stopped where the excluded OIDs before it stop NCBI's
+    /// scan (`mt_gap_stopped_before_at`), else `read`'s block, with the errors of NCBI's reads of
+    /// the excluded OIDs after the last included one (`mt_check_after_last_block`).
+    fn mt_search_block(
+        &self,
+        range: BlockRange,
+        read: impl FnOnce(&Volume, u32) -> SeqBlockResult,
+    ) -> SeqBlockResult {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        if self.mt_gap_stopped_before_at(range, first_oid)? {
+            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+        }
+        let block = read(volume, first_oid)?;
+        self.mt_check_after_last_block(range, first_oid, block)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
     /// Reads the protein sequences of `range` for a search (`Volume::read_protein_search_block`),
     /// validating `.psq` ranges without allocating bytes for proteins whose NCBI 32-bit length is
@@ -2940,17 +3018,15 @@ impl SeqDb {
         &self,
         range: BlockRange,
     ) -> Result<SequenceBlock, SeqDbError> {
-        let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
-        }
-        volume.read_protein_search_block_mt(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            first_oid,
-            self.mt_stop_at_negative,
-        )
+        self.mt_search_block(range, |volume, first_oid| {
+            volume.read_protein_search_block_mt(
+                range.first,
+                range.end,
+                range.first_ordinal,
+                first_oid,
+                self.mt_stop_at_negative,
+            )
+        })
     }
 
     /// Reads the one protein sequence `ordinal` for a search, skipping byte reads when its NCBI
@@ -2969,17 +3045,15 @@ impl SeqDb {
     /// Reads the nucleotide sequences of `range` for a search
     /// (`Volume::read_nucleotide_search_block_mt`), honoring [`Self::mt_stop_at_negative`].
     pub fn read_nucleotide_search_block(&self, range: BlockRange) -> SeqBlockResult {
-        let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
-        }
-        volume.read_nucleotide_search_block_mt(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            first_oid,
-            self.mt_stop_at_negative,
-        )
+        self.mt_search_block(range, |volume, first_oid| {
+            volume.read_nucleotide_search_block_mt(
+                range.first,
+                range.end,
+                range.first_ordinal,
+                first_oid,
+                self.mt_stop_at_negative,
+            )
+        })
     }
 
     /// Reads the one nucleotide sequence `ordinal` for search traceback or retrieval
@@ -3119,18 +3193,16 @@ impl SeqDb {
         range: BlockRange,
         kept: &mut Vec<u8>,
     ) -> SeqBlockResult {
-        let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
-        }
-        volume.x_read_protein_search_block_into_mt(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            first_oid,
-            kept,
-            self.mt_stop_at_negative,
-        )
+        self.mt_search_block(range, |volume, first_oid| {
+            volume.x_read_protein_search_block_into_mt(
+                range.first,
+                range.end,
+                range.first_ordinal,
+                first_oid,
+                kept,
+                self.mt_stop_at_negative,
+            )
+        })
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_block`] into the worker's
@@ -3140,18 +3212,16 @@ impl SeqDb {
         range: BlockRange,
         kept: &mut Vec<u8>,
     ) -> SeqBlockResult {
-        let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
-        }
-        volume.x_read_nucleotide_search_block_into_mt(
-            range.first,
-            range.end,
-            range.first_ordinal,
-            first_oid,
-            kept,
-            self.mt_stop_at_negative,
-        )
+        self.mt_search_block(range, |volume, first_oid| {
+            volume.x_read_nucleotide_search_block_into_mt(
+                range.first,
+                range.end,
+                range.first_ordinal,
+                first_oid,
+                kept,
+                self.mt_stop_at_negative,
+            )
+        })
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_sequence`] with the bytes

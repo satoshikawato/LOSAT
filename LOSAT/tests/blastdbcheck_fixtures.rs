@@ -933,11 +933,22 @@ fn nonasc_cross_program_parity() {
     fs::write(&neg_si, b"AAB00103.2\n").unwrap();
     let n4_neg_gi = root.join("n4_neg_gi.txt");
     fs::write(&n4_neg_gi, b"302\n").unwrap();
+    let neg_gi2 = root.join("neg_gi2.txt");
+    fs::write(&neg_gi2, b"103\n105\n").unwrap();
+    let n4_neg_gi304 = root.join("n4_neg_gi304.txt");
+    fs::write(&n4_neg_gi304, b"304\n").unwrap();
+    let n4_neg_gi_all = root.join("n4_neg_gi_all.txt");
+    fs::write(&n4_neg_gi_all, b"301\n302\n303\n304\n").unwrap();
     let (neg_gis, pos_gis, neg_sis, n4_neg_gis) = (
         neg_gi.to_str().unwrap(),
         pos_gi.to_str().unwrap(),
         neg_si.to_str().unwrap(),
         n4_neg_gi.to_str().unwrap(),
+    );
+    let (neg_gi2s, n4_neg_gi304s, n4_neg_gi_alls) = (
+        neg_gi2.to_str().unwrap(),
+        n4_neg_gi304.to_str().unwrap(),
+        n4_neg_gi_all.to_str().unwrap(),
     );
 
     // 1. d_p4_nonasc_seq (p4.pin@106 = 01f4 -> seq=[1, 62, 500, 179, ...]).
@@ -1077,6 +1088,38 @@ fn nonasc_cross_program_parity() {
             ],
         ),
         (
+            "nonasc_seq_blastp_neggi2_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
             "nonasc_seq_blastx_t1",
             "blastx",
             vec![
@@ -1185,6 +1228,22 @@ fn nonasc_cross_program_parity() {
             ],
         ),
         (
+            "nonasc_seq_blastx_neggi2_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
             "nonasc_seq_psiblast_t1",
             "psiblast",
             vec![
@@ -1208,6 +1267,22 @@ fn nonasc_cross_program_parity() {
                 "p4",
                 "-outfmt",
                 "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_neggi2_t4",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
                 "-num_threads",
                 "4",
             ],
@@ -1536,6 +1611,148 @@ fn nonasc_cross_program_parity() {
     ] {
         let got = run_losat_sub(&root, &d_amb0, sub, &args);
         assert_refused(&format!("n4_amb0_eq_0_{sub}"), got);
+    }
+
+    // 6. n4_amb_past_end (n4.nin@108 = 10000000 -> amb[3] = 2^28: OID 3's last byte lies 256 MiB
+    // past the 114-byte .nsq; NCBI reads it and crashes with SIGSEGV). With `-negative_gilist
+    // {304}` (OID 3 excluded) NCBI at 1 thread and `-mt_mode 1` never reads OID 3; at 2+ threads in
+    // DB-split mode `x_FillSeqBuffer` reads the excluded OIDs after the last included one up to
+    // the iteration range's end and crashes. A list that excludes every OID is scanned the same
+    // way. LOSAT refuses where NCBI crashes.
+    let d_past = root.join("n4_amb_past_end");
+    cp_db(&d_past, "n4", true);
+    poke(d_past.join("n4.nin"), 108, "10000000");
+    let mut past_refusal: Option<Vec<u8>> = None;
+    for (name, args) in [
+        (
+            "n4_ambpast_blastn_neggi_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_neggi_mt1_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_negall_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi_alls,
+                "-num_threads",
+                "1",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_past, "blastn", &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    for (name, args) in [
+        (
+            "n4_ambpast_blastn_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_neggi_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_negall_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi_alls,
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        // NCBI's frozen result (SIGSEGV, rc=-11, no output) stays beside the row for provenance.
+        assert_eq!(load_nonasc_expected(name).2, -11, "{name}");
+        let got = run_losat_sub(&root, &d_past, "blastn", &args);
+        assert!(got.0.is_empty(), "{name}: stdout {:?}", text(&got.0));
+        let err = got.1.clone();
+        assert_refused(name, got);
+        // Every row refuses as the first (1 thread, no list) does: the same read of OID 3's last
+        // byte.
+        match &past_refusal {
+            None => {
+                assert!(
+                    text(&err).contains("byte range 268435455..268435456 passes the end of the file"),
+                    "{name}: {:?}",
+                    text(&err)
+                );
+                past_refusal = Some(err);
+            }
+            Some(first) => assert_eq!(text(&err), text(first), "{name}"),
+        }
     }
 
     let _ = fs::remove_dir_all(&root);

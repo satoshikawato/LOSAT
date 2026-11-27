@@ -1166,6 +1166,13 @@ where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
 {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    // A list that includes no OID leaves no block, but NCBI's multithreaded DB-split scan still
+    // reads the raw OIDs of the iteration range (`SeqDb::mt_check_scan_without_blocks`).
+    database
+        .db
+        .mt_check_scan_without_blocks()
+        .map_err(search_read_error)?;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

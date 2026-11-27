@@ -659,8 +659,6 @@ where
         // The excluded lists of `one_thread_redo`'s Smith-Waterman batches, read with its own
         // reader (`query_fetch_excluded_reached`) when the replay passes each query.
         sw_excluded: fetch_excluded,
-        program: args.app.ncbi_name(),
-        do_link_hsps: args.sum_stats,
     };
     // The parallel paths read the expanded lists of all queries (`plan_redo_and_expand_lists`
     // expands them before the paths), or the windows expand the compact lists as they reach them.
@@ -1076,6 +1074,34 @@ where
     Ok(())
 }
 
+/// What the errors of a BLASTP search's Smith-Waterman redo (`-use_sw_tback`) name: NCBI's
+/// application (`program`, `BlastpApp::ncbi_name`: `blastp` or `psiblast`) and what makes the
+/// score of 0 of a redo that does not end significant (`sw_endless`): the cutoff score with sum
+/// statistics (`do_link_hsps`, `-sum_stats true`), its e-value without them. The search's
+/// `FetchNotes` carry it to every error of the redo (`FetchNotes::sw_text`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::algorithm::blastp) struct SwErrorText {
+    program: &'static str,
+    do_link_hsps: bool,
+}
+
+impl SwErrorText {
+    /// The text of the search `args`.
+    pub(super) fn of(args: &ResolvedBlastpArgs) -> Self {
+        Self {
+            program: args.app.ncbi_name(),
+            do_link_hsps: args.sum_stats,
+        }
+    }
+
+    /// BLASTP's without sum statistics (the tests' searches).
+    #[cfg(test)]
+    pub(in crate::algorithm::blastp) const BLASTP: Self = Self {
+        program: "blastp",
+        do_link_hsps: false,
+    };
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
 /// `sw_batch_failed_after` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a batch's
@@ -1083,7 +1109,6 @@ where
 #[cold]
 #[inline(never)]
 pub(super) fn sw_batch_failed_after_oid(
-    program: &str,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1092,7 +1117,7 @@ pub(super) fn sw_batch_failed_after_oid(
         return refusal;
     }
     sw_batch_failed(
-        program,
+        fetch_notes.sw_text(),
         batch.start,
         &heaps[batch.start],
         fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), None),
@@ -1106,8 +1131,6 @@ pub(super) fn sw_batch_failed_after_oid(
 #[cold]
 #[inline(never)]
 pub(super) fn sw_endless_after_oid(
-    program: &str,
-    do_link_hsps: bool,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1120,8 +1143,7 @@ pub(super) fn sw_endless_after_oid(
         return refusal;
     }
     sw_endless(
-        program,
-        do_link_hsps,
+        fetch_notes.sw_text(),
         batch.start,
         fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), Some((ordinal, q_idx))),
     )
@@ -1172,7 +1194,6 @@ fn sw_matrix_failed(program: &str, batch_start: usize) -> anyhow::Error {
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
-    program: &str,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1184,7 +1205,7 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
         return refusal;
     }
     sw_batch_failed(
-        program,
+        fetch_notes.sw_text(),
         batch.start,
         &heaps[batch.start],
         fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, usize::MAX),
@@ -1200,8 +1221,6 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_endless_after(
-    program: &str,
-    do_link_hsps: bool,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1213,8 +1232,7 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
         return refusal;
     }
     sw_endless(
-        program,
-        do_link_hsps,
+        fetch_notes.sw_text(),
         batch.start,
         fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, position),
     )
@@ -1227,15 +1245,23 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
 /// application writes `BLAST engine error: Traceback failed` (exit status 3) after the reports of
 /// the batches before (without the epilog) and the failing batch's reader messages and search
 /// strategy request. LOSAT gives NCBI's one-thread output at every `-num_threads`. The error names
-/// the batch's first query (`batch_start`, a query of this call: the search of all queries, the only
-/// call that runs `-use_sw_tback`, `x_query_block_plan`), as the error of a header file that a
-/// batch reaches does (`ErrorAfterBatchReports`), whose batches before `search` searches again
-/// and reports alone.
+/// the batch's first query (`batch_start`), as the error of a header file that a batch reaches does
+/// (`ErrorAfterBatchReports`). In BLASTP that is a query of the search of all queries (the only
+/// call that runs `-use_sw_tback`, `x_query_block_plan`), whose batches before `search` searches
+/// again and reports alone. In PSIBLAST each round of a query is one search of that query alone
+/// (`pssm_hooks::pssm_traceback`, `batch_start` 0), and `psi_round` writes the error after the
+/// reports of the queries and rounds before: NCBI's application saves the round's PSSM
+/// (`-save_each_pssm`) before the round's search, and the exception of that search leaves the
+/// rounds' loop before the round's formatting and `PrintEpilog`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:274-276 (the exception leaves the
 /// batch loop before the batch's formatting and `PrintEpilog`)
+/// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-262 (the round's PSSM is
+/// saved before its search)
+/// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:562-572 (`PrintEpilog` is
+/// skipped)
 ///
 /// NCBI ends such a batch by `Traceback failed` only when the batch's first query holds no redone
 /// match (`first_query`, the heap of `batch_start`). With a status other than 0 the clean-up frees
@@ -1249,9 +1275,10 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
 /// pop; the heaps of the function's own `redoneMatches` (blast_kappa.c:3006, 3119-3130), which its
 /// clean-up empties at 3807-3813, receive no match (the loop inserts into its block's
 /// `redoneMatches`, :3472 and :3496, that thread's heaps), so they pop nothing. LOSAT refuses that
-/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.53), in the place of NCBI's error and
-/// after the same reports (the S1 form of 2026-11-18: what NCBI formats before its failing step,
-/// not the part of its stdio buffer that its crash loses). Exit status 1, its message.
+/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.53, and 1.123 for PSIBLAST), in the place
+/// of NCBI's error and after the same reports (the S1 form of 2026-11-18: what NCBI formats before
+/// its failing step, not the part of its stdio buffer that its crash loses). Exit status 1, its
+/// message.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2518-2524
@@ -1259,13 +1286,13 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_batch_failed(
-    program: &str,
+    text: SwErrorText,
     batch_start: usize,
     first_query: &BlastCompoHeap,
     utf8: Option<super::database::Utf8Read>,
 ) -> anyhow::Error {
     let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
-        program,
+        text.program,
         first_query.n > 0,
     );
     crate::blastinput::app::ErrorAfterBatchReports {
@@ -1278,9 +1305,10 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`smith_waterman_match::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
-/// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
-/// printed the reports of the batches before (`blastp_app.cpp:257-276`, cited at
+/// (`smith_waterman_match::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, and 1.123 for PSIBLAST, rule
+/// 3, within the class of RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch (in
+/// PSIBLAST, the round) never ends after NCBI has printed the reports of the batches (queries and
+/// rounds) before (`blastp_app.cpp:257-276` and `psiblast_app.cpp:246-262`, cited at
 /// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search
 /// does, after those reports (without the epilog), as TBLASTX's and TBLASTN's refusals of a step
 /// where NCBI's search of a batch does not finish do (`blastinput::app::ErrorAfterBatchReports`,
@@ -1289,12 +1317,11 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_endless(
-    program: &str,
-    do_link_hsps: bool,
+    text: SwErrorText,
     batch_start: usize,
     utf8: Option<super::database::Utf8Read>,
 ) -> anyhow::Error {
-    let why = if do_link_hsps {
+    let why = if text.do_link_hsps {
         "a score of 0 reaches the cutoff score, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"
     } else {
         "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"
@@ -1303,7 +1330,8 @@ pub(in crate::algorithm::blastp) fn sw_endless(
         query: Some(batch_start),
         utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error(
-            program, why,
+            text.program,
+            why,
         ),
         title_reads: Vec::new(),
     }
@@ -1322,7 +1350,6 @@ pub(in crate::algorithm::blastp) fn sw_endless(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
 pub(super) fn sw_ungapped_check(
-    program: &str,
     use_sw_tback: bool,
     query_batches: &[crate::blastinput::seq_range::RangedBatch],
     query_batch_skipped: &[bool],
@@ -1334,7 +1361,7 @@ pub(super) fn sw_ungapped_check(
         .iter()
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
     {
-        Some(batch) => Err(sw_ungapped_refusal(program, batch.searched.start)),
+        Some(batch) => Err(sw_ungapped_refusal(batch.searched.start)),
         None => Ok(()),
     }
 }
@@ -1342,11 +1369,11 @@ pub(super) fn sw_ungapped_check(
 /// The refusal of [`sw_ungapped_check`] at the batch whose first query is `batch_start`.
 #[cold]
 #[inline(never)]
-fn sw_ungapped_refusal(program: &str, batch_start: usize) -> anyhow::Error {
+fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
     // NCBI crashes at the redo's set-up, before its fetches read a header of the batch.
     crate::blastinput::app::ErrorAfterBatchReports::of_batch(
         batch_start,
-        crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(program),
+        crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error("blastp"),
     )
     .into()
 }
@@ -1494,7 +1521,6 @@ where
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
                 return Err(sw_batch_failed_after(
-                    args.app.ncbi_name(),
                     fetch_notes,
                     batch.clone(),
                     redone_matches,
@@ -1610,8 +1636,6 @@ where
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
                     sw_endless_after(
-                        args.app.ncbi_name(),
-                        args.sum_stats,
                         fetch_notes,
                         batch.clone(),
                         redone_matches,
@@ -1670,7 +1694,6 @@ where
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
             return Err(sw_batch_failed_after(
-                args.app.ncbi_name(),
                 fetch_notes,
                 batch.clone(),
                 redone_matches,

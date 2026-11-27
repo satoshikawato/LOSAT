@@ -84,8 +84,9 @@ impl std::error::Error for SwRedoFailed {}
 /// NCBI's Smith-Waterman redo of a match that does not end: a score of 0 is significant, the
 /// window has two or more HSPs and the first query letter's row scores the window's first subject
 /// letter above 0 (`SwWindowRedo::Endless`, the regime of RPS-BLAST's `SwEndless`;
-/// PD-LOSAT-NCBI-DEFECTS 1.53, within the class of 1.30). The window that reaches it decides; the
-/// windows before it in the call belong to the same match, which NCBI never finishes.
+/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.123 for PSIBLAST, within the class of 1.30).
+/// The window that reaches it decides; the windows before it in the call belong to the same match,
+/// which NCBI never finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwRedoEndless;
 
@@ -150,8 +151,9 @@ pub(crate) fn redo_one_match_smith_waterman_from<'seq>(
     kept: &mut Option<Box<SwMatchResume>>,
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
-    // A PSSM's rows do not reach this redo: psiblast refuses `-use_sw_tback`, and tblastn
-    // `-in_pssm` refuses it at its first match before it calls this redo
+    // A PSSM's rows do not reach this redo: psiblast's PSSM rounds redo their matches with
+    // `pssm_search::redo1::smith_waterman` (its first round, with a square matrix, comes here),
+    // and tblastn `-in_pssm` refuses `-use_sw_tback` at its first match before it calls this redo
     // (`tblastn::match_redo::sw_pssm_refusal`; no program's redo parameters set `position_based`,
     // so this test guards other callers only).
     if params.position_based {
@@ -633,8 +635,9 @@ impl SwBatchStatus {
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo
 /// (`SwRedoFailed`), for `program` (NCBI's name, `blastp`): NCBI's `Traceback failed` (exit 3),
 /// or, when the batch's first query holds a redone match (`first_query_holds_match`), LOSAT's
-/// refusal of the batch where NCBI's clean-up crashes (PD-LOSAT-NCBI-DEFECTS 1.53, rule 3; exit 1).
-/// The caller puts it after the reports of the batches before.
+/// refusal of the batch where NCBI's clean-up crashes (PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for
+/// TBLASTN and 1.123 for PSIBLAST, whose batch is a round of one query; rule 3; exit 1). The caller
+/// puts it after the reports of the batches before.
 ///
 /// NCBI keeps the last nonzero status of its threads, and its traceback throws `Traceback failed`
 /// on it; the clean-up after it frees the heaps' arrays before it pops them:
@@ -655,7 +658,8 @@ pub(crate) fn sw_batch_failed_error(program: &str, first_query_holds_match: bool
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI (`SwRedoEndless`;
-/// PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of RPS-BLAST's refusal of 1.30), for
+/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.123 for PSIBLAST, rule 3, within the class of
+/// RPS-BLAST's refusal of 1.30), for
 /// `program` (NCBI's name, `blastp`) and what makes the score of 0 significant there (`why`). The
 /// caller puts it after the reports of the batches before. Exit status 1, its message.
 #[cold]

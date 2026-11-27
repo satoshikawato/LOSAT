@@ -84,7 +84,7 @@ pub(super) use {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(super) use redo_run::{sw_batch_failed, sw_endless};
+pub(super) use redo_run::{sw_batch_failed, sw_endless, SwErrorText};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -2089,14 +2089,13 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
-    // `-use_sw_tback` (items X4, X4-c0, and line PS-SW): BLASTP and PSIBLAST (round 1 and PSSM
-    // rounds) run NCBI's Smith-Waterman redo in modes 0 to 3 (`kappa::smith_waterman`, `sw_c0`,
-    // and `pssm_search::redo1::smith_waterman`). With `-ungapped` (allowed only in mode 0), NCBI
-    // crashes at the redo's set-up of every searched batch, and LOSAT refuses there
+    // `-use_sw_tback` (items X4, X4-c0, line PS-SW): BLASTP and PSIBLAST (round 1 and the PSSM
+    // rounds) run NCBI's Smith-Waterman redo in modes 0 to 3 (`kappa::smith_waterman`, `sw_c0`
+    // and `pssm_search::redo1::smith_waterman`); rpsblast's redo reads its own flag
+    // (`RpsSearch::use_sw_tback`) and leaves this one off. With `-ungapped` (allowed only in
+    // mode 0), NCBI crashes at the redo's set-up of every searched batch, and LOSAT refuses there
     // (`redo_run::sw_ungapped_check`).
-    if args.use_sw_tback && args.app == BlastpApp::Rpsblast {
-        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
-    }
+    debug_assert!(!(args.use_sw_tback && args.app == BlastpApp::Rpsblast));
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // The compressed lookup table runs at each of its word sizes, 5 to 7
     // (`validate_protein_options` has refused the others), and so does the lookup table at 2
@@ -10622,7 +10621,12 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
-    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
+    let fetch_notes = database::FetchNotes::new(
+        listed_subjects.as_ref(),
+        database,
+        sw_c0_redo,
+        redo_run::SwErrorText::of(&args),
+    );
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -10667,12 +10671,7 @@ fn run_call(
     } else if args.ungapped {
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
-        redo_run::sw_ungapped_check(
-            args.app.ncbi_name(),
-            args.use_sw_tback,
-            &query_batches,
-            &query_batch_skipped,
-        )?;
+        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,

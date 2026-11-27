@@ -2,7 +2,8 @@
 //! parallel replay (`sw_c0`).
 
 use super::*;
-use crate::algorithm::blastp::hsp::BlastpHsp;
+use crate::algorithm::blastp::hsp::{fill_results_from_compo_heaps, BlastpHsp};
+use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
 
 fn dummy_hsp(oid: u32, q_idx: usize, score: i32, evalue: f64) -> BlastpHsp {
     BlastpHsp {
@@ -122,9 +123,7 @@ fn batch_stream_orders_by_database_ordinal_asc_and_query_desc_with_excluded_mark
 ))]
 mod par_tests {
     use super::*;
-    use crate::algorithm::blastp::hsp::fill_results_from_compo_heaps;
     use crate::algorithm::blastp::x_redo_par::x_sw_heap_test;
-    use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
 
     const ECUTOFF: f64 = 0.002;
 
@@ -239,8 +238,6 @@ mod par_tests {
                         });
                         let Some(post) = status.redone(redone, || {
                             sw_endless_after_oid(
-                                "blastp",
-                                false,
                                 &notes,
                                 batch.clone(),
                                 heaps,
@@ -269,12 +266,7 @@ mod par_tests {
                 }
             }
             if status.failed() {
-                return Err(sw_batch_failed_after_oid(
-                    "blastp",
-                    &notes,
-                    batch.clone(),
-                    heaps,
-                ));
+                return Err(sw_batch_failed_after_oid(&notes, batch.clone(), heaps));
             }
         }
         Ok(())
@@ -404,8 +396,6 @@ mod par_tests {
             let mut lists_copy = lists.clone();
             let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None; queries];
             let res = par::test_run_windows(
-                "blastp",
-                false,
                 &mut lists_copy,
                 &mut compact,
                 &mut heaps,

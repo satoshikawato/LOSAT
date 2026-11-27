@@ -337,8 +337,6 @@ where
                     );
                     let Some(postprocessed) = sw_status.redone(redone, || {
                         sw_endless_after_oid(
-                            args.app.ncbi_name(),
-                            args.sum_stats,
                             fetch_notes,
                             batch.clone(),
                             redone_matches,
@@ -364,7 +362,6 @@ where
         *x_prelim_freed += release_batch(batch, preliminary_hit_lists);
         if sw_status.failed() {
             return Err(sw_batch_failed_after_oid(
-                args.app.ncbi_name(),
                 fetch_notes,
                 batch.clone(),
                 redone_matches,
@@ -455,7 +452,6 @@ mod par {
     impl SwC0BatchState {
         fn finish_if_needed(
             &mut self,
-            program: &str,
             next_batch: Option<usize>,
             batches: &[Range<usize>],
             heaps: &[BlastCompoHeap],
@@ -467,7 +463,6 @@ mod par {
             if let Some(prev) = self.current {
                 if self.status.failed() {
                     return Err(sw_batch_failed_after_oid(
-                        program,
                         notes,
                         batches[prev].clone(),
                         heaps,
@@ -715,8 +710,6 @@ mod par {
 
     #[allow(clippy::too_many_arguments)]
     fn sw_c0_replay(
-        program: &str,
-        do_link_hsps: bool,
         entries: &[SwC0Entry],
         results: Vec<Option<SwC0Computed>>,
         lists: &[Option<BlastpHitList>],
@@ -729,7 +722,7 @@ mod par {
         assert_eq!(entries.len(), results.len(), "one result slot per entry");
         let mut replayed = SwC0Replayed::default();
         for (&entry, computed) in entries.iter().zip(results) {
-            batch_state.finish_if_needed(program, Some(entry.batch_idx), batches, heaps, notes)?;
+            batch_state.finish_if_needed(Some(entry.batch_idx), batches, heaps, notes)?;
             let batch = &batches[entry.batch_idx];
             match entry.kind {
                 SwC0Kind::Excluded { best_evalue } => {
@@ -773,8 +766,6 @@ mod par {
                     }
                     let Some(postprocessed) = batch_state.status.redone(result, || {
                         sw_endless_after_oid(
-                            program,
-                            do_link_hsps,
                             notes,
                             batch.clone(),
                             heaps,
@@ -802,8 +793,6 @@ mod par {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn sw_c0_run_windows(
-        program: &str,
-        do_link_hsps: bool,
         lists: &mut [Option<BlastpHitList>],
         compact: &mut [Option<BlastpHitList<XPrelimHsp>>],
         heaps: &mut [BlastCompoHeap],
@@ -869,8 +858,6 @@ mod par {
             }
             let replay_start = timing.then(Instant::now);
             let replayed = match sw_c0_replay(
-                program,
-                do_link_hsps,
                 &window.entries,
                 results,
                 lists,
@@ -910,7 +897,7 @@ mod par {
             }
             released_batch = done_batch;
         }
-        if let Err(error) = batch_state.finish_if_needed(program, None, batches, heaps, notes) {
+        if let Err(error) = batch_state.finish_if_needed(None, batches, heaps, notes) {
             if timing {
                 print_timing(&counts);
             }
@@ -1099,8 +1086,6 @@ mod par {
         let lpt_on = x_redo_par::x_bp_redo_lpt();
         let mut lpt_windows = 0usize;
         let mut counts = sw_c0_run_windows(
-            redo.args.app.ncbi_name(),
-            redo.args.sum_stats,
             preliminary_hit_lists,
             x_compact_hit_lists,
             redone_matches,

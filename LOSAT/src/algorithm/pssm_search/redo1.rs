@@ -98,27 +98,75 @@ pub(crate) struct PssmRedo1<'a> {
     /// read (`blastp::blast_engine::database::ListedSubjects::note_fetched`), and refuses the
     /// search where one of them has a header that cannot be read.
     pub(crate) redone: &'a dyn Fn(&[BlastCompoHeap]) -> anyhow::Result<()>,
-    /// psiblast's `-use_sw_tback` (`Blast_RedoOneMatchSmithWaterman`, CBS 0 to 3); `None` for the
+    /// The redo's scale (`RedoScale::COMPO` with composition-based statistics; psiblast's
+    /// `-comp_based_stats 0 -use_sw_tback`, `RedoScale::UNADJUSTED`), decided once by the search
+    /// (`blast_engine::pssm_hooks::pssm_traceback`); its run (`RedoRun`) carries it.
+    pub(crate) scale: RedoScale,
+    /// psiblast's `-use_sw_tback` (`Blast_RedoOneMatchSmithWaterman`, modes 0 to 3); `None` for the
     /// default X-drop redo.
     pub(crate) sw: Option<PssmSwOptions<'a>>,
 }
 
-/// Options for psiblast's Smith-Waterman position-based redo (`-use_sw_tback`, CBS 0 to 3).
+/// What psiblast's Smith-Waterman redo of a PSSM (`-use_sw_tback`) asks of the search besides the
+/// redo: the batch's status after each query (the subjects that NCBI's fetch excludes) and its
+/// errors. NCBI keeps one status for the batch (`status_code_tld`, one query in a position-based
+/// search), set by the last match that the redo reaches (`SwBatchStatus`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039,3100-3109,3602-3622
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3622
 pub(crate) struct PssmSwOptions<'a> {
-    /// Whether composition-based adjustment runs (`true` for CBS 1..3, `false` for CBS 0).
-    pub(crate) compo_adjust: bool,
-    /// Applies fetch-excluded marks of the finished query to the batch status.
+    /// The status after the query's last match, given the position in the query's list of the last
+    /// match whose redo set it (`None`: none was redone): the lists that the fetch excludes
+    /// (`redo_run::query_fetch_excluded_reached`).
     pub(crate) on_query_done: &'a dyn Fn(
         Option<usize>,
         &[BlastCompoHeap],
         &mut crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus,
     ),
-    /// Builds the error/refusal when the batch's last redone match failed.
+    /// The error of a batch whose last redone match failed (`Traceback failed`, or the refusal
+    /// where NCBI's clean-up crashes).
     pub(crate) on_batch_failed: &'a dyn Fn(&[BlastCompoHeap]) -> anyhow::Error,
-    /// Builds the refusal when a match's SW redo does not terminate in NCBI.
+    /// The refusal of a match whose redo NCBI never ends, at its position in the query's list.
     pub(crate) on_endless: &'a dyn Fn(&[BlastCompoHeap], usize) -> anyhow::Error,
+}
+
+/// The scale of a redo and whether it adjusts the matrix to each subject's composition: NCBI's
+/// `localScalingFactor`, `SCALING_FACTOR` with composition-based statistics (`COMPO`), 1 without
+/// them (`UNADJUSTED`: psiblast's `-comp_based_stats 0 -use_sw_tback`, whose Smith-Waterman redo
+/// reads the PSSM as the search made it and runs no SEG). One value per search, which every step
+/// of the redo reads from its run (`RedoRun::scale`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
+/// (`BLOSUM62_20`'s tenth of the factor is not reached: NCBI's options refuse that matrix,
+/// `core::composition_adjustment::adjust_scores`.)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RedoScale {
+    /// Whether the composition adjustment runs (`compo_adjust_mode` not 0).
+    pub(crate) compo_adjust: bool,
+    /// The scaling factor of the redo's scores, Lambda, gap costs and cutoff.
+    pub(crate) factor: f64,
+}
+
+impl RedoScale {
+    /// With composition-based statistics: the factor `SCALING_FACTOR`.
+    pub(crate) const COMPO: Self = Self {
+        compo_adjust: true,
+        factor: SCALING_FACTOR,
+    };
+    /// Without them: the factor 1.
+    pub(crate) const UNADJUSTED: Self = Self {
+        compo_adjust: false,
+        factor: 1.0,
+    };
+
+    /// The scale of a search whose composition-based statistics are on (`compo_adjust`) or off.
+    pub(crate) fn of(compo_adjust: bool) -> Self {
+        if compo_adjust {
+            Self::COMPO
+        } else {
+            Self::UNADJUSTED
+        }
+    }
 }
 
 /// psiblast's `-sum_stats true` in the redo (`do_link_hsps`): the redone alignments' cutoff and
@@ -140,23 +188,11 @@ pub(crate) struct RedoLink {
 
 impl RedoLink {
     /// The parameters of the redo of the search whose traceback cutoff is `cutoff_score_min`
-    /// (one context) and whose query context is `context`, scaled by `SCALING_FACTOR`.
-    #[cfg(test)]
-    pub(crate) fn new(cutoff_score_min: i32, context: LinkContext) -> Self {
-        Self::with_scale(cutoff_score_min, context, SCALING_FACTOR)
-    }
-
-    /// The parameters of the redo scaled by `scaling_factor` (`SCALING_FACTOR` for CBS 1..3,
-    /// `1.0` for CBS 0 with `-use_sw_tback`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2461,3100-3109
-    pub(crate) fn with_scale(
-        cutoff_score_min: i32,
-        context: LinkContext,
-        scaling_factor: f64,
-    ) -> Self {
+    /// (one context) and whose query context is `context`, at the redo's scale `scale`
+    /// (`RedoScale::factor`: the cutoff times the factor, truncated).
+    pub(crate) fn new(cutoff_score_min: i32, context: LinkContext, scale: RedoScale) -> Self {
         Self {
-            cutoff_s: (cutoff_score_min as f64 * scaling_factor) as i32,
+            cutoff_s: (cutoff_score_min as f64 * scale.factor) as i32,
             params: EvenGapLinkParams::traceback(),
             context,
         }
@@ -175,6 +211,9 @@ pub(crate) struct RedoRun<'a> {
     query_words: Vec<u64>,
     /// `query_composition->numTrueAminoAcids`.
     query_true_amino_acids: i32,
+    /// The redo's scale (`RedoScale`): the factor of its scores and gap costs, and whether it
+    /// adjusts the matrix.
+    scale: RedoScale,
     /// The scaled gapped block of the redo's copy: Lambda over the scaling factor, K of the
     /// factor-1 PSSM.
     karlin: KarlinParams,
@@ -307,14 +346,14 @@ impl<'a> RedoRun<'a> {
             (x_drop_final_bits, x_drop_final),
             matrix,
             scratch,
-            SCALING_FACTOR,
+            RedoScale::COMPO,
         )
     }
 
-    /// `new` with an explicit `scaling_factor` (`SCALING_FACTOR` for CBS 1..3, `1.0` for CBS 0
-    /// with `-use_sw_tback`).
+    /// `new` at the scale `scale` (`RedoScale`; `new` is `RedoScale::COMPO`, the scale of every
+    /// redo with composition-based statistics).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133,3100-3109
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_scale(
         query: &'a [u8],
@@ -325,7 +364,7 @@ impl<'a> RedoRun<'a> {
         (x_drop_final_bits, x_drop_final): (f64, i32),
         matrix: QueryPssm,
         scratch: PssmGapScratch,
-        scaling_factor: f64,
+        scale: RedoScale,
     ) -> Self {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1682-1695
         let query_u_as_c: Vec<u8> = query
@@ -345,10 +384,11 @@ impl<'a> RedoRun<'a> {
             query_data: BlastCompoSequenceData::from_ncbistdaa(&query_u_as_c),
             query_words: build_query_word_hashes(query),
             query_true_amino_acids: read_aa_composition(query).num_true_amino_acids,
+            scale,
             karlin,
             log_k,
-            gap_open: blast_nint(gap_costs.0 as f64 * scaling_factor),
-            gap_extend: blast_nint(gap_costs.1 as f64 * scaling_factor),
+            gap_open: blast_nint(gap_costs.0 as f64 * scale.factor),
+            gap_extend: blast_nint(gap_costs.1 as f64 * scale.factor),
             x_dropoff: crate::core::x_drop::redo_x_dropoff(x_drop_final_bits, lambda, x_drop_final),
             near_identical_cutoff: (NEAR_IDENTICAL_BITS_PER_POSITION * std::f64::consts::LN_2)
                 / lambda,
@@ -461,7 +501,9 @@ impl<'a> RedoRun<'a> {
 }
 
 impl PssmRedo1<'_> {
-    /// The final hit lists of the queries from their preliminary lists, which it takes.
+    /// The final hit lists of the queries from their preliminary lists, which it takes: the X-drop
+    /// redo, or psiblast's Smith-Waterman redo (`-use_sw_tback`, `run_smith_waterman`), in the one
+    /// loop of both (`redo_loop`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3093-3110
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3770-3789
@@ -473,71 +515,21 @@ impl PssmRedo1<'_> {
         if let Some(sw) = &self.sw {
             return self.run_smith_waterman(sw, preliminary_hit_lists, compact_hit_lists);
         }
-        let mut run = self.redo_run();
-        let mut heaps: Vec<BlastCompoHeap> = preliminary_hit_lists
-            .iter()
-            .map(|_| BlastCompoHeap::new(self.hitlist_size, self.inclusion_ethresh))
-            .collect();
-        for q_idx in 0..preliminary_hit_lists.len() {
-            // A list's HSPs as the redo reads them (`s_ResultHspToDistinctAlign`), with its
-            // subject and best e-value, in the order of the sorted preliminary hit list.
-            let matches: Vec<(u32, f64, Vec<BlastpPreliminaryHsp>)> =
-                if let Some(hit_list) = compact_hit_lists[q_idx].take() {
-                    let count = hit_list.hsplist_count;
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| {
-                            let hsps = list.hsps.iter().map(|hsp| hsp.hsp).collect();
-                            (list.oid, list.best_evalue, hsps)
-                        })
-                        .collect()
-                } else if let Some(hit_list) = preliminary_hit_lists[q_idx].take() {
-                    let count = hit_list.hsplist_count;
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| {
-                            let hsps = list
-                                .hsps
-                                .iter()
-                                .map(super::traceback0::preliminary_hsp)
-                                .collect();
-                            (list.oid, list.best_evalue, hsps)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-            for (oid, best_evalue, hsps) in matches {
-                if hsps.is_empty() {
-                    continue;
-                }
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3532
-                if early_termination(best_evalue, &heaps) {
-                    continue;
-                }
-                let Some((hsp_list, best_score, best_evalue)) =
-                    self.redo_match(&mut run, oid, &hsps)?
-                else {
-                    continue;
-                };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3720
-                let heap = &mut heaps[q_idx];
-                if heap.would_insert(best_evalue, best_score, oid) {
-                    heap.insert(hsp_list, best_evalue, best_score, oid);
-                }
-            }
-        }
-        (self.redone)(&heaps)?;
-        Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
+        // Without `-use_sw_tback` the redo runs only with composition-based statistics.
+        debug_assert_eq!(self.scale, RedoScale::COMPO);
+        self.redo_loop(
+            XDropStep,
+            self.redo_run(),
+            preliminary_hit_lists,
+            compact_hit_lists,
+        )
     }
 
-    /// psiblast's Smith-Waterman position-based redo loop (`-use_sw_tback`, CBS 0 to 3).
+    /// psiblast's Smith-Waterman redo (`-use_sw_tback`, modes 0 to 3): `redo_loop` with the step
+    /// of `smith_waterman::PssmSwStep`, which keeps the batch's status. A position-based search
+    /// has one query (NCBI's assertion), so the batch is the query.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3093-3110,3525-3789
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3062-3065
     #[cold]
     #[inline(never)]
     fn run_smith_waterman(
@@ -546,48 +538,42 @@ impl PssmRedo1<'_> {
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
         compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Vec<Option<BlastpHitList>>> {
-        let scaling_factor = if sw.compo_adjust { SCALING_FACTOR } else { 1.0 };
-        let mut run = self.redo_run_with_scale(scaling_factor);
-        let mut sw_scratch = smith_waterman::RpsSwScratch::new();
-        let mut sw_status =
-            crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus::default();
+        debug_assert_eq!(preliminary_hit_lists.len(), 1, "one PSSM query");
+        self.redo_loop(
+            smith_waterman::PssmSwStep::new(sw),
+            self.redo_run(),
+            preliminary_hit_lists,
+            compact_hit_lists,
+        )
+    }
+
+    /// The redo of every query's matches, in the order of its sorted preliminary hit list (by
+    /// e-value; by subject OID without composition-based statistics, `prelim_run`), each match
+    /// redone by `step` unless it is empty or the early termination test stops it, then offered to
+    /// the query's heap of redone matches; `step` hears of each query's end and of the batch's.
+    /// The one loop of the X-drop and the Smith-Waterman redos: the X-drop step (`XDropStep`) does
+    /// nothing at the ends, and its instance is the X-drop loop as it was.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3093-3110
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3770-3789
+    #[inline(always)]
+    fn redo_loop<S: MatchStep>(
+        &self,
+        mut step: S,
+        mut run: RedoRun<'_>,
+        preliminary_hit_lists: &mut [Option<BlastpHitList>],
+        compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    ) -> Result<Vec<Option<BlastpHitList>>> {
         let mut heaps: Vec<BlastCompoHeap> = preliminary_hit_lists
             .iter()
             .map(|_| BlastCompoHeap::new(self.hitlist_size, self.inclusion_ethresh))
             .collect();
         for q_idx in 0..preliminary_hit_lists.len() {
-            let matches: Vec<(u32, f64, Vec<BlastpPreliminaryHsp>)> =
-                if let Some(hit_list) = compact_hit_lists[q_idx].take() {
-                    let count = hit_list.hsplist_count;
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| {
-                            let hsps = list.hsps.iter().map(|hsp| hsp.hsp).collect();
-                            (list.oid, list.best_evalue, hsps)
-                        })
-                        .collect()
-                } else if let Some(hit_list) = preliminary_hit_lists[q_idx].take() {
-                    let count = hit_list.hsplist_count;
-                    hit_list
-                        .hsplist_array
-                        .into_iter()
-                        .take(count)
-                        .map(|list| {
-                            let hsps = list
-                                .hsps
-                                .iter()
-                                .map(super::traceback0::preliminary_hsp)
-                                .collect();
-                            (list.oid, list.best_evalue, hsps)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-            let mut status_position = None;
-            for (match_position, (oid, best_evalue, hsps)) in matches.into_iter().enumerate() {
+            let matches = matches_of(
+                &mut preliminary_hit_lists[q_idx],
+                &mut compact_hit_lists[q_idx],
+            );
+            for (position, (oid, best_evalue, hsps)) in matches.into_iter().enumerate() {
                 if hsps.is_empty() {
                     continue;
                 }
@@ -595,33 +581,9 @@ impl PssmRedo1<'_> {
                 if early_termination(best_evalue, &heaps) {
                     continue;
                 }
-                let subject_read = self.subjects.read(oid)?;
-                let redone = RedoMatch {
-                    info: self.info,
-                    stats: self.stats,
-                    expect_value: self.expect_value,
-                    query_length: self.context.aa_len as i32,
-                    rps_roles: false,
-                    matrix: self.matrix,
-                    link: self.link,
-                }
-                .redo_match_smith_waterman_psiblast(
-                    &mut run,
-                    &mut sw_scratch,
-                    &mut heaps[q_idx],
-                    oid,
-                    &hsps,
-                    subject_read.residues(),
-                    sw.compo_adjust,
-                );
-                let Some(matched) =
-                    sw_status.redone(redone, || (sw.on_endless)(&heaps, match_position))?
+                let Some((hsp_list, best_score, best_evalue)) =
+                    step.redo(self, &mut run, &mut heaps, q_idx, position, oid, &hsps)?
                 else {
-                    status_position = Some(match_position);
-                    continue;
-                };
-                status_position = Some(match_position);
-                let Some((hsp_list, best_score, best_evalue)) = matched else {
                     continue;
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3720
@@ -630,17 +592,16 @@ impl PssmRedo1<'_> {
                     heap.insert(hsp_list, best_evalue, best_score, oid);
                 }
             }
-            (sw.on_query_done)(status_position, &heaps, &mut sw_status);
+            step.query_done(&heaps);
         }
-        if sw_status.failed() {
-            return Err((sw.on_batch_failed)(&heaps));
-        }
+        step.batch_done(&heaps)?;
         (self.redone)(&heaps)?;
         Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
     }
 
-    /// The scaled values of the search (`s_RescaleSearch` on `kbp_gap` and the gap costs, the
-    /// copy's K from `_PSIUpdateLambdaK`, `s_GetAlignParams`) and the query's data.
+    /// The scaled values of the search (`s_RescaleSearch` on `kbp_gap` and the gap costs at the
+    /// search's scale `scale`, the copy's K from `_PSIUpdateLambdaK`, `s_GetAlignParams`) and the
+    /// query's data.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2437-2450
@@ -648,15 +609,11 @@ impl PssmRedo1<'_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2308-2331 (`s_GetQueryInfo`:
     /// `Blast_ReadAaComposition` and `s_CreateWordArray` of the query)
     fn redo_run(&self) -> RedoRun<'_> {
-        self.redo_run_with_scale(SCALING_FACTOR)
-    }
-
-    fn redo_run_with_scale(&self, scaling_factor: f64) -> RedoRun<'_> {
         let ctx = self.context;
         let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
         let query_nomask_full = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
         let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
-        let lambda = self.karlin.lambda / scaling_factor;
+        let lambda = self.karlin.lambda / self.scale.factor;
         RedoRun::new_with_scale(
             query,
             query_nomask,
@@ -670,8 +627,22 @@ impl PssmRedo1<'_> {
             (self.x_drop_final_bits, self.x_drop_final),
             self.pssm.clone(),
             PssmGapScratch::new(),
-            scaling_factor,
+            self.scale,
         )
+    }
+
+    /// What the redo of a match reads besides its run (`RedoMatch`).
+    #[inline(always)]
+    fn matching(&self) -> RedoMatch<'_> {
+        RedoMatch {
+            info: self.info,
+            stats: self.stats,
+            expect_value: self.expect_value,
+            query_length: self.context.aa_len as i32,
+            rps_roles: false,
+            matrix: self.matrix,
+            link: self.link,
+        }
     }
 
     /// The redo of one match of the PSSM query: the subject read from the database, then
@@ -683,16 +654,98 @@ impl PssmRedo1<'_> {
         hsps: &[BlastpPreliminaryHsp],
     ) -> Result<Option<(BlastpHspList, i32, f64)>> {
         let subject_read = self.subjects.read(oid)?;
-        Ok(RedoMatch {
-            info: self.info,
-            stats: self.stats,
-            expect_value: self.expect_value,
-            query_length: self.context.aa_len as i32,
-            rps_roles: false,
-            matrix: self.matrix,
-            link: self.link,
-        }
-        .redo_match(run, oid, hsps, subject_read.residues()))
+        Ok(self
+            .matching()
+            .redo_match(run, oid, hsps, subject_read.residues()))
+    }
+}
+
+/// A query's preliminary hit list as the redo reads it (`s_ResultHspToDistinctAlign`): each list's
+/// subject, best e-value and HSPs, in the list's order, from the compact list where the search
+/// kept one, else from the full list. Takes the list.
+#[inline(always)]
+fn matches_of(
+    preliminary: &mut Option<BlastpHitList>,
+    compact: &mut Option<BlastpHitList<XPrelimHsp>>,
+) -> Vec<(u32, f64, Vec<BlastpPreliminaryHsp>)> {
+    if let Some(hit_list) = compact.take() {
+        let count = hit_list.hsplist_count;
+        hit_list
+            .hsplist_array
+            .into_iter()
+            .take(count)
+            .map(|list| {
+                let hsps = list.hsps.iter().map(|hsp| hsp.hsp).collect();
+                (list.oid, list.best_evalue, hsps)
+            })
+            .collect()
+    } else if let Some(hit_list) = preliminary.take() {
+        let count = hit_list.hsplist_count;
+        hit_list
+            .hsplist_array
+            .into_iter()
+            .take(count)
+            .map(|list| {
+                let hsps = list
+                    .hsps
+                    .iter()
+                    .map(super::traceback0::preliminary_hsp)
+                    .collect();
+                (list.oid, list.best_evalue, hsps)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The redo of one match in `PssmRedo1::redo_loop`, and what the loop tells it at the end of each
+/// query and of the batch: the X-drop redo (`XDropStep`) or psiblast's Smith-Waterman redo
+/// (`smith_waterman::PssmSwStep`, which keeps NCBI's status of the batch).
+trait MatchStep {
+    /// The redo of the match at `position` of query `q_idx`'s list (subject `oid`, its HSPs `hsps`),
+    /// with the queries' heaps `heaps`: its list, best score and best e-value, or `None`.
+    #[allow(clippy::too_many_arguments)]
+    fn redo(
+        &mut self,
+        redo: &PssmRedo1<'_>,
+        run: &mut RedoRun<'_>,
+        heaps: &mut [BlastCompoHeap],
+        q_idx: usize,
+        position: usize,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>>;
+    /// The end of a query's matches.
+    fn query_done(&mut self, heaps: &[BlastCompoHeap]);
+    /// The end of the batch's matches, before the heaps become the hit lists.
+    fn batch_done(&mut self, heaps: &[BlastCompoHeap]) -> Result<()>;
+}
+
+/// The X-drop redo's step: `PssmRedo1::redo_match`, nothing at the ends.
+struct XDropStep;
+
+impl MatchStep for XDropStep {
+    #[inline(always)]
+    fn redo(
+        &mut self,
+        redo: &PssmRedo1<'_>,
+        run: &mut RedoRun<'_>,
+        _heaps: &mut [BlastCompoHeap],
+        _q_idx: usize,
+        _position: usize,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+    ) -> Result<Option<(BlastpHspList, i32, f64)>> {
+        redo.redo_match(run, oid, hsps)
+    }
+
+    #[inline(always)]
+    fn query_done(&mut self, _heaps: &[BlastCompoHeap]) {}
+
+    #[inline(always)]
+    fn batch_done(&mut self, _heaps: &[BlastCompoHeap]) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -725,7 +778,7 @@ pub(crate) trait RedoSubject<'a>: Copy {
         self,
         matching: &RedoMatch<'_>,
         run: &mut RedoRun<'_>,
-        sw: &mut smith_waterman::RpsSwScratch,
+        sw: &mut smith_waterman::PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
@@ -761,13 +814,15 @@ impl<'a> RedoSubject<'a> for ProteinSubject {
         self,
         matching: &RedoMatch<'_>,
         run: &mut RedoRun<'_>,
-        sw: &mut smith_waterman::RpsSwScratch,
+        sw: &mut smith_waterman::PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
         subject: &'a [u8],
     ) -> Result<Option<(BlastpHspList, i32, f64)>, smith_waterman::SwEndless> {
-        matching.redo_match_smith_waterman(run, sw, heap, oid, hsps, subject)
+        matching
+            .redo_match_smith_waterman(run, sw, heap, oid, hsps, subject)
+            .or_else(smith_waterman::SwMatchFailure::for_rps)
     }
 }
 
@@ -801,7 +856,7 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
         self,
         matching: &RedoMatch<'_>,
         run: &mut RedoRun<'_>,
-        sw: &mut smith_waterman::RpsSwScratch,
+        sw: &mut smith_waterman::PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],

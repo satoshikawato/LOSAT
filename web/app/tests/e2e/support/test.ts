@@ -30,7 +30,9 @@ export const test = base.extend<{ uploadableOutputs: void }>({
         );
       }
     },
-    { auto: true },
+    // No time limit of its own (as Playwright's trace fixture): a teardown before it that uses up the
+    // test's time must not skip the renaming. A worker that dies skips it: global-teardown.ts.
+    { auto: true, timeout: 0 },
   ],
 });
 

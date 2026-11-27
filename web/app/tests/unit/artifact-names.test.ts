@@ -51,6 +51,18 @@ describe('artifact names', () => {
     expect(renameUnuploadable(folder())).toEqual([]);
   });
 
+  it('deletes an entry it cannot rename, with the reason, and renames the others', () => {
+    const root = folder();
+    const long = `${'a'.repeat(200)}${':'.repeat(30)}.fa`;
+    writeFileSync(join(root, long), 'x');
+    writeFileSync(join(root, 'b:b'), 'y');
+    expect(renameUnuploadable(root).sort()).toEqual([long, 'b:b'].sort());
+    expect(readdirSync(root).sort()).toEqual([RENAMED_NAMES_FILE, 'b%3Ab'].sort());
+    const recorded = JSON.parse(readFileSync(join(root, RENAMED_NAMES_FILE), 'utf8')) as Array<Record<string, string>>;
+    expect(recorded).toContainEqual({ path: 'b:b', renamed: 'b%3Ab' });
+    expect(recorded.find((entry) => entry['path'] === long)?.['deleted']).toMatch(/^it could not be renamed to a+(%3A)+\.fa: /);
+  });
+
   it('gives every walk fixture a name the upload keeps, and two names two kept names', () => {
     const files = makeFixtures(20261119).files.map((file) => file.name);
     expect(files.some((name) => /[<>"]/.test(name))).toBe(true);

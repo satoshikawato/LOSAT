@@ -164,23 +164,63 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(nested.databases.map((db) => db.name)).toEqual(['d/sub/na', 'd/top']);
   });
 
-  it('hides a listed numbered volume of its own alias only; other foo.NN names and listed databases stay choices (S4-1 R1)', async () => {
-    // refseq.2023 and refseq.2024 are databases an alias lists, not numbered volumes of refseq: 2023 is a year here
-    // but `refseq.2023` is `refseq.NN` by name, which is what makeblastdb writes; the alias lists them, so they are
-    // the volumes of refseq. An unlisted foo.01 beside alias foo is a database, as `blastdbcmd -list` shows it.
+  it('hides only the volumes makeblastdb writes: a DBLIST of A.00 ... A.(n-1) (S4-1 R2)', async () => {
+    const nin = (path: string) => fileWithRelPath(path, 'x');
     const discovery = await discoverBlastDatabases([
-      fileWithRelPath('d/refseq.2023.nin', 'x'),
-      fileWithRelPath('d/refseq.2024.nin', 'x'),
+      // makeblastdb's own output (losat makeblastdb -max_file_sz): `DBLIST mv.00 mv.01 mv.02`, with the header lines.
+      fileWithRelPath('d/mv.nal', '#\n# Alias file created: Nov 28, 2026  1:50 AM\n#\nTITLE big.fa\nDBLIST mv.00 mv.01 mv.02\n'),
+      nin('d/mv.00.nin'),
+      nin('d/mv.01.nin'),
+      nin('d/mv.02.nin'),
+      // three digits, as core_nt.000 shows
+      fileWithRelPath('d/core_nt.nal', 'DBLIST core_nt.000 core_nt.001\n'),
+      nin('d/core_nt.000.nin'),
+      nin('d/core_nt.001.nin'),
+      // years are not volumes: not consecutive from 0
       fileWithRelPath('d/refseq.nal', 'DBLIST refseq.2023 refseq.2024\n'),
+      nin('d/refseq.2023.nin'),
+      nin('d/refseq.2024.nin'),
+      // a gap, a mixed width, and other names among the numbered ones: choices
+      fileWithRelPath('d/gap.nal', 'DBLIST gap.00 gap.02\n'),
+      nin('d/gap.00.nin'),
+      nin('d/gap.02.nin'),
+      fileWithRelPath('d/wide.nal', 'DBLIST wide.00 wide.001\n'),
+      nin('d/wide.00.nin'),
+      nin('d/wide.001.nin'),
+      fileWithRelPath('d/mixed.nal', 'DBLIST mixed.00 mixed.01 other\n'),
+      nin('d/mixed.00.nin'),
+      nin('d/mixed.01.nin'),
+      nin('d/other.nin'),
+    ]);
+    expect(discovery.databases.map((db) => db.name)).toEqual([
+      'd/core_nt',
+      'd/gap',
+      'd/gap.00',
+      'd/gap.02',
+      'd/mixed',
+      'd/mixed.00',
+      'd/mixed.01',
+      'd/mv',
+      'd/other',
+      'd/refseq',
+      'd/refseq.2023',
+      'd/refseq.2024',
+      'd/wide',
+      'd/wide.00',
+      'd/wide.001',
+    ]);
+    expect(defaultDatabase(discovery.databases)?.name).toBe('d/core_nt');
+  });
+
+  it('hides a numbered volume only when its alias lists it; unlisted foo.NN and databases other aliases list stay choices (S4-1 R1)', async () => {
+    const discovery = await discoverBlastDatabases([
       fileWithRelPath('d/foo.nal', 'DBLIST bar\n'),
       fileWithRelPath('d/bar.nin', 'x'),
       fileWithRelPath('d/foo.01.nin', 'x'),
       fileWithRelPath('d/other.nal', 'DBLIST bar.07 foo.01\n'),
       fileWithRelPath('d/bar.07.nin', 'x'),
     ]);
-    // refseq.2023/2024: `refseq.NN` with two or more digits and listed by refseq: volumes. foo.01: listed by `other`, not by
-    // foo, so a database of its own (and a listed one: not the default). bar.07: listed by other, not by bar: a database.
-    expect(discovery.databases.map((db) => db.name)).toEqual(['d/bar', 'd/bar.07', 'd/foo', 'd/foo.01', 'd/other', 'd/refseq']);
+    expect(discovery.databases.map((db) => db.name)).toEqual(['d/bar', 'd/bar.07', 'd/foo', 'd/foo.01', 'd/other']);
     expect(discovery.databases.filter((db) => db.listed).map((db) => db.name)).toEqual(['d/bar', 'd/bar.07', 'd/foo.01']);
     expect(defaultDatabase(discovery.databases)?.name).toBe('d/foo');
   });
@@ -715,6 +755,23 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       release('DBLIST x\n');
       await picking;
     }
+  });
+
+  it('selects the repeats database chosen before the reload again after the re-pick (S4-5 R2)', async () => {
+    const memory = memoryStore({ filtering: { name: 'rep/b', folder: 'rep' } });
+    const { draft } = setup(memory);
+    pasteQuery(draft);
+    pasteSubject(draft);
+    await draft.idle();
+    await draft.setFilteringDbFiles([
+      fileWithRelPath('rep/a.nin', 'x'),
+      fileWithRelPath('rep/b.nin', 'x'),
+      fileWithRelPath('rep/ab.nal', 'DBLIST a b\n'),
+    ]);
+    await draft.idle();
+    expect(draft.state.get().filteringDb.selected).toBe('rep/b');
+    expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe('rep/b');
+    expect(memory.data.filtering).toEqual({ name: 'rep/b', folder: 'rep' });
   });
 
   it('says folder in the same places when a folder was chosen (S4-5)', async () => {

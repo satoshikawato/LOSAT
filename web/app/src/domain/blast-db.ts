@@ -379,6 +379,29 @@ function joinPath(dir: string, rel: string): string {
   return dir === '' ? clean : `${dir}/${clean}`;
 }
 
+/**
+ * The volume names of an alias's DBLIST as makeblastdb writes it: `A.00`, `A.01` ... `A.(n-1)`, every
+ * number written to one width of 2 digits or more (`core_nt.000`); each name relative to the alias's
+ * folder, or as the alias's own path. Empty for any other DBLIST.
+ */
+function numberedVolumes(alias: string, dir: string, dblist: readonly string[]): readonly string[] {
+  const names: string[] = [];
+  const numbers = new Set<number>();
+  let width = 0;
+  for (const token of dblist) {
+    const name = [token, joinPath(dir, token)].find((candidate) => candidate.startsWith(`${alias}.`));
+    const digits = name?.slice(alias.length + 1);
+    if (name === undefined || digits === undefined || !/^\d{2,}$/.test(digits)) return [];
+    if (width === 0) width = digits.length;
+    else if (digits.length !== width) return [];
+    numbers.add(Number(digits));
+    names.push(name);
+  }
+  if (names.length === 0 || numbers.size !== names.length) return [];
+  for (let n = 0; n < names.length; n++) if (!numbers.has(n)) return [];
+  return names;
+}
+
 function classifyBlastDbFile(
   name: string,
 ): { readonly stem: string; readonly kind: SequenceKind; readonly entry: 'alias' | 'volume' } | undefined {
@@ -479,9 +502,10 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     }
   }
 
-  // A database an alias of its kind lists in its DBLIST. A listed `A.NN` of alias `A` is a volume of
-  // that one database (what makeblastdb writes): not a choice of its own. Any other listed database
-  // stays a choice, and a `foo.NN` that no alias lists is a database like any other.
+  // A database an alias of its kind lists in its DBLIST stays a choice, except the volumes of one
+  // database: a DBLIST that is exactly `A.00`, `A.01` ... (consecutive from 0, one width) is what
+  // makeblastdb writes for the alias `A` of a multi-volume database, and those names are not choices.
+  // A `foo.NN` that no alias lists, or that `foo` lists among other names, is a database like any other.
   const known = new Set(initial.map((db) => `${db.kind}:${db.name}`));
   const listed = new Set<string>();
   const volumes = new Set<string>();
@@ -489,11 +513,12 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     const kind = key.slice(0, key.indexOf(':'));
     const alias = key.slice(key.indexOf(':') + 1);
     const dir = parentDir(alias);
+    const written = new Set(numberedVolumes(alias, dir, meta.dblist));
     for (const token of meta.dblist) {
       for (const member of [token, joinPath(dir, token)]) {
         if (!known.has(`${kind}:${member}`)) continue;
         listed.add(`${kind}:${member}`);
-        if (member.startsWith(`${alias}.`) && /^\d{2,}$/.test(member.slice(alias.length + 1))) volumes.add(`${kind}:${member}`);
+        if (written.has(member)) volumes.add(`${kind}:${member}`);
       }
     }
   }

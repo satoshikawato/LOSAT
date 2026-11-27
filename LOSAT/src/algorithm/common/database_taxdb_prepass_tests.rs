@@ -3615,7 +3615,6 @@ fn a_failed_lookup_ends_the_prefetchs_loads_in_ncbis_order_of_seq_id_handles() {
         batch(&TaxdbRun::default(), &[failed, local, control]).unwrap(),
         offset("blastp") + &warning("blastp")
     );
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// The databases of `tests/db_search/ids` (`make_ids.py --pfworder-only`) of line NP item O4b2-10,
@@ -3734,7 +3733,6 @@ fn a_failed_lookups_loads_go_to_the_data_sources_cache_of_ten() {
         let name_of = blob_name(&db, 5, 5, "BLASTP").unwrap();
         assert_eq!(lookups.blob_read(5, &name_of), BlobRead::Again, "{name}");
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// Line NP item O4b2-10, review F2 (`ptie_t5`, `ptie150_t5` of `make_ids.py --pfworder-only`,
@@ -3814,7 +3812,6 @@ fn a_load_of_the_failures_key_is_made_or_not() {
             );
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// Line NP item O4b2-10, review F6: of several lookups of a batch that throw on their ids, the first
@@ -3878,7 +3875,6 @@ fn the_first_of_several_failing_lookups_ends_the_loads() {
         }
         assert!(!lookups.slot_blobs.contains_key(&1));
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// Line NP item O4b2-10, review F3 and F6: NCBI's `GetBioseqHandles` counts the distinct Seq-id
@@ -3957,7 +3953,6 @@ fn the_map_of_a_batch_counts_every_seq_align_id_of_it() {
     );
     assert_eq!(map_unknown(&[(2, Some(vec![1]))], 201), Some(MANY_IDS));
     assert_eq!(map_unknown(&[(2, Some(vec![1]))], 200), None);
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// Line NP item O4b2-10, review F4 and F6: NCBI posts its warning of a UTF8String header (803.10) once
@@ -4021,7 +4016,6 @@ fn a_load_that_may_not_be_made_is_refused_where_it_would_post_the_utf8_warning()
         "BLASTN"
     )
     .is_ok());
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// NCBI's `CATCH_ALL` takes the `CEofException` of a record that ends before its read enters

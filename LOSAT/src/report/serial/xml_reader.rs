@@ -304,11 +304,14 @@ impl<S: AsnSource> XmlReader<S> {
         self.pos -= count;
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:84-101
     /// `ResetState` of an object stream at its root frame: no tag open, none given back.
     pub(super) fn reset_state(&mut self) {
         self.state = TagState::Outside;
         self.rejected = None;
         self.last_tag.clear();
+        self.attlist = false;
+        self.ns_prefix.clear();
         self.utf8.clear();
         self.utf8_at = 0;
     }

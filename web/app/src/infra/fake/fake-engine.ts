@@ -38,10 +38,12 @@ import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
 import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
 import DESCRIBE from './describe.json';
+import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
 const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
+const BLAST_FORMATTER_XMLHELP: string = BLAST_FORMATTER_XMLHELP_DOC.xml;
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -54,6 +56,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   private readonly cancelled = new Set<string>();
   private readonly phaseDelayMs: number;
   private windowMaskerDescription: ToolDescription | undefined;
+  private blastFormatterDescription: ToolDescription | undefined;
 
   constructor(options: FakeEngineOptions = {}) {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
@@ -72,23 +75,30 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   async describeTool(tool: string): Promise<ToolDescription> {
-    if (tool !== 'windowmasker') throw new Error(`unknown tool: ${tool}`);
-    this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
-    return this.windowMaskerDescription;
+    if (tool === 'windowmasker') {
+      this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
+      return this.windowMaskerDescription;
+    }
+    if (tool === 'blast_formatter') {
+      this.blastFormatterDescription ??= parseToolDescription(BLAST_FORMATTER_XMLHELP);
+      return this.blastFormatterDescription;
+    }
+    throw new Error(`unknown tool: ${tool}`);
   }
 
   async validateTool(argv: readonly string[]): Promise<ToolValidation> {
     const tool = argv[0];
-    if (tool !== 'windowmasker') return { ok: false, message: `unknown tool: ${tool}` };
+    if (tool !== 'windowmasker' && tool !== 'blast_formatter') return { ok: false, message: `unknown tool: ${tool}` };
     const description = await this.describeTool(tool);
     const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
     const seen = new Set<string>();
+    const values = new Map<string, string>();
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
       if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
       const param = byFlag.get(flag!);
-      const extraValued = flag === '-logfile' || flag === '-conffile';
+      const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
         return { ok: false, message: `Argument error: Unknown argument: "${word}"` };
       }
@@ -100,6 +110,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
           if (i + 1 >= argv.length) return { ok: false, message: `Argument error: Missing value for "${flag}"` };
           value = argv[++i]!;
         }
+        values.set(flag!, value);
         if (param?.choices !== undefined && !param.choices.includes(value)) {
           return { ok: false, message: `Argument error: Invalid value "${value}" for "${flag}"` };
         }
@@ -122,8 +133,22 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         return { ok: false, message: `Argument error: ${first} and ${second} are mutually exclusive` };
       }
     }
-    if (!seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
+    if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    if (tool === 'blast_formatter') {
+      if (seen.has('-rid') && seen.has('-archive')) {
+        return { ok: false, message: 'Argument error: -rid and -archive are mutually exclusive' };
+      }
+      if (!seen.has('-archive')) {
+        if (!seen.has('-rid')) {
+          return { ok: false, message: 'Command line argument error: Argument "rid". The argument has no value' };
+        }
+        if ((values.get('-rid') ?? '') === '') {
+          return { ok: false, message: 'LOSAT engine error: Empty RID string specified' };
+        }
+        return { ok: false, message: "Error: -rid (the results of a search on NCBI's servers) is not supported by LOSAT's BLAST_FORMATTER" };
+      }
     }
     return { ok: true };
   }
@@ -164,17 +189,18 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       return finish(1);
     }
 
+    const toolName = argv[0] ?? 'windowmasker';
     const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
     if (words.includes('-xmlhelp')) {
-      await writeStdout(WINDOWMASKER_XMLHELP);
+      await writeStdout(toolName === 'blast_formatter' ? BLAST_FORMATTER_XMLHELP : WINDOWMASKER_XMLHELP);
       return finish(0);
     }
     if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
-      await writeStdout(`USAGE\n  windowmasker ... (${FAKE_MARKER})\n`);
+      await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
     if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
-      await writeStdout(`windowmasker: 0.2.0 (${FAKE_MARKER})\n`);
+      await writeStdout(`${toolName}: 0.2.0 (${FAKE_MARKER})\n`);
       return finish(0);
     }
 

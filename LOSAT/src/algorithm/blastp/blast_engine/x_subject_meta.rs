@@ -14,8 +14,9 @@
 //! once per search with the subjects' encoding) also hold an `XSubjectMeta`: the shown IDs
 //! (`tabular_subject_ids`: each subject's `tabular_subject_id`, `None` where NCBI's `GenerateDefline`
 //! would throw) and the title `Arc`s. A block borrows the titles (`subject_titles` in `run_resolved_in_pool`) and
-//! the shown IDs, which the check of failed lookups (`report::tabular::check_failed_lookups`)
-//! reads over the block's hit lists as it reads `tabular_subject_ids`'.
+//! the shown IDs, which the rows' writers (and their stops where NCBI has no result,
+//! `report::tabular::row_stop_end`) read over the block's hit lists as they read
+//! `tabular_subject_ids`'.
 //!
 //! Why the reports do not change: `tabular_subject_id(local_id, title, true)` and
 //! `Arc::from(title)` are functions of the subject record only (its local ID and title bytes), and

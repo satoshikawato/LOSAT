@@ -49,10 +49,18 @@ const NO_LINKS: MainLinks = {
   fault: () => undefined,
 };
 
-/** What a run posted. */
+/**
+ * What a run posted. The bytes are taken as the Engine worker's posts take them (tool-posts.ts): their buffer is transferred
+ * (here to a copy that the test keeps), which leaves the runtime's array empty, as the main thread's receipt of a post does.
+ */
 function posts(): ToolPosts & { stdout: Uint8Array[]; stderr: Uint8Array[]; frames: ToolFrame[] } {
   const posted = { stdout: [] as Uint8Array[], stderr: [] as Uint8Array[], frames: [] as ToolFrame[] };
-  return { ...posted, chunk: (stream, bytes) => posted[stream].push(bytes), file: (frame) => posted.frames.push(frame) };
+  const taken = (bytes: Uint8Array) => structuredClone(bytes, { transfer: [bytes.buffer as ArrayBuffer] });
+  return {
+    ...posted,
+    chunk: (stream, bytes) => posted[stream].push(taken(bytes)),
+    file: (frame) => posted.frames.push(frame.kind === 'bytes' ? { ...frame, bytes: taken(frame.bytes) } : frame),
+  };
 }
 const joined = (chunks: Uint8Array[]) => Buffer.concat(chunks);
 
@@ -188,6 +196,28 @@ describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on
     const again = await worker.tool(toolOf(['makeblastdb', '-in', 'dbs/db', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy']), after);
     expect(again.status).not.toBe(0);
     expect(after.frames).toEqual([]);
+  });
+
+  it('posts a database file larger than a chunk in frames one after another, each at its offset (their buffers transferred)', async () => {
+    const worker = runtime();
+    // 1,500 proteins of 1,000 residues: a .psq of about 1.5 MB, more than one chunk (CHUNK_BYTES, 1 MiB) of the directory.
+    const residues = 'ACDEFGHIKLMNPQRSTVWY';
+    let fasta = '';
+    for (let i = 0; i < 1500; i++) {
+      let sequence = '';
+      for (let j = 0; j < 1000; j++) sequence += residues[(i * 7 + j * 13 + ((i * j) % 17)) % residues.length];
+      fasta += `>p${i} protein ${i}\n${sequence.replace(/(.{60})/g, '$1\n')}\n`;
+    }
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'big.faa', '-dbtype', 'prot', '-out', 'big'], [memoryFile('big.faa', fasta)]), run);
+    expect(done.status).toBe(0);
+    const psq = filesOf(run.frames).find((file) => file.name === 'big.psq')!;
+    expect(psq.inOrder).toBe(true);
+    // One byte per residue, a 0 between the sequences and one at the start.
+    expect(psq.bytes.length).toBe(1500 * 1001 + 1);
+    const number = run.frames.find((frame) => frame.kind === 'begin' && frame.name === 'big.psq')!.number;
+    const offsets = run.frames.flatMap((frame) => (frame.kind === 'bytes' && frame.number === number ? [frame.offset] : []));
+    expect(offsets).toEqual([0, 1024 * 1024]);
   });
 
   it('replaces a database of the directory as the command line does: the old files it removed never come, and a log is appended to', async () => {

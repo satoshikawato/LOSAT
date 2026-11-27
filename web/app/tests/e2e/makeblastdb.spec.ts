@@ -6,7 +6,8 @@
 // the mask column's times and the elapsed time, and the browser's run equals the CLI's run either just before or just
 // after it (a minute may pass between them). Then the database that the browser made is searched through the package's
 // `-db` path, and its outfmt 0 and 6 are those of the native command line searching the same files. Rows: version 5
-// nucleotide with `-parse_seqids`; protein with `-mask_data` (seg); a nucleotide database of three volumes (`-max_file_sz`).
+// nucleotide with `-parse_seqids`; protein with `-mask_data` (seg); a nucleotide database of three volumes (`-max_file_sz`);
+// a bacterial genome, whose sequence file is larger than one frame.
 //
 // LOSAT_WEB_MEASURE=1 adds a measurement in Chromium (outside CI): makeblastdb of the files named by
 // LOSAT_WEB_MEASURE_MAKEBLASTDB_NUCL (a nucleotide FASTA, 50 MB or more) and LOSAT_WEB_MEASURE_MAKEBLASTDB_PROT (a protein
@@ -15,7 +16,7 @@
 // memory before the next search on the same instance) and the bytes of the database (the run's directory's overlay).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -36,6 +37,8 @@ const MIB = 1024 * 1024;
 
 /** A zone with summer time and one without, half an hour off a whole hour. */
 const ZONES = ['America/New_York', 'Asia/Kolkata'] as const;
+/** The names by which a browser's `Intl` may give a zone (Chromium's ICU gives Asia/Kolkata its older name). */
+const ZONE_NAMES: Readonly<Record<string, readonly string[]>> = { 'America/New_York': ['America/New_York'], 'Asia/Kolkata': ['Asia/Kolkata', 'Asia/Calcutta'] };
 
 const CASES: readonly MakeblastdbCase[] = [
   {
@@ -58,6 +61,14 @@ const CASES: readonly MakeblastdbCase[] = [
     argv: ['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-max_file_sz', '4000', '-out', 'vol/db'],
     files: [['ns.fna', 'tests/dropin_corpus/ns.fna']],
     search: { program: 'blastn', argv: ['blastn', '-db', 'vol/db', '-query', 'nq.fna'], query: 'tests/dropin_corpus/nq.fna' },
+  },
+  {
+    // A genome (E. coli K-12, 4.6 Mbp): its .nsq (1.2 MB) is larger than a chunk of the run's directory (1 MiB), so it
+    // reaches the page in two frames, each a transferred buffer.
+    id: 'nucl.genome',
+    argv: ['makeblastdb', '-in', 'MG1655.fna', '-dbtype', 'nucl', '-out', 'genome'],
+    files: [['MG1655.fna', 'tests/fasta/MG1655.fna']],
+    search: { program: 'blastn', argv: ['blastn', '-db', 'genome', '-query', 'nq.fna'], query: 'tests/dropin_corpus/nq.fna' },
   },
 ];
 
@@ -167,7 +178,7 @@ for (const zone of ZONES) {
         const [result]: MakeblastdbResult[] = await page.evaluate((list) => window.losatHarness!.engine.makeblastdbRuns(list), [item]);
         const after = nativeRun(item, zone);
         expect(result!.error, label).toBeUndefined();
-        expect(result!.zone, `${label}: the page's zone`).toBe(zone);
+        expect(ZONE_NAMES[zone], `${label}: the page's zone`).toContain(result!.zone);
         const browser: Written = {
           status: result!.status!,
           stdout: fromBase64(result!.stdout),
@@ -219,17 +230,23 @@ function descendantRssBytes(rootPid: number): number {
 }
 
 /** The native command line's makeblastdb of `input` with GNU time: wall seconds, max RSS and the files' SHA-256. */
-function nativeMeasured(argv: readonly string[], input: string): { seconds: number; maxRssBytes: number; files: Map<string, { size: number; sha256: string }> } {
+function nativeMeasured(argv: readonly string[], input: string): { seconds: number; maxRssBytes: number; files: Map<string, { size: number; sha256: string; mibSha256: string[] }> } {
   const folder = mkdtempSync(join(tmpdir(), 'losat-makeblastdb-measure-'));
   try {
     const report = join(folder, 'time.txt');
-    const words = argv.map((word) => (word === basename(input) ? input : word));
-    const run = spawnSync('/usr/bin/time', ['-f', '%e %M', '-o', report, NATIVE!, ...words], { cwd: folder, maxBuffer: 1 << 28 });
+    // The input under its name in the folder, as the browser's run has it (the title of the database is the name).
+    symlinkSync(input, join(folder, basename(input)));
+    const run = spawnSync('/usr/bin/time', ['-f', '%e %M', '-o', report, NATIVE!, ...argv], { cwd: folder, maxBuffer: 1 << 28 });
     if (run.status !== 0) throw new Error(`native makeblastdb exited ${run.status}: ${run.stderr.toString()}`);
+    rmSync(join(folder, basename(input)));
     const [seconds, kib] = readFileSync(report, 'utf8').trim().split(/\s+/).map(Number);
-    const files = new Map<string, { size: number; sha256: string }>();
+    const files = new Map<string, { size: number; sha256: string; mibSha256: string[] }>();
+    const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
     for (const [name, bytes] of treeOf(folder)) {
-      if (name !== 'time.txt') files.set(name, { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+      if (name === 'time.txt') continue;
+      const mibSha256: string[] = [];
+      for (let at = 0; at < bytes.length; at += MIB) mibSha256.push(digest(bytes.subarray(at, at + MIB)));
+      files.set(name, { size: bytes.length, sha256: digest(bytes), mibSha256 });
     }
     return { seconds: seconds!, maxRssBytes: kib! * 1024, files };
   } finally {
@@ -289,8 +306,17 @@ test.describe('makeblastdb of a large input, measured', () => {
       // The files without a date are the same bytes; those with one (the index and the JSON) the same length.
       for (const file of files) {
         const expected = native.files.get(file.name)!;
-        if (/\.(nin|pin|njs|pjs|nal|pal)$/.test(file.name)) expect(file.size, file.name).toBe(expected.size);
-        else expect(file.sha256, file.name).toBe(expected.sha256);
+        if (/\.(nin|pin|njs|pjs|nal|pal)$/.test(file.name)) {
+          expect.soft(file.size, file.name).toBe(expected.size);
+          continue;
+        }
+        const differing = (file.mibSha256 ?? []).flatMap((sha, i) => (sha === expected.mibSha256[i] ? [] : [i]));
+        expect.soft({ size: file.size, sha256: file.sha256, differingMib: differing.slice(0, 20), differingMibCount: differing.length }, file.name).toEqual({
+          size: expected.size,
+          sha256: expected.sha256,
+          differingMib: [],
+          differingMibCount: 0,
+        });
       }
       const overlayBytes = files.reduce((sum, file) => sum + file.size, 0);
       const engineBytes = result!.search?.runtime?.memory?.linearBytesBefore;

@@ -236,8 +236,10 @@ export class EngineRuntime {
         posts.file({ number, kind: 'begin', name: file.name });
         let offset = 0;
         for (const bytes of file.pieces()) {
+          // The post transfers the chunk's buffer, which leaves `bytes` empty: its length is read first.
+          const length = bytes.length;
           posts.file({ number, kind: 'bytes', offset, bytes });
-          offset += bytes.length;
+          offset += length;
         }
         posts.file({ number, kind: 'end' });
       }

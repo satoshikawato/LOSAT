@@ -668,6 +668,8 @@ export interface MakeblastdbFile {
   readonly sha256: string;
   /** The bytes, base64. */
   readonly base64?: string;
+  /** Without the bytes (`digestsOnly`): the SHA-256 of each MiB, to find where two files differ. */
+  readonly mibSha256?: readonly string[];
 }
 
 export interface MakeblastdbResult {
@@ -720,7 +722,9 @@ export async function makeblastdbRuns(list: readonly MakeblastdbCase[]): Promise
       const files: MakeblastdbFile[] = [];
       for (const { name, file } of done.files) {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        files.push({ name, size: bytes.length, sha256: await sha256Hex(bytes), ...(run.digestsOnly === true ? {} : { base64: base64Of(bytes) }) });
+        const mib: string[] = [];
+        if (run.digestsOnly === true) for (let at = 0; at < bytes.length; at += 1 << 20) mib.push(await sha256Hex(bytes.subarray(at, at + (1 << 20))));
+        files.push({ name, size: bytes.length, sha256: await sha256Hex(bytes), ...(run.digestsOnly === true ? { mibSha256: mib } : { base64: base64Of(bytes) }) });
       }
       let search: MakeblastdbResult['search'];
       if (run.search !== undefined) {

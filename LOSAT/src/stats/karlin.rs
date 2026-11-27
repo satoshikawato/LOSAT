@@ -10,14 +10,16 @@ pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
     (params.lambda * (raw_score as f64) - params.k.glibc_ln()) / ln2
 }
 
-/// Calculate E-value from raw score, Karlin parameters, precomputed `log(K)`, and search space
-/// (NCBI BLAST_KarlinStoE_simple compatible).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
+/// `BLAST_KarlinStoE_simple`: the e-value of one alignment of raw score `raw_score` in the
+/// effective search space `search_space`, from the block's Lambda and `log_k`, its `logK`; -1
+/// for a block with a negative Lambda, K or H. The one owner of this e-value: every caller of
+/// NCBI's function (`Blast_HSPListGetEvalues` without a Gumbel block, the first e-values of the
+/// linking) calls this one or `evalue_from_raw_score`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-///
-/// Formula: E = searchsp * exp(-Lambda * S + logK)
-/// where S is the raw score, `log_k` is the natural logarithm of K, and searchsp is the effective
-/// search space. Returns -1.0 when Lambda, K, or H is negative.
+/// A negative value comes from a PSSM's file (`-in_pssm`), an RPS database's K, or the failed
+/// Karlin calculation of a PSSM's round (-1 in all three); NCBI's other searches leave no hit in
+/// a context without valid statistics (its block is freed and the context masked).
 #[inline]
 pub fn evalue_from_raw_score_with_log_k(
     raw_score: i32,
@@ -31,19 +33,22 @@ pub fn evalue_from_raw_score_with_log_k(
     search_space * ((-params.lambda * (raw_score as f64)) + log_k).glibc_exp()
 }
 
-/// Calculate E-value from raw score and search space (NCBI BLAST_KarlinStoE_simple compatible)
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-///
-/// Formula: E = searchsp * exp(-Lambda * S + logK)
-/// where S is the raw score and searchsp is the effective search space. Returns -1.0 when
-/// Lambda, K, or H is negative. Every valid NCBI Karlin block stores the natural logarithm of K
-/// in `logK`, so `params.k.glibc_ln()` matches `kbp->logK` bit-for-bit.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2722-2725
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2729-2733
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3619-3622
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3883-3899
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2876-2878
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2123-2128
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2750-2752
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1192-1193
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:97-121
+/// `BLAST_KarlinStoE_simple` (`evalue_from_raw_score_with_log_k`) with `logK` taken as the log
+/// of the block's K. NCBI sets `logK` to `log(K)` wherever it sets K (the ungapped calculation,
+/// the tables, a copy, the rescaling of composition-based statistics, a PSSM's blocks, an RPS
+/// database's K); its one other value, `HUGE_VAL` beside the -1s of a failed calculation, is
+/// behind the check.
 #[inline]
 pub fn evalue_from_raw_score(raw_score: i32, params: &KarlinParams, search_space: f64) -> f64 {
-    if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        return -1.0;
-    }
     evalue_from_raw_score_with_log_k(raw_score, params, params.k.glibc_ln(), search_space)
 }
 

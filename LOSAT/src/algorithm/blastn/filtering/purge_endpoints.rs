@@ -16,7 +16,6 @@
 
 use super::super::alignment::ContextQuery;
 use super::super::hsp::{adjust_blastn_offsets, BlastnHsp};
-use crate::utils::glibc_fma_libm::GlibcLibm;
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
 use super::super::tracing as blastn_trace;
 use crate::common::GapEditOp;
@@ -894,18 +893,14 @@ pub fn blast_hsp_test_identity_and_length(
     crate::core::blast_hits::hsp_test(matches as i64, align_length as i64, percent_identity, 0)
 }
 
-/// Parameters needed for E-value and bit score recalculation after re-evaluation.
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-250 s_HSPListPostTracebackUpdate
-pub struct ReevalParams {
-    pub karlin: crate::stats::KarlinParams,
-    pub eff_searchsp: i64,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
-    pub round_down_evalue_score: bool,
-}
-
-/// Extended version with optional Karlin parameters for E-value recalculation.
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
-pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:479-647
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:440-470
+/// `Blast_HSPReevaluateWithAmbiguitiesGapped`: the score, offsets and edit script of a trimmed
+/// HSP, scored again with the ambiguities (`s_UpdateReevaluatedHSP`); `true` deletes it. NCBI
+/// computes no e-value or bit score here: both come after the final purge, in
+/// `s_HSPListPostTracebackUpdate` (blast_traceback.c:199-253; LOSAT's
+/// `traceback_finish::traceback_final_list`).
+pub fn reevaluate_hsp_with_ambiguities_gapped(
     hit: &mut BlastnHsp,
     query: ContextQuery<'_>,
     s_seq: &[u8],
@@ -915,7 +910,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
     gap_extend: i32,
     cutoff_score: i32,
     score_matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
-    reeval_params: Option<&ReevalParams>,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:539-540
     let gap_ops = match hit.gap_info.as_mut() {
@@ -1230,34 +1224,6 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
     if let Some(new_gap_info) = new_gap_info {
         hit.gap_info = Some(new_gap_info);
-    }
-
-    // Recalculate bit_score and e_value if Karlin parameters are provided
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:234-250 Blast_HSPListGetEvalues, Blast_HSPListGetBitScores
-    if let Some(params) = reeval_params {
-        const LN2: f64 = std::f64::consts::LN_2; // NCBIMATH_LN2 (ncbi_math.h:161), the same f64
-
-        // Bit score calculation
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1923-1928
-        let log_k = params.karlin.k.glibc_ln();
-        hit.bit_score = ((params.karlin.lambda * (score as f64)) - log_k) / LN2;
-
-        // E-value calculation
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1864-1870
-        let evalue_score = if params.round_down_evalue_score {
-            score & !1
-        } else {
-            score
-        };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-        if params.eff_searchsp > 0 {
-            hit.e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
-                evalue_score,
-                &params.karlin,
-                log_k,
-                params.eff_searchsp as f64,
-            );
-        }
     }
 
     false

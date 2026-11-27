@@ -18,8 +18,8 @@ use super::{
     blast_hsp_test_identity_and_length, blastn_trace, calculate_blastn_context_statistics,
     context_query, format_gap_edit_ops_for_trace, hsp_survives_evalue_reap,
     purge_hsps_with_common_endpoints, purge_hsps_with_common_endpoints_ex,
-    reevaluate_hsp_with_ambiguities_gapped_ex, sort_hsps_by_score, BlastIntervalTree, BlastnHsp,
-    BlastnTiming, ContextKarlin, IndexMethod, QueryContext, ReevalParams, TreeHsp,
+    reevaluate_hsp_with_ambiguities_gapped, sort_hsps_by_score, BlastIntervalTree, BlastnHsp,
+    BlastnTiming, ContextKarlin, IndexMethod, QueryContext, TreeHsp,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 
@@ -100,9 +100,6 @@ pub(super) fn traceback_post_purge(
         query_contexts,
         cutoff_scores,
         hit_saving_cutoff_scores,
-        query_eff_searchsp,
-        search_karlin_ref,
-        round_down_evalue_score,
         reward,
         penalty,
         gap_open,
@@ -161,14 +158,6 @@ pub(super) fn traceback_post_purge(
             .copied()
             .unwrap_or_else(|| cutoff_scores.get(context_idx).copied().unwrap_or(0));
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1887-1891
-        let eff_searchsp = query_eff_searchsp.get(context_idx).copied().unwrap_or(0);
-        let reeval_params = ReevalParams {
-            karlin: search_karlin_ref[context_idx].gapped,
-            eff_searchsp,
-            round_down_evalue_score,
-        };
-
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:653-665 (reevaluate with blastna sequences)
         // NCBI's `query` and `query_nomask` (c++/src/algo/blast/core/blast_traceback.c:386-389): the context in the
         // concatenated query, with masks and without, read at the HSP's offsets, which lie
@@ -182,7 +171,7 @@ pub(super) fn traceback_post_purge(
         } else {
             None
         };
-        let delete = reevaluate_hsp_with_ambiguities_gapped_ex(
+        let delete = reevaluate_hsp_with_ambiguities_gapped(
             hit,
             query,
             s_seq_eval,
@@ -192,7 +181,6 @@ pub(super) fn traceback_post_purge(
             gap_extend,
             cutoff,
             score_matrix,
-            Some(&reeval_params),
         );
         if let (Some(timing), Some(reeval_start)) = (timing_ref, reeval_start) {
             BlastnTiming::record_duration(&timing.reevaluate_ambiguities_ns, reeval_start);
@@ -274,7 +262,7 @@ pub(super) fn traceback_post_purge(
             blastn_trace::log(
                 "purge",
                 format!(
-                    "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} evalue={:.12e} bit_score={:.12} identities={} aln_len={} identity={:.6} gap_info={}",
+                    "subject={}({}) context={} pass=reeval q{}..{} s{}..{} deleted=false raw_score={} identities={} aln_len={} identity={:.6} gap_info={}",
                     s_id,
                     s_idx,
                     context_idx,
@@ -283,8 +271,6 @@ pub(super) fn traceback_post_purge(
                     hit.internal_s_offset_0,
                     hit.internal_s_end_0,
                     hit.raw_score,
-                    hit.e_value,
-                    hit.bit_score,
                     hit.num_ident,
                     hit.length,
                     hit.identity,

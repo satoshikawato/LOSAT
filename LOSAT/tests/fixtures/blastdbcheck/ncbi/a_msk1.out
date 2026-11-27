@@ -1,0 +1,19 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+
+Testing 1 volume(s).
+ <RUN>/cases/a_msk1/p5
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/a_msk1/a.pal
+  <RUN>/cases/a_msk1/a.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a_msk1/a.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a_msk1/a.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbatlas.cpp", line 77: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::SeqDB_ThrowException() - Validation failed: [start < end] at /home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:128
+
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 2

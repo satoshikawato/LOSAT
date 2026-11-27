@@ -51,6 +51,7 @@ use crate::report::{
     PairwiseHit, ReportContext,
 };
 use crate::stats::compute_blosum62_ideal_karlin_params;
+use crate::stats::karlin::evalue_from_raw_score_with_log_k;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params,
@@ -1435,14 +1436,21 @@ fn x_build_compact_preliminary_hsp_list<'h>(
                 ),
             })
             .collect(),
-        None => preliminary_hits
-            .map(|hit| XPrelimHsp {
-                hsp: *hit,
-                e_value: search_space
-                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.glibc_ln())
-                        .glibc_exp(),
-            })
-            .collect(),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
+        None => {
+            let log_k = karlin_params.k.glibc_ln();
+            preliminary_hits
+                .map(|hit| XPrelimHsp {
+                    hsp: *hit,
+                    e_value: evalue_from_raw_score_with_log_k(
+                        hit.raw_score,
+                        karlin_params,
+                        log_k,
+                        search_space,
+                    ),
+                })
+                .collect()
+        }
     };
     let mut hsp_list = BlastpHspList {
         oid,
@@ -4872,6 +4880,33 @@ fn open_search_database(
                 ),
             );
             let rps = resolved.rps_search.is_some();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:243,254
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let mt_stop = if rps {
+                false
+            } else if matches!(
+                args.app,
+                crate::algorithm::blastp::args::BlastpApp::Psiblast
+            ) {
+                crate::algorithm::common::database::ncbi_effective_threads(resolved.num_threads) > 1
+            } else {
+                let max_db = if resolved.word_size > 4 {
+                    2_500_000_000
+                } else {
+                    740_000_000
+                };
+                crate::algorithm::common::database::ncbi_mt_splits_db(
+                    resolved.num_threads,
+                    args.mt_mode,
+                    database.seqdb().total_length(),
+                    Some(args.query.as_path()),
+                    max_db,
+                    200_000,
+                )
+            };
+            let database = database.with_mt_stop_at_negative(mt_stop);
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
             } else {

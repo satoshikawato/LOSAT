@@ -24,6 +24,8 @@ fn seq_data_keeps_the_stored_bits_of_ncbi2na_and_clears_them_for_ncbi4na() {
         data_start: 0,
         seq_offsets: vec![0, 2, 12, 17],
         amb_offsets: vec![2, 4, 14],
+        stopped_at_negative: false,
+        amb_error: None,
     };
     assert_eq!(
         block.nucleotide_seq_data(0).unwrap(),
@@ -599,4 +601,429 @@ fn sparse_protein_volumes_match_ncbi_32bit_lengths_and_keep_nucleotide_widened()
         assert_eq!(db.exact_totals().unwrap(), (expected_total, 40));
         assert_eq!(db.included_length().unwrap(), 40);
     }
+}
+
+#[test]
+fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
+    use crate::seqdb::{BlockRange, SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let dir = TempDir::unique("mt-neg-amb-unit");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+
+    // 1. Protein volume with non-ascending sequence offset at OID 2 (len = -10).
+    write_v4_index(
+        &root.join("pneg.pin"),
+        SeqType::Protein,
+        21,
+        13,
+        &[1, 6, 20, 11, 16],
+        None,
+    );
+    write_sparse_psq(
+        &root.join("pneg.psq"),
+        20,
+        &[(1, &[1, 2, 3, 4]), (11, &[5, 6, 7, 8])],
+    );
+    std::fs::write(root.join("pneg.phr"), b"").unwrap();
+
+    let mut db = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
+    let full = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 4,
+        first_ordinal: 0,
+    };
+    let blk_1t = db.read_protein_search_block(full).unwrap();
+    assert!(!blk_1t.stopped_at_negative());
+    assert_eq!(blk_1t.len(), 4);
+    assert_empty_sentinels(&blk_1t, 2);
+    assert_eq!(blk_1t.protein(3), &[5, 6, 7, 8]);
+
+    db.set_mt_stop_at_negative(true);
+    let blk_mt = db.read_protein_search_block(full).unwrap();
+    assert!(blk_mt.stopped_at_negative());
+    assert_eq!(blk_mt.len(), 2);
+    assert_eq!(blk_mt.protein(0), &[1, 2, 3, 4]);
+
+    // 1b. Filtered protein DB where the negative-length OID (OID 2) is excluded by a list:
+    // NCBI's `CSeqDBImpl::x_FillSeqBuffer` still stops at OID 2 before applying the OID bitmap.
+    // Block 0 (OIDs 0..2) precedes the gap; block 1 (OID 3) checks its preceding gap [2..3) and
+    // returns an empty stopped block.
+    let mut fdb = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
+    fdb.x_keep_oids(|oid| oid != 2);
+    assert_eq!(fdb.num_seqs(), 3);
+    fdb.set_mt_stop_at_negative(true);
+    let r0 = fdb.next_block(0, 1 << 20).unwrap();
+    let b0 = fdb.read_protein_search_block(r0).unwrap();
+    assert!(!b0.stopped_at_negative());
+    assert_eq!(b0.len(), 2);
+    let r1 = fdb.next_block(r0.end_ordinal(), 1 << 20).unwrap();
+    let b1 = fdb.read_protein_search_block(r1).unwrap();
+    assert!(b1.stopped_at_negative());
+    assert_eq!(b1.len(), 0);
+    // Excluded negative OID preceding all included OIDs stops block 0 with 0 scanned ordinals.
+    let mut fdb_after = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
+    fdb_after.x_keep_oids(|oid| oid == 3);
+    fdb_after.set_mt_stop_at_negative(true);
+    let r_after = fdb_after.next_block(0, 1 << 20).unwrap();
+    let b_after = fdb_after.read_protein_search_block(r_after).unwrap();
+    assert!(b_after.stopped_at_negative());
+    assert_eq!(b_after.len(), 0);
+
+    // 1c. `start == 0` protein cases:
+    // - `start = 0, next = 1` -> length 0: skipped, NOT a stop in MT mode.
+    // - `start = 0, next = 0` -> length -1: negative stop in MT mode.
+    // - `start = 0, next = 5` -> length 4 > 0: refused (`NcbiCrashes`, reads before mapping).
+    write_v4_index(
+        &root.join("pstart0_len0.pin"),
+        SeqType::Protein,
+        4,
+        4,
+        &[0, 1, 6],
+        None,
+    );
+    write_sparse_psq(&root.join("pstart0_len0.psq"), 6, &[(1, &[1, 2, 3, 4])]);
+    std::fs::write(root.join("pstart0_len0.phr"), b"").unwrap();
+    let mut s0_len0 = SeqDb::open_search_in(b"pstart0_len0", SeqType::Protein, &path).unwrap();
+    assert_eq!(
+        s0_len0
+            .protein_sequence_len_at(s0_len0.locate_oid(0).unwrap())
+            .unwrap(),
+        0
+    );
+    s0_len0.set_mt_stop_at_negative(true);
+    let blk_s0_len0 = s0_len0
+        .read_protein_search_block(BlockRange {
+            volume: 0,
+            first: 0,
+            end: 2,
+            first_ordinal: 0,
+        })
+        .unwrap();
+    assert!(!blk_s0_len0.stopped_at_negative());
+    assert_eq!(blk_s0_len0.len(), 2);
+    assert_empty_sentinels(&blk_s0_len0, 0);
+    assert_eq!(blk_s0_len0.protein(1), &[1, 2, 3, 4]);
+
+    write_v4_index(
+        &root.join("pstart0_pos.pin"),
+        SeqType::Protein,
+        4,
+        4,
+        &[0, 5],
+        None,
+    );
+    write_sparse_psq(&root.join("pstart0_pos.psq"), 6, &[(0, &[1, 2, 3, 4])]);
+    std::fs::write(root.join("pstart0_pos.phr"), b"").unwrap();
+    let s0_pos = SeqDb::open_search_in(b"pstart0_pos", SeqType::Protein, &path).unwrap();
+    assert!(matches!(
+        s0_pos.protein_sequence_len_at(s0_pos.locate_oid(0).unwrap()),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+    assert!(matches!(
+        s0_pos.read_protein_search_sequence(0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+
+    // 1d. Poked `start` past `.psq` EOF with non-positive length does not fail range checks before
+    // skipping/stopping, matching NCBI pointer-arithmetic-only `x_GetSequence`.
+    // OID 0: start=100_000, next=100_001 -> len=0 (skip, no stop);
+    // OID 1: start=100_001, next=1 -> len=-100_001 (skip at 1t, stop at MT);
+    // OID 2: start=1, next=6 -> len=4 (regular).
+    write_v4_index(
+        &root.join("ppast.pin"),
+        SeqType::Protein,
+        4,
+        4,
+        &[100_000, 100_001, 1, 6],
+        None,
+    );
+    write_sparse_psq(&root.join("ppast.psq"), 6, &[(1, &[1, 2, 3, 4])]);
+    std::fs::write(root.join("ppast.phr"), b"").unwrap();
+    let mut ppast = SeqDb::open_search_in(b"ppast", SeqType::Protein, &path).unwrap();
+    let ppast_range = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 3,
+        first_ordinal: 0,
+    };
+    let ppast_1t = ppast.read_protein_search_block(ppast_range).unwrap();
+    assert!(!ppast_1t.stopped_at_negative());
+    assert_eq!(ppast_1t.len(), 3);
+    assert!(ppast_1t.protein(0).is_empty());
+    assert!(ppast_1t.protein(1).is_empty());
+    assert_eq!(ppast_1t.protein(2), &[1, 2, 3, 4]);
+    ppast.set_mt_stop_at_negative(true);
+    let ppast_mt = ppast.read_protein_search_block(ppast_range).unwrap();
+    assert!(ppast_mt.stopped_at_negative());
+    assert_eq!(ppast_mt.len(), 1);
+
+    // 2. Nucleotide volume with OID 0 regular (4 bases), OID 1 amb == start (len = -4),
+    // OID 2 amb > next (reads 2 bytes past next, defers AMBIGUITY_DATA_ERROR), OID 3 regular.
+    // seq_offsets = [0, 2, 4, 6, 8], amb = [2, 2, 8, 8, 8], nsq len = 8.
+    write_v4_index(
+        &root.join("nirr.nin"),
+        SeqType::Nucleotide,
+        16,
+        4,
+        &[0, 2, 4, 6, 8],
+        Some(&[2, 2, 8, 8, 8]),
+    );
+    std::fs::write(
+        root.join("nirr.nsq"),
+        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    std::fs::write(root.join("nirr.nhr"), b"").unwrap();
+
+    let mut ndb = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
+    assert_eq!(ndb.nucleotide_length_i32(0).unwrap(), 4);
+    assert_eq!(ndb.nucleotide_length_i32(1).unwrap(), -4);
+    assert_eq!(ndb.nucleotide_length_i32(2).unwrap(), 12);
+    assert!(ndb
+        .nucleotide_ambiguity(2)
+        .unwrap_err()
+        .is_ambiguity_data_error());
+
+    let nrange = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 4,
+        first_ordinal: 0,
+    };
+    let nblk_1t = ndb.read_nucleotide_search_block(nrange).unwrap();
+    assert!(!nblk_1t.stopped_at_negative());
+    assert_eq!(nblk_1t.len(), 4);
+    assert_eq!(nblk_1t.nucleotide_len(1).unwrap(), 0);
+    assert_eq!(nblk_1t.nucleotide_len(2).unwrap(), 12);
+    assert!(nblk_1t
+        .nucleotide_blastna(2)
+        .unwrap_err()
+        .is_ambiguity_data_error());
+
+    ndb.set_mt_stop_at_negative(true);
+    let nblk_mt = ndb.read_nucleotide_search_block(nrange).unwrap();
+    assert!(nblk_mt.stopped_at_negative());
+    assert_eq!(nblk_mt.len(), 1);
+
+    // 2b. Filtered nucleotide DB where negative OID 1 is excluded still stops at block 1 (after
+    // checking excluded gap [1..2)), and `exact_totals` sums signed `GetSeqLengthExact` lengths.
+    let mut fndb = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
+    fndb.x_keep_oids(|oid| oid != 1);
+    fndb.set_mt_stop_at_negative(true);
+    let nr0 = fndb.next_block(0, 1 << 20).unwrap();
+    let nb0 = fndb.read_nucleotide_search_block(nr0).unwrap();
+    assert!(!nb0.stopped_at_negative());
+    assert_eq!(nb0.len(), 1);
+    let nr1 = fndb.next_block(nr0.end_ordinal(), 1 << 20).unwrap();
+    let nb1 = fndb.read_nucleotide_search_block(nr1).unwrap();
+    assert!(nb1.stopped_at_negative());
+    assert_eq!(nb1.len(), 0);
+
+    let mut fndb_all = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
+    fndb_all.x_keep_oids(|_| true);
+    let (exact_total, exact_longest) = fndb_all.exact_totals().unwrap();
+    let want_total = 0u64
+        .wrapping_add(4)
+        .wrapping_add((-4i64) as u64)
+        .wrapping_add(12)
+        .wrapping_add(4);
+    assert_eq!((exact_total, exact_longest), (want_total, 12));
+
+    // 2c. Poked nucleotide `start` past `.nsq` EOF with `whole_bytes < 0` and `last_pos` in-file:
+    // NCBI reads only `file[start + whole_bytes]`, so `nucleotide_length_i32` and search block
+    // reads cleanly stop/skip without checking `file[start]`.
+    write_v4_index(
+        &root.join("npast.nin"),
+        SeqType::Nucleotide,
+        4,
+        4,
+        &[100_000, 2, 4],
+        Some(&[2, 4, 4]),
+    );
+    std::fs::write(root.join("npast.nsq"), [0u8; 4]).unwrap();
+    std::fs::write(root.join("npast.nhr"), b"").unwrap();
+    let mut npast = SeqDb::open_search_in(b"npast", SeqType::Nucleotide, &path).unwrap();
+    // OID 0: whole_bytes = (2 - 100_000 - 1) = -99_999; last_pos = 100_000 + (-99_999) = 1.
+    assert_eq!(npast.nucleotide_length_i32(0).unwrap(), -399_996);
+    let npast_range = BlockRange {
+        volume: 0,
+        first: 0,
+        end: 2,
+        first_ordinal: 0,
+    };
+    let npast_1t = npast.read_nucleotide_search_block(npast_range).unwrap();
+    assert!(!npast_1t.stopped_at_negative());
+    assert_eq!(npast_1t.len(), 2);
+    assert_eq!(npast_1t.nucleotide_len(0).unwrap(), 0);
+    assert_eq!(npast_1t.nucleotide_len(1).unwrap(), 4);
+    npast.set_mt_stop_at_negative(true);
+    let npast_mt = npast.read_nucleotide_search_block(npast_range).unwrap();
+    assert!(npast_mt.stopped_at_negative());
+    assert_eq!(npast_mt.len(), 0);
+
+    // 2d. Excluded nucleotide OID whose last-byte offset lies past the mapped 4 KiB page with
+    // positive `whole_bytes` below 2^29 must fail the MT gap check because NCBI reads that tail
+    // byte for every OID it scans (`seqdbvol.cpp:1835`).
+    write_v4_index(
+        &root.join("npast_excl.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[10_000, 0, 2],
+        Some(&[10_002, 2, 2]),
+    );
+    std::fs::write(root.join("npast_excl.nsq"), [0u8; 4]).unwrap();
+    std::fs::write(root.join("npast_excl.nhr"), b"").unwrap();
+    let mut npast_excl = SeqDb::open_search_in(b"npast_excl", SeqType::Nucleotide, &path).unwrap();
+    npast_excl.x_keep_oids(|oid| oid == 1);
+    npast_excl.set_mt_stop_at_negative(true);
+    let r_excl = npast_excl.next_block(0, 1 << 20).unwrap();
+    let err_excl = npast_excl.read_nucleotide_search_block(r_excl).unwrap_err();
+    assert!(
+        matches!(
+            &err_excl,
+            SeqDbError::Format { message, .. }
+                if message == "byte range 10001..10002 passes the end of the file (4 bytes)"
+        ),
+        "2d: {err_excl:?}"
+    );
+
+    // 3. Nucleotide volume with amb[0] == 0 -> reads before mmap -> NcbiCrashes refusal.
+    write_v4_index(
+        &root.join("namb0.nin"),
+        SeqType::Nucleotide,
+        4,
+        4,
+        &[0, 2],
+        Some(&[0, 2]),
+    );
+    std::fs::write(root.join("namb0.nsq"), [0u8; 2]).unwrap();
+    std::fs::write(root.join("namb0.nhr"), b"").unwrap();
+    let zdb = SeqDb::open_search_in(b"namb0", SeqType::Nucleotide, &path).unwrap();
+    assert!(matches!(
+        zdb.nucleotide_length_i32(0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+    assert!(matches!(
+        zdb.read_nucleotide_search_sequence(0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1838
+/// The excluded OIDs after the last included one: NCBI's multithreaded DB-split scan of a
+/// list-filtered database reads them up to the iteration range's end, stopping at the first
+/// negative length, and its read of a nucleotide's last byte past the mapping crashes. The block
+/// that holds the last included OID returns that read's error (LOSAT's refusal); a list that
+/// includes no OID gets it from `mt_check_scan_without_blocks`. Without the multithreaded stop
+/// (1 thread, `-mt_mode 1`) nothing past the included OIDs is read.
+#[test]
+fn mt_scan_reads_the_excluded_oids_after_the_last_included_one() {
+    use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let dir = TempDir::unique("mt-tail-excl-unit");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+    let past_end = |err: &SeqDbError, range: &str, len: u64| {
+        let want = format!("byte range {range} passes the end of the file ({len} bytes)");
+        matches!(err, SeqDbError::Format { message, .. } if *message == want)
+    };
+
+    // 1. OID 0 regular (bytes 0..2); OID 1 (start 2, amb 10_002): `whole_bytes` 9_999, last byte
+    // 10_001, past the 4-byte `.nsq` and its mapped page.
+    write_v4_index(
+        &root.join("ntail.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[0, 2, 4],
+        Some(&[2, 10_002, 4]),
+    );
+    std::fs::write(root.join("ntail.nsq"), [0u8; 4]).unwrap();
+    std::fs::write(root.join("ntail.nhr"), b"").unwrap();
+    let open = || SeqDb::open_search_in(b"ntail", SeqType::Nucleotide, &path).unwrap();
+
+    let mut db = open();
+    db.x_keep_oids(|oid| oid == 0);
+    let range = db.next_block(0, 1 << 20).unwrap();
+    assert_eq!(range.end_ordinal(), db.num_seqs());
+    let at_1t = db.read_nucleotide_search_block(range).unwrap();
+    assert!(!at_1t.stopped_at_negative());
+    assert_eq!(at_1t.len(), 1);
+    db.mt_check_scan_without_blocks().unwrap();
+    db.set_mt_stop_at_negative(true);
+    let err = db.read_nucleotide_search_block(range).unwrap_err();
+    assert!(past_end(&err, "10001..10002", 4), "1: {err:?}");
+    let mut kept = Vec::new();
+    let err = db
+        .x_read_nucleotide_search_block_into(range, &mut kept)
+        .unwrap_err();
+    assert!(past_end(&err, "10001..10002", 4), "1 (into): {err:?}");
+    // The list includes OID 0, so the block holds the check, not the scan without blocks.
+    db.mt_check_scan_without_blocks().unwrap();
+
+    // 2. A list that includes no OID: no block, but the scan reads OIDs 0 and 1.
+    let mut none = open();
+    none.x_keep_oids(|_| false);
+    assert_eq!(none.num_seqs(), 0);
+    assert!(none.next_block(0, 1 << 20).is_none());
+    none.mt_check_scan_without_blocks().unwrap();
+    none.set_mt_stop_at_negative(true);
+    let err = none.mt_check_scan_without_blocks().unwrap_err();
+    assert!(past_end(&err, "10001..10002", 4), "2: {err:?}");
+    // Without a list there is no scan without blocks to check.
+    let mut whole = open();
+    whole.set_mt_stop_at_negative(true);
+    whole.mt_check_scan_without_blocks().unwrap();
+
+    // 3. A negative length before the bad OID ends NCBI's scan there: OID 1 (amb == start,
+    // `whole_bytes` -1) stops it before OID 2 (last byte 10_003). The block is not stopped (the
+    // negative length is past its OIDs).
+    write_v4_index(
+        &root.join("ntailneg.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[0, 2, 4, 6],
+        Some(&[2, 2, 10_004, 6]),
+    );
+    std::fs::write(root.join("ntailneg.nsq"), [0u8; 6]).unwrap();
+    std::fs::write(root.join("ntailneg.nhr"), b"").unwrap();
+    let mut neg = SeqDb::open_search_in(b"ntailneg", SeqType::Nucleotide, &path).unwrap();
+    neg.x_keep_oids(|oid| oid == 0);
+    neg.set_mt_stop_at_negative(true);
+    let range = neg.next_block(0, 1 << 20).unwrap();
+    let block = neg.read_nucleotide_search_block(range).unwrap();
+    assert!(!block.stopped_at_negative());
+    assert_eq!(block.len(), 1);
+    let mut neg_none = SeqDb::open_search_in(b"ntailneg", SeqType::Nucleotide, &path).unwrap();
+    neg_none.x_keep_oids(|_| false);
+    neg_none.set_mt_stop_at_negative(true);
+    neg_none.mt_check_scan_without_blocks().unwrap();
+
+    // 4. A last block that stops at a negative length inside it reads nothing after it: OID 1
+    // stops the block of OIDs 0..3 before the excluded OID 3 (last byte 10_005).
+    write_v4_index(
+        &root.join("ntailstop.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[0, 2, 4, 6, 8],
+        Some(&[2, 2, 6, 10_006, 8]),
+    );
+    std::fs::write(root.join("ntailstop.nsq"), [0u8; 8]).unwrap();
+    std::fs::write(root.join("ntailstop.nhr"), b"").unwrap();
+    let mut stop = SeqDb::open_search_in(b"ntailstop", SeqType::Nucleotide, &path).unwrap();
+    stop.x_keep_oids(|oid| oid != 3);
+    stop.set_mt_stop_at_negative(true);
+    let range = stop.next_block(0, 1 << 20).unwrap();
+    assert_eq!(range.end_ordinal(), 3);
+    let block = stop.read_nucleotide_search_block(range).unwrap();
+    assert!(block.stopped_at_negative());
+    assert_eq!(block.len(), 1);
 }

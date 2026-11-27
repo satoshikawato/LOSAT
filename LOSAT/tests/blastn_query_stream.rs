@@ -750,8 +750,8 @@ fn errors_and_refusals_give_the_off_bytes() {
         let (off, numbers) = same_two(what, &args, 4, &extra, None);
         assert_ne!(off.status, Some(0), "{what}: the refusal");
         // The Subject_ id is refused by the report of the batch that reaches it, after the reports
-        // of the batches before; the other two are refused in the first batch's search, where
-        // LOSAT_X_RPTSTREAM keeps the reports after the loop.
+        // of the batches before; the other two are refused in the first batch's search, before
+        // any report, with the reports per batch too.
         assert_eq!(
             off.report.is_empty(),
             what != "Subject_ id",
@@ -957,13 +957,12 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     };
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS]), "0");
 
-    // LOSAT_X_RPTSTREAM on but refusing the search after the reading (scoring options without
-    // Karlin-Altschul values: `off=scoring`; a negative `CHUNK_SIZE` streams since line RG item
-    // X-short-bat-2, the other reasons are made before the reading) while the switch acts. A first
+    // Scoring options without Karlin-Altschul values stream too (`off=none`; before line RG series
+    // D's follow-up of D1c-1c-b PR 2b, `off=scoring`): NCBI's Karlin-Altschul error of a later batch
+    // comes after the reports of the batches before in both paths (`after_batch_reports`). A first
     // query of `N` only, longer than `BATCH_SIZE`, is a batch without a valid context, which is
-    // reported, and the next batch meets NCBI's Karlin-Altschul error after that report: the
-    // report is written from the records the loop kept, and the bytes are those without the
-    // switch.
+    // reported, and the next batch meets NCBI's Karlin-Altschul error after that report: the bytes
+    // are those without LOSAT_X_QSTREAM and those without LOSAT_X_RPTSTREAM.
     let n_first = dir.path("n_first.fa");
     let mut text = format!(">n1\n{}\n", "N".repeat(5_000)).into_bytes();
     text.extend_from_slice(&query_text(b""));
@@ -997,7 +996,7 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
     let rpt = stats_line(&stderr, "[X_STATS] RPTSTREAM ");
     assert!(
-        rpt.split_whitespace().any(|word| word == "off=scoring"),
+        rpt.split_whitespace().any(|word| word == "off=none"),
         "{rpt}"
     );
     let stream = stats_line(&stderr, "[X_STATS] QSTREAM ");
@@ -1010,8 +1009,10 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
         .find_map(|word| word.strip_prefix("kept="))
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| panic!("{stream}"));
-    assert!(kept_records > 0, "{stream}");
+    // The stream acts, so each batch's records are dropped after its reports.
+    assert_eq!(kept_records, 0, "{stream}");
     let zero = blastn(&scoring, 4, &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0")], None);
+    let reports_after = blastn(&scoring, 4, &[SWITCH, ("LOSAT_X_RPTSTREAM", "0")], None);
     assert_eq!(
         refused.status,
         Some(3),
@@ -1027,12 +1028,14 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
             .filter(|line| !line.starts_with("[X_STATS] "))
             .collect()
     };
-    assert_eq!(
-        (refused.status, &refused.report, without_stats(&stderr)),
-        (
-            zero.status,
-            &zero.report,
-            without_stats(&String::from_utf8_lossy(&zero.stderr))
-        )
-    );
+    for other in [&zero, &reports_after] {
+        assert_eq!(
+            (refused.status, &refused.report, without_stats(&stderr)),
+            (
+                other.status,
+                &other.report,
+                without_stats(&String::from_utf8_lossy(&other.stderr))
+            )
+        );
+    }
 }

@@ -186,6 +186,13 @@ FASTA files:
   `db.xs.tblastn.bat.e0.6` on `aliaskeys/e_nF` (volumes without an OID), whose setup fails to read the length of OID 0
   (`Database memory map file error`), and `db.xs.tblastn.bat.nosq.6` on `arch_tbn_snucl_nonsq` (no sequence file), whose
   search fails to read the first sequence of chunk 0 (the same error).
+  `xsb_nanr.fna` (rows `db.xs.blastx.bat.bank.*`, line RG item X-sb2n-rows) is `na` of `xsb_na.fna` (`pa`, 93 bases)
+  then `nr`, the first 8,714 of 9,000 random bases (Python's `random.Random(1124)`, `choice("ACGT")` 9,000 times):
+  with `-word_size 5 -threshold 1` the words of `nr`'s batch fill NCBI's 1024 overflow banks of the compressed table
+  from its first 8,694 bases (LOSAT's count of NCBI's cells, by bisection; 8,693 bases pass in both programs with the
+  same bytes; under memcheck NCBI's first write past its 1,024 bank pointers comes at 8,694 bases, none at 8,693), and
+  8,714 is the shortest length of a sweep (8,694 to 9,000) at which NCBI 2.17.0's native run crashes: up to 8,704
+  bases it ended with exit 0, the pointer past the array of 8,192 bytes landing in the 8 spare bytes of glibc's block.
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's

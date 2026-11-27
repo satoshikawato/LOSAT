@@ -55,8 +55,7 @@ use super::super::extension::{
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
-    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, ReevalParams,
+    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
 };
 use super::super::hsp::{
     adjust_blastn_offsets, evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
@@ -429,11 +428,12 @@ fn calculate_blastn_context_statistics(
     } else {
         raw_score
     };
-    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        -1.0
-    } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
-    };
+    let e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+        evalue_score,
+        params,
+        log_k,
+        eff_searchsp as f64,
+    );
     (bit_score, e_value)
 }
 
@@ -6566,6 +6566,16 @@ fn open_search_database(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
             );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let word_size =
+                crate::algorithm::blastn::coordination::determine_effective_word_size(args);
+            let database = database.with_mt_mode(
+                args.num_threads,
+                args.mt_mode,
+                word_size,
+                Some(args.query.as_path()),
+            );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -7536,7 +7546,8 @@ fn search(
 /// prologs that come with the reports). Its errors: of a batch after the first that do not depend on
 /// the batch's queries (the Karlin-Altschul error of the scoring options, the average subject length,
 /// in `context_statistics`), which the first batch with a valid query meets after the reports of the
-/// batches before, whose queries were all invalid; and the stops of NCBI's search of the batch that
+/// batches before, whose queries were all invalid; those that do (a search space overflow, the
+/// ungapped word cutoff of a long query), after the reports of batches with hits; and the stops of NCBI's search of the batch that
 /// LOSAT refuses where NCBI meets them (the query chunks of a split batch, `search_query_chunks`; a
 /// header that the fetch under a negative seqid list cannot read, `database::fetch_refusal`), after
 /// the reports that NCBI's batch loop has printed (line RG item X-short-bat-2). The one place that
@@ -8460,7 +8471,6 @@ fn run_in_pool(
         source,
         subject_ranges,
         query_input,
-        &lengths,
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -8824,7 +8834,6 @@ fn run_in_pool(
             .into());
         }
         warnings[start].append(&batch_title_warnings);
-        check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
         // them (`query_split::restrict_masks_with_letter_before`); WindowMasker replaces the
@@ -8854,6 +8863,13 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err($error);
             }};
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in
+        // the batch whose concatenated query is too long, after the reports of the batches
+        // before (in both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
+        if let Err(error) = check_batch_window(&args, batch_records.batch_queries().records()) {
+            fail_batch!(error);
         }
         // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
         // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
@@ -11480,7 +11496,17 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
         prelim: x_prelim_cutoffs_owned,
-    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())?;
+    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())
+        .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let prelim_eff_searchsp_ref: &Vec<i64> =
         prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
     let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);

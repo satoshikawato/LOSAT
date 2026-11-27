@@ -543,7 +543,10 @@ pub(super) fn call_lookup(
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => {
-                let words = CallTableWords::of(args, &query_batches, query_lengths, query_chunk)?;
+                // An unreadable CHUNK_SIZE or OVERLAP_CHUNK_SIZE: the table of every query, and
+                // the error where the search meets it (`split_steps::first_batch_setup`).
+                let words = CallTableWords::of(args, &query_batches, query_lengths, query_chunk)
+                    .unwrap_or_default();
                 match x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
                     Some(spare) => blastp_aa_lookup_on_block_spare(
                         args,

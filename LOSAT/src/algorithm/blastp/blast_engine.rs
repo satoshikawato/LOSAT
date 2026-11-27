@@ -1683,6 +1683,7 @@ fn ncbi_table_batches<'a>(
 /// finds no hit of them. The call keeps their contexts, its set-up (`split_steps::first_batch_setup`,
 /// where a split batch meets the failures of its set-up first) and its scan of the subjects (the
 /// reads and each subject's statistics of all its queries), so every error comes where it came.
+#[derive(Default)]
 struct CallTableWords(Option<Vec<std::ops::Range<usize>>>);
 
 impl CallTableWords {

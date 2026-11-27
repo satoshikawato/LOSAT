@@ -2380,8 +2380,10 @@ fn search_all(
             if let Commands::Psiblast(psi) = command {
                 let mut blastp = psi
                     .into_blastp_args()
-                    .map_err(|error| format!("{error:#}"))?;
-                losat::web_adapter::refuse_psiblast_phi_pattern(&blastp)
+                    .and_then(|args| {
+                        losat::web_adapter::refuse_psiblast_phi_pattern(&args)?;
+                        Ok(args)
+                    })
                     .map_err(|error| format!("{error:#}"))?;
                 let pssm_files = if position == own {
                     run_files.clone()

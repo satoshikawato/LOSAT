@@ -304,6 +304,8 @@ export class EngineRuntime {
     try {
       // The files that the argv names, opened by the engine from here on (validate checks some of them, as the CLI does).
       loaded.directory.open(request.files ?? []);
+      // ... and the folder that its `BLASTDB` names, which the argv of every call below carries (ABI v2 §7, version 17).
+      abi.blastdb = request.blastdb;
       const validation = abi.validate(argv);
       if (!validation.ok) throw new EngineCallError(validation.message);
       // The inputs are read with the data loaders of the argv's registry, as the CLI reads them (line WQA's D16, 2026-11-20).
@@ -424,6 +426,7 @@ export class EngineRuntime {
         ...(readRecords === undefined ? {} : { readRecords }),
       };
     } finally {
+      abi.blastdb = undefined;
       if (abi.stoppedBy === undefined) {
         release();
         // The run's files are let go: an idle worker keeps no File of the user's (review of D12a, low 6).

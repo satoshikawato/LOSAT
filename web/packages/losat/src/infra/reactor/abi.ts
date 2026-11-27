@@ -14,7 +14,7 @@ import type { Compression } from '../../ports/inflate.js';
 import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 16;
+export const ABI_VERSION = 17;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -267,10 +267,13 @@ const encoder = new TextEncoder();
 /**
  * The argv of a `losat_web2_*` call (abi_v2.md §7): each word ends with NUL. The adapter drops the
  * empty word after the last NUL, so a last empty word (`blast_formatter -rid ''`) reaches the engine
- * as the CLI gets it. Every call that takes an argv encodes it here.
+ * as the CLI gets it. Every call that takes an argv encodes it here. `blastdb`, the folder that the
+ * run's `BLASTDB` names, leads it as `BLASTDB=<folder>` (§7, version 17), as the shown command
+ * writes it.
  */
-function encodeArgv(argv: readonly string[]): Uint8Array {
-  return encoder.encode(argv.map((word) => `${word}\0`).join(''));
+function encodeArgv(argv: readonly string[], blastdb?: string): Uint8Array {
+  const words = blastdb === undefined || blastdb === '' ? argv : [`BLASTDB=${blastdb}`, ...argv];
+  return encoder.encode(words.map((word) => `${word}\0`).join(''));
 }
 
 /** Bytes copied into engine memory that the caller holds (`ChunkBuffer`). */
@@ -294,6 +297,17 @@ export class ReactorAbi {
     private readonly exports: AbiExports,
     private readonly output: () => string = () => '',
   ) {}
+
+  /**
+   * The folder that the run's `BLASTDB` names (the run's directory's `BLASTDB=<folder>` of the shown command), which
+   * every call's argv carries while it is set (§7, version 17). The Engine worker sets it with the run's files and
+   * clears it when the run's directory is closed.
+   */
+  blastdb: string | undefined;
+
+  private argv(argv: readonly string[]): Uint8Array {
+    return encodeArgv(argv, this.blastdb);
+  }
 
   /** The `losat_host.emit` import of the instance. */
   readonly emit = (stream: number, ptr: number, len: number): void => {
@@ -330,7 +344,7 @@ export class ReactorAbi {
    * `-db` (`database`); or the CLI's message for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
-    const status = this.call(this.exports.losat_web2_start, [encodeArgv(argv)]);
+    const status = this.call(this.exports.losat_web2_start, [this.argv(argv)]);
     if (status < 0) return { ok: false, message: this.lastError() };
     const json = this.response() as {
       conffile: string | null;
@@ -373,7 +387,7 @@ export class ReactorAbi {
    * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
-    const status = this.call(this.exports.losat_web2_validate, [encodeArgv(argv)]);
+    const status = this.call(this.exports.losat_web2_validate, [this.argv(argv)]);
     // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
     // it is read before the error, whose call drops the responses.
     const known =
@@ -400,7 +414,7 @@ export class ReactorAbi {
    * command line's error text, or valid. The call emits no response for it, and none is read.
    */
   validateTool(argv: readonly string[]): ToolValidation {
-    const status = this.call(this.exports.losat_web2_validate, [encodeArgv(argv)]);
+    const status = this.call(this.exports.losat_web2_validate, [this.argv(argv)]);
     return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
   }
 
@@ -426,7 +440,7 @@ export class ReactorAbi {
    * `-db` takes no subject: its `subject` is empty, and the query is read alone (line WQA D12a).
    */
   registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
-    this.check(this.call(this.exports.losat_web2_register_inputs, [encodeArgv(argv), query, subject]));
+    this.check(this.call(this.exports.losat_web2_register_inputs, [this.argv(argv), query, subject]));
     const response = this.response() as { query: RecordsResponse | null; subject: RecordsResponse | null };
     const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
     try {
@@ -574,7 +588,7 @@ export class ReactorAbi {
   run(argv: readonly string[], query: number, subject: number, sink: StreamSink): void {
     this.sink = sink;
     try {
-      this.check(this.call(this.exports.losat_web2_run, [encodeArgv(argv), query, subject]));
+      this.check(this.call(this.exports.losat_web2_run, [this.argv(argv), query, subject]));
     } finally {
       this.sink = undefined;
     }
@@ -593,7 +607,7 @@ export class ReactorAbi {
       else if (stream === TOOL_FILES_STREAM) sink.file(parseToolFrame(bytes));
     };
     try {
-      this.check(this.call(this.exports.losat_web2_tool, [encodeArgv(argv)]));
+      this.check(this.call(this.exports.losat_web2_tool, [this.argv(argv)]));
     } finally {
       this.sink = undefined;
     }

@@ -228,6 +228,12 @@ export interface EngineRunRequest {
    * the bytes that it asks for at a time; none is copied whole (line WQA D12a, 2026-11-20).
    */
   readonly files?: readonly DirectoryFile[];
+  /**
+   * The folder that the run's `BLASTDB` names, as the command that the application shows writes it (`BLASTDB=<folder>
+   * losat ...`): a folder of `files` whose `taxdb.*` and `taxonomy4blast.sqlite3` the engine finds there, as the command
+   * line finds them, and nowhere else in the run's directory (ABI v2 §7, version 17).
+   */
+  readonly blastdb?: string;
   readonly requestedThreads: number | 'auto';
   /** The file of `-window_masker_db`, when the argv has it. */
   readonly windowMasker?: CountsFile;

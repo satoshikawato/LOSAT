@@ -256,8 +256,8 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       }
 
       // Taxonomy filter (-taxids 40674 Mammalia) + taxdb scientific names (`sscinames`):
-      // On Chromium, pick `protdb/` as a folder so `-db protdb/tfp` mounts taxonomy files at root
-      // and displays `BLASTDB=protdb losat ...`; compare against native run from parent (`work`) with `BLASTDB=protdb`.
+      // On Chromium, pick `protdb/` as a folder so `-db protdb/tfp` finds the taxonomy files through `BLASTDB=protdb`
+      // and the page displays `BLASTDB=protdb losat ...`; compare against native run from parent (`work`) with `BLASTDB=protdb`.
       // On other browsers, multi-file pick runs in `protDir` without needing `BLASTDB=`.
       await page.getByTestId('db-filter-negative_seqidlist-remove').click();
       if (useFolderPick) {

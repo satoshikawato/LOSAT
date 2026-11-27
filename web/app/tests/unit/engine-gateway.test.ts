@@ -572,6 +572,21 @@ describe('WasmEngine', () => {
     expect((await run).readRecords).toEqual(readRecords);
   });
 
+  it('posts the run\'s BLASTDB with its files, and none for a run without one', async () => {
+    const { engine, workers } = setup();
+    const base = request('r1');
+    const run = engine.run({ ...base, blastdb: 'nucdb' }, output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    expect(worker.runs[0]!.blastdb).toBe('nucdb');
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    await run;
+    const next = engine.run(request('r2'), output(), () => undefined);
+    await posted(() => workers[0], 2);
+    expect(worker.runs[1]).not.toHaveProperty('blastdb');
+    worker.send({ type: 'done', generation: 1, runId: 'r2', ok: true, result: RESULT });
+    await next;
+  });
+
   it('ends the runtime after an error that stopped the instance', async () => {
     const { engine, workers } = setup();
     const run = engine.run(request('r1'), output(), () => undefined);

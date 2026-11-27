@@ -964,6 +964,7 @@ export class Coordinator {
           ...(snapshot.queryFile === undefined ? { query: engineInput(snapshot.query) } : {}),
           ...(snapshot.database === undefined ? { subject: engineInput(snapshot.subject) } : {}),
           ...(files === undefined || files.length === 0 ? {} : { files }),
+          ...(snapshot.database?.blastdbEnv === undefined ? {} : { blastdb: snapshot.database.blastdbEnv }),
           requestedThreads: snapshot.requestedThreads,
           ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
           ...(snapshot.conffile === undefined || conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, file: conffile } }),

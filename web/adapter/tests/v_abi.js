@@ -1971,7 +1971,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor: own, close, waitForWorkers } = await engine.open();
-    assert.equal(own.exports.losat_web2_abi_version(), 16);
+    assert.equal(own.exports.losat_web2_abi_version(), 17);
     checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const psw1Rows = await checkPsiblastAndTblastnPssm(engine, options.native, scratch);

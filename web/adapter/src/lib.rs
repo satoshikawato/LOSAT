@@ -64,16 +64,55 @@ unsafe fn text<'a>(ptr: *const u8, len: usize, name: &str) -> Result<&'a str, St
     std::str::from_utf8(bytes(ptr, len)).map_err(|error| format!("{name} is not UTF-8: {error}"))
 }
 
-/// The NUL-separated argv words (docs/web/abi_v2.md §7); a trailing NUL is allowed.
+/// The NUL-separated argv words (docs/web/abi_v2.md §7); a trailing NUL is allowed. The words
+/// that lead it as `BLASTDB=<folder>` are environment assignments, as the shown command writes
+/// them before `losat`: they are taken off the argv and make the process's `BLASTDB` for this call
+/// (`apply_blastdb`), so the engine finds the database's `taxdb.*` and `taxonomy4blast.sqlite3`
+/// where the command line finds them, in the folder `BLASTDB` names, and not in the run's
+/// directory (line WQA D35, 2026-11-28).
 fn words(argv: &str) -> Vec<&str> {
     let mut words: Vec<&str> = argv.split('\0').collect();
     if words.last() == Some(&"") {
         words.pop();
     }
-    words
+    let (blastdb, program) = split_blastdb(&words);
+    apply_blastdb(blastdb);
+    program.to_vec()
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 16 since adding `psiblast` (single- and
+/// The last value of the leading `BLASTDB=<value>` words of `words`, and the words after them.
+fn split_blastdb<'a, 'b>(words: &'b [&'a str]) -> (Option<&'a str>, &'b [&'a str]) {
+    let leading = words
+        .iter()
+        .take_while(|word| word.starts_with("BLASTDB="))
+        .count();
+    let value = words[..leading]
+        .last()
+        .map(|word| &word["BLASTDB=".len()..]);
+    (value, &words[leading..])
+}
+
+/// Makes the process's `BLASTDB` the value that this call's argv gave, and unsets it for a call
+/// whose argv gave none after one that did: the host's environment is empty (docs/web/abi_v2.md
+/// §3), so what a call finds is what its argv says and nothing an earlier call left.
+fn apply_blastdb(value: Option<&str>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SET: AtomicBool = AtomicBool::new(false);
+    match value {
+        Some(value) => {
+            std::env::set_var("BLASTDB", value);
+            SET.store(true, Ordering::Relaxed);
+        }
+        None => {
+            if SET.swap(false, Ordering::Relaxed) {
+                std::env::remove_var("BLASTDB");
+            }
+        }
+    }
+}
+
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 17 since `BLASTDB=<folder>` words may lead an
+/// argv (`words`; line WQA D35, 2026-11-28); 16 since adding `psiblast` (single- and
 /// multi-round, `-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`,
 /// `-save_pssm_after_last_round`) and `tblastn -in_pssm` (file queries with `query_handle = 0`,
 /// PSSM output files on stream 8, *start* fields `query_file`, `out_pssm`, `out_ascii_pssm`,
@@ -109,7 +148,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    16
+    17
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -526,4 +565,39 @@ pub unsafe extern "C" fn losat_web2_tool(argv_ptr: *const u8, argv_len: usize) -
         tool::run(&words(text(argv_ptr, argv_len, "argv")?))?;
         Ok(0)
     })
+}
+
+#[cfg(test)]
+mod blastdb_words_tests {
+    use super::{split_blastdb, words};
+
+    #[test]
+    fn leading_blastdb_words_are_the_environment_of_the_call() {
+        assert_eq!(
+            split_blastdb(&["BLASTDB=nuc5", "blastn", "-db", "nuc5/nuc5"]),
+            (Some("nuc5"), &["blastn", "-db", "nuc5/nuc5"][..])
+        );
+        // The last assignment wins, as in a shell; a word of another name is the program's.
+        assert_eq!(
+            split_blastdb(&["BLASTDB=a", "BLASTDB=b", "blastn"]),
+            (Some("b"), &["blastn"][..])
+        );
+        assert_eq!(
+            split_blastdb(&["blastn", "BLASTDB=nuc5"]),
+            (None, &["blastn", "BLASTDB=nuc5"][..])
+        );
+        assert_eq!(
+            split_blastdb(&["BLASTDBX=1", "blastn"]),
+            (None, &["BLASTDBX=1", "blastn"][..])
+        );
+    }
+
+    /// The only test of this crate that reads or changes the process's `BLASTDB`.
+    #[test]
+    fn a_call_finds_the_blastdb_that_its_own_argv_gave() {
+        assert_eq!(words("BLASTDB=nuc5\0blastn\0-db\0nuc5/nuc5\0"), ["blastn", "-db", "nuc5/nuc5"]);
+        assert_eq!(std::env::var("BLASTDB").as_deref(), Ok("nuc5"));
+        assert_eq!(words("blastn\0-version\0"), ["blastn", "-version"]);
+        assert!(std::env::var_os("BLASTDB").is_none());
+    }
 }

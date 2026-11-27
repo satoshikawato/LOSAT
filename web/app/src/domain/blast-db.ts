@@ -209,8 +209,8 @@ export interface BlastDbDiscovery {
 export interface AssembledSearchDirectory {
   readonly files: DirectoryEntries;
   /**
-   * Relative folder of the selected `-db` whose auxiliary taxonomy files were mounted at the
-   * run directory root (`/work`); CLI reproduction commands prepend `BLASTDB=<blastdbEnv>`.
+   * Relative folder of the selected `-db` that holds auxiliary taxonomy files: the run's `BLASTDB`, which the
+   * engine is given with the run and CLI reproduction commands prepend as `BLASTDB=<blastdbEnv>`.
    */
   readonly blastdbEnv?: string;
 }
@@ -534,9 +534,10 @@ export function noMatchingDatabaseMessage(discovery: BlastDbDiscovery, kind: Seq
 
 /**
  * Builds the `DirectoryFile[]` mounted into `RunDirectory` for a search run:
- * - all picked files of the subject DB (with `taxdb.bti`, `taxdb.btd`, `taxonomy4blast.sqlite3`
- *   from the selected DB's own folder also mounted at root so NCBI's `SeqDB_ResolveDbPath` finds
- *   them in `/work`, recording `blastdbEnv` so CLI reproduction commands prepend `BLASTDB=<dir>`)
+ * - all picked files of the subject DB, where the user has them; when the selected DB's own folder
+ *   has `taxdb.bti`, `taxdb.btd` or `taxonomy4blast.sqlite3`, `blastdbEnv` is that folder: the
+ *   engine's `BLASTDB`, as the CLI reproduction command's `BLASTDB=<dir>` (the engine finds them
+ *   there, as NCBI's `SeqDB_ResolveDbPath` does; none is mounted at the run's root)
  * - all picked files of BLASTN's `-filtering_db` repeats DB
  * - all picked DB filter list files (`-seqidlist`, `-taxidlist`, etc.), mounted at root by `file.name`
  *
@@ -556,16 +557,14 @@ export function assembleSearchDirectory(parts: {
 
   if (parts.subjectDb !== undefined) {
     for (const entry of parts.subjectDb.discovery.files) dir.add(entry.name, entry.file);
-    // Alias auxiliary taxonomy files from the selected DB's own folder to root (`/work`)
-    // so `SeqDB_ResolveDbPath` resolves them as `BLASTDB=<dbDir>` does on the CLI.
+    // The selected DB's own folder holds its auxiliary taxonomy files where the user has them, and
+    // `BLASTDB=<dbDir>` (the shown command's, given to the engine with the run) is where
+    // `SeqDB_ResolveDbPath` looks after the working directory, as on the CLI. They are not also
+    // mounted at the run's root: the run's directory is the user's directory, and the files of
+    // `-logfile`, `-out` and the like are compared with it.
     const dbDir = parentDir(parts.subjectDb.selectedName);
-    if (dbDir !== '') {
-      const tax = databaseTaxonomy(parts.subjectDb.discovery, parts.subjectDb.selectedName);
-      for (const entry of tax.entries) {
-        const auxName = entry.name.slice(dbDir.length + 1);
-        dir.add(auxName, entry.file);
-        blastdbEnv = dbDir;
-      }
+    if (dbDir !== '' && databaseTaxonomy(parts.subjectDb.discovery, parts.subjectDb.selectedName).entries.length > 0) {
+      blastdbEnv = dbDir;
     }
   }
 

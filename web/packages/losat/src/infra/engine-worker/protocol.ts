@@ -80,6 +80,8 @@ export interface WorkerRun {
   readonly subject?: WorkerInput;
   /** The files of the run's working directory (EngineRunRequest.files); Files are shared, not copied. */
   readonly files?: readonly DirectoryFile[];
+  /** The folder that the run's `BLASTDB` names (EngineRunRequest.blastdb). */
+  readonly blastdb?: string;
   readonly windowMasker?: WorkerCounts;
   /**
    * The registry file of `-conffile` (EngineRunRequest.conffile): registered before the argv is

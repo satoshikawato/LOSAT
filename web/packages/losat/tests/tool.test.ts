@@ -384,9 +384,26 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
 }
 
 describe('ReactorAbi.tool and validateTool', () => {
-  it('speaks ABI version 16 and the module check wants losat_web2_tool', () => {
-    expect(ABI_VERSION).toBe(16);
+  it('speaks ABI version 17 and the module check wants losat_web2_tool', () => {
+    expect(ABI_VERSION).toBe(17);
     expect(ABI_EXPORTS).toContain('losat_web2_tool');
+  });
+
+  it('leads the argv of every call with BLASTDB=<folder> while the run has a BLASTDB (ABI v2 §7, version 17), and with nothing after it', () => {
+    const { abi, log } = fakeEngine({ validate: (emit) => (emit(2, encode('{"data_loaders":true}')), 0) });
+    abi.validate(['blastn', '-db', 'nuc5/nuc5']);
+    abi.blastdb = 'nuc5';
+    abi.validate(['blastn', '-db', 'nuc5/nuc5']);
+    abi.blastdb = '';
+    abi.validate(['blastn', '-db', 'nuc5/nuc5']);
+    abi.blastdb = undefined;
+    abi.validate(['blastn', '-db', 'nuc5/nuc5']);
+    expect(log).toEqual([
+      'validate blastn -db nuc5/nuc5',
+      'validate BLASTDB=nuc5 blastn -db nuc5/nuc5',
+      'validate blastn -db nuc5/nuc5',
+      'validate blastn -db nuc5/nuc5',
+    ]);
   });
 
   it('hands streams 11, 3 and 12 to the callbacks as each emit arrives, and returns the status of stream 2', () => {

@@ -138,7 +138,7 @@ describe('blast-db domain discovery & directory assembly', () => {
     );
   });
 
-  it('mounts DB files, root aliases for selected-folder taxonomy files with blastdbEnv, filter lists by name, and deduplicates identical Files', async () => {
+  it('mounts DB files where the user has them (no taxonomy copies at the root), names the DB folder as blastdbEnv, mounts filter lists by name, and deduplicates identical Files', async () => {
     const dbFiles = [
       fileWithRelPath('mydb/nt.nin', 'nin'),
       fileWithRelPath('mydb/nt.nhr', 'nhr'),
@@ -165,13 +165,10 @@ describe('blast-db domain discovery & directory assembly', () => {
       'mydb/taxdb.btd',
       'mydb/taxdb.bti',
       'mydb/taxonomy4blast.sqlite3',
-      'taxdb.btd',
-      'taxdb.bti',
-      'taxonomy4blast.sqlite3',
     ]);
   });
 
-  it('aliases taxonomy files ONLY from the selected DB folder and omits blastdbEnv for root picks or folders without taxonomy files (F1)', async () => {
+  it('names ONLY the selected DB folder as blastdbEnv, and none for root picks or folders without taxonomy files (F1)', async () => {
     const nested = await discoverBlastDatabases([
       fileWithRelPath('root/subA/a.pin', 'a'),
       fileWithRelPath('root/subB/b.pin', 'b'),
@@ -185,12 +182,14 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(forA.files.some((f) => f.name === 'taxonomy4blast.sqlite3' || f.name === 'taxdb.bti')).toBe(false);
     expect(databaseTaxonomy(nested, 'root/subA/a')).toMatchObject({ taxdb: false, sqlite: false });
 
-    // Selecting subB/b aliases subB's taxonomy files to root and sets blastdbEnv = 'root/subB'.
+    // Selecting subB/b sets blastdbEnv = 'root/subB' and mounts the taxonomy files only where the user has them.
     const forB = assembleSearchDirectory({ subjectDb: { discovery: nested, selectedName: 'root/subB/b' } });
     expect(forB.blastdbEnv).toBe('root/subB');
-    expect(forB.files.map((f) => f.name)).toEqual(
-      expect.arrayContaining(['taxdb.bti', 'taxdb.btd', 'taxonomy4blast.sqlite3']),
-    );
+    expect(forB.files.map((f) => f.name).filter((name) => !name.endsWith('.pin')).sort()).toEqual([
+      'root/subB/taxdb.btd',
+      'root/subB/taxdb.bti',
+      'root/subB/taxonomy4blast.sqlite3',
+    ]);
 
     // Multi-file root pick already has taxonomy files at root, so blastdbEnv is omitted.
     const rootPick = await discoverBlastDatabases([
@@ -406,9 +405,9 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       'nucdb/taxdb.btd',
       'nucdb/taxdb.bti',
       'subset.ids',
-      'taxdb.btd',
-      'taxdb.bti',
     ]);
+    // The engine is given the shown command's BLASTDB, not copies of the taxonomy files at the run's root.
+    expect(req.blastdb).toBe('nucdb');
 
     // ResultsBrowser reads subject lengths from HspTable even though snapshot.subject has 0 FASTA records.
     await results.open(runId);

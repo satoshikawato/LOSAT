@@ -434,6 +434,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
       ...(request.query === undefined ? {} : { query: workerInput(program, request.query) }),
       ...(request.subject === undefined ? {} : { subject: workerInput(program, request.subject) }),
       ...(request.files === undefined ? {} : { files: request.files }),
+      ...(request.blastdb === undefined ? {} : { blastdb: request.blastdb }),
       ...(request.windowMasker === undefined ? {} : { windowMasker: workerCounts(request.windowMasker) }),
       ...(request.conffile === undefined ? {} : { conffile: request.conffile }),
       output,

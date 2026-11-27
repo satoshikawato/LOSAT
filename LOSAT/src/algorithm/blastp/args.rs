@@ -712,6 +712,14 @@ pub struct ResolvedBlastpArgs {
             >,
         >,
     >,
+    /// Whether NCBI's formatter is PHI-BLAST's (`phiblastp`) for the whole run: psiblast's
+    /// `-phi_pattern` (item PS8a). NCBI's psiblast makes its formatter from the first options
+    /// handle, so the rounds after a PHI-BLAST round 1, which search with the PSI-BLAST handle
+    /// (`phi_rounds`, `phi` then `None`), are reported under `phiblastp` too (item PS8b).
+    pub(crate) phi_report: bool,
+    /// psiblast `-phi_pattern` with `-num_iterations` other than 1 (item PS8b): NCBI's second
+    /// `SetOptions` (`PhiRounds`), whose PSI-BLAST options search the rounds after round 1.
+    pub(crate) phi_rounds: Option<std::sync::Arc<PhiRounds>>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -767,9 +775,9 @@ impl ResolvedBlastpArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
     /// The program that the reports name (the formatter's program): the application's, or
     /// `phiblastp` for psiblast's `-phi_pattern` (`PHIBLASTP` in the prolog and in outfmt 7's
-    /// header, item PS8a).
+    /// header, item PS8a), also in the rounds after its round 1 (`phi_report`, item PS8b).
     pub(crate) fn report_program(&self) -> &'static str {
-        if self.phi.is_some() {
+        if self.phi_report {
             "phiblastp"
         } else {
             self.app.ncbi_name()
@@ -1383,6 +1391,8 @@ impl BlastpArgs {
             inclusion_ethresh: self
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
+            phi_report: has_phi,
+            phi_rounds: None,
             traceback_hitlist: 0,
             subject_taxdb_found: false,
             subject_taxdb: None,
@@ -1393,7 +1403,107 @@ impl BlastpArgs {
             resolved.threshold = 0.0;
         }
         resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:213-229
+        // psiblast `-phi_pattern` with rounds (item PS8b): the options of the later rounds.
+        if has_phi && resolved.psi_rounds.is_some() {
+            resolved.phi_rounds =
+                Some(std::sync::Arc::new(self.phi_second_set_options(read_files)));
+        }
         Ok(resolved)
+    }
+
+    /// NCBI's second `SetOptions` of a PHI-BLAST search with rounds (item PS8b): psiblast removes
+    /// the pattern from the arguments and makes the PSI-BLAST options handle of the rounds after
+    /// round 1 with every argument handler again (`check_options_with` of the arguments without
+    /// `-phi_pattern`), which posts the handlers' warnings again and validates the options as
+    /// PSI-BLAST's (the lookup table's checks that PHI-BLAST skips). The options differ from
+    /// PHI-BLAST's in what the PHI-BLAST handle leaves out (`PhiLaterOptions`).
+    #[cold]
+    #[inline(never)]
+    fn phi_second_set_options(&self, read_files: bool) -> PhiRounds {
+        let mut psi = self.clone();
+        if let Some(pssm) = psi.psiblast_pssm.as_mut() {
+            pssm.phi_pattern = None;
+        }
+        let mut posts = Vec::new();
+        let later = psi
+            .check_options_with(read_files, &mut posts)
+            .map(|resolved| PhiLaterOptions {
+                comp_based_stats: resolved.comp_based_stats,
+                identity_cbs_reset: resolved.identity_cbs_reset,
+                use_sw_tback: resolved.use_sw_tback,
+                traceback_hitlist: resolved.traceback_hitlist,
+            })
+            .map_err(|error| match error.downcast::<crate::cli::NativeError>() {
+                Ok(native) => PhiRoundsError::Native(native),
+                Err(other) => PhiRoundsError::Other(format!("{other:#}")),
+            });
+        PhiRounds { posts, later }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:213-229
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3640
+/// psiblast `-phi_pattern` with rounds (item PS8b): NCBI calls `SetOptions` a second time for
+/// each query, before its round 1, with the pattern removed from the arguments, for the
+/// PSI-BLAST options handle of the rounds after round 1. Every argument handler runs again: their
+/// posts come again (`posts`), and the handle's `Validate` can fail where PHI-BLAST's passed
+/// (`later`'s error; `-word_size` above 4: `Word-size must be less than 5 for psiblast`). The
+/// database handler reads `-subject` again from its stream, which round 1's reading left at its
+/// end, and fails first (`psi_round::run_queries`).
+#[derive(Debug, Clone)]
+pub(crate) struct PhiRounds {
+    /// The second `SetOptions`' posts (the formatting handler's warnings).
+    pub(crate) posts: Vec<u8>,
+    /// The PSI-BLAST options of the later rounds, or the second `SetOptions`' error.
+    pub(crate) later: std::result::Result<PhiLaterOptions, PhiRoundsError>,
+}
+
+/// The options in which the PSI-BLAST handle of the rounds after a PHI-BLAST round 1 differs
+/// from the PHI-BLAST handle (`BlastpArgs::check_options_with`'s branches of `-phi_pattern`):
+/// the composition-based statistics, the Smith-Waterman traceback and the traceback's hit list
+/// size, which PHI-BLAST's handle does not take.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PhiLaterOptions {
+    comp_based_stats: BlastpCompBasedStats,
+    identity_cbs_reset: bool,
+    pub(crate) use_sw_tback: bool,
+    traceback_hitlist: usize,
+}
+
+/// The error of NCBI's second `SetOptions` (`PhiRounds`): NCBI's (an options error, exit status
+/// 1), or LOSAT's.
+#[derive(Debug, Clone)]
+pub(crate) enum PhiRoundsError {
+    Native(crate::cli::NativeError),
+    Other(String),
+}
+
+impl PhiRoundsError {
+    /// The error as the run returns it.
+    pub(crate) fn to_error(&self) -> anyhow::Error {
+        match self {
+            Self::Native(native) => native.clone().into(),
+            Self::Other(message) => anyhow::anyhow!("{message}"),
+        }
+    }
+}
+
+impl ResolvedBlastpArgs {
+    /// The options of a round after PHI-BLAST's round 1 (item PS8b): these options without the
+    /// pattern, with the PSI-BLAST handle's options (`later`); the reports keep `phiblastp`
+    /// (`phi_report`).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn phi_later_round(&self, later: &PhiLaterOptions) -> Self {
+        let mut round = self.clone();
+        round.phi = None;
+        round.phi_rounds = None;
+        round.comp_based_stats = later.comp_based_stats;
+        round.identity_cbs_reset = later.identity_cbs_reset;
+        round.use_sw_tback = later.use_sw_tback;
+        round.traceback_hitlist = later.traceback_hitlist;
+        round
     }
 }
 

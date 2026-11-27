@@ -335,14 +335,15 @@ impl<'a> PssmAlignment<'a> {
 /// the PSI blocks are copies of the standard ones (`kbp_psi` and `kbp_gap_psi` of the search's
 /// score block are its standard blocks, blast_setup.c:114-120); in a round that searched a PSSM
 /// they are the PSSM's, and `kbp_gap` is `kbp_gap_psi` (blast_setup.c:113-126, cited at
-/// `algorithm::pssm_search`).
+/// `algorithm::pssm_search`). After PHI-BLAST's round 1 there are no PSI blocks (`None`, item
+/// PS8b: `psi_round::next_pssm`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:99-111
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PssmAncillary {
     pub(crate) ungapped: KarlinBlk,
     pub(crate) gapped: KarlinBlk,
-    pub(crate) psi_ungapped: KarlinBlk,
-    pub(crate) psi_gapped: KarlinBlk,
+    pub(crate) psi_ungapped: Option<KarlinBlk>,
+    pub(crate) psi_gapped: Option<KarlinBlk>,
 }
 
 /// The query of a PSSM: its letters (the whole record, without masks), its Seq-align id
@@ -442,7 +443,9 @@ pub(crate) fn query_pssm(
     archive: bool,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
-    sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
+    if let Some(psi_gapped) = ancillary.psi_gapped {
+        sbp.set_ungapped_statistical_params(psi_gapped);
+    }
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
     let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh, unread)?;
@@ -857,12 +860,13 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:296-326
 fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
     [
-        ("Standard Ungapped    ", ancillary.ungapped),
-        ("Standard Gapped      ", ancillary.gapped),
+        ("Standard Ungapped    ", Some(ancillary.ungapped)),
+        ("Standard Gapped      ", Some(ancillary.gapped)),
         ("PSI Ungapped         ", ancillary.psi_ungapped),
         ("PSI Gapped           ", ancillary.psi_gapped),
     ]
     .into_iter()
+    .filter_map(|(label, block)| Some((label, block?)))
     .filter(|(_, block)| crate::stats::tables::ancillary_kept(block.lambda))
     .collect()
 }

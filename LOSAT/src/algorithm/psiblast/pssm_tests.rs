@@ -454,26 +454,33 @@ fn a_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
     let all = PssmAncillary {
         ungapped: BLOSUM62_11_1,
         gapped: BLOSUM62_11_1,
-        psi_ungapped: BLOSUM62_11_1,
-        psi_gapped: BLOSUM62_11_1,
+        psi_ungapped: Some(BLOSUM62_11_1),
+        psi_gapped: Some(BLOSUM62_11_1),
     };
     assert_eq!(labels(all).len(), 4);
+    // After PHI-BLAST's round 1 (item PS8b): no PSI blocks.
+    let phi = PssmAncillary {
+        psi_ungapped: None,
+        psi_gapped: None,
+        ..all
+    };
+    assert_eq!(labels(phi), ["Standard Ungapped", "Standard Gapped"]);
     for lambda in [f64::NEG_INFINITY, f64::NAN, -1.0] {
         let gapped_out = PssmAncillary {
             gapped: block(lambda),
-            psi_gapped: block(lambda),
+            psi_gapped: Some(block(lambda)),
             ..all
         };
         assert_eq!(labels(gapped_out), ["Standard Ungapped", "PSI Ungapped"]);
         let ungapped_out = PssmAncillary {
             ungapped: block(lambda),
-            psi_ungapped: block(lambda),
+            psi_ungapped: Some(block(lambda)),
             ..all
         };
         assert_eq!(labels(ungapped_out), ["Standard Gapped", "PSI Gapped"]);
     }
     let infinite = PssmAncillary {
-        psi_gapped: block(f64::INFINITY),
+        psi_gapped: Some(block(f64::INFINITY)),
         ..all
     };
     assert_eq!(labels(infinite).len(), 4);
@@ -562,12 +569,12 @@ const ANCILLARY: PssmAncillary = PssmAncillary {
         h: 0.4,
     },
     gapped: BLOSUM62_11_1,
-    psi_ungapped: KarlinBlk {
+    psi_ungapped: Some(KarlinBlk {
         lambda: 0.31998,
         k: 0.13697,
         h: 0.4,
-    },
-    psi_gapped: BLOSUM62_11_1,
+    }),
+    psi_gapped: Some(BLOSUM62_11_1),
 };
 
 const SCORING: PssmScoring<'static> = PssmScoring {

@@ -168,6 +168,25 @@ pub(super) fn psi_karlin(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+/// The blocks that the footer of a PSSM search's report prints: `kbp_psi` and `kbp_gap_psi`
+/// under psiblast's formatter; under PHI-BLAST's (`phiblastp`, the rounds after a PHI-BLAST round
+/// 1, item PS8b) the query's `kbp_std` and its `kbp_gap`, which is `kbp_gap_psi`.
+#[cold]
+#[inline(never)]
+pub(super) fn report_karlin(
+    args: &ResolvedBlastpArgs,
+    psi: &PsiSearch,
+    contexts: &[QueryContext],
+    gapped_params: &KarlinParams,
+) -> PsiKarlin {
+    let mut karlin = psi_karlin(psi, contexts, gapped_params);
+    if args.phi_report {
+        karlin.ungapped = contexts[0].karlin_params;
+    }
+    karlin
+}
+
 thread_local! {
     /// The PSSM preliminary search's memory of this thread (`PssmSubjectScratch`), which the
     /// subject loops' scratch (`BlastpSubjectScratch`, blastp's) does not hold.

@@ -220,6 +220,48 @@ fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:213-229
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2525-2557
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+/// NCBI's second `SetOptions` of a PHI-BLAST search with rounds (`PhiRounds`), for the query of
+/// batch `batch`, after its reader's messages `reader_warnings` and its search strategy request
+/// (written before): the reader's messages and the posts of the bytes replaced in the request
+/// come first (round 1's call writes neither then); a `-subject` set fails first, read again from
+/// the stream that round 1 read to its end (`Empty CBlastQueryVector`, exit status 3); then the
+/// handlers' posts again, and the options' error. Both errors come after the prolog. NCBI crashes
+/// at the second query's (probes `q.tk_tk.it3.*`, `fi.export.tktk.it3`: SIGSEGV after the second
+/// request is written, before its posts): LOSAT refuses it there (DESIGN_ps8 §3.2).
+#[cold]
+#[inline(never)]
+fn phi_second_set_options(
+    args: &ResolvedBlastpArgs,
+    rounds: &crate::algorithm::blastp::args::PhiRounds,
+    batch: usize,
+    reader_warnings: &[u8],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    if batch > 0 {
+        bail!(
+            "a -phi_pattern search of two or more queries with -num_iterations other than 1 (NCBI BLAST+ 2.17.0 crashes at the second query) is not supported by LOSAT's PSIBLAST"
+        );
+    }
+    outputs.diagnostics.write_all(reader_warnings)?;
+    super::write_request_posts(args, &mut *outputs.diagnostics)?;
+    let error = if subject_source.database().is_none() {
+        crate::blastinput::app::engine_error("Empty CBlastQueryVector")
+    } else {
+        outputs.diagnostics.write_all(&rounds.posts)?;
+        match &rounds.later {
+            Ok(_) => return Ok(()),
+            Err(error) => error.to_error(),
+        }
+    };
+    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+    Err(error)
+}
+
 /// The rounds of every searched batch's query on `pool`, then the epilog (`epilog`).
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:508-532
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:196-205 (cited at
@@ -245,17 +287,27 @@ fn run_queries(
         &plan.request,
         args.out.as_deref().filter(|path| path.as_os_str() != "-"),
     );
+    // psiblast `-phi_pattern` (item PS8b): round 1 is PHI-BLAST's search (`args`), the later
+    // rounds search with the options of NCBI's second `SetOptions` (`phi_later_round`; its error
+    // stops the run before round 1, `phi_second_set_options`).
+    let phi_later = match args.phi_rounds.as_deref().map(|rounds| &rounds.later) {
+        Some(Ok(later)) => Some(args.phi_later_round(later)),
+        _ => None,
+    };
+    let later_args = phi_later.as_ref().unwrap_or(args);
     // With `-in_pssm` the options' mode is already the PSSM search's (`check_options`), so a later
     // round warns no more.
-    let original_mode = args.comp_based_stats.mode;
+    let original_mode = later_args.comp_based_stats.mode;
     let pssm_mode =
         crate::algorithm::psiblast::in_pssm::position_based_mode(app_mode(original_mode));
     let pssm_round_mode = match pssm_mode {
         CompositionMode::NoCompositionBasedStats => BlastpCompositionMode::NoCompositionBasedStats,
         _ => BlastpCompositionMode::CompositionBasedStats,
     };
-    // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
+    // The rounds searched so far, and those formatted (`m_QueriesFormatted`: each round's
+    // `PrintOneResultSet`; not PHI-BLAST's round 1, `PrintPhiResult`).
     let mut calls = 0usize;
+    let mut formatted = 0usize;
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
@@ -335,6 +387,17 @@ fn run_queries(
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
             requests.write(strategy, query, records, placement)?;
         }
+        if let Some(rounds) = args.phi_rounds.as_deref() {
+            phi_second_set_options(
+                args,
+                rounds,
+                batch,
+                &batches.warnings[query],
+                subject_source,
+                subject_label,
+                outputs,
+            )?;
+        }
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
@@ -365,7 +428,11 @@ fn run_queries(
                 }
                 _ => {}
             }
-            let mut round_args = args.clone();
+            let mut round_args = if round == 1 {
+                args.clone()
+            } else {
+                later_args.clone()
+            };
             if let Some(current) = &pssm {
                 // The options' mode when this round's score block is set up: the given one in
                 // the query's first PSSM round, 1 (or 0) after it.
@@ -464,8 +531,9 @@ fn run_queries(
             if let Some(observer) = outputs.observer.as_deref_mut() {
                 observer.round_begin(query, round);
             }
-            // The reader's messages of the batch come with its first round.
-            let reader_warnings: &[Vec<u8>] = if round == 1 {
+            // The reader's messages of the batch come with its first round (before NCBI's second
+            // `SetOptions` of PHI-BLAST, `phi_second_set_options`).
+            let reader_warnings: &[Vec<u8>] = if round == 1 && args.phi_rounds.is_none() {
                 &batches.warnings[query..query + 1]
             } else {
                 &[]
@@ -533,7 +601,7 @@ fn run_queries(
                     if calls == 0 {
                         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                     }
-                    if round == 1 {
+                    if round == 1 && args.phi_rounds.is_none() {
                         outputs.diagnostics.write_all(&batches.warnings[query])?;
                         // NCBI's posts of the bytes replaced in the query's request, which
                         // round 1's report did not place.
@@ -553,6 +621,9 @@ fn run_queries(
                 return Err(error);
             }
             calls += 1;
+            if round > 1 || args.phi.is_none() {
+                formatted += 1;
+            }
             let outcome = io
                 .outcome
                 .lock()
@@ -607,7 +678,7 @@ fn run_queries(
         }
     }
     if epilog {
-        write_round_epilogs(args, subject_source, subject_label, outputs, calls)?;
+        write_round_epilogs(args, subject_source, subject_label, outputs, formatted)?;
     }
     Ok(())
 }
@@ -942,6 +1013,11 @@ pub(super) fn round_outcome(
     keys: SubjectKeys<'_>,
 ) -> Result<Option<FoundBefore>> {
     let key = |s_idx: u32| keys.key(s_idx);
+    // PHI-BLAST's round 1 (item PS8b): the round's outcome is its first occurrence's result.
+    let first_occurrence = args.phi.is_some().then(|| phi_first_occurrence(hit_lists));
+    let hit_lists = first_occurrence
+        .as_ref()
+        .map_or(hit_lists, std::slice::from_ref);
     let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> = hit_lists
         .first()
         .and_then(Option::as_ref)
@@ -1031,6 +1107,33 @@ pub(super) fn round_outcome(
         searched,
     });
     Ok(found_before)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:290-310
+/// The result of the first pattern occurrence of PHI-BLAST's round 1 (`(*results)[0]`, the
+/// Seq-aligns and the ancillary data that the next round's PSSM reads): the query's hit list split
+/// by occurrence as its reports split it (`phi_hooks::split_hit_list_by_occurrence`), its first
+/// part.
+#[cold]
+#[inline(never)]
+fn phi_first_occurrence(hit_lists: &[Option<BlastpHitList>]) -> Option<BlastpHitList> {
+    let mut list = hit_lists.first().cloned().flatten()?;
+    let count = list.hsplist_count.min(list.hsplist_array.len());
+    let occurrences = list.hsplist_array[..count]
+        .iter()
+        .flat_map(|hsp_list| &hsp_list.hsps)
+        .filter_map(|hsp| hsp.clone().take_phi_occurrence())
+        .map(|occurrence| occurrence.index() + 1)
+        .max()
+        .unwrap_or(0);
+    super::phi_hooks::split_hit_list_by_occurrence(Some(&mut list), occurrences, |_, hsp| {
+        hsp.take_phi_occurrence()
+            .expect("every PHI HSP carries a PhiOccurrenceIndex from phi_traceback")
+            .index()
+    })
+    .into_iter()
+    .next()
+    .flatten()
 }
 
 /// What the two-part description table of a round after one with an inclusion set reads of the
@@ -1199,11 +1302,34 @@ fn next_pssm(
     let standard_ungapped = engine_block(&contexts[0].karlin_params);
     let table_gapped = engine_block(gapped);
     let ancillary = match args.psi_search.as_deref() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:505-506
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:51-59
+        // After PHI-BLAST's round 1 (item PS8b): the score block has only the standard blocks,
+        // both the PHI-BLAST table's (`s_PHIScoreBlkFill`), and no PSI blocks, so the PSSM engine
+        // keeps its own (`SetUngappedStatisticalParams`) and the ASCII PSSM prints two.
+        None if args.phi.is_some() => {
+            let phi = super::phi_hooks::phi_karlin(args).map_err(|_| {
+                anyhow::anyhow!(
+                    "LOSAT internal error: a PHI-BLAST round with alignments has no Karlin block"
+                )
+            })?;
+            let block = KarlinBlk {
+                lambda: phi.lambda,
+                k: phi.k,
+                h: phi.h,
+            };
+            PssmAncillary {
+                ungapped: block,
+                gapped: block,
+                psi_ungapped: None,
+                psi_gapped: None,
+            }
+        }
         None => PssmAncillary {
             ungapped: standard_ungapped,
             gapped: table_gapped,
-            psi_ungapped: standard_ungapped,
-            psi_gapped: table_gapped,
+            psi_ungapped: Some(standard_ungapped),
+            psi_gapped: Some(table_gapped),
         },
         Some(psi) => {
             let karlin = super::pssm_hooks::psi_karlin(psi, contexts, gapped);
@@ -1211,8 +1337,8 @@ fn next_pssm(
             PssmAncillary {
                 ungapped: standard_ungapped,
                 gapped: psi_gapped,
-                psi_ungapped: engine_block(&karlin.ungapped),
-                psi_gapped,
+                psi_ungapped: Some(engine_block(&karlin.ungapped)),
+                psi_gapped: Some(psi_gapped),
             }
         }
     };

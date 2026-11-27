@@ -929,7 +929,7 @@ pub(super) fn write_pairwise(
     let psi_report_karlin = args
         .psi_search
         .as_deref()
-        .map(|psi| pssm_hooks::psi_karlin(psi, contexts, &gapped_params));
+        .map(|psi| pssm_hooks::report_karlin(args, psi, contexts, &gapped_params));
     // The titles are written as bytes by query index (`query_titles`);
     // `query_name` stays empty (`BlastpPairwiseQuery` is BLASTX's too).
     let mut pairwise_queries: Vec<BlastpPairwiseQuery> = query_lengths

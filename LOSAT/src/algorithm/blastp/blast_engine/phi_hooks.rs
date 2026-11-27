@@ -339,7 +339,7 @@ pub(super) fn phi_call<'p>(
 /// ported yet), whatever is searched. Then only where the
 /// round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
 /// without it round 1 is the run's last whatever `-num_iterations` and `-sum_stats` say, probes
-/// `k.pam.it3.0`, `k.pam.ss3.0`): the rounds after it (PS8b), `-sum_stats true` (NCBI links the
+/// `k.pam.it3.0`, `k.pam.ss3.0`): `-sum_stats true` (NCBI links the
 /// preliminary HSPs with the pattern's Karlin block and reaps them by the linked e-values; probe
 /// `op.sumstats.6`) and a subject longer than `MAX_DBSEQ_LEN` (NCBI's parts), both item PS8a-2.
 /// Outfmt 8, 9 and 12 are no exception: NCBI's engine error of their Seq-annot comes only where an
@@ -368,12 +368,6 @@ fn phi_limits(
     }
     if !searched {
         return None;
-    }
-    if let Some(rounds) = args.psi_rounds.as_deref() {
-        return Some(anyhow::anyhow!(
-            "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
-            rounds.num_iterations
-        ));
     }
     if args.sum_stats {
         return Some(anyhow::anyhow!(

@@ -2094,7 +2094,15 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // `identity_cbs_reset`). With `-ungapped` (allowed only in mode 0), NCBI crashes at the redo's
     // set-up of every searched batch, and LOSAT refuses there (`redo_run::sw_ungapped_check`).
     // psiblast keeps its refusal (the position-based Smith-Waterman redo).
-    if args.use_sw_tback && (args.app != BlastpApp::Blastp || args.psi_search.is_some()) {
+    // PHI-BLAST's round 1 takes no Smith-Waterman traceback, the rounds after it would
+    // (`PhiLaterOptions::use_sw_tback`, item PS8b).
+    let later_sw = args
+        .phi_rounds
+        .as_deref()
+        .is_some_and(|rounds| rounds.later.as_ref().is_ok_and(|later| later.use_sw_tback));
+    if (args.use_sw_tback || later_sw)
+        && (args.app != BlastpApp::Blastp || args.psi_search.is_some())
+    {
         bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
@@ -3294,8 +3302,8 @@ fn psiblast_pssms(
         let ancillary = PssmAncillary {
             ungapped,
             gapped,
-            psi_ungapped: ungapped,
-            psi_gapped: gapped,
+            psi_ungapped: Some(ungapped),
+            psi_gapped: Some(gapped),
         };
         let mut unread = Vec::new();
         let query_letters = [
@@ -6678,10 +6686,9 @@ fn search(
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
-    // one search per round per query (`psi_round`). PHI-BLAST's round 1 is this call's search:
-    // LOSAT refuses the rounds after it where NCBI's table has a Karlin block, and without one it
-    // is the run's last (`phi_hooks::phi_limits`).
-    if let Some(plan) = args.psi_rounds.clone().filter(|_| args.phi.is_none()) {
+    // one search per round per query (`psi_round`), with `-phi_pattern` too: PHI-BLAST's round 1,
+    // then PSI-BLAST's rounds (item PS8b).
+    if let Some(plan) = args.psi_rounds.clone() {
         return psi_round::search_rounds(
             &args,
             &plan,

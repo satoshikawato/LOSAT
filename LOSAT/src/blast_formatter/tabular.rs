@@ -6,12 +6,13 @@
 //!
 //! NCBI's scope finds each row's query among the request's queries, and its subject in the
 //! database that the archive names (its BLAST database data loader: the first OID that the lookup
-//! of the Seq-align's subject id gives, `SeqidLookup::seqid_to_oid`, decision F3-14) or among the
-//! request's `-subject` Bioseqs. What LOSAT does not find as NCBI's scope would is refused by name
-//! before the object's first byte: a subject that the database does not hold (NCBI asks its
-//! servers, `Refusal::Database`), and the forms that this driver does not cover
-//! (`Refusal::Tabular`): queries given as locations, and ids that NCBI's scope could find
-//! elsewhere. The translated programs' Std-seg Seq-aligns are read as the others
+//! of the Seq-align's subject id gives, `SeqidLookup::seqid_to_oid`, decision F3-14, whose Bioseq
+//! is the definition line that holds that id) or among the request's `-subject` Bioseqs; queries
+//! given as locations are the database's sequences of their ids, loaded at their blocks in the
+//! same scope. What LOSAT does not find as NCBI's scope would is refused by name before the
+//! object's first byte: a subject or a located query that the database does not hold (NCBI asks
+//! its servers), and the forms that this driver does not cover (`Refusal::Tabular`), such as ids
+//! that NCBI's scope could find elsewhere. The translated programs' Std-seg Seq-aligns are read as the others
 //! (`report::tabular_seqalign`, PR 3b of line RG item F3), and `-subject` with `BL2SEQ_LEGACY` in
 //! outfmt 7 names each query's subject (`Bl2seqSubjects`).
 
@@ -23,7 +24,7 @@ use anyhow::Result;
 use super::refusals::Refusal;
 use super::PROGRAM;
 use crate::algorithm::common::database::{
-    database_error, parsed_refusal, prefetch_messages, prefetch_warning_of, read_header,
+    database_error, parsed_refusal, prefetch_messages, prefetch_warning_of, read_header_of_id,
     subject_taxonomy, tabular_names, HeaderReader, ReportedHeader, StoredTitle, TaxdbRun,
     TaxdbSetting,
 };
@@ -264,6 +265,9 @@ struct QueryEntry<'r> {
     nucleotide: bool,
     /// outfmt 7's `# Query:` text before its spaces are cut (`x_AcknowledgeBlastSequence`).
     title: Vec<u8>,
+    /// The header of a query location's database sequence as the data loader reads it for the
+    /// location's Seq-id, whose load each query block makes (`Subjects::load_query`).
+    loaded: Option<std::sync::Arc<ParsedSubject>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -308,6 +312,7 @@ impl<'r> QueryEntry<'r> {
             length: bioseq.length().unwrap_or(0),
             nucleotide: !bioseq_protein(bioseq),
             title: acknowledged_title(bioseq, believe),
+            loaded: None,
         }
     }
 
@@ -501,14 +506,21 @@ enum SubjectSource {
 }
 
 impl SubjectSource {
-    /// The sequence of the source: one subject index serves every id of it, as NCBI's data
-    /// loader gives the sequence it loaded for each id of its own (`RegisterIds`) and the scope
-    /// one Bioseq for each of its ids.
-    fn sequence(&self) -> (u8, usize) {
-        match *self {
-            SubjectSource::Database { oid, .. } => (0, oid as usize),
-            SubjectSource::Bioseq(at) => (1, at),
-            SubjectSource::Query(at) => (2, at),
+    /// The Bioseq of the source: one subject index serves every id of it, as the scope gives one
+    /// Bioseq for each of its ids. A database sequence's Bioseq is the one of the definition line
+    /// that its load's id finds (`ParsedSubject::bioseq_line`): loads by ids of other lines make
+    /// other Bioseqs (the data loader's blob id is the OID and the id asked for).
+    fn sequence(&self) -> (u8, usize, usize) {
+        match self {
+            SubjectSource::Database { oid, header, .. } => {
+                let line = match header {
+                    ReportedHeader::Parsed(subject) => subject.bioseq_line(),
+                    ReportedHeader::Stored(_) => 0,
+                };
+                (0, *oid as usize, line)
+            }
+            SubjectSource::Bioseq(at) => (1, *at, 0),
+            SubjectSource::Query(at) => (2, *at, 0),
         }
     }
 }
@@ -523,7 +535,7 @@ struct Subjects<'db> {
     /// The index of `keys`.
     key_ids: IdIndex,
     /// The subject index of each sequence (`SubjectSource::sequence`).
-    by_sequence: HashMap<(u8, usize), usize>,
+    by_sequence: HashMap<(u8, usize, usize), usize>,
     /// Index in `keys` of the most recently matched subject id (consecutive HSPs of one subject).
     last: Option<usize>,
     /// One `SeqidLookup`, `HeaderReader` and `ScopeWalk` opened lazily for the whole object.
@@ -578,16 +590,18 @@ impl<'db> Subjects<'db> {
                     }
                 },
                 Some((name, db)) => {
-                    if self.db_readers.is_none() {
-                        let lookup = db
-                            .seqid_lookup()
-                            .map_err(|error| database_error(error, PROGRAM))?;
-                        let headers = HeaderReader::new(db, false);
-                        let walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
-                        self.db_readers = Some((lookup, headers, walk));
+                    let (lookup, headers, walk) = self.readers(db)?;
+                    let source = database_sequence(name, db, lookup, headers, id)?;
+                    if let SubjectSource::Database {
+                        header: ReportedHeader::Parsed(subject),
+                        ..
+                    } = &source
+                    {
+                        if !matches!(walk.load(subject), HitLoad::Loaded) {
+                            return Err(refused(SCOPE_ELSEWHERE));
+                        }
                     }
-                    let (lookup, headers, walk) = self.db_readers.as_mut().expect("opened above");
-                    database_subject(name, db, lookup, headers, walk, id)?
+                    source
                 }
             },
         };
@@ -607,6 +621,41 @@ impl<'db> Subjects<'db> {
         self.keys.push((id.clone(), index));
         self.last = Some(key_at);
         Ok(index)
+    }
+
+    /// The object's readers of the database `db`, opened at the first load.
+    fn readers(
+        &mut self,
+        db: &'db SeqDb,
+    ) -> Result<&mut (SeqidLookup<'db>, HeaderReader<'db>, ScopeWalk)> {
+        if self.db_readers.is_none() {
+            let lookup = db
+                .seqid_lookup()
+                .map_err(|error| database_error(error, PROGRAM))?;
+            let headers = HeaderReader::new(db, false);
+            let walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+            self.db_readers = Some((lookup, headers, walk));
+        }
+        Ok(self.db_readers.as_mut().expect("opened above"))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:766-768
+    /// The load of the query `query` at the start of its block (`x_PrintTabularReport`'s
+    /// `GetBioseqHandle`): after the prefetch's loads of every subject, and where the prefetch is
+    /// off after the rows of the queries before. A query location's Seq-id takes the scope's
+    /// places as a subject's ([`ScopeWalk::load`]); one that they do not answer with the
+    /// sequence that its own definition line makes is refused.
+    fn load_query(&mut self, inputs: &ObjectInputs<'db>, query: &QueryEntry<'_>) -> Result<()> {
+        let (Some(subject), Some((_, db))) = (&query.loaded, inputs.database) else {
+            return Ok(());
+        };
+        let (_, _, walk) = self.readers(db)?;
+        if !matches!(walk.load(subject), HitLoad::Loaded) {
+            return Err(refused(
+                "a query location whose database sequence NCBI BLAST+'s scope finds otherwise",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -645,20 +694,27 @@ fn holds<'i>(ids: impl IntoIterator<Item = &'i ParsedSeqId>, id: &ParsedSeqId) -
     ids.into_iter().any(|held| compare(held, id) == Sic::Yes)
 }
 
+/// The refusal of a database sequence whose load by an id of an archive NCBI's places may answer
+/// with another sequence, or with none.
+const SCOPE_ELSEWHERE: &str =
+    "a database sequence that NCBI BLAST+'s lookup of its Seq-align id may not give as it is";
+
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393
-/// The database sequence that NCBI's BLAST database data loader serves for the Seq-align
-/// subject id `id`: the first OID of the restricted database's lookup (`seqid_to_oid`), its
-/// header read as the search programs read a reported sequence's (`read_header`). Not found is
-/// NCBI's ask of its servers (`Refusal::Database`); a lookup that throws, a header with a
-/// UTF8String, and a parsed header whose Seq-align id NCBI's lookup or scope may not give as it is
-/// (`ParsedSubject::found`, `unfetchable`, `load_throws`, `scope_finds_none`, `ScopeWalk::load`,
-/// or an id other than `id`) are refused.
-fn database_subject(
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:440-449
+/// The database sequence that NCBI's BLAST database data loader serves for the Seq-id `id` (a
+/// Seq-align subject id, or a query location's): the first OID of the restricted database's
+/// lookup (`seqid_to_oid`), its header read for `id` as the loader builds its Bioseq
+/// (`read_header_of_id`: the definition line that holds `id`, which can be another than the
+/// search programs' Seq-align id). Not found is NCBI's ask of its servers (`Refusal::Database`);
+/// a lookup that throws, a header with a UTF8String, and a parsed header whose id NCBI's lookup
+/// or loader may not give as it is (`ParsedSubject::found`, `unfetchable`, `load_throws`,
+/// `scope_finds_none`) are refused. The scope's places ([`ScopeWalk::load`]) are asked at the
+/// load, by the caller.
+fn database_sequence(
     name: &[u8],
     db: &SeqDb,
     lookup: &SeqidLookup<'_>,
     headers: &HeaderReader<'_>,
-    walk: &mut ScopeWalk,
     id: &ParsedSeqId,
 ) -> Result<SubjectSource> {
     let oid = match lookup.seqid_to_oid(id) {
@@ -679,19 +735,14 @@ fn database_subject(
             "a database sequence whose header holds a UTF8String",
         ));
     }
-    let header = read_header(headers, ordinal, 0, PROGRAM)?;
+    let header = read_header_of_id(headers, ordinal, id, PROGRAM)?;
     if let ReportedHeader::Parsed(subject) = &header {
-        let plain = subject.found().is_none()
-            && !subject.unfetchable()
-            && !subject.load_throws()
-            && !subject.scope_finds_none()
-            && matches!(walk.load(subject), HitLoad::Loaded)
-            && compare(id, subject.alignment_id()) == Sic::Yes;
-        if !plain {
-            return Err(refused(
-                "a database sequence that NCBI BLAST+'s lookup of its Seq-align id may not give \
-                 as it is",
-            ));
+        if subject.found().is_some()
+            || subject.unfetchable()
+            || subject.load_throws()
+            || subject.scope_finds_none()
+        {
+            return Err(refused(SCOPE_ELSEWHERE));
         }
     }
     Ok(SubjectSource::Database {
@@ -1156,6 +1207,7 @@ pub(super) fn print_object(
     let mut stop: Option<NcbiStop> = None;
     if inputs.iteration.is_ok() {
         for (q, set) in sets.iter().enumerate() {
+            subjects.load_query(inputs, &queries[q])?;
             let all = read_set(&alignments[set.clone()], ungapped && !set.is_empty());
             let mut plan = QueryPlan {
                 count: all.len(),
@@ -1301,6 +1353,8 @@ pub(super) fn print_object(
         ));
     }
 
+    let query_texts = query_load_texts(inputs, &queries, plans.len())?;
+
     // outfmt 7's `# Subject:` line of each query where the formatter has no database name.
     let subject_headers =
         if commented && inputs.database.is_none() && std::env::var_os("BL2SEQ_LEGACY").is_some() {
@@ -1328,6 +1382,9 @@ pub(super) fn print_object(
     let last = plans.len().saturating_sub(1);
     for (q, plan) in plans.iter().enumerate() {
         post_warning(sink);
+        if let Some(text) = query_texts.get(q) {
+            sink.post(text);
+        }
         let target = match &subject_headers {
             None => HeaderTarget::Database(database_text),
             Some(texts) => match texts.get(q) {
@@ -1451,13 +1508,14 @@ const LOCATED_ELSEWHERE: &str =
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1310-1470
 /// The queries of a `seq-loc-list` (each a whole sequence or an interval, `check_queries`): the
 /// queries' scope has no loader, so the scope's loader of the database gives each Seq-id's
-/// sequence (`database_subject`, the subjects' lookup), whose Bioseq is the query: the ids and
+/// sequence (`database_sequence`, the subjects' read), whose Bioseq is the query: the ids and
 /// title of its definition line that holds the Seq-id (`GetBioseq` with the Seq-id as its
-/// target), the whole sequence's length and letters, the database's residue type. A Seq-id that
-/// the database does not hold, or a `-subject` object, is NCBI's ask of its servers (refused). A
-/// sequence of taxids (its load's lookups of the volume's taxonomy cache, whose texts the
-/// subjects' loads model), of a title or id that the reader repairs, or that the scope finds
-/// otherwise (`unfetchable`, `scope_finds_none`, `load_throws`) is refused.
+/// target), the whole sequence's length and letters, the database's residue type. Its load at
+/// its block takes the scope's places as a subject's (`Subjects::load_query`) and the volume's
+/// lookups of its taxids as a subject's load (`query_load_texts`). A Seq-id that the database
+/// does not hold, or a `-subject` object, is NCBI's ask of its servers (refused). A sequence
+/// with taxids where the taxonomy database's lookups throw (`TaxdbRun::load_throws`), or with a
+/// title that the reader repairs, is refused.
 fn located_queries<'r>(
     inputs: &ObjectInputs<'_>,
     queries: &'r Queries,
@@ -1469,7 +1527,6 @@ fn located_queries<'r>(
         .seqid_lookup()
         .map_err(|error| database_error(error, PROGRAM))?;
     let headers = HeaderReader::new(db, false);
-    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
     let protein = db.seqtype() == SeqType::Protein;
     let mut out = Vec::new();
     for loc in queries.seq_locs() {
@@ -1487,7 +1544,7 @@ fn located_queries<'r>(
         }
         let SubjectSource::Database {
             ordinal, header, ..
-        } = database_subject(name, db, &lookup, &headers, &mut walk, id)?
+        } = database_sequence(name, db, &lookup, &headers, id)?
         else {
             unreachable!("a database sequence");
         };
@@ -1496,19 +1553,17 @@ fn located_queries<'r>(
                 "a query location whose database sequence has no parsed definition line",
             ));
         };
-        if subject.unfetchable() || subject.scope_finds_none() || subject.load_throws() {
+        let defline = subject.bioseq_defline();
+        if defline.replaced_title_bytes > 0 {
             return Err(refused(
-                "a query location whose database sequence NCBI BLAST+'s scope finds otherwise",
+                "a query location whose database sequence has a definition line that NCBI \
+                 BLAST+ repairs",
             ));
         }
-        let defline = subject.bioseq_defline();
-        if !subject.volume_lookups().is_empty()
-            || defline.replaced_title_bytes > 0
-            || defline.replaced_id_bytes > 0
-        {
+        if !subject.volume_lookups().is_empty() && inputs.taxdb.load_throws(db) {
             return Err(refused(
-                "a query location whose database sequence has taxids or a definition line that \
-                 NCBI BLAST+ repairs",
+                "a query location whose database sequence has taxids, where the taxonomy \
+                 database's lookups throw",
             ));
         }
         let title = defline.title.as_deref().unwrap_or_default();
@@ -1526,9 +1581,35 @@ fn located_queries<'r>(
             length,
             nucleotide: !protein,
             title: acknowledged_text(&defline.ids, [title], inputs.believe),
+            loaded: Some(subject),
         });
     }
     Ok(out)
+}
+
+/// The texts of the taxonomy database at the load of each query of `queries` whose block the
+/// object writes (`count`), after the prefetch's (`prefetch_messages` of its database sequence
+/// at that point of the run's lookups): the volume looks a positive taxid up once in the run,
+/// so a sequence loaded before (a subject of the same id) writes none again. Empty for a query
+/// Bioseq of the request.
+fn query_load_texts(
+    inputs: &ObjectInputs<'_>,
+    queries: &[QueryEntry<'_>],
+    count: usize,
+) -> Result<Vec<Vec<u8>>> {
+    queries
+        .iter()
+        .take(count)
+        .map(|query| match (&query.loaded, query.sequence, inputs.database) {
+            (Some(subject), QuerySequence::Database(ordinal), Some((_, db))) => prefetch_messages(
+                db,
+                inputs.taxdb,
+                [(ordinal, Some(&**subject))],
+                PROGRAM,
+            ),
+            _ => Ok(Vec::new()),
+        })
+        .collect()
 }
 
 /// The letters of the database sequence `ordinal` as a row reads them (IUPAC, or the protein's

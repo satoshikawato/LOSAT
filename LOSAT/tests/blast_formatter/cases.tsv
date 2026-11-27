@@ -9,7 +9,8 @@
 # Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
 # Rows from of6_db_bin on (line RG item F3 PR 3b, agent 3B of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fix3b3.py, every NCBI run under unshare -rn: tabular formats of archives in ASN.1 binary and XML. New inputs: in/bx.asnb and in/bx.xml (blastx -query in/qx.fna -db ../db_search/paja with ARCHIVE_FORMAT=bin and xml), in/tx.asnb (tblastx -query in/q2.fa -db in/db/s3, ARCHIVE_FORMAT=bin); in/db.asnb, in/bn.xml and in/rps.asnb are line RG-F3bx's.
 # Rows from of6_ptn on (line RG item F3 PR 3b, agent 3Bb of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine (ws's queue was hours long), by remaining-gaps-20261112/F/f3/tools/fix3b4.py, every NCBI run under unshare -rn: PSI-TBLASTN archives. NCBI's tblastn -in_pssm writes none (its archive writer is given no queries: exit status 255), its blast_formatter writes them for PSI-TBLASTN results of NCBI's servers (program tblastn, service psi, the PSSM's query as a Bioseq); in/ptn.asn and in/ptn_subj.asn are in/tn.asn and in/tn_subj.asn with their service changed to psi, as in/delta.asn and in/phi.asn of PR 1.
-# Rows from of6_loc_md on (line RG item F3 PR 3b, agent 3Bb of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fix3b5.py, every NCBI run under unshare -rn: queries kept as locations whose database sequence has two definition lines. in/db/s3gbmd: makeblastdb -parse_seqids -blastdb_version 5 of in/s3gbmd.fa (in/s3gb.fa with s1 under the lines gb|AB000011.1| s1 in gb and gb|AB000021.1| s1 again); in/loc_md.asn: blastn -parse_deflines of in/qgb.fa (gb|AB000011.1|) on it. The query of the second line's id (gb|AB000021.1|), whose sequence the subject rows then reach by the first line's id, is LOSAT's refusal of a sequence that the scope may find otherwise (fix3b5.py's loc_md2).
+# Rows from of6_loc_md on (line RG item F3 PR 3b, agent 3Bb of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fix3b5.py, every NCBI run under unshare -rn: queries kept as locations whose database sequence has two definition lines. in/db/s3gbmd: makeblastdb -parse_seqids -blastdb_version 5 of in/s3gbmd.fa (in/s3gb.fa with s1 under the lines gb|AB000011.1| s1 in gb and gb|AB000021.1| s1 again); in/loc_md.asn: blastn -parse_deflines of in/qgb.fa (gb|AB000011.1|) on it. The same probe's in/loc_md2.asn: blastn -parse_deflines of in/qgbmd2.fa (gb|AB000021.1|, the second line's id) on it; in/loc_tx9606.asn: of in/qgb.fa on in/db/s3gbtx (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 5 of in/s3gb.fa; no taxonomy database here).
+# Rows from of6_loc_sl2 on (line RG item F3 PR 3b, agent 3Bc of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fix3b6.py, every NCBI run under unshare -rn: Seq-align subject ids of the second definition line of in/db/s3gbmd's s1. in/loc_sl2.asn: in/loc_md.asn with the first Seq-align's subject id gb|AB000021.1|; in/loc_sl12.asn: in/loc_md.asn with a copy of its first Seq-align of that subject id after it.
 noargs	
 h	-h
 help	-help
@@ -413,3 +414,23 @@ of7_loc_md	-archive in/loc_md.asn -outfmt 7
 of6_loc_md_all	-archive in/loc_md.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
 of7_loc_md_pd	-archive in/loc_md.asn -outfmt 7 -parse_deflines
 of20_loc_md	-archive in/loc_md.asn -outfmt 20
+of6_loc_tx9606	-archive in/loc_tx9606.asn -outfmt 6
+of7_loc_tx9606	-archive in/loc_tx9606.asn -outfmt 7
+of6_loc_tx9606_all	-archive in/loc_tx9606.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_tx9606_pd	-archive in/loc_tx9606.asn -outfmt 7 -parse_deflines
+of20_loc_tx9606	-archive in/loc_tx9606.asn -outfmt 20
+of6_loc_md2	-archive in/loc_md2.asn -outfmt 6
+of7_loc_md2	-archive in/loc_md2.asn -outfmt 7
+of6_loc_md2_all	-archive in/loc_md2.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_md2_pd	-archive in/loc_md2.asn -outfmt 7 -parse_deflines
+of20_loc_md2	-archive in/loc_md2.asn -outfmt 20
+of6_loc_sl2	-archive in/loc_sl2.asn -outfmt 6
+of7_loc_sl2	-archive in/loc_sl2.asn -outfmt 7
+of6_loc_sl2_all	-archive in/loc_sl2.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_sl2_pd	-archive in/loc_sl2.asn -outfmt 7 -parse_deflines
+of10_loc_sl2	-archive in/loc_sl2.asn -outfmt 10
+of6_loc_sl12	-archive in/loc_sl12.asn -outfmt 6
+of7_loc_sl12	-archive in/loc_sl12.asn -outfmt 7
+of6_loc_sl12_all	-archive in/loc_sl12.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_sl12_pd	-archive in/loc_sl12.asn -outfmt 7 -parse_deflines
+of10_loc_sl12	-archive in/loc_sl12.asn -outfmt 10

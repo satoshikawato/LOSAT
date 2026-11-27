@@ -4054,3 +4054,33 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
     assert!(nucl_source_throwing.description_may_throw());
     assert_long_id(&nucl_source_throwing, false, "BLASTN");
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1360
+// blast_formatter loads each id of an archive as it is (line RG item F3 PR 3b, fix3b6.py's
+// loc_sl2): the Bioseq of a load by the second line's id is that line's.
+#[test]
+fn a_load_by_another_lines_id_makes_that_lines_bioseq() {
+    let set = || DeflineSet {
+        deflines: vec![
+            BlastDefline {
+                title: Some(b"s1 in gb".to_vec()),
+                ids: vec![gb("AB000011", 1)],
+                ..BlastDefline::default()
+            },
+            BlastDefline {
+                title: Some(b"s1 again".to_vec()),
+                ids: vec![gb("AB000021", 1)],
+                ..BlastDefline::default()
+            },
+        ],
+        utf8: false,
+    };
+    let searched = ParsedSubject::new(set()).unwrap();
+    assert_eq!(searched.alignment_id(), &gb("AB000011", 1));
+    assert_eq!(searched.bioseq_line(), 0);
+    let second = ParsedSubject::of_seq_align_id(set(), Some(&gb("AB000021", 1))).unwrap();
+    assert_eq!(second.alignment_id(), &gb("AB000021", 1));
+    assert_eq!(second.bioseq_line(), 1);
+    assert_eq!(second.bioseq_defline().title.as_deref(), Some(&b"s1 again"[..]));
+    assert!(!second.unfetchable() && !second.scope_finds_none() && !second.load_throws());
+}

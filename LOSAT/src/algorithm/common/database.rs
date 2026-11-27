@@ -3495,18 +3495,36 @@ pub(crate) fn read_header(
         headers,
         headers.db.read_header(ordinal),
         ordinal,
-        query,
+        (query, None),
+        program,
+    )
+}
+
+/// [`read_header`] of a sequence that NCBI's data loader loads by the Seq-id `id`, which can be
+/// another definition line's than the Seq-align id of NCBI's search programs
+/// (`ParsedSubject::of_seq_align_id`: blast_formatter's loads by the ids of an archive).
+pub(crate) fn read_header_of_id(
+    headers: &HeaderReader<'_>,
+    ordinal: u32,
+    id: &crate::seqid::ParsedSeqId,
+    program: &str,
+) -> Result<ReportedHeader> {
+    reported_header(
+        headers,
+        headers.db.read_header(ordinal),
+        ordinal,
+        (0, Some(id)),
         program,
     )
 }
 
 /// The `read_header` of the header `header` of the sequence `ordinal` of the database of
-/// `headers`.
+/// `headers`, for the query `query` and the Seq-id of the load (`None`: the Seq-align id).
 fn reported_header(
     headers: &HeaderReader<'_>,
     header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
     ordinal: u32,
-    query: usize,
+    (query, id): (usize, Option<&crate::seqid::ParsedSeqId>),
     program: &str,
 ) -> Result<ReportedHeader> {
     let db = headers.db;
@@ -3536,7 +3554,7 @@ fn reported_header(
             ))
         }
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
-            crate::report::db_subject::ParsedSubject::new(set)
+            crate::report::db_subject::ParsedSubject::of_seq_align_id(set, id)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
                 .map(|subject| {
                     if subject.replaced_title_bytes() {
@@ -4597,7 +4615,7 @@ pub(crate) fn reports_may_refuse(
         } {
             return Ok(());
         }
-        match reported_header(headers, header, ordinal, 0, program) {
+        match reported_header(headers, header, ordinal, (0, None), program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(db, ordinal, stored.replaced_bytes, shown.titles, program)
                     .map_err(|_| ReportRefusal::Headers)?;

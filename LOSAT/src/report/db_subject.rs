@@ -2984,6 +2984,15 @@ impl ParsedSubject {
     /// (`algorithm::common::database::SeqAligned` drops its hits before the reports), so it never
     /// comes here: LOSAT's internal error.
     pub fn new(set: DeflineSet) -> Result<Self, String> {
+        Self::of_seq_align_id(set, None)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:58
+    /// [`ParsedSubject::new`] of a sequence that NCBI's data loader loads by the Seq-id `id`
+    /// (`None`: the Seq-align id that NCBI's search programs give it, `DeflineSet::alignment_id`):
+    /// blast_formatter's loads by the ids that an archive holds, a Seq-align's subject id or a
+    /// query location's id, which can be another line's.
+    pub fn of_seq_align_id(set: DeflineSet, id: Option<&ParsedSeqId>) -> Result<Self, String> {
         if set
             .deflines
             .iter()
@@ -2991,7 +3000,7 @@ impl ParsedSubject {
         {
             return Err("has a stored Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
-        let Some(alignment_id) = set.alignment_id().cloned() else {
+        let Some(alignment_id) = id.or_else(|| set.alignment_id()).cloned() else {
             return Err(
                 "has no Seq-id in any definition line, which gets no Seq-align (internal error)"
                     .into(),
@@ -3949,6 +3958,13 @@ impl ParsedSubject {
     /// Seq-align id has (`GetBioseq` with that id as its target: the first line that holds it).
     pub fn bioseq_defline(&self) -> &BlastDefline {
         self.target()
+    }
+
+    /// The index of [`ParsedSubject::bioseq_defline`] among the definition lines: loads of one
+    /// sequence by ids of different lines make different Bioseqs (the data loader's blob id is
+    /// the OID and the id asked for, bdbloader.cpp:440-449).
+    pub fn bioseq_line(&self) -> usize {
+        self.target
     }
 
     /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids, whether it has a source

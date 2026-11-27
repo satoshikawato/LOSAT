@@ -1419,7 +1419,8 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
                 to += 1;
             }
             let chunk = &planned[at..to];
-            // The pieces of a query whose reads write texts, and of a `-html` report, mark where
+            // The pieces of a query whose reads write texts, of a report whose reads of the
+            // titles post (`QueryWarnings::reads_titles`), and of a `-html` report, mark where
             // the serial writer writes to the diagnostics; the texts are written there
             // (`at_place`).
             let links = sections.html_links();
@@ -1427,9 +1428,9 @@ fn write_parallel_with<S: QuerySections, W: ReportWrite>(
                 .iter()
                 .map(|piece| {
                     links.is_some()
-                        || warnings
-                            .as_deref()
-                            .is_some_and(|warnings| warnings.reads_with_texts(piece.query))
+                        || warnings.as_deref().is_some_and(|warnings| {
+                            warnings.reads_with_texts(piece.query) || warnings.reads_titles()
+                        })
                 })
                 .collect();
             let indexed: Vec<(Piece, bool)> = chunk.iter().copied().zip(marked).collect();

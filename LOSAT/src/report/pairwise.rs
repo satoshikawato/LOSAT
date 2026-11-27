@@ -1111,23 +1111,14 @@ impl SubjectHeading<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<Option<Vec<u8>>> {
         match self {
-            SubjectHeading::Database(db_heading) => {
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
-                // The heading of a loaded subject (`x_PrintDefLine`) reads its definition line
-                // once, before its bytes and the reads of its links, posting for the bytes of its
-                // title that NCBI replaces (`common::database::FormatterTitleReads::Pairwise`).
-                if !matches!(db_heading, DatabaseHeading::Skipped(_)) {
-                    place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer)?;
-                }
-                write_database_subject_heading(
-                    writer,
-                    db_heading,
-                    protein,
-                    subject_length,
-                    html,
-                    place,
-                )
-            }
+            SubjectHeading::Database(db_heading) => write_database_subject_heading(
+                writer,
+                db_heading,
+                protein,
+                (s_idx, subject_length),
+                html,
+                place,
+            ),
             SubjectHeading::Record(title) => {
                 let defline = super::defline::generate_defline(title, protein, false);
                 match html {
@@ -1447,7 +1438,7 @@ fn write_database_subject_alignments_part<W: Write>(
             writer,
             title,
             protein,
-            hits[0].subject_length,
+            (s_idx, hits[0].subject_length),
             html,
             &mut *place,
         )?;
@@ -1806,18 +1797,25 @@ pub fn stored_source(
         .unwrap_or(&super::defline::UNNAMED_SOURCE)
 }
 
-/// The heading `heading` of a database sequence's alignments
-/// (`write_database_subject_alignments_part`): its definition-line lines (`DatabaseHeading::write_lines`), then `Length=` when the length is
+/// The heading `heading` of database sequence `s_idx`'s alignments
+/// (`write_database_subject_alignments_part`): its definition-line lines (`DatabaseHeading::write_lines`), then `Length=` when the length (`length`) is
 /// known, and one blank line; or nothing, and the Seq-id text of NCBI's line in place of each
 /// alignment, where NCBI cannot make the heading's title.
 fn write_database_subject_heading<W: Write>(
     writer: &mut W,
     heading: DatabaseHeading<'_>,
     protein: bool,
-    length: Option<usize>,
+    (s_idx, length): (u32, Option<usize>),
     html: Option<HtmlHeading<'_>>,
     place: super::query_warnings::ReportHook<'_, W>,
 ) -> io::Result<Option<Vec<u8>>> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
+    // The heading of a loaded subject (`x_PrintDefLine`) reads its definition line once, before
+    // its bytes and the reads of its links, posting for the bytes of its title that NCBI replaces
+    // (`common::database::FormatterTitleReads::Pairwise`).
+    if !matches!(heading, DatabaseHeading::Skipped(_)) {
+        place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer)?;
+    }
     if let Some(id) = heading.write_lines(writer, protein, html, place)? {
         return Ok(Some(id));
     }

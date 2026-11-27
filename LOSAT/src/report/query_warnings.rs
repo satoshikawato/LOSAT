@@ -1267,6 +1267,12 @@ impl<'a> QueryWarnings<'a> {
         self
     }
 
+    /// Whether a read of the definition line of some subject posts (`with_title_decodes`): a
+    /// writer that formats into buffers marks where it reads them only then.
+    pub fn reads_titles(&self) -> bool {
+        self.titles.is_some()
+    }
+
     /// Whether a read of the definition line of the subject `subject` (the key of the report's
     /// writer) posts (`with_title_decodes`): a writer that formats into buffers writes them out
     /// before `title_read` only then.

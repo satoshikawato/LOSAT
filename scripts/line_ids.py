@@ -50,6 +50,8 @@ def _line_mention(m: re.Match[str]) -> str | None:
         return "DI-" + code.replace("DI-", "").replace("DI", "")
     if re.fullmatch(r"OF[0-9]+[a-z]?|RL[0-9]+|BDC[0-9]+[a-z]?|NCMEM[0-9]+|WF-[0-9]+", code):
         return code
+    if re.fullmatch(r"[A-Z]+-[A-Z][A-Z0-9]*", code):  # a line of its own named after another: "line PS-SW"
+        return code if code.split("-")[0] in LINES else None
     if code not in V4 and code not in LINES:
         return None  # prose: "line N of the file", "line NCBI prints"
     base = "v4-" + code if code in V4 else code
@@ -61,7 +63,8 @@ def _line_mention(m: re.Match[str]) -> str | None:
 
 
 _RAW: list[tuple[str, Callable[[re.Match[str]], str | None]]] = [
-    (r"(?P<pre>(?:plan v4 |v4 |structural )?)(?:\b[Ll]ines?|線) (?P<code>[A-Z][A-Za-z0-9]*(?:-[0-9]+[a-z]?)?)"
+    (r"(?P<pre>(?:plan v4 |v4 |structural )?)(?:\b[Ll]ines?|線) `?(?P<code>[A-Z][A-Za-z0-9]*"
+     r"(?:-[0-9]+[a-z]?|-[A-Z][A-Z0-9]*\b)?)`?"
      r"(?:,? (?:item )?(?P<stage>[A-Z]{1,4}[0-9]+[a-z]?|s[0-9]+|session [0-9]+))?", _line_mention),
     (r"\bDI-?([0-9]+[a-z]?)\b", lambda m: "DI-" + m.group(1)),
     (r"\bDBID (?:item )?([A-Z]{1,2}[0-9]+[a-z]?)\b", lambda m: "DBID " + m.group(1)),

@@ -25,7 +25,7 @@ Error: the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTP
 A value or setting refused after the options are read (exit status 1):
 
 ```text
-Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST
+Error: -ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not supported by LOSAT's RPSTBLASTN
 ```
 
 An output format the program does not write (exit status 1):
@@ -34,11 +34,11 @@ An output format the program does not write (exit status 1):
 Error: output format 15 is not supported by LOSAT's PSIBLAST yet
 ```
 
-For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
+For example, NCBI BLAST+ crashes after an ungapped `rpstblastn` search without composition-based statistics, and LOSAT stops with the second message above:
 
 <!-- example: refusals-1 -->
 ```bash
-losat psiblast -query query.faa -subject proteins.faa -use_sw_tback
+losat rpstblastn -query query.fna -db profiles -comp_based_stats 0 -ungapped
 ```
 
 ## How this page is organised
@@ -51,7 +51,7 @@ There is one section for each program, and one for the five search programs toge
 | :--- | :--- | :--- |
 | `-remote`, `-entrez_query` | All search programs | Out of scope (needs NCBI servers) |
 | `-import_search_strategy` | `psiblast`, `rpsblast`, `rpstblastn`; strategy files in binary or XML form | Not yet supported (text strategy files run in the five search programs) |
-| `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
+| `-use_sw_tback` | `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
 | `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10` and `20`) |
@@ -249,6 +249,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
+| `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query or round that NCBI crashes on | Refused, as in `blastp`, after the results of the queries and rounds before. See [Rare and pathological inputs](refusals-edge-cases.md#psiblast). |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-outfmt` 1 to 4 with an `-in_pssm` PSSM whose query has the molecule `other`, at a round whose merge reads past a row's end, crashes, reads freed memory or wraps a segment length in NCBI | Refused after the report before the round's query-anchored section, which is NCBI's. NCBI reads such a query as a nucleotide sequence when it merges the alignments, three positions to a letter on three rows: where it reads past the last piece of a row while it orders the pieces, it stops with a C++ exception (`CObject is corrupted`, exit status 255); where a query letter against a gap of the subject falls on a row that no aligned piece opened, it crashes; where filling a row's unaligned stretch replaces a piece that it still lists, it reads memory it has freed; where a piece's walk finds the next piece before its own position, it computes a length below zero and then runs forever or goes on with lengths near 2^32. Rounds whose merge returns (an empty line for the section) or stops with NCBI's own merge exception (`CAlnException`, exit status 255) are answered as NCBI does. |
 | `-outfmt 11` with a database and an `-in_pssm` file that holds frequency ratios only, without `params.rpsdbparams`, in the ASN.1 text archive (no `ARCHIVE_FORMAT`), `ARCHIVE_FORMAT=xml` or `ARCHIVE_FORMAT=bin` (NCBI stops with a C++ exception while it writes the request's PSSM, as it does for `-out_pssm`) | Refused. `-subject`, `-outfmt 6` and `-export_search_strategy` with such a file are answered as NCBI does. |

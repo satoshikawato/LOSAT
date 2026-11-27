@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.122
+- Version: 1.123
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -986,7 +986,14 @@
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
-  then 1.118, then 1.120, then 1.121)
+  then 1.118, then 1.120, then 1.121);
+  1.123 2026-11-27 (PSIBLAST `-use_sw_tback`, line PS-SW (row PS12c): the explicit rejections of
+  1.53 and 1.73, a Smith-Waterman redo that NCBI repeats without end and a failed round whose
+  query holds a redone match, on which NCBI's clean-up crashes, extended to PSIBLAST's first round
+  and PSSM rounds, rule 3, within the class of 1.30, after the reports of the queries and rounds
+  before; a failed last match, the status that a subject excluded at the redo's fetch clears, and
+  the OID order of the redo at `-comp_based_stats 0` reproduced, rule 2; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.122)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3510,6 +3517,41 @@ file would differ, and NCBI's programs still could not open the database).
   and drops the profile, which LOSAT reproduces (rule 2; rows `db.rpstbn.sw.*`, among them the
   `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
   `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).
+
+- PSIBLAST `-use_sw_tback` (version 1.123, 2026-11-27, line PS-SW, row PS12c, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of
+  1.53; P2, P3: the same match body and round loop as BLASTP's,
+  `core::composition_adjustment::smith_waterman_match`, and one redo loop for PSIBLAST's X-drop and
+  Smith-Waterman redos, `pssm_search::redo1`): NCBI's redo of PSIBLAST's matches runs when
+  composition-based statistics or the Smith-Waterman traceback is on, in the first round with the
+  rows of the square matrix and in a PSSM round (`-in_pssm`, `-in_msa` and the later rounds of a
+  FASTA query) with the PSSM's rows, scaled by 32 with composition-based statistics and by 1 at
+  `-comp_based_stats 0`, where the redo takes the matches in OID order (`blast_kappa.c:3100-3109`,
+  `blast_hspstream.c:678-686`). A match with two or more preliminary HSPs in which a score of 0 is
+  significant (the query's effective search space times K below `-evalue`: a large `-evalue` or a
+  small `-searchsp`; with `-sum_stats true`, a cutoff score of 0 or below) makes NCBI's round loop
+  reach the score of 0. Where the query's first letter (in a PSSM round, the PSSM's first row)
+  scores the subject's first letter above 0, NCBI never ends (NCBI BLAST+ 2.17.0's psiblast still
+  running at 120 seconds on the inputs of rows `db.sw.rej.endless.*`, whose searches without
+  `-use_sw_tback` took 0.04 to 0.06 seconds), and LOSAT refuses (exit 1, "a match whose
+  Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not supported by
+  LOSAT's PSIBLAST"). Otherwise the match's redo fails: a failed match that is not the round's last
+  redone one is dropped, and a failed last one fails the round's traceback (`BLAST engine error:
+  Traceback failed`, exit status 3, after the reports of the queries and rounds before, without the
+  epilog), which LOSAT reproduces (rule 2; rows `db.sw.fail.*`); a failed last match after the
+  query kept a redone match crashes NCBI's clean-up as in 1.53 (SIGSEGV), and LOSAT refuses that
+  round (exit 1, "... with which NCBI BLAST+ 2.17.0's psiblast crashes, is not supported by LOSAT's
+  PSIBLAST"; rows `db.sw.rej.crash.*`). Both refusals come after the reports of the queries and
+  rounds before: NCBI's application writes each round's report, and saves the next round's PSSM,
+  before it searches the next round (`psiblast_app.cpp:246-262`), as in the form of 1.40 and in
+  1.53. A match whose subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps
+  without a line) sets the status back to 0, in OID order at `-comp_based_stats 0` and in the
+  order of the preliminary e-values at 1 to 3, so the same database fails, crashes or ends with
+  exit 0 by the mode (rows `db.sw.excl.*`, databases `LOSAT/tests/db_search/pssw`,
+  `make_pssw.py`). The status is per thread in NCBI; LOSAT gives the outcome of `-num_threads 1`
+  at every thread count. Unlike TBLASTN's redo of a PSSM (1.73), PSIBLAST's takes the PSSM's rows
+  by the query's own positions, so `-in_pssm -use_sw_tback` gives NCBI's results (rows
+  `db.sw.inpssm.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

@@ -2,7 +2,7 @@
 
 `losat blast_formatter` writes the reports of a search again from its BLAST archive, without running the search again. Use it when you saved a search with `-outfmt 11` and want its tabular report or its Seq-aligns later.
 
-It writes the same bytes as NCBI's `blast_formatter` 2.17.0: the Seq-aligns for archives of every search program, the tabular formats for archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`, with `-subject` or `-db`.
+It writes the same bytes as NCBI's `blast_formatter` 2.17.0, the Seq-aligns and the tabular formats, for archives of every search program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, PHI-BLAST of a protein query, `rpsblast`, `rpstblastn`) with `-subject` or `-db`.
 
 ## Synopsis
 
@@ -34,7 +34,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 | `-outfmt` | What you get |
 | --- | --- |
-| `6`, `7`, `10`, `20` | The tabular report: tab-separated, with comment lines, comma-separated, comma-separated with a header line; any field list (`-outfmt "6 qaccver saccver pident qcovs"`). The subjects of `-db` archives are read from the database the archive names. |
+| `6`, `7`, `10`, `20` | The tabular report: tab-separated, with comment lines, comma-separated, comma-separated with a header line; any field list (`-outfmt "6 qaccver saccver pident qcovs"`). The subjects of `-db` archives are read from the database the archive names, and so are the queries of a `-parse_deflines` search that the archive keeps as locations. The translated programs' rows show their frames and translated letters with the search's genetic codes. With `BL2SEQ_LEGACY` set, `-outfmt 7` names each query's subject (`# Subject:`) as NCBI does. |
 | `8` | The Seq-aligns as ASN.1 text. |
 | `9` | The Seq-aligns as binary ASN.1. |
 | `12` | The Seq-aligns as JSON. |
@@ -48,7 +48,7 @@ None that change the output of a normal run. The options, NCBI's help and usage 
 `blast_formatter` stops with its own error message in these cases:
 
 - `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `11`, `13`, `14`, `15`, `16`, `17` and `18`.
-- The tabular formats (`6`, `7`, `10`, `20`) of an archive of a translated search (`blastx`, `tblastn`, `tblastx`, `rpstblastn`) or of queries given as locations, `-subject` sequences with `BL2SEQ_LEGACY` set in `-outfmt 7`, and Seq-aligns whose sequences NCBI BLAST+'s scope may find otherwise; each with the case named.
+- The tabular formats (`6`, `7`, `10`, `20`) of an archive whose queries are locations that the database does not hold (NCBI BLAST+ then asks NCBI's servers for them), and Seq-aligns whose sequences NCBI BLAST+'s scope may find otherwise; each with the case named.
 - An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`).
 - A database named in the archive that cannot be opened here as NCBI opens it. NCBI BLAST+ then asks NCBI's servers for its sequences.
 - `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12`: NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one.

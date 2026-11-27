@@ -178,7 +178,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
 
-use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::report::blast_xml2::Xml2Carry;
 use crate::report::sam::SamDocument;
@@ -483,10 +483,7 @@ pub(super) fn refused_before_reading(
     if outputs.hits.is_some()
         || outputs.observer.is_some()
         || outputs.formats.len() > 1
-        || outputs
-            .formats
-            .iter()
-            .any(|format| matches!(format.sink, OutputSink::File(_)))
+        || outputs.formats.iter().any(|format| format.sink.is_file())
     {
         return Some(Off::Outputs);
     }

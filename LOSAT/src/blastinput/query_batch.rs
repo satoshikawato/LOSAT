@@ -1705,12 +1705,19 @@ pub(crate) fn read_query_batches(
 /// run at its batch too (`blast_engine.rs` `search`). The query splitter of the batch's search
 /// (`CPsiBlast::Run`, after the constructor's check) stops the first batch where it cannot convert
 /// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` (`app::check_query_split_environment`).
+///
+/// With `-phi_pattern` and one round (`phi_local`) NCBI searches each batch with `CLocalBlast`, not
+/// `CPsiBlast`: a batch of a query without letters and the next is PHI-BLAST's search of the
+/// batch (`phi_hooks::PhiBatch`), and a batch of queries without letters only stops the run with
+/// blastp's error of its set-up (`read_query_batches`: `Sequence contains no data`, exit 3).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:211-258
 pub(crate) fn read_psiblast_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
     query_scopes: Option<QueryScopes>,
+    phi_local: bool,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -1719,6 +1726,11 @@ pub(crate) fn read_psiblast_query_batches(
         reading,
         1,
         &|batch| {
+            if phi_local {
+                return crate::blastinput::app::check_query_split_environment(false, true)
+                    .err()
+                    .or_else(|| no_data_batch_error(batch));
+            }
             psiblast_batch_error(batch).or_else(|| {
                 crate::blastinput::app::check_query_split_environment(false, true).err()
             })

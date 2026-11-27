@@ -446,6 +446,27 @@ const PSIBLAST: &[Case] = &[
         &["-in_msa", "m.aln", "-ignore_msa_master"],
         &[At("IgnoreMsaMaster", "Boolean(true)")],
     ),
+    // A pattern (`-phi_pattern`, line PS item PS8a) makes the handle PHI-BLAST's
+    // (`RequestKind::Phiblastp`): no composition-based statistics or Smith-Waterman mode, psiblast's
+    // own options after the window and gap trigger ones, and the pattern as the file gives it last
+    // (NCBI BLAST+ 2.17.0 `fi.export.it1`, PS/ncbi8/ws).
+    (
+        "phi_pattern",
+        &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+        &[
+            Drop("InclusionThreshold"),
+            Drop("PseudoCountWeight"),
+            Drop("CompositionBasedStats"),
+            Drop("SmithWatermanMode"),
+            After("IgnoreMsaMaster", "PseudoCountWeight", "Integer(0)"),
+            After("PseudoCountWeight", "InclusionThreshold", "Real(0.002)"),
+            After(
+                "InclusionThreshold",
+                "PHIPattern",
+                "Str(\"[AG]-x(4)-G-K-[ST]\")",
+            ),
+        ],
+    ),
 ];
 
 /// psiblast's request of the base command line (`p9.ps.q.db.itdef.f6`, `p9.pp.db.itdef.f6`).
@@ -535,6 +556,10 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
                 ("in_msa", &["-in_msa", "m.aln"]),
                 ("msa_master_idx", &["-msa_master_idx", "2"]),
                 ("ignore_msa_master", &["-ignore_msa_master"]),
+                (
+                    "phi_pattern",
+                    &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+                ),
             ],
         ),
         inputs: psiblast_inputs,

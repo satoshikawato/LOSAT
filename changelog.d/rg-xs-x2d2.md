@@ -1,0 +1,1 @@
+- `tblastn`: report `-in_pssm -window_size 0` alignments whose one-hit traceback starts on their frame's trailing end marker across all supported output formats (`0` to `10`, `12` to `16`, `18` and `20`) with both `-db` and `-subject`, matching NCBI BLAST+ 2.17.0 while keeping the refusal for starts after the end marker.

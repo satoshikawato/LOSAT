@@ -1,34 +1,44 @@
 //! The runs of the command line's tools besides the searches (`losat_web2_tool`, docs/web/abi_v2.md
-//! §4, §5; line NP WW3a, 2026-11-22): `windowmasker`, with the command line's words, in the run's
-//! working directory (`run::enter_run_directory`), whose files it reads by name as the command line
-//! reads them in its directory. Its standard input is the null device (empty), its standard output
-//! goes to stream 11 and its standard error to stream 3, and the files that it writes
-//! (`-out FILE`, `-logfile FILE`) to stream 12, each as it is written, so that no output is held
-//! whole (D-WW3-6: human counts are 724 MB, a genome masked as FASTA 3.1 GB): each write at its
-//! offset, as the system writes a file that a run opens twice (`-out x -logfile x`, D-WW3-9); then
-//! its exit status goes to stream 2 (`{"status":N}`).
+//! §4, §5; line NP WW3a, 2026-11-22; line RG-F3p7): `windowmasker` and `blast_formatter`, with the
+//! command line's words, in the run's working directory (`run::enter_run_directory`), whose files
+//! they read by name as the command line reads them in its directory. Standard input is the null
+//! device (empty), standard output goes to stream 11 and standard error to stream 3, and files
+//! written (`-out FILE`, `-logfile FILE`) go to stream 12 as they are written, so that no output is
+//! held whole (D-WW3-6: human counts are 724 MB, a genome masked as FASTA 3.1 GB): each write at
+//! its offset, as the system writes a file that a run opens twice (`-out x -logfile x`, D-WW3-9);
+//! then the exit status goes to stream 2 (`{"status":N}`).
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use losat::web_adapter::{windowmasker_read_files, FileReceiver, FileStream, RunFiles, PROGRAMS};
+use losat::web_adapter::{
+    blast_formatter_read_files, windowmasker_read_files, FileReceiver, FileStream, RunFiles,
+    PROGRAMS,
+};
 
 use crate::emit::{
     emit, StreamWriter, CHUNK, FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE,
     STREAM_DIAGNOSTICS, STREAM_PRINTED, STREAM_RESPONSE, STREAM_TOOL_FILES,
 };
 
-/// The tools that a tool run runs: `windowmasker`.
-pub const TOOLS: &[&str] = &["windowmasker"];
+/// The tools that a tool run runs: `windowmasker` and `blast_formatter`.
+pub const TOOLS: &[&str] = &["windowmasker", "blast_formatter"];
+
+#[derive(Clone, Copy)]
+enum ToolKind {
+    WindowMasker,
+    BlastFormatter,
+}
 
 /// The tool `words[0]` and its words after the name; `Err` for a name that is not a tool that
 /// LOSAT Web runs: another program of the command line (`PROGRAMS`: a search, which
 /// `losat_web2_run` runs, or a tool that LOSAT Web does not run yet), or no program.
-fn tool<'a>(words: &'a [&'a str]) -> Result<&'a [&'a str], String> {
+fn tool<'a>(words: &'a [&'a str]) -> Result<(ToolKind, &'a [&'a str]), String> {
     let (name, arguments) = words.split_first().unwrap_or((&"", &[]));
     match *name {
-        "windowmasker" => Ok(arguments),
+        "windowmasker" => Ok((ToolKind::WindowMasker, arguments)),
+        "blast_formatter" => Ok((ToolKind::BlastFormatter, arguments)),
         other if PROGRAMS.contains(&other) => {
             Err(format!("{other} is not available in the browser (ABI v2)"))
         }
@@ -40,15 +50,25 @@ fn tool<'a>(words: &'a [&'a str]) -> Result<&'a [&'a str], String> {
 /// emits its streams: 11, 3 and 12 as the tool writes them, then the exit status on 2. `Err` for a
 /// name that is not a tool that LOSAT Web runs; nothing is emitted then.
 pub fn run(words: &[&str]) -> Result<(), String> {
-    let arguments = tool(words)?;
+    let (kind, arguments) = tool(words)?;
     let mut out = StreamWriter::new(STREAM_PRINTED);
-    let status = losat::web_adapter::run_windowmasker(
-        arguments,
-        &RunFiles::Receiver(Arc::new(ToolFiles::for_args(arguments))),
-        &mut io::empty(),
-        &mut out,
-        &mut Diagnostics,
-    );
+    let files = RunFiles::Receiver(Arc::new(ToolFiles::for_tool(kind, arguments)));
+    let status = match kind {
+        ToolKind::WindowMasker => losat::web_adapter::run_windowmasker(
+            arguments,
+            &files,
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+        ToolKind::BlastFormatter => losat::web_adapter::run_blast_formatter(
+            arguments,
+            &files,
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+    };
     out.finish();
     emit(
         STREAM_RESPONSE,
@@ -59,11 +79,15 @@ pub fn run(words: &[&str]) -> Result<(), String> {
 
 /// Checks the words of a tool run as the command line reads them before its tool reads its input
 /// or opens a file (`losat_web2_validate` of a tool's argv, docs/web/abi_v2.md §4; line NP WW3a,
-/// D-WW3-7 and D-WW3-10): `Err` with the command line's error (`web_adapter::check_windowmasker`,
-/// which reads the registry files of the run's working directory), or for a name that is not a
-/// tool that LOSAT Web runs. Emits nothing.
+/// D-WW3-7 and D-WW3-10): `Err` with the command line's error (which reads the registry files of
+/// the run's working directory), or for a name that is not a tool that LOSAT Web runs. Emits
+/// nothing.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    losat::web_adapter::check_windowmasker(tool(words)?)
+    let (kind, arguments) = tool(words)?;
+    match kind {
+        ToolKind::WindowMasker => losat::web_adapter::check_windowmasker(arguments),
+        ToolKind::BlastFormatter => losat::web_adapter::check_blast_formatter(arguments),
+    }
 }
 
 /// The standard error of a tool run: stream 3, each write as it comes (the tool's diagnostics, a
@@ -94,8 +118,11 @@ struct ToolFiles {
 }
 
 impl ToolFiles {
-    fn for_args(arguments: &[&str]) -> Self {
-        let (read, out_read) = windowmasker_read_files(arguments);
+    fn for_tool(kind: ToolKind, arguments: &[&str]) -> Self {
+        let (read, out_read) = match kind {
+            ToolKind::WindowMasker => windowmasker_read_files(arguments),
+            ToolKind::BlastFormatter => blast_formatter_read_files(arguments),
+        };
         Self {
             next: AtomicU32::new(0),
             read,

@@ -40,6 +40,7 @@ use crate::algorithm::tblastx::blast_aascan::{
 use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
+use crate::utils::call_boundary::out_of_line;
 use std::sync::atomic::AtomicI64;
 
 /// The values the word finder reads, made once per batch by `search_query_batch` under the names
@@ -1798,10 +1799,10 @@ pub(super) fn scan_chunk<S: TbxScore>(
     } = cx;
     let &FrameCx { x_soft_calls, .. } = frame;
     // The one-hit word finder (`-window_size 0`, and a negative window) has a loop of its own,
-    // compiled out of line (`x_out_of_line`) so that this function keeps the two-hit scan's code.
+    // compiled out of line (`out_of_line`) so that this function keeps the two-hit scan's code.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
     if window <= 0 {
-        return x_out_of_line(|| {
+        return out_of_line(|| {
             // A chunk whose ranges start before it (masks stored out of order,
             // `common::translated_chunks::scan_lead`) is the only one whose words can lie before
             // it: only its loop tests for them (`AROUND`). The choice is made in this out-of-line
@@ -1890,12 +1891,4 @@ pub(super) fn scan_chunk<S: TbxScore>(
             sc,
         )
     }
-}
-
-// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
-/// Calls `f` in a function of its own that is never inlined, so that the function that calls it
-/// (`scan_chunk`, for the one-hit scan of `-window_size 0`) does not take `f`'s code.
-#[inline(never)]
-fn x_out_of_line<R>(f: impl FnOnce() -> R) -> R {
-    f()
 }

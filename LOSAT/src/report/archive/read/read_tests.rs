@@ -11,7 +11,7 @@ use super::options::archive_request;
 use super::request::{ParamSet, Queries, Request, Subject};
 use super::results::{KarlinBlocks, MaskRange, Results, SearchStats};
 use super::{seq_align_id, seq_loc_id, Archive, ArchiveReader, Message, Search, Severity, Stop};
-use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_input::{Input, Names};
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::real_of_parts;
 use crate::report::serial::asn_types::stream::{guess_encoding, text_stream, Encoding};
@@ -284,32 +284,46 @@ enum End {
     Serial,
 }
 
-/// The archive objects read of `text` and how they end; the encoding guessed for a text that is
-/// not ASN.1 text.
-fn outcome(text: &[u8]) -> Result<(usize, End), Encoding> {
-    let guessed = guess_encoding(text);
-    match guessed.encoding.as_ref() {
-        Ok(Encoding::Text) => {}
-        Ok(other) => return Err(*other),
+/// The archive objects read of `bytes` by the reader of the encoding guessed, as blast_formatter
+/// reads them, and how they end; the guess for bytes that are no archive's encoding.
+fn outcome(bytes: &[u8]) -> Result<(usize, End), Encoding> {
+    let guessed = guess_encoding(bytes);
+    let encoding = match guessed.encoding.as_ref() {
+        Ok(encoding) => *encoding,
         Err(stop) => panic!("{stop:?}"),
+    };
+    match encoding {
+        Encoding::Text => Ok(ends(ArchiveReader::new(guessed.into_text(Names::ARCHIVE)))),
+        Encoding::Binary => Ok(ends(ArchiveReader::new(
+            guessed.into_binary(Names::ARCHIVE),
+        ))),
+        Encoding::Xml => Ok(ends(ArchiveReader::new(
+            guessed.into_xml(Names::XML_ARCHIVE),
+        ))),
+        Encoding::Other => Err(Encoding::Other),
     }
-    let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+}
+
+/// The archive objects that `reader` reads and how they end.
+fn ends<I: Input>(mut reader: ArchiveReader<I>) -> (usize, End) {
     let mut count = 0;
     while let Some((archive, _)) = reader.next_archive() {
         match archive {
             Ok(_) => count += 1,
-            Err(ReadError::Eof) => return Ok((count, End::Eof)),
-            Err(ReadError::Serial(_)) => return Ok((count, End::Serial)),
+            Err(ReadError::Eof) => return (count, End::Eof),
+            Err(ReadError::Serial(_)) => return (count, End::Serial),
             Err(other) => panic!("{other:?}"),
         }
     }
-    Ok((count, End::Data))
+    (count, End::Data)
 }
 
 /// The inputs of NCBI's probes, made from one archive (`blastn -outfmt 11` of three queries,
 /// `blastn_multi.asn`), the same archive as binary ASN.1 and XML, and a batch of three
 /// archives (`blastn_batch.asn`): the archives LOSAT reads before the end of the data or an
-/// error, and the error, are the archives NCBI formatted and the code it ended with.
+/// error, and the error, are the archives NCBI formatted and the code it ended with. The
+/// binary and XML cases are probes P3.001-015, P3.091-092, P3.104-107 and P7.001-037 of
+/// SURVEY_F3_NCBI §2.3 (line RG item F3).
 #[test]
 fn the_objects_of_a_stream_end_as_ncbis_did() {
     let text = fixture("blastn_multi.asn");
@@ -369,51 +383,186 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
         ("JSON", fixture("bad/json"), Err(Encoding::Other)),
         ("bytes 0-255", fixture("bad/binjunk"), Err(Encoding::Other)),
         ("gzip", fixture("bad/gzip"), Err(Encoding::Other)),
+        // The guess is binary ASN.1, whose reader fails at the first byte (P3.085).
+        ("UTF-8 BOM", with(b"\xef\xbb\xbf", b""), Ok((0, Serial))),
+        // Binary ASN.1 and XML: formatted (P3.001-015), also twice (P7.027-028); 1 cut at 50 %
+        // and 90 % or without the last 2 bytes (P3.102-103, P7.003-022) or the last 20 bytes
+        // of XML (P3.107); 0 without the last byte, binary: the object not formatted and no
+        // message (P3.104, P7.001-002, also the last object of two, P7.029-030), XML: formatted
+        // (P3.106); 1 after the archive with two zero bytes (P7.023-024) or an element
+        // (P3.092) after it; 0 with one byte 0x30 after it (P7.025-026).
+        ("binary", binary.clone(), Ok((1, Data))),
+        ("binary twice", [&binary[..], &binary[..]].concat(), Ok((2, Data))),
+        ("binary cut at 50 %", binary[..2461].to_vec(), Ok((0, Serial))),
+        ("binary cut at 90 %", binary[..4429].to_vec(), Ok((0, Serial))),
+        ("binary no last byte", binary[..4921].to_vec(), Ok((0, Eof))),
+        ("binary no last 2 bytes", binary[..4920].to_vec(), Ok((0, Serial))),
         (
-            "UTF-8 BOM",
-            with(b"\xef\xbb\xbf", b""),
-            Err(Encoding::Binary),
-        ),
-        // NCBI's binary and XML readers (none in LOSAT yet): formatted (P3.001-015), 1 cut at
-        // 50 % and 90 % or without the last 20 bytes, 0 without its last byte (binary: nothing
-        // formatted; XML: formatted), 1 after the archive with an element after it.
-        ("binary", binary.clone(), Err(Encoding::Binary)),
-        (
-            "binary cut at 50 %",
-            binary[..2461].to_vec(),
-            Err(Encoding::Binary),
-        ),
-        (
-            "binary cut at 90 %",
-            binary[..4429].to_vec(),
-            Err(Encoding::Binary),
-        ),
-        (
-            "binary no last byte",
-            binary[..4921].to_vec(),
-            Err(Encoding::Binary),
-        ),
-        ("XML", xml.clone(), Err(Encoding::Xml)),
-        ("XML cut at 50 %", xml[..25305].to_vec(), Err(Encoding::Xml)),
-        (
-            "XML no last byte",
-            xml[..50610].to_vec(),
-            Err(Encoding::Xml),
+            "binary no last 16 bytes",
+            binary[..4906].to_vec(),
+            Ok((0, Serial)),
         ),
         (
-            "XML no last 20 bytes",
-            xml[..50591].to_vec(),
-            Err(Encoding::Xml),
+            "binary twice, no last byte",
+            [&binary[..], &binary[..4921]].concat(),
+            Ok((1, Eof)),
         ),
+        (
+            "binary and two zero bytes",
+            [&binary[..], b"\0\0"].concat(),
+            Ok((1, Serial)),
+        ),
+        (
+            "binary and a byte 0x30",
+            [&binary[..], b"\x30"].concat(),
+            Ok((1, Eof)),
+        ),
+        ("XML", xml.clone(), Ok((1, Data))),
+        ("XML twice", [&xml[..], &xml[..]].concat(), Ok((2, Data))),
+        ("XML cut at 50 %", xml[..25305].to_vec(), Ok((0, Serial))),
+        ("XML no last byte", xml[..50610].to_vec(), Ok((1, Data))),
+        ("XML no last 2 bytes", xml[..50609].to_vec(), Ok((0, Serial))),
+        ("XML no last 20 bytes", xml[..50591].to_vec(), Ok((0, Serial))),
         (
             "XML element after",
             [&xml[..], b"<junk/>"].concat(),
-            Err(Encoding::Xml),
+            Ok((1, Serial)),
         ),
     ];
     for (name, bytes, expected) in cases {
         assert_eq!(outcome(&bytes), expected, "{name}");
     }
+}
+
+/// A file under `LOSAT/tests/fixtures`, unzipped if its name ends with `.gz`.
+fn test_fixture(path: &str) -> Vec<u8> {
+    let full = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(path);
+    let bytes = std::fs::read(&full).unwrap_or_else(|error| panic!("{}: {error}", full.display()));
+    if !path.ends_with(".gz") {
+        return bytes;
+    }
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out)
+        .expect("a gzip file");
+    out
+}
+
+/// The objects that `reader` reads, each written as ASN.1 text, the messages its read posted, and
+/// the error that ended the objects.
+fn written_as_text<I: Input>(mut reader: ArchiveReader<I>) -> (Vec<u8>, usize, Option<ReadError>) {
+    let mut out = Vec::new();
+    let mut posts = 0;
+    while !reader.objects.end_of_data() {
+        let (value, posted) = reader.objects.read_object(named::BLAST4_ARCHIVE);
+        posts += posted.len();
+        match value {
+            Ok(value) => {
+                let mut enc = AsnTextEncoder::new(&mut out);
+                write_document(&mut enc, named::BLAST4_ARCHIVE, &value);
+                assert_eq!(enc.error(), None);
+            }
+            Err(error) => return (out, posts, Some(error)),
+        }
+    }
+    (out, posts, None)
+}
+
+/// Each archive in ASN.1 binary or XML among LOSAT's fixtures that has a twin in ASN.1 text (the
+/// same search, written by NCBI BLAST+ 2.17.0 with `ARCHIVE_FORMAT=bin` or `xml` and without it)
+/// is guessed as its encoding and read whole by blast_formatter's reader of that encoding, and its
+/// objects written as ASN.1 text are its twin's bytes: the search programs' archives of one query
+/// and of several batches, error archives (`bad_sub`: an error object after the batches), and line
+/// PS's psiblast archives of PSSM queries with User-object descriptors and annotations, a
+/// UTF8String, a NULL Seq-loc and REALs that are infinite or NaN (the text twins frozen with them,
+/// agent D6 of line RG item F3, 2026-11-23). NCBI's blast_formatter gives the same output for the
+/// three encodings (probes P3.001-060).
+#[test]
+fn binary_and_xml_archives_are_read_as_their_text_twins() {
+    let mut twins: Vec<(String, String)> = vec![
+        (
+            "archive_read/blastn_multi.bin".into(),
+            "archive_read/blastn_multi.asn".into(),
+        ),
+        (
+            "archive_read/blastn_multi.xml".into(),
+            "archive_read/blastn_multi.asn".into(),
+        ),
+        (
+            "outfmt11/bad_sub_xml.out".into(),
+            "outfmt11/bad_sub.out".into(),
+        ),
+    ];
+    for program in ["", "bp_", "bx_", "tbn_", "tbx_"] {
+        for (twin, text) in [
+            ("env_binary", "env_empty"),
+            ("env_bin_upper", "env_empty"),
+            ("default_sub_xml", "env_empty"),
+            ("batches_sub_bin", "batches_sub"),
+            ("bad_sub_bin", "bad_sub"),
+        ] {
+            twins.push((
+                format!("outfmt11/{program}{twin}.out"),
+                format!("outfmt11/{program}{text}.out"),
+            ));
+        }
+    }
+    for case in [
+        "psi_ber_real_list_pinf",
+        "psi_ber_real_nan",
+        "psi_ber_real_ninf",
+        "psi_bin_pssm_d3a_c10_user",
+        "psi_bin_pssm_d3a_c17_locs",
+    ] {
+        twins.push((
+            format!("outfmt11/{case}.bin.gz"),
+            format!("outfmt11/{case}.asn.gz"),
+        ));
+    }
+    let mut failures = Vec::new();
+    for (twin, text) in &twins {
+        let bytes = test_fixture(twin);
+        let want = test_fixture(text);
+        let guessed = guess_encoding(&bytes[..]);
+        let read = match guessed.encoding.as_ref().ok() {
+            Some(Encoding::Binary) => {
+                written_as_text(ArchiveReader::new(guessed.into_binary(Names::ARCHIVE)))
+            }
+            Some(Encoding::Xml) => {
+                written_as_text(ArchiveReader::new(guessed.into_xml(Names::XML_ARCHIVE)))
+            }
+            other => {
+                failures.push(format!("{twin}: guessed {other:?}"));
+                continue;
+            }
+        };
+        match read {
+            (out, 0, None) if out == want => {}
+            (_, posts, Some(error)) => failures.push(format!("{twin}: {posts} posts, {error:?}")),
+            (_, posts, None) if posts > 0 => failures.push(format!("{twin}: {posts} posts")),
+            (out, _, None) => {
+                let at = out
+                    .iter()
+                    .zip(&want)
+                    .position(|(a, b)| a != b)
+                    .unwrap_or(out.len().min(want.len()));
+                let around = |bytes: &[u8]| {
+                    String::from_utf8_lossy(
+                        &bytes[at.saturating_sub(40)..(at + 40).min(bytes.len())],
+                    )
+                    .into_owned()
+                };
+                failures.push(format!(
+                    "{twin}: from byte {at} of {text}: {:?} / {:?}",
+                    around(&want),
+                    around(&out)
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(twins.len(), 33);
 }
 
 /// NCBI's pointer forms in an archive, one element added to `blastn_subject_mixnh.asn` (NCBI

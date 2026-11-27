@@ -43,7 +43,7 @@ use crate::report::archive::read::{
 };
 use crate::report::archive::writer::FLUSH_BYTES;
 use crate::report::run_files::{OpenFiles, OpenedFile};
-use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_input::{Input, Names};
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
@@ -401,20 +401,35 @@ struct OpenedDatabase {
 }
 
 impl<'r, 'o> Run<'r, 'o> {
-    /// The `CRemoteBlast` made of a stream and the loop of `LoadFromArchive`: the encoding guessed
-    /// (an archive in ASN.1 binary or XML is refused by name), then each object read, its messages
-    /// posted and, unless it is the error archive, formatted.
+    /// The `CRemoteBlast` made of a stream (`x_Init`: the encoding guessed, the object stream of
+    /// that encoding; any other guess is the invalid input), then the loop of `LoadFromArchive`
+    /// (`read_objects`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
     fn objects(&mut self, archive: &mut dyn Read, diag: &mut Diag) -> anyhow::Result<()> {
         let guessed = guess_encoding(archive);
-        match &guessed.encoding {
-            Ok(Encoding::Text) => {}
-            Ok(Encoding::Binary) => return Err(Refusal::BinaryArchive.into()),
-            Ok(Encoding::Xml) => return Err(Refusal::XmlArchive.into()),
-            Ok(Encoding::Other) => return Err(invalid_archive()),
-            Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
-            Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
+        match guessed.encoding {
+            Ok(Encoding::Text) => {
+                self.read_objects(ArchiveReader::new(guessed.into_text(Names::ARCHIVE)), diag)
+            }
+            Ok(Encoding::Binary) => {
+                self.read_objects(ArchiveReader::new(guessed.into_binary(Names::ARCHIVE)), diag)
+            }
+            Ok(Encoding::Xml) => {
+                self.read_objects(ArchiveReader::new(guessed.into_xml(Names::XML_ARCHIVE)), diag)
+            }
+            Ok(Encoding::Other) => Err(invalid_archive()),
+            Err(GuessStop::Exception(ref exception)) => Err(exception_error(exception)),
+            Err(GuessStop::Undecided(what)) => Err(Refusal::Undecided(what).into()),
         }
-        let mut reader = ArchiveReader::new(guessed.into_text(Names::ARCHIVE));
+    }
+
+    /// The loop of `LoadFromArchive` over the objects of `reader`: each object read, its messages
+    /// posted and, unless it is the error archive, formatted.
+    fn read_objects<I: Input>(
+        &mut self,
+        mut reader: ArchiveReader<I>,
+        diag: &mut Diag,
+    ) -> anyhow::Result<()> {
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -1068,7 +1083,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
         ReadError::Exception(exception) => exception_error(&exception),
         ReadError::Std(what) => NativeError::std_exception(what).into(),
         ReadError::OutOfMemory => NativeError::out_of_memory().into(),
-        ReadError::Unsupported(text) => Refusal::UnreadText(text).into(),
+        ReadError::Unsupported(text) => Refusal::Unread(text).into(),
     }
 }
 

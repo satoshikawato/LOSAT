@@ -5,15 +5,18 @@
 //! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
 //! `ExtractBlast4Request`).
 //!
-//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); the text is read by the
-//! generic reader of the type table (`read::ObjectStream`) on a stream read in blocks
-//! (`StreamSource`), so one object at a time is in memory. Binary ASN.1 and XML are recognised and
-//! left to their callers, which take the input from [`Guessed::into_parts`].
+//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); each encoding is read by the
+//! generic reader of the type table (`read::ObjectStream`) over its stream primitives (text,
+//! binary, NCBI's ASN.1-style XML) on a stream read in blocks (`StreamSource`), so one object at a
+//! time is in memory. A caller that does not read an encoding takes the input from
+//! [`Guessed::into_parts`].
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
 use super::read::ObjectStream;
+use super::read_xml::{XmlInput, XmlStyle};
 use crate::ncbi_exception::NcbiException;
+use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{Names, TextInput};
 use crate::report::serial::asn_text_reader::StreamSource;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -25,9 +28,9 @@ use crate::utils::format_guess::{Format, FormatGuess, Stop};
 pub(crate) enum Encoding {
     /// `eTextASN`: read by [`ObjectStream`].
     Text,
-    /// `eBinaryASN`: recognised; the caller reads it (`read::ObjectStream::binary`) or refuses it.
+    /// `eBinaryASN`: read by [`Guessed::into_binary`], or refused by the caller.
     Binary,
-    /// `eXml`: recognised; LOSAT has no XML reader of the table's types yet.
+    /// `eXml`: read by [`Guessed::into_xml`], or refused by the caller.
     Xml,
     /// Any other answer (`eUnknown`, `eJSON`, another format): the caller's invalid input.
     Other,
@@ -96,6 +99,20 @@ impl<R: IoRead> Guessed<R> {
         text_stream(self.input, &self.taken[self.start..], names)
     }
 
+    /// The binary reader of the stream (a new `CObjectIStreamAsnBinary` of the file), from where
+    /// the guess left it, whose refusals call the input by `names`.
+    pub(crate) fn into_binary(self, names: Names) -> BinaryStream<R> {
+        let (first, input) = self.into_parts();
+        ObjectStream::binary(StreamSource::new(input, &first), names)
+    }
+
+    /// The XML reader of the stream (`CObjectIStream::Open` with `eSerial_Xml`: ASN.1-style XML,
+    /// `XmlStyle::Asn`), from where the guess left it, whose refusals call the input by `names`.
+    pub(crate) fn into_xml(self, names: Names) -> XmlStream<R> {
+        let (first, input) = self.into_parts();
+        ObjectStream::xml(StreamSource::new(input, &first), XmlStyle::Asn, names)
+    }
+
     /// The stream from where the guess left it: the bytes the guess took from there, and the
     /// input after them (the front end of another encoding reads from here).
     pub(crate) fn into_parts(mut self) -> (Vec<u8>, R) {
@@ -103,6 +120,14 @@ impl<R: IoRead> Guessed<R> {
         (self.taken, self.input)
     }
 }
+
+/// The objects of an ASN.1 binary stream read in blocks, one at a time ([`TextStream`]'s binary
+/// twin).
+pub(crate) type BinaryStream<R> = ObjectStream<BerReader<StreamSource<R>>>;
+
+/// The objects of an ASN.1-style XML stream read in blocks, one at a time ([`TextStream`]'s XML
+/// twin).
+pub(crate) type XmlStream<R> = ObjectStream<XmlInput<StreamSource<R>>>;
 
 /// The objects of an ASN.1 text stream read in blocks, one at a time: one reader for the whole
 /// stream (`read::ObjectStream`), as NCBI keeps one object stream (its buffer goes on from one

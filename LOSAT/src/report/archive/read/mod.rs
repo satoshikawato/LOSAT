@@ -4,8 +4,9 @@
 //! results (`results`).
 //!
 //! The objects are read by the generic reader of the type table (`report::serial::asn_types`:
-//! the encoding guessed by `stream::guess_encoding`, the text read by `stream::TextStream`);
-//! this module makes the typed model of each value. It models what NCBI's archive reader and
+//! the encoding guessed by `stream::guess_encoding`, the objects read by its `read::ObjectStream`
+//! of that encoding: ASN.1 text, ASN.1 binary or XML); this module makes the typed model of each
+//! value. It models what NCBI's archive reader and
 //! blast_formatter read of the archive; the members they ignore stay in the values (the Bioseqs,
 //! Seq-locs, PSSM and Seq-aligns are kept as read, for the formats that write them again).
 //!
@@ -29,10 +30,9 @@ mod read_tests;
 #[cfg(test)]
 mod strategy_tests;
 
-use std::io::Read;
-
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_types::stream::TextStream;
+use crate::report::serial::asn_input::Input;
+use crate::report::serial::asn_types::read::ObjectStream;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::{member_index, Post, ReadError, Value};
@@ -121,14 +121,15 @@ pub(crate) struct Search {
 }
 
 /// The objects of an archive stream (the `CRemoteBlast` made of a stream, with its object
-/// stream), one at a time.
-pub(crate) struct ArchiveReader<R: Read> {
-    objects: TextStream<R>,
+/// stream of the guessed encoding, `x_Init`), one at a time.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
+pub(crate) struct ArchiveReader<I: Input> {
+    objects: ObjectStream<I>,
 }
 
-impl<R: Read> ArchiveReader<R> {
-    /// The archive objects of a text stream.
-    pub(crate) fn new(objects: TextStream<R>) -> Self {
+impl<I: Input> ArchiveReader<I> {
+    /// The archive objects of an object stream (ASN.1 text, ASN.1 binary or XML).
+    pub(crate) fn new(objects: ObjectStream<I>) -> Self {
         ArchiveReader { objects }
     }
 

@@ -145,7 +145,8 @@ const MAX_DOUBLE_LENGTH: u64 = 256;
 /// The state of one `CObjectIStreamAsnBinary` over the bytes of `src`.
 pub(crate) struct BerReader<S: AsnSource> {
     pub(crate) src: S,
-    /// The position in `src` of the first byte of the object being read (`new_object`).
+    /// The position in `src` of the first byte of the object being read (`new_object`; 0 for
+    /// one stream).
     base: usize,
     /// The position in `src` of the next byte; `at - base` is the position of NCBI's input
     /// buffer (the bytes of the object read so far, [`pos`](Self::pos)). The cursor is the
@@ -751,15 +752,20 @@ impl<S: AsnSource> BerReader<S> {
 impl<S: AsnSource> Input for BerReader<S> {
     const ENCODING: Encoding = Encoding::Binary;
 
-    /// `GetPosition()` of the binary stream: the bytes read from the start of the object.
+    /// `GetPosition()` of the binary stream: the bytes read from the start of the object (of the
+    /// file, for one stream: `new_object`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:118-121
     fn position(&self) -> StreamPosition {
         StreamPosition::Byte(self.pos() as u64)
     }
 
-    /// The state of a new stream at the next byte: its positions count from there.
+    /// The state of a new stream at the next byte: its positions count from there; or, for the
+    /// one stream of a program that reads all the objects of a file with it (`Names::one_stream`),
+    /// they go on from the file's start (`CIStreamBuffer::GetStreamPosAsInt8`).
     fn new_object(&mut self) {
-        self.base = self.at;
+        if !self.names.one_stream {
+            self.base = self.at;
+        }
         self.tag_len = 0;
         self.limit = 0;
         self.limits.clear();

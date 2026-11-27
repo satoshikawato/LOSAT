@@ -202,6 +202,13 @@ impl Names {
         one_stream: true,
         own_serial_message: true,
     };
+    /// [`Names::ARCHIVE`] of a BLAST archive in XML, whose reader's own refusals name the XML
+    /// document and reader.
+    pub(crate) const XML_ARCHIVE: Names = Names {
+        document: "BLAST archive",
+        reader: "XML reader",
+        ..Names::ARCHIVE
+    };
     /// The documents of the tests of the readers.
     #[cfg(test)]
     pub(crate) const TEST: Names = Names {
@@ -456,8 +463,8 @@ pub(crate) trait Input {
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a
     /// stream of its own in NCBI: its line count, or its byte count and data limits, start
-    /// again), or, in text, of the one stream of a program that reads all the objects of a file
-    /// with it (`Names::one_stream`: the line count goes on).
+    /// again), or of the one stream of a program that reads all the objects of a file with it
+    /// (`Names::one_stream`: the line or byte count goes on).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
     /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader

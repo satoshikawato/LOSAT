@@ -1013,9 +1013,12 @@ impl<S: AsnSource> Input for XmlInput<S> {
     }
 
     /// Each object of a stream is read by a stream of its own in NCBI (its line count starts
-    /// again); no frame, nothing posted.
+    /// again), but for the one stream of a program that reads all the objects of a file with it
+    /// (`Names::one_stream`: the line count goes on); no frame, nothing posted.
     fn new_object(&mut self) {
-        self.x.line = 1;
+        if !self.names.one_stream {
+            self.x.line = 1;
+        }
         self.frames.clear();
         self.posts.clear();
         self.x.replaced.clear();

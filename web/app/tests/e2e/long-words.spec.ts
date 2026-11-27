@@ -1,11 +1,14 @@
 // Long words in the page's messages: a name the user gave (an MSA, PSSM or database file) in the line under
 // Run LOSAT, and the engine's usage text for an unknown option, whose line of 72 `=` is one word, must not
-// make the page wider than the window (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28).
+// make the page wider than the window (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28). The same word in the other
+// boxes that show a name or an ID (the review's M1): the Alignments summary, the HSP list's heading, the Dot plot's
+// caption, Format Archive's chosen file, WindowMasker's output tab and download button, and the words of a failed run.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { openParameters, openSearch, paste, program } from './support/search';
+import { openParameters, openSearch, paste, pickRun, program, runMessage, submit, waitStatus } from './support/search';
 import { test } from './support/test';
 
 const WIDTHS = [320, 390, 768, 1280] as const;
@@ -14,13 +17,13 @@ const MSA = readFileSync(join(REPOSITORY, 'LOSAT/tests/fixtures/msa/ps6_b_db_0.a
 const PSSM = readFileSync(join(REPOSITORY, 'LOSAT/tests/fixtures/pssm/q1b_gi.asn'));
 const SUBJECT = '>s1\nTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV\n';
 
-/** Shows that at each width the page has no sideways scroll, and that `selector` (one element) lies inside the window. */
+/** Shows that at each width the page has no sideways scroll, and that every element of `selector` lies inside the window. */
 async function expectFits(page: Page, selector: string, context: string): Promise<void> {
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
     const measured = await page.evaluate((css) => {
-      const box = document.querySelector(css)!.getBoundingClientRect();
-      return { page: document.documentElement.scrollWidth, window: document.documentElement.clientWidth, right: box.right };
+      const boxes = [...document.querySelectorAll(css)].map((element) => element.getBoundingClientRect());
+      return { page: document.documentElement.scrollWidth, window: document.documentElement.clientWidth, right: Math.max(...boxes.map((box) => box.right)) };
     }, selector);
     expect(measured.page, `${context} at ${width} px: the page scrolls sideways`).toBeLessThanOrEqual(measured.window);
     expect(measured.right, `${context} at ${width} px: the text passes the window's edge`).toBeLessThanOrEqual(measured.window);
@@ -78,4 +81,87 @@ test.describe('long words stay inside the page', () => {
       await expectFits(page, '[data-testid="argv-validation"] .error', 'usage text');
     });
   }
+
+  // The Results page: an ID of an ordinary length (39 characters: a RefSeq accession and its species) and a very long one.
+  for (const length of [39, 400]) {
+    test(`the Results page wraps a sequence ID of ${length} characters (Alignments, HSP list, Dot plot caption)`, async ({ page }) => {
+      test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
+      test.setTimeout(180_000);
+      const id = 'NC_000913.3_Escherichia_coli_K12_MG1655_'.padEnd(length, 'x').slice(0, length);
+      const unit = 'ACGTTGCAAGCTTGCAGGCATCGATCGGATCGATTTAGCGCGATATCGCGATTAGCGGCTAATCGGATCGATCGTAGGCTAGCTAGGATCGGCTAGCTAG';
+      const fasta = `>${id} description\n${unit}${unit}\n`;
+      await openSearch(page);
+      await paste(page, 'query', fasta);
+      await paste(page, 'subject', fasta);
+      await submit(page);
+      await waitStatus(page, 1, 'completed');
+      await pickRun(page, 1);
+      await expect(page.getByTestId('alignments-summary')).toContainText(id.slice(0, 30));
+      await expectFits(page, '[data-testid="alignments-summary"]', `Alignments summary, ID of ${length}`);
+      await expectFits(page, '[data-testid="hsp-table"] h3', `HSP list heading, ID of ${length}`);
+      await page.getByTestId('pane-dotplot').click();
+      const caption = '.plot-caption:has([data-testid="dotplot-title"])';
+      await expect(page.locator(caption)).toContainText(id.slice(0, 30));
+      await expectFits(page, caption, `Dot plot caption, ID of ${length}`);
+    });
+  }
+
+  for (const name of ['rid_search_strategy_archive_2026_11_28_with_a_long_name.asn', `${'a'.repeat(400)}.asn`]) {
+    test(`Format Archive wraps the chosen file's name of ${name.length} characters`, async ({ page }) => {
+      await openSearch(page);
+      await page.getByTestId('tab-blast-formatter').click();
+      await page.getByTestId('bf-archive-file-input').setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from('x') });
+      await expect(page.getByTestId('bf-archive-chosen')).toContainText(name.slice(0, 30));
+      await expectFits(page, '[data-testid="bf-archive-chosen"]', 'Format Archive file');
+    });
+  }
+
+  test("WindowMasker's output tab and download button wrap an -out name of 200 characters", async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
+    test.setTimeout(180_000);
+    const unit = 'ACGTTGCAAGCTTGCAGGCATCGATCGGATCGATTTAGCGCGATATCGCGATTAGCGGCTAATCGGATCGATCGTAGGCTAGCTAGGATCGGCTAGCTAG';
+    await openSearch(page);
+    await page.getByTestId('tab-windowmasker').click();
+    await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+    await page.getByTestId('wm-fasta-input').fill(`>w1\n${unit.repeat(40)}\n`);
+    await page.getByTestId('wm-out').fill(`${'Z'.repeat(200)}.counts`);
+    await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, 1, 'completed', 120_000);
+    await pickRun(page, 1);
+    await expect(page.getByTestId('tool-tab-file-0')).toContainText('ZZZZ');
+    await page.getByTestId('tool-tab-file-0').click();
+    await expectFits(page, '[data-testid="tool-tab-file-0"]', 'WindowMasker output tab');
+    await expectFits(page, '[data-testid="tool-output-download"]', 'WindowMasker download button');
+  });
+
+  // The words of a failed run (the results box) carry the name that the user gave: -out_pssm in a folder of 400 characters.
+  test('the words of a failed run wrap a name of 400 characters', async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
+    test.setTimeout(180_000);
+    const fasta = (path: string): string => readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/psiblast', path), 'utf8');
+    await openSearch(page);
+    await program(page, 'psiblast');
+    await paste(page, 'query', fasta('q1b_gi.faa'));
+    await paste(page, 'subject', fasta('q1_subj_ids.faa'));
+    await openParameters(page);
+    await page.getByTestId('param-num_iterations').fill('2');
+    await page.getByTestId('param-out_pssm').fill(`${LONG}/x.asn`);
+    await submit(page);
+    await waitStatus(page, 1, 'failed');
+    expect(await runMessage(page, 1)).toContain('YYYY');
+    await expectFits(page, '[data-testid="results-status"]', 'failed run message');
+  });
+
+  // A source's card says which input stopped the search; with a long name in it the words wrap.
+  test("an input's card names the file that stopped the search, and wraps its name of 400 characters", async ({ page }) => {
+    test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
+    await openSearch(page);
+    await page.getByTestId('query-files').setInputFiles([
+      { name: `${LONG}.fa`, mimeType: 'text/plain', buffer: Buffer.from('>a\nAC#GT\n') },
+      { name: 'second.fa', mimeType: 'text/plain', buffer: Buffer.from('>q\nACGTACGTACGTACGTACGTAAAAACCCCCGGGGGTTTTTACGTACGTAC\n') },
+    ]);
+    await expect(page.locator('.warning').filter({ hasText: 'Not searched' }).first()).toContainText('YYYY', { timeout: 30_000 });
+    await expectFits(page, '.warning', 'source card warning');
+  });
 });

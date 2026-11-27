@@ -2583,16 +2583,11 @@ pre.range-text {
   white-space: pre-line;
 }
 
-/* The page's messages carry words that the user chose or that the engine wrote, and some are one word as
-   long as the line (a file's name, the usage text's line of 72 `=`): they break at the card's edge instead
-   of widening the page (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28). One rule for the line under Run
-   LOSAT and for the notes of the form, the inputs and the results. */
-.search-summary-line,
-.error,
-.validation,
-.warning,
-.notice,
-.results-message {
+/* Words that the user chose (a file's name, a sequence ID) or that the engine wrote (the usage text's line of 72
+   `=`) can be as long as the line, and one such word made the page scroll sideways: any text breaks at its box's
+   edge when no other place in the line can break it. The rule is on the page, so a new box cannot forget it (line
+   WQA's sweep 4, S4-4 and S4-7 and the review of D32, 2026-11-28). The boxes that have their own wrap rule keep it. */
+body {
   overflow-wrap: anywhere;
 }
 

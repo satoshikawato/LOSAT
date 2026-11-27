@@ -190,7 +190,7 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
   await expect
     .poll(() => told(page, 'status'))
-    .toContainEqual(expect.stringContaining('A run fails at this error if it reads that far, as the command line does, and keeps only the outputs written before it: '));
+    .toContainEqual(expect.stringContaining('A run that reaches this error fails there, as the command line does: '));
   // A subject that the engine refuses for that error: its card's hint of the byte order mark is told too
   // (review L1, 2026-11-20).
   await paste(page, 'subject', `\uFEFF>s1\n${dna(5, 60)}\n`);

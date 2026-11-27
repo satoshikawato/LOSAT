@@ -3,8 +3,9 @@
 // batch at a time and ends with the reader's error in the batch that reads the record, after the
 // reports of the batches before, so the input is not refused before the run. Its card lists the records
 // before the error and warns with the command line's message; a run that reads that far ends with that
-// message and keeps the outputs written before it (none when the error's batch is the first; line WQA's
-// D28, 2026-11-27). Under -parse_deflines an error of an earlier batch (two records of one id) comes
+// message and keeps the outputs written before it, the reports of the batches before (line WQA's D28,
+// 2026-11-27): when the error's batch is the first, no record has results, outfmt 0 keeps its prolog
+// (-html its page's head, outfmt 15 the start of its JSON), and outfmt 5, 6 and 7 are empty. Under -parse_deflines an error of an earlier batch (two records of one id) comes
 // first, as on the command line. A query of comment lines only is a batch without a query: the
 // card says that it has no sequence, and the run ends with NCBI's `Empty CBlastQueryVector`.
 import { spawnSync } from 'node:child_process';
@@ -38,13 +39,17 @@ const SUBJECT = `>s1 subject\n${DNA}\n`;
 const NOT_PLAUSIBLE = (line: number) =>
   `LOSAT query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`;
 /**
- * The warning (review M-a, 2026-11-20; line WQA's D28, 2026-11-27): a run that reads that far fails with the error and keeps
- * what the command line writes before it, the reports of the query batches before the error's; an error before it (an ID
- * repeated in an earlier batch under -parse_deflines) ends the run first.
+ * The warning (review M-a, 2026-11-20; line WQA's D28, 2026-11-27): a run that reaches the error fails there; an error before
+ * it (an ID repeated in an earlier batch under -parse_deflines) ends the run first.
  */
-const WARNING = 'A run fails at this error if it reads that far, as the command line does, and keeps only the outputs written before it: ';
-/** What the warning says to do (review L2), with the input's own line where the run's differs (review L-b, 2026-11-20). */
-const REMEDY = (own?: string) => ` Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
+const WARNING = 'A run that reaches this error fails there, as the command line does: ';
+/**
+ * What the warning says that the run keeps (line WQA's D28 and its review r1 L1, 2026-11-27: the reports of the query batches
+ * before the error's, none in a query shorter than a batch) and what to do (review L2), with the input's own line where the
+ * run's differs (review L-b, 2026-11-20).
+ */
+const REMEDY = (own?: string) =>
+  ` Only the records searched before it keep their results; in a short query, that is none. Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
 
 /** The native CLI's run of `words` (program first) on the inputs as query.fa and subject.fa, one thread. */
 function nativeRun(words: readonly string[], query: string, subject: string): { status: number | null; stdout: string; stderr: string } {
@@ -185,7 +190,7 @@ test("a Combined query input reads up to a source's reader's error, and the warn
   const later = page.getByTestId('query-source-2-check');
   await expect(later).toHaveAttribute('data-not-searched', '');
   await expect(later).toHaveText(
-    'Not searched: the search stops at the error in bad.fa, before this input. Correct that error, or choose Separate to search each input alone.',
+    'Not searched: a run does not read past the error in bad.fa, before this input. Correct that error, or choose Separate to search each input alone.',
   );
   await page.getByTestId('query-mode-separate').check();
   await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(4)}${REMEDY()}`);

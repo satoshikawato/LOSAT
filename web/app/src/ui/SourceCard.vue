@@ -77,8 +77,13 @@ const readerError = computed(() =>
 const endedBy = computed(() => (combinedQuery.value === undefined ? undefined : queryEndBefore(combinedQuery.value, props.source)));
 /** A source's name in the card's sentences. */
 const sourceName = (source: DraftSource) => (source.origin === 'paste' ? 'the pasted sequences' : source.name);
+/**
+ * What the card of an input after a reader's error says. A run does not read past that error, but it may end before it, with
+ * an error of an earlier query batch (an ID repeated under -parse_deflines): correcting that error is needed to search this
+ * input, and may not be enough (line WQA's D28, review r1 M1, 2026-11-27).
+ */
 const notSearchedText = (before: DraftSource) =>
-  `Not searched: the search stops at the error in ${sourceName(before)}, before this input. Correct that error, or choose Separate to search each input alone.`;
+  `Not searched: a run does not read past the error in ${sourceName(before)}, before this input. Correct that error, or choose Separate to search each input alone.`;
 /** A Combined query input has sources after this one, which a run does not read past this one's error. */
 const sourcesAfter = computed(() => {
   const sources = combinedQuery.value;
@@ -90,11 +95,15 @@ const lineOf = (message: string | undefined) => {
   return found === null ? undefined : Number(found[1]);
 };
 /**
- * The warning of a reader's error, with what to do (review L2 and M-a, 2026-11-20): a run that reads that far fails with it,
- * and keeps only the outputs that the command line writes before it (the reports of the query batches before the error's,
- * line WQA's sweep, D15). It says neither that the run ends with this error nor that it gives no results (line WQA's D28,
- * 2026-11-27): an error that comes before it (a query ID repeated under -parse_deflines in an earlier batch) ends the run
- * first, and an error in a later batch comes after the hits of the batches before. The message is the run's:
+ * The warning of a reader's error, with what to do (review L2 and M-a, 2026-11-20): a run that reaches it fails there, and
+ * keeps only the outputs that the command line writes before it (line WQA's sweep, D15): the reports of the query batches
+ * before the error's. The records of the error's batch have no results; with the error in the first batch (a query
+ * shorter than a batch) no record has, and outfmt 0 keeps only its prolog (-html its page's head, outfmt 15 the start of
+ * its JSON), while outfmt 5, 6 and 7 are empty. It says neither that the run ends with this error nor that it gives no
+ * results (line WQA's D28, 2026-11-27): an error that comes before it (a query ID repeated under -parse_deflines in an
+ * earlier batch) ends the run first, and an error in a later batch comes after the hits of the batches before. A short
+ * query is the run's (in a Combined input, all of its inputs): this input may be short, and yet the records of it that
+ * close a batch of an earlier input's records keep their results (review r1 L1). The message is the run's:
  * in a Combined input the line it names counts the inputs before this one, and with records excluded it counts the records
  * included (`SearchDraft`'s check), so the card adds this input's own line where the two differ (review L-b, 2026-11-20).
  */
@@ -103,7 +112,7 @@ const readerErrorText = (message: string) => {
   const run = lineOf(message);
   const where = own !== undefined && run !== undefined && own !== run ? ` (line ${own} of ${sourceName(props.source)})` : '';
   return [
-    `A run fails at this error if it reads that far, as the command line does, and keeps only the outputs written before it: ${message} Correct that line${where} to search this input.`,
+    `A run that reaches this error fails there, as the command line does: ${message} Only the records searched before it keep their results; in a short query, that is none. Correct that line${where} to search this input.`,
     ...(sourcesAfter.value ? ['The run does not read the inputs after this one.'] : []),
   ].join(' ');
 };

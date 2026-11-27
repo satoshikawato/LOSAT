@@ -1,9 +1,10 @@
 - LOSAT Web: a query file whose reader fails on a later record (a line that NCBI's reader
   refuses, "there's a line that doesn't look like plausible data") now runs as on the command line,
   where it was refused before the run. The input card lists the records before that record and
-  warns that a run that reads that far fails with the command line's message and keeps only the
-  outputs written before it; the run ends with that message, after the hits of the query batches
-  before the error's. Under `-parse_deflines`, an error of an earlier query batch (two records
+  warns that a run that reaches it fails there with the command line's message, and that only the
+  records searched before it keep their results (none in a short query); the run ends with that
+  message, after the hits of the query batches before the error's. Under `-parse_deflines`, an
+  error of an earlier query batch (two records
   with one ID) comes first, as on the command line. A query of comment lines only runs and ends with
   NCBI's `Empty CBlastQueryVector`. In a Combined query the warning names the run's line, which
   counts the lines of the inputs before it (those without records too), and the input's own line

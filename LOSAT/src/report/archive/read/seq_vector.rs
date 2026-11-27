@@ -347,7 +347,7 @@ struct Iter {
     /// `m_Seg`, `None` before its first `x_InitSeg`.
     seg: Option<Seg>,
     cache: Cache,
-    /// `m_Cache - m_CacheData`.
+    /// The position of `m_Cache` in its block `m_CacheData`.
     offset: u32,
     backup: Cache,
     /// Whether the cache's buffers are made (`x_InitializeCache`: `m_Cache` no longer null).
@@ -663,7 +663,7 @@ impl<'m, 'a> SeqVector<'m, 'a> {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_map_ci.cpp:558-570 (`x_TopNext`)
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_map_ci.cpp:685-692 (`x_SettleNext`)
-    /// `++m_Seg`: the next segment of the vector, past the end markers.
+    /// The step of `m_Seg` to the next segment of the vector, past the end markers.
     fn next(&self, seg: &mut Seg) -> Result<(), RenderError> {
         loop {
             seg.position = seg.position.wrapping_add(seg.length);
@@ -786,11 +786,11 @@ impl<'m, 'a> RowVector<'m, 'a> {
         }
     }
 
-    /// `GetSeqString(row, seq_from, seq_to)`: the letters `seq_from..=seq_to` of the plus strand
-    /// (`seq_to` is `seq_from - 1` for a segment of 0 letters: a read of none, which still moves
-    /// the iterator), read on the row's strand: on the minus strand from `size - seq_to - 1` to
-    /// `size - seq_from` of the vector, in the unsigned `TSeqPos` (none where `seq_to` is past the
-    /// size, `RowLetters`). The exception of the read, or none.
+    /// `GetSeqString` of the row from `seq_from` to `seq_to`: the letters `seq_from..=seq_to` of
+    /// the plus strand (`seq_to` is `seq_from - 1` for a segment of 0 letters: a read of none,
+    /// which still moves the iterator), read on the row's strand: on the minus strand from
+    /// `size - seq_to - 1` to `size - seq_from` of the vector, in the unsigned `TSeqPos` (none
+    /// where `seq_to` is past the size, `RowLetters`). The exception of the read, or none.
     pub(crate) fn read(&mut self, seq_from: u32, seq_to: u32) -> Result<(), RenderError> {
         let vector = match &mut self.vector {
             Some(vector) => vector,

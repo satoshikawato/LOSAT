@@ -38,7 +38,7 @@ use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions, EProgram};
 use crate::report::archive::read::queries::{check_setup_letters, RenderError, SubjectSetup};
-use crate::report::archive::read::request::{ParamSet, Queries, Subject};
+use crate::report::archive::read::request::{Bioseq, ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
@@ -1072,8 +1072,10 @@ fn check_subjects(subject: &Subject) -> anyhow::Result<()> {
 /// report of the chain (`ReportAll`) in a `CBlastException` `eSeqSrcInit`, NCBI's engine error
 /// (exit status 3), in every output format, before the object's first byte (probes
 /// `of6_slen_huge`, `of6_slen_short`, `of8_slen_big`, `of6_s_*`, `of6_c_*`, `of6_e_nodata`); a
-/// read that LOSAT does not reproduce is refused (`Err`, before any warning). The warnings of
-/// the Bioseqs before NCBI's end, and that end.
+/// read that LOSAT does not reproduce is refused (`Err`, before any warning). A Bioseq that
+/// declares 4294967295 letters and reads (a delta whose segments resolve) ends there at its
+/// length (`query_length`), the same way. The warnings of the Bioseqs before NCBI's end, and
+/// that end.
 fn setup_subjects(
     subject: &Subject,
     program: EProgram,
@@ -1100,8 +1102,16 @@ fn setup_subjects(
             return Ok((warnings, None))
         }
     };
-    for bioseq in subject.bioseqs() {
+    for (index, bioseq) in subject.bioseqs().into_iter().enumerate() {
         let end: anyhow::Error = match check_setup_letters(bioseq, protein) {
+            // The location of the subject is `0` to `length - 1` of its declared length
+            // (`s_ConvertSubjects2TSeqLocVector`): after a read, `GetLength` of one that declares
+            // 4294967295 letters (`kInvalidSeqPos`) throws (`query_length`).
+            Ok(SubjectSetup::Read) if bioseq.length() == Some(i64::from(u32::MAX)) => {
+                let length = query_length(index, bioseq);
+                let seq_src = NcbiException::new(SEQ_SRC_INIT, length.what());
+                NativeError::exception(&seq_src).into()
+            }
             Ok(SubjectSetup::Read) => continue,
             Ok(SubjectSetup::Empty) => {
                 warnings.extend_from_slice(b"Warning: ");
@@ -1137,6 +1147,33 @@ fn setup_subjects(
     }
     Ok((warnings, None))
 }
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:231-255
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:323-344
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:858-859
+/// The throw of `CBlastQuerySourceOM::GetLength` at the subject `index` (counted over every
+/// subject Bioseq) of the setup (`max_subjlen`, after its letters are read), whose location
+/// is `kInvalidSeqPos` letters long: `Could not find length of query # <index> with Seq-id
+/// [<AsFastaString of its id>]` (the id that `FindBestChoice` with `BestRank` picks). NCBI's
+/// report of it names its module but no function (probe C of agent E3c, 2026-11-28:
+/// `of*_c_dlen*`, `of6_c_dlen_p`, and `of6_l_dlen_nolegacy*` of agent E3L).
+fn query_length(index: usize, bioseq: Bioseq<'_>) -> NcbiException {
+    let mut message =
+        format!("Could not find length of query # {index} with Seq-id [").into_bytes();
+    if let Some(id) = bioseq.best_id() {
+        crate::seqid::label::fasta(id, &mut message);
+    }
+    message.push(b']');
+    NcbiException::new(QUERY_LENGTH, message)
+}
+
+/// Where `CBlastQuerySourceOM::GetLength` throws.
+const QUERY_LENGTH: ThrowSite = ThrowSite {
+    file: "src/algo/blast/api/blast_objmgr_tools.cpp",
+    line: 337,
+    kind: "CBlastException::eInvalid",
+    function: Some("BLAST::"),
+};
 
 /// Where `s_CheckForBlastSeqSrcErrors` throws the error of a sequence source's setup.
 const SEQ_SRC_INIT: ThrowSite = ThrowSite {

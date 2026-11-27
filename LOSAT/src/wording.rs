@@ -48,7 +48,8 @@
 //! - [`NCBI_USER_MANUAL_FOOTER`] becomes [`USER_MANUAL_FOOTER`].
 //! - `NCBI C++ Exception:`, the white space after it and the place of the first exception
 //!   (`T0 "<file>", line <n>: <severity>: (<class>::<code>) ` and NCBI's function
-//!   `<function>() - ` when the report names one) are left out: the line keeps the message, or
+//!   `<function>() - ` when the report names one, or its module alone, `<module>:: - `) are left
+//!   out: the line keeps the message, or
 //!   `<code>` when the message is empty.
 //! - The place of each further exception of the chain (after a space: its indentation, or the
 //!   space of a message whose white space is collapsed, as in an archive's message) is left out
@@ -871,9 +872,10 @@ fn place(text: &[u8]) -> Option<(usize, &[u8])> {
 }
 
 /// The length of `(<class>::<code>) ` at the start of `text` and of the function after it
-/// (`<function>() - `), where `<class>` is a class of NCBI's exceptions, and the `<code>` slice
-/// between `::` and `)`. At the end of a line or of `text` (a collapsed message with an empty
-/// body) the trailing space after `)` or `-` may be absent.
+/// (`<function>() - `, or `<module>:: - ` without a function), where `<class>` is a class of
+/// NCBI's exceptions, and the `<code>` slice between `::` and `)`. At the end of a line or of
+/// `text` (a collapsed message with an empty body) the trailing space after `)` or `-` may be
+/// absent.
 fn tag(text: &[u8]) -> Option<(usize, &[u8])> {
     let mut i = literal(text, b"(")?;
     let class = text[i..]
@@ -909,11 +911,20 @@ fn tag(text: &[u8]) -> Option<(usize, &[u8])> {
         if text[i..f].ends_with(b"::operator") && text[f..].starts_with(b"()") {
             f += 2;
         }
-        if let Some(end) = literal(&text[f..], b"() - ") {
-            i = f + end;
-        } else if let Some(end) = literal(&text[f..], b"() -") {
-            if matches!(text.get(f + end), None | Some(b'\n')) {
-                i = f + end;
+        // The place ends with `()` after a function, or with `::` where the report names a module
+        // (or a class) but no function (`BLAST:: - `: `SDiagMessage::x_OldWrite`).
+        let place = if text[i..f].ends_with(b"::") {
+            Some(f)
+        } else {
+            literal(&text[f..], b"()").map(|end| f + end)
+        };
+        if let Some(p) = place {
+            if let Some(end) = literal(&text[p..], b" - ") {
+                i = p + end;
+            } else if let Some(end) = literal(&text[p..], b" -") {
+                if matches!(text.get(p + end), None | Some(b'\n')) {
+                    i = p + end;
+                }
             }
         }
     }

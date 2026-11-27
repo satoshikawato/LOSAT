@@ -9,10 +9,11 @@
   `rpstblastn`), queries stored as `seq-loc-list`, and `-subject` with `BL2SEQ_LEGACY` in
   `-outfmt 7` remain refused by name.
 - `losat blast_formatter`: in every output format, an archive of `-subject` sequences (without
-  `BL2SEQ_LEGACY`) whose subject sequence does not read (more letters declared than held, a length
-  of 4294967295, a protein residue outside NCBIstdaa's 28 codes, a sequence coding that does not
-  convert) ends with NCBI BLAST+'s engine error before any output, as NCBI's sets up the subject
-  sequences; a subject sequence of 0 letters gets NCBI's warning and the report goes on.
+  `BL2SEQ_LEGACY`) whose subject sequence does not read (more letters declared than held, a protein
+  residue outside NCBIstdaa's 28 codes, a sequence coding that does not convert), or reads but
+  declares 4294967295 letters, ends with NCBI BLAST+'s engine error before any output, as NCBI's
+  sets up the subject sequences; a subject sequence of 0 letters gets NCBI's warning and the report
+  goes on.
 - `losat blast_formatter`: in the tabular formats, a query or subject sequence that holds fewer
   letters than it declares (or whose segments end before its length) ends the run with NCBI
   BLAST+'s error at the row that reads past its letters, with the position NCBI's read names.

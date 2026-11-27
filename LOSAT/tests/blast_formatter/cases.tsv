@@ -414,3 +414,11 @@ of6_l_huge2_names	BL2SEQ_LEGACY=1 -archive in/t_huge2.asn -outfmt '6 qseqid sseq
 of6_l_qdlen_qseq	-archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length qseq'
 of6_l_qdlen	-archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length'
 of6_l_qdlen_legacy_qseq	BL2SEQ_LEGACY=1 -archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length qseq'
+# Rows from of6_l_dlen_nolegacy on (line RG item F3 PR 3a, agent E3c of ad-RG-F3-13, 2026-11-28): NCBI BLAST+ 2.17.0, the official release build on the local machine, every NCBI run under unshare -rn, by remaining-gaps-20261112/F/f3/tmp/e3l/tools/probeL1.py (agent E3L; rows of6_l_dlen_nolegacy*) and F/f3/tmp/e3c/tools/probeC.py (rows of*_c_dlen*): the setup of -subject Bioseqs without BL2SEQ_LEGACY, where one declares 4294967295 letters and reads (a delta whose literals resolve): its location's length (0 to length - 1) is kInvalidSeqPos, and the setup ends with NCBI's engine error `Could not find length of query # <i> with Seq-id [<id>]` before any output, in every output format. in/c_dlen_p.asn: in/bp_subject.asn with Subject_1 of 0 letters (the warning first) and Subject_3 a delta declaring 4294967295 whose literals hold its 20 residues (subject # 2).
+of6_l_dlen_nolegacy	-archive in/t_dlen.asn -outfmt '6 std slen'
+of6_l_dlen_nolegacy_nopf	PRE_FETCH_SEQS_LIMIT=0 -archive in/t_dlen.asn -outfmt '6 std slen'
+of7_c_dlen	-archive in/t_dlen.asn -outfmt 7
+of8_c_dlen	-archive in/t_dlen.asn -outfmt 8
+of10_c_dlen	-archive in/t_dlen.asn -outfmt '10 std slen'
+of20_c_dlen	-archive in/t_dlen.asn -outfmt '20 std slen'
+of6_c_dlen_p	-archive in/c_dlen_p.asn -outfmt '6 std slen'

@@ -204,6 +204,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         db_len_overflow,
         positives: positives.as_ref(),
         mask_char: b'X',
+        pattern: None,
     };
     let queries = run.queries;
     let query_placements = &run.ranges.input.placements;

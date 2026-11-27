@@ -1001,22 +1001,31 @@ impl TaxReport {
     /// off, the texts of the subjects that the report reads one by one and the query's index among
     /// them (`ReadCursor::subject_read`). A query that NCBI did not search (`TaxQuery::hsps`) is
     /// refused after its `Query=` block (`TaxReportRefusal`), where NCBI's report stops.
+    #[inline(always)]
     pub fn write_query(
         &self,
         q_idx: usize,
         out: &mut crate::cli::NcbiOstream<'_>,
         diagnostics: &mut dyn Write,
-        mut reads: Option<(&mut ReadCursor<'_>, usize)>,
+        reads: Option<(&mut ReadCursor<'_>, usize)>,
         title: &[u8],
         length: usize,
     ) -> Result<()> {
+        self.write_caption(out)?;
+        self.write_result(q_idx, out, diagnostics, reads, title, length)
+    }
+
+    /// The report's caption (`reportCaption`), which NCBI writes once for the results of each
+    /// `PrintOneResultSet` (one query, `write_query`) and of each `PrintPhiResult` (a PHI-BLAST
+    /// query's occurrences, each a result of its own, `write_result`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1462-1463
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2059-2061
+    #[inline(always)]
+    pub fn write_caption(&self, out: &mut crate::cli::NcbiOstream<'_>) -> Result<()> {
         // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `reportCaption`
-        // and a line feed into `m_Outfile` (module docs), the `Query=` block's and `orgReportData`
-        // into `out` (`organism_report`).
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1462-1463, 879-884
+        // into `m_Outfile` (module docs).
         if self.html {
             crate::cli::insert(out, b"<h1>Tax BLAST report</h1>")?;
-            crate::cli::insert(out, b"<pre>")?;
         } else {
             add_spaces(
                 b"Tax BLAST report",
@@ -1026,6 +1035,28 @@ impl TaxReport {
                 true,
             )
             .insert_into(out)?;
+        }
+        Ok(())
+    }
+
+    /// `write_query` without its caption (`x_PrintTaxReport` of one result).
+    #[inline(always)]
+    pub fn write_result(
+        &self,
+        q_idx: usize,
+        out: &mut crate::cli::NcbiOstream<'_>,
+        diagnostics: &mut dyn Write,
+        mut reads: Option<(&mut ReadCursor<'_>, usize)>,
+        title: &[u8],
+        length: usize,
+    ) -> Result<()> {
+        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): a line feed
+        // into `m_Outfile` (module docs), the `Query=` block's and `orgReportData` into `out`
+        // (`organism_report`).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:879-884
+        if self.html {
+            crate::cli::insert(out, b"<pre>")?;
+        } else {
             crate::cli::insert(out, b"\n")?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:885-888

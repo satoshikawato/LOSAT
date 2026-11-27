@@ -502,6 +502,7 @@ pub(super) fn write_structured_xml(
                 .is_some_and(|database| database.total_letters_overflow),
             positives: None,
             mask_char: b'N',
+            pattern: None,
         },
         queries: report.queries,
         query_records: report.query_records,

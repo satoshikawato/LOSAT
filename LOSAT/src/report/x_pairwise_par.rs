@@ -774,7 +774,7 @@ pub(crate) fn write<S: QuerySections, W: ReportWrite>(
 /// view does after a throw, with `-html` where the report has its links,
 /// `PairwiseView::after_throw`, the answer that the model of the loads takes too,
 /// `FormatThrow::of`, and of the loads of its aligned subjects, `QuerySections::thrown`).
-fn alignment_end<'s, S: QuerySections>(
+pub(crate) fn alignment_end<'s, S: QuerySections>(
     sections: &'s S,
     group: &QueryGroup<'_>,
 ) -> Option<(usize, &'s crate::ncbi_exception::NcbiException)> {
@@ -830,7 +830,7 @@ pub(super) fn end_here(
 /// makes the Dense-segs of the HSPs of the aligned subjects that `html_links_densegs` does not
 /// pass over, for its links (`x_PreProcessSeqAlign`, `QuerySections::subject_densegs`), which
 /// can throw, before any alignment. One order for both writers (line RG T4b review a B1, N3).
-fn alignment_start<S: QuerySections, W: ReportWrite>(
+pub(crate) fn alignment_start<S: QuerySections, W: ReportWrite>(
     sections: &S,
     group: &QueryGroup<'_>,
     end: Option<(usize, &crate::ncbi_exception::NcbiException)>,

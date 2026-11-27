@@ -825,12 +825,36 @@ fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
 /// also a subject, `aln_mix::MixError::NcbiThrows`) fails the section with NCBI's exception before
 /// its first byte, as NCBI's leaves `DisplaySeqalign` there (`NcbiException::into_io_error`; the
 /// program's report ends with it, `cli::NativeError::of_writer`).
+#[inline(always)]
 pub(crate) fn write_section<W: Write + ?Sized>(
     writer: &mut W,
     view: View,
     line_length: usize,
     hsps: &Hsps,
     sequences: &dyn Sequences,
+) -> io::Result<()> {
+    write_decorated_section(
+        writer,
+        view,
+        line_length,
+        hsps,
+        sequences,
+        super::pairwise::PlainRows,
+    )
+}
+
+/// `write_section` with the query feature of `decoration` (PHI-BLAST's `pattern` row,
+/// `phi_round::PatternRow`) over the query's row of each line that it meets
+/// (`display_row_data_set`); `pairwise::PlainRows` has none.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2142-2162
+pub(crate) fn write_decorated_section<W: Write + ?Sized, D: super::pairwise::RowDecoration>(
+    writer: &mut W,
+    view: View,
+    line_length: usize,
+    hsps: &Hsps,
+    sequences: &dyn Sequences,
+    decoration: D,
 ) -> io::Result<()> {
     if hsps.is_empty() {
         return writer.write_all(b"\n");
@@ -870,7 +894,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
             }
             rows => rows?,
         };
-        display_rows(writer, &map, view, line_length, rows, sequences)?;
+        display_rows(writer, &map, view, line_length, rows, sequences, decoration)?;
     }
     Ok(())
 }
@@ -1547,13 +1571,14 @@ pub(crate) fn write_output_seq<W: io::Write + ?Sized>(
 /// (`j` stays below 2^31: an alignment of more than 2^30 columns would make NCBI's `int` wrap.
 /// An alignment of no columns, the merge of BLASTX HSPs of length 0 alone, ends at `TSeqPos`
 /// 4294967295, which `(int)` makes -1: no line.)
-fn display_rows<W: Write + ?Sized>(
+fn display_rows<W: Write + ?Sized, D: super::pairwise::RowDecoration>(
     writer: &mut W,
     map: &AlnMap<'_>,
     view: View,
     line_length: usize,
     mut rows: RowData,
     sequences: &dyn Sequences,
+    decoration: D,
 ) -> io::Result<()> {
     let aln_stop = i64::from(map.aln_stop() as i32);
     let mut prev_stop = vec![0i32; map.num_rows()];
@@ -1570,6 +1595,7 @@ fn display_rows<W: Write + ?Sized>(
             j,
             &mut prev_stop,
             sequences,
+            decoration,
         )?;
         writer.write_all(&out)?;
         j += line_length as i64;
@@ -1588,9 +1614,10 @@ fn add_space(out: &mut Vec<u8>, n: usize) {
 /// The identity test reads the letters before any mask puts them in lower case (`x_OutputSeq`
 /// masks a copy), so a masked identical letter is a `.`. The label is the whole id
 /// (`x_DisplaySequenceIDForQueryAnchored` without HTML, alignment statistics or sequence
-/// property labels).
+/// property labels). The query's row (row 0) has the feature row of `decoration` above it where
+/// the feature meets the line (`write_feature_line`).
 #[allow(clippy::too_many_arguments)]
-fn display_row_data_set(
+fn display_row_data_set<D: super::pairwise::RowDecoration>(
     out: &mut Vec<u8>,
     map: &AlnMap<'_>,
     view: View,
@@ -1599,6 +1626,7 @@ fn display_row_data_set(
     aln_start: i64,
     prev_stop: &mut [i32],
     sequences: &dyn Sequences,
+    decoration: D,
 ) -> io::Result<()> {
     let aln_stop = i64::from(map.aln_stop());
     let actual_line_len = if aln_stop - aln_start + 1 < line_length as i64 {
@@ -1626,6 +1654,11 @@ fn display_row_data_set(
                     if letters[index] == query[0][index] && letters[index].is_ascii_alphabetic() {
                         letters[index] = b'.';
                     }
+                }
+            }
+            if row == 0 {
+                if let Some(positions) = decoration.query_positions() {
+                    write_feature_line::<D>(out, map, rows, cur_range, positions);
                 }
             }
             out.extend_from_slice(&rows.labels[row]);
@@ -1659,6 +1692,48 @@ fn display_row_data_set(
     }
     out.push(b'\n');
     Ok(())
+}
+
+/// The feature row of the query positions `from..=to` (0-based) on the line of columns
+/// `line` (`x_PrintFeatures` of row 0), where the feature meets it: the positions clipped to the
+/// query row's (`GetSeqStart`, `GetSeqStop`) and taken to the alignment's columns
+/// (`GetAlnPosFromSeqPos`), `x_SetFeatureInfo`'s string of the alignment's width with the feature's
+/// letter over them, and of it the line's columns after the id and the margin of the rows' starts
+/// (no start is shown). A minus-strand query row has no feature here: PHI-BLAST's queries are
+/// proteins.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4352-4389
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2945-2969
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:900-916
+#[cold]
+fn write_feature_line<D: super::pairwise::RowDecoration>(
+    out: &mut Vec<u8>,
+    map: &AlnMap<'_>,
+    rows: &RowData,
+    line: (i64, i64),
+    (from, to): (u32, u32),
+) {
+    if !map.is_positive_strand(0) {
+        return;
+    }
+    let aln_from = i64::from(map.aln_pos_from_seq_pos(0, from.max(map.seq_start(0))));
+    let aln_to = i64::from(map.aln_pos_from_seq_pos(0, to.min(map.seq_stop(0))));
+    if aln_to < aln_from || !(line.0 <= aln_to && aln_from <= line.1) {
+        return;
+    }
+    out.extend_from_slice(D::FEATURE_ID.as_bytes());
+    add_space(
+        out,
+        (rows.max_id_len + 2 + rows.max_start_len + 2).saturating_sub(D::FEATURE_ID.len()),
+    );
+    out.extend((line.0..=line.1).map(|column| {
+        if (aln_from..=aln_to).contains(&column) {
+            D::FEATURE_CHAR
+        } else {
+            b' '
+        }
+    }));
+    out.push(b'\n');
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627

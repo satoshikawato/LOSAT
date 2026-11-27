@@ -1526,6 +1526,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         db_len_overflow,
         positives: Some(&positives),
         mask_char: b'X',
+        pattern: None,
     };
     // The definition line and message of every query, and the names of the subjects with hits,
     // made (and refused) before the first byte, for the written reports.

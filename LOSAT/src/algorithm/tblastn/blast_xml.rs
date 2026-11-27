@@ -487,6 +487,7 @@ impl PreparedXml {
             db_len_overflow: self.db_len_overflow,
             positives: Some(positives),
             mask_char: b'X',
+            pattern: None,
         });
         // The document's start (`StructuredXml::start`), before the first query's warnings, after
         // the refusal of the database counts that the written reports would print, also for a run

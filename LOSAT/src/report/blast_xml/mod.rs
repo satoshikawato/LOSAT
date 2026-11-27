@@ -49,5 +49,9 @@ pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.s
 /// (`CReference::GetString` of `eCompBasedStats`).
 pub const REFERENCE_COMP_BASED_STATS: &str = super::reference::Publication::CompBasedStats.string();
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:652-671
+/// `BlastOutput_reference` of psiblast's `-phi_pattern` (`CReference::GetString` of `ePhiBlast`).
+pub const REFERENCE_PHI_BLAST: &str = super::reference::Publication::PhiBlast.string();
+
 #[cfg(test)]
 mod tests;

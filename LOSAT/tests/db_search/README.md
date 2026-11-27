@@ -2112,6 +2112,13 @@ rows instead of 95; review 7 R7-S2 of D1a-3). Frozen with the local NCBI BLAST+ 
 9223372036854775808` over `../bslice` (row `db.cnt.l2p63b.bx_c0.16`: a database without parsed Seq-ids or taxonomy, so that
 only the report sums can make BLASTX's library hold its XML2 start before the refusal; review 3 R3-S1 of D1a-3).
 
+## psiblast -phi_pattern with a database sequence of the query's id (line PS, item PS8b)
+
+- `ps8b_qid` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/ps8b_qid_db.faa -dbtype prot -parse_seqids
+  -out tests/db_search/ps8b_qid` (NCBI BLAST+ 2.17.0, run from `LOSAT/`): its first sequence has the Seq-id of the
+  query `tests/fasta/psiblast/tk.faa` (`ref|YP_009220601.1|`, the query's first 181 letters), which NCBI's
+  `-parse_deflines` shows as the query in the tables of each pattern occurrence (rows `db.phi.qid.*`).
+
 ## psiblast's id options (line RG, series Q, Q1)
 
 - `q1_sq1` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/q1_subj_q1.faa -dbtype prot -parse_seqids

@@ -58,6 +58,8 @@ pub(crate) struct PhiPattern {
     pub(crate) min_match_length: i64,
     /// The pattern as NCBI saves it (`pattern_blk->pattern`): the raw text, upper-cased.
     pub(crate) text: Vec<u8>,
+    /// The raw text, as the options hold it (`GetPHIPattern`: BLAST XML's `Parameters_pattern`).
+    pub(crate) raw: Vec<u8>,
     /// One word: `match_mask` and `whichPositionPtr` (for each residue, the positions it matches).
     pub(crate) match_mask: i32,
     pub(crate) which_positions: [i32; BLASTAA_SIZE],
@@ -251,6 +253,7 @@ impl PhiPattern {
             probability: 1.0,
             min_match_length: 0,
             text,
+            raw: Vec::new(),
             match_mask: 0,
             which_positions: [0; BLASTAA_SIZE],
             num_words: 0,
@@ -281,6 +284,7 @@ impl PhiPattern {
         let text: Vec<u8> = raw.iter().map(u8::to_ascii_uppercase).collect();
         let prob = crate::stats::karlin_calc::compute_std_aa_composition();
         let mut blk = Self::blank(text.clone());
+        blk.raw = raw.to_vec();
         let mut flags = [0u8; PHI_MAX_PATTERN_LENGTH];
         let pattern = PatternBytes(&text);
         let length = text.len();

@@ -347,10 +347,11 @@ impl<'a> RoundSections<'a> {
         probe: Option<&mut FormatProbe<'_>>,
         group: &QueryGroup<'_>,
         s_idx: u32,
+        place: ReportHook<'_, W>,
         decoration: &D,
     ) -> io::Result<()> {
-        // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the rows have no spans, and
-        // `phi_round` places the subject's load posts itself.
+        // As the round's (`subject`): no mask spans; `phi_round` places the subject's load posts
+        // itself (`x_pairwise_par::alignment_start`).
         write_blastp_subject_part(
             writer,
             probe,
@@ -363,7 +364,47 @@ impl<'a> RoundSections<'a> {
             s_idx,
             0..group.subject_hits[&s_idx].len(),
             HtmlRowMasks::new(None, 0),
-            &mut |_, _| Ok(()),
+            place,
+            decoration,
+        )
+    }
+
+    /// The query-anchored section of the aligned subjects of a PHI-BLAST occurrence (`group`,
+    /// outfmt 1 to 4, `phi_round`): `alignments`' section with the occurrence's `pattern` row
+    /// (`query_anchored::write_decorated_section`). PHI-BLAST's query is a FASTA record, which the
+    /// display reads.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2161-2186
+    #[cold]
+    fn phi_alignments<W: crate::report::ostream::ReportWrite, D: RowDecoration>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: &QueryGroup<'_>,
+        decoration: D,
+    ) -> io::Result<()> {
+        let (PairwiseView::QueryAnchored { identity, anchored }, Some(sequences)) =
+            (self.config.view, self.anchored)
+        else {
+            return Err(io::Error::other(
+                "LOSAT internal error: a query-anchored report without its sequences",
+            ));
+        };
+        let hsps = super::blastp_section_hsps(
+            self.report.num_alignments,
+            group,
+            self.parsed_subjects,
+            |s_idx| sequences.subject_is_query(q_idx, s_idx),
+        );
+        crate::report::query_anchored::write_decorated_section(
+            writer,
+            crate::report::query_anchored::View {
+                identity,
+                anchored,
+                html: self.config.html.is_some(),
+            },
+            self.config.line_length,
+            &hsps,
+            &crate::report::query_anchored::OfQuery { sequences, q_idx },
             decoration,
         )
     }

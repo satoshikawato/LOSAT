@@ -144,6 +144,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         db_len_overflow: false,
         positives: matrix,
         mask_char: b'X',
+        pattern: None,
     }
 }
 

@@ -303,6 +303,28 @@ impl<'a> SeenFrom<'a> {
         };
         seen.hides_ordinal(queries.into_iter().map(|query| self.first + query), ordinal)
     }
+
+    /// psiblast `-phi_pattern`: the query Bioseqs of the call's query `query` as the reports of
+    /// its `results` pattern occurrences ask them, each occurrence a result of its own numbered
+    /// from 0 (`QueryBioseqs::numbered_from(0)` of the value): the scope of the query's batch
+    /// finds the same query for a sequence in the report of every occurrence.
+    #[cold]
+    pub fn of_occurrences(&self, query: usize, results: usize) -> QueryBioseqs {
+        let mut occurrences = QueryBioseqs::default();
+        let Some(seen) = self.seen else {
+            return occurrences;
+        };
+        for (&(of, ordinal), bioseq) in &seen.seen {
+            if of == self.first + query {
+                for occurrence in 0..results {
+                    occurrences
+                        .seen
+                        .insert((occurrence, ordinal), Arc::clone(bioseq));
+                }
+            }
+        }
+        occurrences
+    }
 }
 
 /// The frame that NCBI's tabular formatter computes for a translated subject whose Bioseq handle

@@ -16,8 +16,8 @@ use crate::utils::os_bytes::os_str_bytes;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` runs round 1 as a PHI-BLAST search (`algorithm::phi_search`; rounds after it are a
-// later item's refusal, `phi_rounds_refusal`).
+// `-phi_pattern` runs round 1 as a PHI-BLAST search (`algorithm::phi_search`) and the rounds after
+// it as psiblast's, from the PSSM of its first occurrence's result (`blast_engine::psi_round`).
 // The values are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`); the
 // checks that NCBI makes after reading them are blastp's (`BlastpArgs::check_options`, with
 // psiblast's program).
@@ -487,7 +487,7 @@ impl PsiblastArgs {
             // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
             // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
             let allowed = if phi {
-                matches!(choice.number, 0 | 5..=12 | 20)
+                matches!(choice.number, 0..=12 | 18 | 20)
             } else {
                 writes_outfmt(choice.number)
             };

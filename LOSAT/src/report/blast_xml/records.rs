@@ -9,6 +9,7 @@ use super::matrix::FormattingMatrix;
 use super::subjects::SubjectNames;
 
 /// What a whole search contributes to every document (`BlastOutput` and `Parameters`).
+#[derive(Clone, Copy)]
 pub struct XmlRun<'a> {
     /// `BlastOutput_program`: `Blast_ProgramNameFromType` (`blastn`, `blastp`, ...).
     pub program: &'static str,
@@ -52,6 +53,9 @@ pub struct XmlRun<'a> {
     /// The letter of a masked query position: `N` for BLASTN, `X` otherwise
     /// (blastxml_format.cpp:280-283).
     pub mask_char: u8,
+    /// `Parameters_pattern`: PHI-BLAST's pattern as its options hold it (psiblast
+    /// `-phi_pattern`, `GetPHIPattern`); `None` for every other search.
+    pub pattern: Option<&'a [u8]>,
 }
 
 impl XmlRun<'_> {

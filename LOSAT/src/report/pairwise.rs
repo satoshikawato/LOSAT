@@ -2337,9 +2337,13 @@ pub(crate) trait RowDecoration {
     /// The first and last alignment columns of the feature on the HSP of rows `rows`, `None`
     /// where it has none there.
     fn feature(&self, rows: &super::query_anchored::HspAlnVec) -> Option<(usize, usize)>;
+    /// The query positions `from..=to` (0-based) of the feature, which a query-anchored section
+    /// takes to its columns (`query_anchored::write_decorated_section`); `None` without one.
+    fn query_positions(&self) -> Option<(u32, u32)>;
 }
 
 /// The rows of every report but PHI-BLAST's: no feature.
+#[derive(Clone, Copy)]
 pub(crate) struct PlainRows;
 
 impl RowDecoration for PlainRows {
@@ -2348,6 +2352,11 @@ impl RowDecoration for PlainRows {
 
     #[inline(always)]
     fn feature(&self, _rows: &super::query_anchored::HspAlnVec) -> Option<(usize, usize)> {
+        None
+    }
+
+    #[inline(always)]
+    fn query_positions(&self) -> Option<(u32, u32)> {
         None
     }
 }

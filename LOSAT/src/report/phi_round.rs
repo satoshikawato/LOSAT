@@ -56,6 +56,7 @@ pub(crate) enum PhiFooter {
 /// query's record also under `-query_loc`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2142-2150
+#[derive(Clone, Copy)]
 pub(crate) struct PatternRow {
     pub(crate) from: u32,
     pub(crate) to: u32,
@@ -68,29 +69,38 @@ impl RowDecoration for PatternRow {
     fn feature(&self, rows: &crate::report::query_anchored::HspAlnVec) -> Option<(usize, usize)> {
         rows.query_columns(self.from, self.to)
     }
+
+    fn query_positions(&self) -> Option<(u32, u32)> {
+        Some((self.from, self.to))
+    }
 }
 
-/// The prolog of PHI-BLAST's outfmt 0 report (`PrintProlog` of `phiblastp`): its version line, the
-/// Gapped BLAST reference and the database's lines.
+/// The prolog of PHI-BLAST's outfmt 0 to 4 report (`PrintProlog` of `phiblastp`): its version
+/// line, the Gapped BLAST reference and the database's lines; with `-html` the page's head and the
+/// reference's link, whose registry reads post to `warnings` (`pairwise::html_with_diagnostics`).
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506
 pub(crate) fn write_phi_prolog(
     writer: &mut dyn ReportWrite,
     config: &PairwiseConfig,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the plain prolog.
-    write_prolog(
+    let prolog = write_prolog(
         writer,
         blastp_family_program(&config.program),
         &report.version,
         false,
         false,
         false,
-        None,
-    )?;
+        super::super::html_with_diagnostics(config.html_links(), warnings)?,
+    );
+    if let Err(error) = prolog {
+        let _ = writer.flush();
+        return Err(error);
+    }
     match database {
         Some(database) => write_blast_database_header(writer, database)?,
         None => write_blastp_database_header_spacing(
@@ -104,12 +114,14 @@ pub(crate) fn write_phi_prolog(
     writer.flush()
 }
 
-/// The outfmt 0 report of query `q_idx` of PHI-BLAST's round: `occurrence_hits[i]` are the rows of
-/// the HSPs of occurrence `i` (its result set), in its result's order, after the warnings of the
-/// queries `batch` (the batch's reading, from `q_idx` on) and the messages `result_warning` of the
-/// results (`query_warnings::phi_result_warning`), and the footer `footer`. No prolog, no epilog.
-/// `info` is `None` where NCBI's table had no Karlin block and nothing was searched: no pattern
-/// block, no hits.
+/// The outfmt 0 to 4 report of query `q_idx` of PHI-BLAST's round: `occurrence_hits[i]` are the
+/// rows of the HSPs of occurrence `i` (its result set), in its result's order, after the warnings
+/// of the queries `batch` (the batch's reading, from `q_idx` on) and the messages `result_warning`
+/// of the results (`query_warnings::phi_result_warning`), and the footer `footer`. No prolog, no
+/// epilog. `info` is `None` where NCBI's table had no Karlin block and nothing was searched: no
+/// pattern block, no hits. `anchored`: the sequences of outfmt 1 to 4, whose occurrences'
+/// alignments are each one query-anchored section with the pattern's row (`config.view`; `None`
+/// for outfmt 0). With `-html` the tables' and alignments' links are the psiblast round's.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2047
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2068-2199
 #[allow(clippy::too_many_arguments)]
@@ -131,6 +143,7 @@ pub(crate) fn write_phi_round_report(
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    anchored: Option<&dyn crate::report::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
@@ -154,7 +167,7 @@ pub(crate) fn write_phi_round_report(
             number: 1,
             found_before: None,
         },
-        anchored: None,
+        anchored,
     };
     // Each occurrence's group, its HSPs numbered over the query's report.
     let mut first_index: HspIndex = 0;
@@ -184,7 +197,12 @@ pub(crate) fn write_phi_round_report(
     let query_title = query_titles
         .get(q_idx)
         .map_or(&b""[..], |title| title.as_ref());
-    write_blastp_query_header(writer, query_title, queries[q_idx].query_length, false)?;
+    write_blastp_query_header(
+        writer,
+        query_title,
+        queries[q_idx].query_length,
+        config.html.is_some(),
+    )?;
     if let Some(info) = info {
         write_phi_info(writer, info)?;
     }
@@ -194,9 +212,17 @@ pub(crate) fn write_phi_round_report(
         return write_phi_footer(writer, &sections, q_idx, footer).and_then(|()| writer.flush());
     }
     // NCBI loads each subject that the query's batch did not prefetch at its description line,
-    // or one the tables do not show at its alignment's heading (`QueryWarnings::subject_read`).
+    // or one the tables do not show at its alignment's heading (`QueryWarnings::subject_read`);
+    // with `-html` its formatter reads its registries (`ReportPlace::Html`).
+    let links = sections.html_links();
     let mut place = |place: ReportPlace, writer: &mut io::BufWriter<RoundWriter<'_>>| {
-        crate::report::x_pairwise_par::at_place(warnings.as_deref_mut(), None, q_idx, place, writer)
+        crate::report::x_pairwise_par::at_place(
+            warnings.as_deref_mut(),
+            links,
+            q_idx,
+            place,
+            writer,
+        )
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2118-2128
     for group in &groups {
@@ -211,8 +237,7 @@ pub(crate) fn write_phi_round_report(
                 None,
                 |s_idx| sections.label(group, s_idx),
                 &mut place,
-                // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the plain table.
-                None,
+                sections.html_rows(),
                 None,
             )?,
             None => write_empty_table(writer, report.num_descriptions)?,
@@ -234,24 +259,48 @@ pub(crate) fn write_phi_round_report(
                 to: (offset + length).saturating_sub(1),
             };
             let aligned = group.aligned(report.num_alignments);
-            let end = crate::report::x_pairwise_par::aligned_end(
-                config.after_throw(),
-                aligned,
-                |s_idx| sections.thrown(s_idx),
-            );
-            // Each occurrence's alignments are one `CDisplaySeqalign` (its region and its flush).
+            let end = crate::report::x_pairwise_par::alignment_end(&sections, group);
+            // Each occurrence's alignments are one `CDisplaySeqalign` (its region and its flush):
+            // outfmt 0's of each subject in turn, or outfmt 1 to 4's one section, which loads
+            // every aligned subject before its first byte (none without one, `-num_alignments
+            // 0`).
             let mut display = DisplaySeqalign::default();
-            for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
-                place(ReportPlace::Load(s_idx), &mut *writer)?;
-                display.enter(writer)?;
-                sections.phi_subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
-            }
-            if let Some((_, exception)) = end {
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    warnings.end_run();
+            let merges = sections.merges_alignments();
+            for (position, &s_idx) in aligned.iter().enumerate() {
+                let started = crate::report::x_pairwise_par::alignment_start(
+                    &sections,
+                    group,
+                    end,
+                    position,
+                    s_idx,
+                    &mut *writer,
+                    &mut place,
+                );
+                if let Err(error) = started {
+                    // The load that throws ends the run there (`alignment_end`).
+                    if end.is_some_and(|(at, _)| at == position) {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                        writer.flush()?;
+                    }
+                    return Err(error);
                 }
-                writer.flush()?;
-                return Err(exception.clone().into_io_error());
+                if !merges {
+                    display.enter(writer)?;
+                    sections.phi_subject(
+                        writer,
+                        probe.as_deref_mut(),
+                        group,
+                        s_idx,
+                        &mut place,
+                        &pattern,
+                    )?;
+                }
+            }
+            if merges && !aligned.is_empty() {
+                display.enter(writer)?;
+                sections.phi_alignments(writer, q_idx, group, pattern)?;
             }
             display.leave(writer)?;
         }

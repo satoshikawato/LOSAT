@@ -12,6 +12,7 @@ use super::names::{self, Refusal};
 use super::records::HitTaxonomy;
 
 /// The subjects of a search, indexed by the subject number of its HSPs.
+#[derive(Clone, Copy)]
 pub enum XmlSubjects<'a> {
     /// A `-subject` set: the records as searched (`records[s_idx]`), named `Subject_N` with
     /// their titles; `length(s_idx)` is the record's own length (the whole record under

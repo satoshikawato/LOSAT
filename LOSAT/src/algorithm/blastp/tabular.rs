@@ -225,6 +225,64 @@ impl SubjectValues<'_> {
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// psiblast `-phi_pattern`: these subjects as the reports of the call's query `query`'s
+    /// `results` pattern occurrences show them, each occurrence a result of its own
+    /// (`report::query_bioseq::SeenFrom::of_occurrences`, whose value `occurrences` holds).
+    #[cold]
+    pub(crate) fn of_occurrences<'b>(
+        &self,
+        query: usize,
+        results: usize,
+        occurrences: &'b mut crate::report::query_bioseq::QueryBioseqs,
+    ) -> TabularSubjects<'b>
+    where
+        'a: 'b,
+    {
+        match *self {
+            TabularSubjects::Records {
+                records,
+                ids,
+                accessions,
+                parsed,
+                length,
+            } => TabularSubjects::Records {
+                records,
+                ids,
+                accessions,
+                parsed,
+                length,
+            },
+            TabularSubjects::Database {
+                ids,
+                accessions,
+                ordinals,
+                oids,
+                titles,
+                parsed,
+                sources,
+                length,
+                taxonomy,
+                loads,
+                seen,
+            } => {
+                *occurrences = seen.of_occurrences(query, results);
+                TabularSubjects::Database {
+                    ids,
+                    accessions,
+                    ordinals,
+                    oids,
+                    titles,
+                    parsed,
+                    sources,
+                    length,
+                    taxonomy,
+                    loads,
+                    seen: occurrences.numbered_from(0),
+                }
+            }
+        }
+    }
+
     /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
     /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
     pub(super) fn seen_at(
@@ -601,12 +659,7 @@ pub(super) fn write_blastp_tax_report(
     warnings: Option<&mut QueryWarnings<'_>>,
     html: bool,
 ) -> Result<()> {
-    use crate::report::tax_report::{report_batch, write_report, TaxHsp, TaxPlain, TaxQuery};
-    let parsed = match &tab.subjects {
-        TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
-            *parsed
-        }
-    };
+    use crate::report::tax_report::{report_batch, write_report, TaxQuery};
     let queries: Vec<TaxQuery<'_>> = hit_lists
         .iter()
         .enumerate()
@@ -617,21 +670,61 @@ pub(super) fn write_blastp_tax_report(
                 .map_or(&b""[..], |title| title.as_ref()),
             length: record_lengths.get(q_idx).copied().unwrap_or_default(),
             // A query of a batch that NCBI did not search has no Seq-align-set.
-            hsps: (!tab.unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
-                hit_list
-                    .iter()
-                    .flat_map(reported)
-                    .flat_map(|hsp_list| &hsp_list.hsps)
-                    .map(|hsp| TaxHsp {
-                        subject: hsp.s_idx as usize,
-                        evalue: hsp.e_value,
-                        bit_score: hsp.bit_score,
-                    })
-                    .collect()
-            }),
+            hsps: (!tab.unsearched.get(q_idx).copied().unwrap_or(false))
+                .then(|| tax_hsps(hit_list.as_ref())),
         })
         .collect();
-    let plain = |s_idx: usize| match &tab.subjects {
+    let (parsed, plain, loads) = tax_subjects(tab);
+    let seen = |q_idx: usize, s_idx: usize| tab.subjects.seen_at(q_idx, s_idx);
+    let report = report_batch(
+        &queries,
+        parsed,
+        plain,
+        true,
+        loads,
+        tab.names,
+        tab.app.name(),
+        tab.app.ncbi_name(),
+        html,
+        Some(&seen),
+    )?;
+    write_report(writer, warnings, &queries, &report)?;
+    Ok(())
+}
+
+/// The organism report's HSPs of the final hit list `hit_list` (`TaxHsp`), in its order.
+#[inline(always)]
+fn tax_hsps(hit_list: Option<&BlastpHitList>) -> Vec<crate::report::tax_report::TaxHsp> {
+    hit_list
+        .into_iter()
+        .flat_map(reported)
+        .flat_map(|hsp_list| &hsp_list.hsps)
+        .map(|hsp| crate::report::tax_report::TaxHsp {
+            subject: hsp.s_idx as usize,
+            evalue: hsp.e_value,
+            bit_score: hsp.bit_score,
+        })
+        .collect()
+}
+
+/// What the organism report reads of the subjects of `tab` (`tax_report::report_batch`): their
+/// parsed Seq-ids, each subject's plain values (`TaxPlain`) and the database's loads.
+#[inline(always)]
+#[allow(clippy::type_complexity)]
+fn tax_subjects<'t>(
+    tab: &'t BlastpTabular<'_>,
+) -> (
+    &'t [Option<Arc<ParsedSubject>>],
+    impl Fn(usize) -> crate::report::tax_report::TaxPlain<'t> + 't,
+    Option<&'t crate::report::db_subject::HitLoads>,
+) {
+    use crate::report::tax_report::TaxPlain;
+    let parsed = match &tab.subjects {
+        TabularSubjects::Records { parsed, .. } | TabularSubjects::Database { parsed, .. } => {
+            *parsed
+        }
+    };
+    let plain = move |s_idx: usize| match &tab.subjects {
         TabularSubjects::Records { records, .. } => TaxPlain::Record {
             local_id: records[s_idx].local_id.as_bytes(),
             title: &records[s_idx].title,
@@ -654,7 +747,56 @@ pub(super) fn write_blastp_tax_report(
         TabularSubjects::Records { .. } => None,
         TabularSubjects::Database { loads, .. } => Some(*loads),
     };
-    let seen = |q_idx: usize, s_idx: usize| tab.subjects.seen_at(q_idx, s_idx);
+    (parsed, plain, loads)
+}
+
+/// One batch of PHI-BLAST's organism report (`write_phi_tax_report`): its queries (the call's),
+/// its query with letters (`searched`), its messages, each result's query (whose title and record
+/// length head its report) and final hit list (one for each occurrence), and whether NCBI
+/// searched it.
+pub(super) struct PhiTaxBatch {
+    pub(super) queries: std::ops::Range<usize>,
+    pub(super) searched: usize,
+    pub(super) messages: Vec<u8>,
+    pub(super) results: Vec<(usize, Option<BlastpHitList>)>,
+    pub(super) unsearched: bool,
+}
+
+/// psiblast `-phi_pattern`: the organism report (outfmt 18) of PHI-BLAST's batches `batches`
+/// (`PrintPhiResult`): for each, the warnings of its queries (`QueryWarnings::before_query`), its
+/// messages, the caption once, then the report of each occurrence in turn
+/// (`TaxReport::write_result`) under the title and length of its first query; a sequence that
+/// the scope finds as the query shows it in each (`seen_at` of the batch's query with letters).
+/// The reports are made before the first byte (`tax_report::report_batch`). The texts of the
+/// subjects' reads are not placed by query here (the warnings' sink takes the lookups' texts).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2058-2065
+#[cold]
+pub(super) fn write_phi_tax_report(
+    tab: &BlastpTabular<'_>,
+    record_lengths: &[usize],
+    batches: &[PhiTaxBatch],
+    writer: &mut crate::cli::NcbiOstream<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+    html: bool,
+) -> Result<()> {
+    use crate::report::tax_report::{report_batch, TaxQuery};
+    let mut queries = Vec::new();
+    let mut query_of = Vec::new();
+    for batch in batches {
+        for (q_idx, list) in &batch.results {
+            queries.push(TaxQuery {
+                title: tab
+                    .query_titles
+                    .get(*q_idx)
+                    .map_or(&b""[..], |title| title.as_ref()),
+                length: record_lengths.get(*q_idx).copied().unwrap_or_default(),
+                hsps: (!batch.unsearched).then(|| tax_hsps(list.as_ref())),
+            });
+            query_of.push(batch.searched);
+        }
+    }
+    let (parsed, plain, loads) = tax_subjects(tab);
+    let seen = |result: usize, s_idx: usize| tab.subjects.seen_at(query_of[result], s_idx);
     let report = report_batch(
         &queries,
         parsed,
@@ -667,7 +809,37 @@ pub(super) fn write_blastp_tax_report(
         html,
         Some(&seen),
     )?;
-    write_report(writer, warnings, &queries, &report)?;
+    let mut result = 0;
+    for batch in batches {
+        if let Some(warnings) = warnings.as_deref_mut() {
+            for q_idx in batch.queries.clone() {
+                warnings.before_query(q_idx, &mut *writer)?;
+            }
+        }
+        writer.write_all(&batch.messages)?;
+        report.write_caption(writer)?;
+        for _ in &batch.results {
+            let query = &queries[result];
+            match warnings.as_deref_mut() {
+                Some(warnings) => {
+                    let (_, sink) = warnings.reads_and_sink();
+                    report.write_result(result, writer, sink, None, query.title, query.length)?;
+                }
+                None => report.write_result(
+                    result,
+                    writer,
+                    &mut std::io::sink(),
+                    None,
+                    query.title,
+                    query.length,
+                )?,
+            }
+            result += 1;
+        }
+    }
+    if let Some(warnings) = warnings {
+        warnings.after_last_query(batches.last().map_or(0, |batch| batch.queries.end), writer)?;
+    }
     Ok(())
 }
 

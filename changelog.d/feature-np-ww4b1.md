@@ -14,3 +14,6 @@
   (`m` and `./m`, or a folder through a symbolic link) are refused as on the command line, instead of
   writing both masks into one file; names are resolved through symbolic links as `realpath(3)` does
   where the platform has no `canonicalize`.
+- LOSAT Web's engine reads a file that a run reads in order (makeblastdb's input FASTA, a database's
+  files) from the browser in larger pieces, up to 1 MiB ahead: makeblastdb of a 146 MB genome FASTA
+  makes 143 reads of the file instead of 4,474 and runs 2 to 4 times faster in Chromium.

@@ -14,7 +14,8 @@
 // `FileReaderSync`, so a file is never copied whole into the Wasm memory or into the browser's storage. A file read in
 // order is read ahead, as an OS reads ahead (`readBase`): a read of a Blob costs about a millisecond up to a few hundred
 // KiB, whatever it takes (the browser's process reads the file), so makeblastdb's FASTA reader, which asks for 32 KiB at
-// a time, spent 87 % of its run in those reads (line NP WW4b1, 2026-11-27: 9.3 of 10.7 s for 146 MB in Chromium). The
+// a time, spent 83 to 87 % of its run in those reads (line NP WW4b1, 2026-11-27: 4,474 reads of a 146 MB genome in
+// Chromium; 143 with the read-ahead). The
 // Node hosts of LOSAT's tests give the engine the same view from the OS
 // (LOSAT/tests/wasi_thread_worker.js, `preopens: { "/work": directory }`).
 //

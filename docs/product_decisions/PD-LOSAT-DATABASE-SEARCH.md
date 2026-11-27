@@ -1311,7 +1311,14 @@ error stops the run after that query (where the query's report read the sequence
 lookup of the run wrote the texts of opening, there is nothing to write). NCBI's scope does not keep a
 query's sequences for its later rounds and queries: a read of a sequence loaded before loads it again
 or not (after 40 other included subjects it does, after none it does not), which writes nothing where
-the slot holds that taxid either way. Refused: an id that
+the slot holds that taxid either way. Where NCBI's scope and data loader give another sequence for
+the id when the PSSM reads it after the round's report (a sequence loaded before that holds the id,
+also by an earlier query or round of the run, or one that the scope matches weakly), the read takes
+that sequence's letters, or NCBI's warning and the query's letters where they end before the range
+does (line DBID hr-3, 2026-11-27); refused there: such a read where LOSAT does not know which sequence
+NCBI gives (an order of its loads that their Seq-ids do not decide, a handle at the limit of the
+loader's 1,000), or where that sequence's load can write texts of a damaged taxonomy database or the
+warning of a UTF8String header. Refused: an id that
 another sequence also holds besides the one the lookup gives (NCBI's scope can read that one where it
 has read it before, and with the prefetch on as its memory layout falls), a lookup that fails on a
 file, the same record whose read writes taxonomy texts, in a batch whose prefetch is off an id that

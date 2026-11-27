@@ -22,7 +22,7 @@
 //! the reports read of the final hit lists' Seq-aligns, psiblast's cut and PSSMs among them
 //! (`report_values`), and the labels of the reports (`report_labels`). They read `ReportSetup`,
 //! and of `blast_engine` also `ShownSubjects`, `ShownQueries`, `ShownLetters`,
-//! `BlastpSubjectSource`, `psiblast_pssms`, `recount_shown_identities`, `write_pairwise_prologs`,
+//! `BlastpSubjectSource`, `psiblast_pssm_aligns`, `recount_shown_identities`, `write_pairwise_prologs`,
 //! `write_request_posts`, `blastp_subject_tag` and `path_label`.
 
 use std::ops::Range;
@@ -50,7 +50,7 @@ use crate::report::query_warnings::SubjectReads;
 /// `subject_records` and `subject_titles` are those that the reports show, a database's listed
 /// subjects' or the subject set's; `format_plans` is the requested formats). The values that
 /// `run_call` makes for the prefetch (`batches_prefetch` to `batch_prefetch`) and for the PSSMs
-/// (`pssm_made`, `pssm_reads`) come last.
+/// (`pssm_reads` to `gapped_params`, the search's) come last.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-758
 pub(super) struct ReportPrep<'a, 'o> {
@@ -82,8 +82,10 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) pre_prune_replaced_titles: &'a [Option<usize>],
     pub(super) batch_ranges: &'a [Range<usize>],
     pub(super) batch_prefetch: &'a BatchPrefetch,
-    pub(super) pssm_made: bool,
     pub(super) pssm_reads: &'a database::PssmReads,
+    pub(super) pssm_making: &'a psi_round::PssmMaking<'a>,
+    pub(super) contexts: &'a [QueryContext],
+    pub(super) gapped_params: &'a KarlinParams,
 }
 
 /// The warning lines of each query of the call, which the first format writes once, before the
@@ -286,13 +288,13 @@ pub(super) fn prefetch_reported_subjects(
         pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
-        pssm_made,
         pssm_reads,
         query_records,
         psi_found_before,
         prefetch_format,
         ..
     } = *prep;
+    let pssm_made = prep.pssm_making.made;
     // Whether the reports write the same where every load of a subject with a positive taxid throws
     // (`db_subject::unchanged_by_load_throws`, of psiblast's formats as of blastp's, as
     // `query_warning_lines` reads them); psiblast's PSSM reads no letters of such a subject
@@ -420,6 +422,9 @@ pub(super) fn prefetch_reported_subjects(
     // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
+    // The PSSMs, whose reads come after the round's reports (`make_pssms`); a read that LOSAT
+    // does not make as NCBI is refused after the reports' refusals, below.
+    let pssm_refusal = make_pssms(prep, &hit_loads, psiblast_pssms)?;
     if let Some(titles) = listed_titles.as_ref() {
         let db = database.expect("listed titles are a database's");
         let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
@@ -472,11 +477,11 @@ pub(super) fn prefetch_reported_subjects(
                 |words, outfmt| words.or(outfmt.printed_ids()),
             ),
         )?;
-        // A PSSM read whose failing lookup NCBI answers with a sequence loaded before (by the
-        // run's record, the reports and the reads before it), as a report's (`HitLoad::Held`):
-        // after the reports' refusals, as NCBI reads the PSSM after the round's reports.
-        if let (true, Some(database)) = (pssm_made, database) {
-            titles.check_pssm_holds(database, pssm_reads, &hit_loads)?;
+        // A PSSM read that another sequence answers where LOSAT does not know which, or whose
+        // load's texts it does not model (`ListedTitles::pssm_holds`): after the reports'
+        // refusals, as NCBI reads the PSSM after the round's reports.
+        if let Some(refusal) = pssm_refusal {
+            return Err(refusal);
         }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
@@ -625,9 +630,15 @@ pub(super) fn prefetch_reported_subjects(
                     let mut ranks: Vec<usize> = database::ListedTitles::fetched_ranks(hits, rows)
                         .filter(|&rank| hit_loads_ref.loaded(rank))
                         .collect();
+                    // A PSSM read that another sequence answers loads none of the subject's own
+                    // (`HitLoads::read_after`).
                     if pssm_made {
                         for query in span {
-                            ranks.extend_from_slice(pssm_reads.one_by_one(query));
+                            ranks.extend(
+                                pssm_reads.one_by_one(query).iter().filter(|&&rank| {
+                                    hit_loads_ref.read_after(query, rank).is_none()
+                                }),
+                            );
                         }
                     }
                     ranks
@@ -934,6 +945,38 @@ pub(super) fn prefetch_reported_subjects(
         posts,
         hit_loads,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-299 (cited at
+// `report_values`: a round's reports, then the PSSM for the next round)
+/// The call's PSSMs (`psi_round::PssmMaking`), made after its walk of the loads `hit_loads`
+/// answered their reads by the subjects' Seq-align ids (`ListedTitles::pssm_holds`, which gives
+/// the reads that another sequence answers its letters): `-out_pssm`'s into `files`. Returns
+/// LOSAT's refusal of a read that it does not make as NCBI, for after the reports' refusals.
+fn make_pssms(
+    prep: &ReportPrep<'_, '_>,
+    hit_loads: &crate::report::db_subject::HitLoads,
+    files: &mut Option<PssmFiles>,
+) -> Result<Option<anyhow::Error>> {
+    let refusal = match (
+        prep.pssm_making.made,
+        prep.listed_titles.as_ref(),
+        prep.database,
+    ) {
+        (true, Some(titles), Some(database)) => {
+            titles.pssm_holds(database, prep.pssm_reads, hit_loads, prep.batch_prefetch)?
+        }
+        _ => None,
+    };
+    prep.pssm_making.make(
+        prep.args,
+        (prep.contexts, prep.gapped_params, prep.database),
+        prep.ranges,
+        prep.reports.psi_round,
+        prep.pssm_reads,
+        files,
+    )?;
+    Ok(refusal)
 }
 
 /// Refuse, before any format of the call is written, what LOSAT does not report as NCBI does
@@ -1287,7 +1330,7 @@ pub(super) fn described_in<'r>(
 // rows of the reports. `hit_list_to_seqalign_order` is `blast_engine`'s import (from `hsp`),
 // which only this module reads.
 use super::{
-    blastp_subject_tag, hit_list_to_seqalign_order, psiblast_pssms, recount_shown_identities,
+    blastp_subject_tag, hit_list_to_seqalign_order, psiblast_pssm_aligns, recount_shown_identities,
     write_pairwise_prologs, write_request_posts, BlastpSubjectSource, ShownLetters, ShownQueries,
     ShownSubjects,
 };
@@ -1501,14 +1544,16 @@ pub(super) fn shown_of<'a>(
 }
 
 /// What `report_values` makes for the reports, each `run_call`'s value of the same name: the
-/// prefetch of each batch (`batches_prefetch` to `batch_prefetch`), the PSSMs' reads, files and
-/// round outcome (`pssm_reads` to `pssm_made`), psiblast's numbers of HSPs before its cut by query
+/// prefetch of each batch (`batches_prefetch` to `batch_prefetch`), the PSSMs' reads, files
+/// (those made before a PSSM's stop; the others are made after the call's walk of the loads,
+/// `pssm_making`, which also says whether the call makes one) and round outcome (`pssm_reads` to
+/// `psi_found_before`), psiblast's numbers of HSPs before its cut by query
 /// (`psiblast_hits_found`), and the engine's identity counts of the HSPs that the recount changed
 /// (`engine_counts`).
 ///
 /// No NCBI counterpart: LOSAT's values between its Seq-aligns and its reports; NCBI's result set
 /// and formatter hold theirs (`report_values`).
-pub(super) struct ReportValues {
+pub(super) struct ReportValues<'a> {
     pub(super) prefetch_format: crate::algorithm::common::database::PrefetchFormat,
     pub(super) batches_prefetch: bool,
     pub(super) prefetch_taxids: bool,
@@ -1519,8 +1564,8 @@ pub(super) struct ReportValues {
     pub(super) batch_prefetch: BatchPrefetch,
     pub(super) pssm_reads: database::PssmReads,
     pub(super) psiblast_pssms: Option<PssmFiles>,
+    pub(super) pssm_making: psi_round::PssmMaking<'a>,
     pub(super) psi_found_before: Option<psi_round::FoundBefore>,
-    pub(super) pssm_made: bool,
     pub(super) psiblast_hits_found: Option<Vec<usize>>,
     pub(super) engine_counts: EngineCounts,
 }
@@ -1550,13 +1595,13 @@ pub(super) fn prefetch_format(
 /// (`recount_shown_identities`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1551
-pub(super) fn report_values(
+pub(super) fn report_values<'a>(
     setup: &ReportSetup<'_>,
-    listed_subjects: &Option<database::ListedSubjects>,
-    listed_titles: &Option<database::ListedTitles<'_>>,
-    shown_subjects: ShownSubjects<'_>,
+    listed_subjects: &'a Option<database::ListedSubjects>,
+    listed_titles: &'a Option<database::ListedTitles<'_>>,
+    shown_subjects: ShownSubjects<'a>,
     hit_lists: &mut [Option<BlastpHitList>],
-) -> Result<ReportValues> {
+) -> Result<ReportValues<'a>> {
     let ReportSetup {
         args,
         reports,
@@ -1651,8 +1696,9 @@ pub(super) fn report_values(
         });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:291-309
     // psiblast's PSSM is made from the Seq-aligns of the round's results, before the
-    // formatter's cut; its files are staged here (`psiblast_pssms`) and written after the
-    // reports (`run_call`'s `output_result`). A refusal between here and the reports
+    // formatter's cut (kept here, `psi_round::PssmMaking`); its files are staged after the call's
+    // walk of the loads (`psiblast_pssms`, `prefetch_reported_subjects`) and written after the
+    // reports (`run_call`'s `output_result`). A refusal between there and the reports
     // (`refuse_unreportable` in `run_call`) or a report write error drops them: no PSSM file has
     // changed (`PssmFiles`).
     // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the first format and
@@ -1747,14 +1793,16 @@ pub(super) fn report_values(
     if args.psi_pssm.is_some() {
         pssm_reads.check()?;
     }
+    let listed_ordinals = listed_subjects
+        .as_ref()
+        .zip(database)
+        .map(|(listed, database)| (listed.ordinals.as_slice(), database.oid_map()));
+    let parsed = listed_titles
+        .as_ref()
+        .map_or(&[][..], |titles| titles.parsed.as_slice());
     let subject_keys = psi_round::SubjectKeys {
-        listed_ordinals: listed_subjects
-            .as_ref()
-            .zip(database)
-            .map(|(listed, database)| (listed.ordinals.as_slice(), database.oid_map())),
-        parsed: listed_titles
-            .as_ref()
-            .map_or(&[][..], |titles| titles.parsed.as_slice()),
+        listed_ordinals,
+        parsed,
         reads: &pssm_reads,
     };
     // The search again of the queries up to a PSSM's stop takes the PSSMs made before it
@@ -1762,47 +1810,50 @@ pub(super) fn report_values(
     let stopped_pssms = reports
         .stopped_pssms
         .and_then(|stopped| stopped.lock().expect("the stopped PSSMs").take());
-    let psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles> =
-        match args.psi_pssm.as_ref() {
-            Some(_) if stopped_pssms.is_some() => stopped_pssms,
-            Some(request) => Some(psiblast_pssms(
-                args,
-                request,
-                hit_lists,
-                ranges,
-                shown_subjects,
-                contexts,
-                gapped_params,
-                subject_keys,
-            )?),
-            None => None,
-        };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-299
+    // NCBI makes a round's PSSM after the round's reports, from its Seq-aligns before the
+    // formatter's cut, and its reads of the subjects' letters by their Seq-align ids resolve in
+    // the scope that the reports left: the PSSMs are made where the call's walk of the loads has
+    // answered those reads (`psi_round::PssmMaking`, `prefetch_reported_subjects`), from the
+    // Seq-aligns kept here; their refusals are made here.
+    let psiblast_aligns = match args.psi_pssm.as_ref() {
+        Some(_) if stopped_pssms.is_some() => None,
+        Some(_) => Some(psiblast_pssm_aligns(args, hit_lists, ranges, subject_keys)?),
+        None => None,
+    };
     // psiblast's rounds: the round's outcome (its inclusion set and the next round's PSSM, from
     // the same Seq-aligns), and the subjects of the previous round's set for its two-part table
     // (`psi_round::round_outcome`).
-    let psi_found_before: Option<psi_round::FoundBefore> = match reports.psi_round {
+    let (psi_found_before, next_aligns) = match reports.psi_round {
         Some(io) => psi_round::round_outcome(
             args,
             io,
             hit_lists,
             ranges,
-            shown_subjects,
             contexts,
             gapped_params,
             subject_keys,
         )?,
-        None => None,
+        None => (None, None),
     };
     // The PSSM of each round that makes the next round's PSSM (review 1 of line DBID weakbatch,
     // H1: psiblast_app.cpp:291-309 `ComputePssmForNextIteration`) reads the letters of the
     // subjects before the cut by their Seq-align ids.
-    if let Some(io) = reports.psi_round {
-        if io.makes_next() {
-            pssm_reads.check()?;
-        }
+    if next_aligns.is_some() {
+        pssm_reads.check()?;
     }
     // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
-    let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
+    let pssm_made = args.psi_pssm.is_some() || next_aligns.is_some();
+    let pssm_making = psi_round::PssmMaking {
+        files: psiblast_aligns,
+        next: next_aligns,
+        shown_subjects,
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
+        parsed,
+        made: pssm_made,
+    };
     if prunes_lists && !cuts_before_pssm {
         cut_lists(hit_lists);
     }
@@ -1831,9 +1882,9 @@ pub(super) fn report_values(
         batch_ranges,
         batch_prefetch,
         pssm_reads,
-        psiblast_pssms,
+        psiblast_pssms: stopped_pssms,
+        pssm_making,
         psi_found_before,
-        pssm_made,
         psiblast_hits_found,
         engine_counts,
     })

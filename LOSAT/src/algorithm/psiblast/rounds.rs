@@ -263,20 +263,9 @@ pub(crate) struct PsiRoundIo {
 }
 
 impl PsiRoundIo {
-    /// Whether the round makes the PSSM of the next round, or the last one that is saved
-    /// (`RoundOutcome::next`): it reads the letters of every subject of the round's Seq-aligns
-    /// before the formatter's cut, by its Seq-align id.
-    pub(crate) fn makes_next(&self) -> bool {
-        self.outcome
-            .lock()
-            .expect("the round's outcome")
-            .as_ref()
-            .is_some_and(|outcome| outcome.next.is_some())
-    }
-
     /// Whether the round can make a PSSM, whatever its inclusion set: another round can follow it
     /// (`-num_iterations` 0, or a round before the last) or the last PSSM is saved. Before the
-    /// round's outcome (`makes_next`), a round that cannot reads no letter of its subjects from
+    /// round's outcome (whether it makes one, `RoundOutcome::next`), a round that cannot reads no letter of its subjects from
     /// NCBI's scope (`report::query_bioseq`).
     pub(crate) fn may_make_next(&self) -> bool {
         self.save_last || self.state.total == 0 || self.state.done + 1 < self.state.total

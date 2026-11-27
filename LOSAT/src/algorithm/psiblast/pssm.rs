@@ -324,9 +324,77 @@ impl<'a> PssmAlignment<'a> {
     /// takes letters (`x_GetSubjectSequence`'s `CSeqVector` of that range, cited at `input_msa`):
     /// the end of the range; a shorter one throws, and the read gets none. The one rule of
     /// `input_msa` and of LOSAT's refusal of a read held by another sequence
-    /// (`ListedTitles::check_pssm_holds` of BLASTP; review 5 of line DBID pfoff-4, H1).
+    /// (`ListedTitles::pssm_holds` of BLASTP; review 5 of line DBID pfoff-4, H1).
     pub(crate) fn subject_end(&self) -> usize {
         self.s_start + subject_span(self)
+    }
+}
+
+/// One query's Seq-aligns as the PSSM reads them ([`PssmAlignment`], in their order), kept apart
+/// from the hit lists: psiblast makes a round's PSSMs after the round's reports, where NCBI reads
+/// the subjects' letters for them (`ComputePssmForNextIteration`, cited at
+/// `blast_engine::report_prep::report_values`), from the Seq-aligns before the formatter's cut,
+/// which the reports' hit lists no longer hold by then. One flat list of the operations; the
+/// call drops it once its PSSMs are made.
+#[derive(Default)]
+pub(crate) struct PssmSeqAligns {
+    kept: Vec<KeptAlignment>,
+    ops: Vec<GapEditOp>,
+}
+
+/// A [`PssmAlignment`] of [`PssmSeqAligns`]: its operations are `ops[start..end]` of the list
+/// (`None` for an ungapped one).
+struct KeptAlignment {
+    subject: u32,
+    e_value: f64,
+    q_start: usize,
+    s_start: usize,
+    q_length: usize,
+    ops: Option<(u32, u32)>,
+}
+
+impl PssmSeqAligns {
+    /// The Seq-aligns `alignments`, in their order.
+    pub(crate) fn of<'a>(alignments: impl IntoIterator<Item = PssmAlignment<'a>>) -> Self {
+        let mut aligns = Self::default();
+        for alignment in alignments {
+            let ops = alignment.ops.map(|ops| {
+                let start = aligns.ops.len() as u32;
+                aligns.ops.extend_from_slice(ops);
+                (start, aligns.ops.len() as u32)
+            });
+            aligns.kept.push(KeptAlignment {
+                subject: alignment.subject,
+                e_value: alignment.e_value,
+                q_start: alignment.q_start,
+                s_start: alignment.s_start,
+                q_length: alignment.q_length,
+                ops,
+            });
+        }
+        aligns
+    }
+
+    /// The Seq-aligns, in their order.
+    pub(crate) fn alignments(&self) -> Vec<PssmAlignment<'_>> {
+        self.kept
+            .iter()
+            .map(|kept| PssmAlignment {
+                subject: kept.subject,
+                e_value: kept.e_value,
+                q_start: kept.q_start,
+                s_start: kept.s_start,
+                q_length: kept.q_length,
+                ops: kept
+                    .ops
+                    .map(|(start, end)| &self.ops[start as usize..end as usize]),
+            })
+            .collect()
+    }
+
+    /// Whether there is no Seq-align (a query without alignments makes no PSSM).
+    pub(crate) fn is_empty(&self) -> bool {
+        self.kept.is_empty()
     }
 }
 

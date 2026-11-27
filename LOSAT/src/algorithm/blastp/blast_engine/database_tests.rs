@@ -2178,3 +2178,23 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
     }
     std::fs::remove_dir_all(&cwd).unwrap();
 }
+
+#[test]
+fn a_pssm_read_held_after_the_report_takes_the_holders_letters_first() {
+    // Line DBID hr-3: the reads that another sequence holds after the query's report
+    // (`ListedTitles::pssm_holds`) answer before the lookup's (`read`) and the subject's own
+    // letters, for that query only.
+    let mut reads = PssmReads::default();
+    reads.read.insert(2, None);
+    let own = || Ok(b"OWN".to_vec());
+    assert_eq!(reads.letters(0, 2, own).unwrap(), None);
+    assert_eq!(reads.letters(0, 3, own).unwrap(), Some(b"OWN".to_vec()));
+    let held =
+        std::collections::BTreeMap::from([((0, 2), Some(b"HOLDER".to_vec())), ((1, 3), None)]);
+    assert!(reads.held.set(held).is_ok());
+    assert_eq!(reads.letters(0, 2, own).unwrap(), Some(b"HOLDER".to_vec()));
+    assert!(reads.is_held(0, 2) && !reads.is_held(1, 2));
+    assert_eq!(reads.letters(1, 2, own).unwrap(), None);
+    assert_eq!(reads.letters(1, 3, own).unwrap(), None);
+    assert_eq!(reads.letters(0, 3, own).unwrap(), Some(b"OWN".to_vec()));
+}

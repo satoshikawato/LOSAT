@@ -30,7 +30,7 @@ use crate::algorithm::blastp::args::{BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
 use crate::algorithm::psiblast::pssm::{
     ncbistdaa_letters, query_pssm, seqalign_pssm_evalue, PssmAlignment, PssmAncillary,
-    PssmQueryRecord, PssmScoring, QueryPssm,
+    PssmQueryRecord, PssmScoring, PssmSeqAligns, QueryPssm,
 };
 use crate::algorithm::psiblast::rounds::{
     HandleIndex, InclusionSet, IterationState, PsiRoundIo, PsiRoundPlan, RoundFiles, RoundOutcome,
@@ -905,11 +905,13 @@ fn engine_block(params: &KarlinParams) -> KarlinBlk {
 
 /// The outcome of one round's search (`PsiRoundIo::outcome`), from the round's hit list of its
 /// one query before the formatter's cut (`psiblast_pssms`' Seq-aligns): whether it has
-/// alignments, its inclusion set, and where NCBI makes one the next round's PSSM (an error of
-/// the engine is kept for after the round's report). Returns, when the previous round's set is
-/// not empty, whether each subject of the round (by subject index, a database's by rank) is in
-/// it, for the two-part description table (`psiblast_round::ReportRound`, `FoundBefore`).
-/// Refuses keys of the inclusion sets that NCBI's handles can take for one (`HandleIndex`).
+/// alignments and its inclusion set. Returns, when the previous round's set is not empty,
+/// whether each subject of the round (by subject index, a database's by rank) is in it, for the
+/// two-part description table (`psiblast_round::ReportRound`, `FoundBefore`); and where NCBI
+/// makes one the next round's PSSM, the Seq-aligns from which the call makes it after the round's
+/// reports (`PssmMaking::make`, `RoundOutcome::next`; an error of the engine is kept for after the
+/// round's report). Refuses keys of the inclusion sets that NCBI's handles can take for one
+/// (`HandleIndex`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-566
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
 // The Seq-id of a subject is its key (`rounds::SetKey`, `SubjectKeys`): a `-subject` record's
@@ -936,11 +938,10 @@ pub(super) fn round_outcome(
     io: &PsiRoundIo,
     hit_lists: &[Option<BlastpHitList>],
     ranges: &BlastpRanges<'_>,
-    shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
     gapped: &KarlinParams,
     keys: SubjectKeys<'_>,
-) -> Result<Option<FoundBefore>> {
+) -> Result<(Option<FoundBefore>, Option<PssmSeqAligns>)> {
     let key = |s_idx: u32| keys.key(s_idx);
     let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> = hit_lists
         .first()
@@ -1003,20 +1004,9 @@ pub(super) fn round_outcome(
     if makes_next {
         HandleIndex::new(&set)?;
     }
-    let mut next_warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
-    let next = makes_next.then(|| {
-        next_pssm(
-            args,
-            io,
-            &hsps,
-            ranges,
-            shown_subjects,
-            contexts,
-            gapped,
-            keys,
-            &mut next_warnings,
-        )
-    });
+    let q_shift = ranges.query_input.placements.offset(0);
+    let next = makes_next
+        .then(|| PssmSeqAligns::of(hsps.iter().map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))));
     // The blocks of a PSSM round's search, which NCBI writes back into the PSSM it searched
     // (`in_pssm_files::InPssmRounds::written_back`).
     let searched = args.psi_search.as_deref().map(|psi| {
@@ -1026,11 +1016,11 @@ pub(super) fn round_outcome(
     *io.outcome.lock().expect("the round's outcome") = Some(RoundOutcome {
         has_alignments,
         set,
-        next,
-        next_warnings,
+        next: None,
+        next_warnings: Default::default(),
         searched,
     });
-    Ok(found_before)
+    Ok((found_before, next))
 }
 
 /// What the two-part description table of a round after one with an inclusion set reads of the
@@ -1079,16 +1069,18 @@ pub(super) struct SubjectKeys<'a> {
 }
 
 impl SubjectKeys<'_> {
-    /// The letters that the PSSM reads by the Seq-align id of subject `s_idx` (`PssmReads`), in
-    /// NCBIstdaa: its own are `shown_subjects`' (`None` for no sequence). A subject whose own
-    /// letters are missing or empty (no database or `-subject` record has none) is LOSAT's
-    /// internal error, not NCBI's warning (review 2 of line DBID pssmread, L2).
+    /// The letters that the PSSM of the call's query `query` reads by the Seq-align id of subject
+    /// `s_idx` (`PssmReads`), in NCBIstdaa: its own are `shown_subjects`' (`None` for no
+    /// sequence). A subject whose own letters are missing or empty (no database or `-subject`
+    /// record has none) is LOSAT's internal error, not NCBI's warning (review 2 of line DBID
+    /// pssmread, L2).
     pub(super) fn letters(
         &self,
         shown_subjects: ShownSubjects<'_>,
+        query: usize,
         s_idx: u32,
     ) -> Result<Option<Vec<u8>>> {
-        self.reads.letters(s_idx, || {
+        self.reads.letters(query, s_idx, || {
             let letters = match shown_subjects.letters(s_idx as usize) {
                 // A subject's letters are never a query's Bioseq letters; they would read as these.
                 Some(ShownLetters::Ascii(letters) | ShownLetters::Bioseq(letters)) => {
@@ -1152,7 +1144,7 @@ impl SubjectKeys<'_> {
     }
 }
 
-/// `ComputePssmForNextIteration` of the round's Seq-aligns `hsps` (`psiblast_pssms`' PSSM of the
+/// `ComputePssmForNextIteration` of the round's Seq-aligns `aligns` (`psiblast_pssms`' PSSM of the
 /// FASTA query, its Seq-align id and title, which every round keeps) with the round's ancillary
 /// data: round 1's standard blocks, or the PSSM's `kbp_psi` and `kbp_gap_psi` (and `kbp_gap`,
 /// which is `kbp_gap_psi`) after a PSSM round.
@@ -1161,7 +1153,7 @@ impl SubjectKeys<'_> {
 fn next_pssm(
     args: &ResolvedBlastpArgs,
     io: &PsiRoundIo,
-    hsps: &[&crate::algorithm::blastp::hsp::BlastpHsp],
+    aligns: &PssmSeqAligns,
     ranges: &BlastpRanges<'_>,
     shown_subjects: ShownSubjects<'_>,
     contexts: &[QueryContext],
@@ -1169,18 +1161,15 @@ fn next_pssm(
     keys: SubjectKeys<'_>,
     warnings: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
 ) -> Result<QueryPssm> {
-    let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
+    // The round's one query.
+    let subject = |s_idx: u32| keys.letters(shown_subjects, 0, s_idx);
     let scoring = PssmScoring {
         matrix: args.scoring.matrix,
         matrix_name: &args.matrix_name,
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
     };
-    let q_shift = ranges.query_input.placements.offset(0);
-    let alignments: Vec<PssmAlignment<'_>> = hsps
-        .iter()
-        .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
-        .collect();
+    let alignments = aligns.alignments();
     let ordinal = ranges.query_input.ordinal(0);
     let record = &ranges.input_records[ordinal];
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:148-158
@@ -1246,6 +1235,94 @@ fn next_pssm(
     );
     keys.unread_warnings(args.app.ncbi_name(), &unread, warnings);
     pssm
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-299 (cited at
+// `report_prep::report_values`: a round's reports, then the PSSM for the next round)
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:411-451 (cited at
+// `algorithm::psiblast::pssm::input_msa`)
+// NCBI makes a round's PSSM after the round's reports, and its reads of the subjects' letters by
+// their Seq-align ids resolve in the scope that the reports left (`x_GetSubjectSequence`), so a
+// read can give another sequence's letters (`ListedTitles::pssm_holds`, the call's walk of the
+// loads, `report::db_subject::HitLoads::read_after`). LOSAT makes the PSSMs where the walk has
+// answered those reads, before any report is written.
+/// What a call needs to make its PSSMs once its walk of the loads answered their reads
+/// (`make`): `-out_pssm`'s Seq-aligns by query (`files`, `psiblast_pssm_aligns`; `None` where the
+/// call makes no files, or takes those made before a PSSM's stop, `BlastpReports::stopped_pssms`),
+/// the round's Seq-aligns of its next PSSM (`next`, `round_outcome`; `None` where it makes none),
+/// the subjects' letters and keys (`SubjectKeys` without the reads, which `make` takes), and
+/// whether the call makes a PSSM (`made`: `-out_pssm`'s, also one that stopped, or the round's
+/// next one).
+/// Made by `report_prep::report_values` from the Seq-aligns before the formatter's cut; dropped
+/// with the call's values once the PSSMs are made.
+pub(super) struct PssmMaking<'a> {
+    pub(super) files: Option<Vec<Option<PssmSeqAligns>>>,
+    pub(super) next: Option<PssmSeqAligns>,
+    pub(super) shown_subjects: ShownSubjects<'a>,
+    pub(super) listed_ordinals: Option<&'a [u32]>,
+    pub(super) parsed: &'a [Option<Arc<ParsedSubject>>],
+    pub(super) made: bool,
+}
+
+impl PssmMaking<'_> {
+    /// Makes the call's PSSMs with what their reads give (`reads`, after
+    /// `ListedTitles::pssm_holds`): `-out_pssm`'s into `files` (`psiblast_pssms`, whose stop is the
+    /// call's error), and the round's next PSSM into its outcome (`RoundOutcome::next`, with its
+    /// read warnings, `next_warnings`), of the round `io`, with the search's `contexts`, `gapped`
+    /// Karlin-Altschul parameters and `database` (whose OIDs the listed subjects have).
+    pub(super) fn make(
+        &self,
+        args: &ResolvedBlastpArgs,
+        (contexts, gapped, database): (
+            &[QueryContext],
+            &KarlinParams,
+            Option<&super::database::BlastpDatabase>,
+        ),
+        ranges: &BlastpRanges<'_>,
+        io: Option<&PsiRoundIo>,
+        reads: &super::database::PssmReads,
+        files: &mut Option<crate::algorithm::psiblast::pssm::PssmFiles>,
+    ) -> Result<()> {
+        let keys = SubjectKeys {
+            listed_ordinals: self
+                .listed_ordinals
+                .zip(database)
+                .map(|(ordinals, database)| (ordinals, database.oid_map())),
+            parsed: self.parsed,
+            reads,
+        };
+        if let (Some(aligns), Some(request)) = (&self.files, args.psi_pssm.as_ref()) {
+            *files = Some(super::psiblast_pssms(
+                args,
+                request,
+                aligns,
+                ranges,
+                self.shown_subjects,
+                contexts,
+                gapped,
+                keys,
+            )?);
+        }
+        if let (Some(aligns), Some(io)) = (&self.next, io) {
+            let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
+            let next = next_pssm(
+                args,
+                io,
+                aligns,
+                ranges,
+                self.shown_subjects,
+                contexts,
+                gapped,
+                keys,
+                &mut warnings,
+            );
+            if let Some(outcome) = io.outcome.lock().expect("the round's outcome").as_mut() {
+                outcome.next = Some(next);
+                outcome.next_warnings = warnings;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

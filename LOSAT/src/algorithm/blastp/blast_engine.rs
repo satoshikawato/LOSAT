@@ -3208,51 +3208,19 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
     }
 }
 
-/// psiblast's PSSMs after its round (`-save_pssm_after_last_round` with `-out_pssm` and/or
-/// `-out_ascii_pssm`): one for each query whose results have alignments, in the order of the
-/// queries, from the query's whole record and its Seq-aligns before the formatter's cut
-/// (`algorithm::psiblast::pssm`). Their files are made ready here, before the reports, and
-/// written after them (`PssmFiles`: the ASN.1 bytes staged beside each target, which is not
-/// changed before `commit`). A query whose PSSM fails or whose ASN.1 file cannot be written stops
-/// the run after its report (`PssmStop`, handled by `search`), with the PSSMs of the queries
-/// before it.
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
-// The query is its record's Bioseq, whole also with `-query_loc`; its Seq-align id is
-// `Query_<n>` (`n` its position in the input, as the reports name it); the ancillary data are
-// the query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its
-// context and the gapped one, and in the first round the PSI blocks are copies of them).
-#[cold]
-#[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn psiblast_pssms(
+/// The Seq-aligns of psiblast's PSSMs after its round (`-save_pssm_after_last_round` with
+/// `-out_pssm` and/or `-out_ascii_pssm`, `psiblast_pssms`), by query, from the hit lists before
+/// the formatter's cut (`None` for a query without results), kept for the PSSMs that the call
+/// makes after its reports (`psi_round::PssmMaking`). The rows of each query's PSSM are the
+/// handles of the Seq-align ids that it takes (`SubjectKeys`): keys that NCBI's handles can take
+/// for one, and giim ids, are refused here, before any PSSM is made (`rounds::HandleIndex`).
+fn psiblast_pssm_aligns(
     args: &ResolvedBlastpArgs,
-    request: &crate::algorithm::psiblast::pssm::PssmRequest,
     hit_lists: &[Option<BlastpHitList>],
     ranges: &BlastpRanges<'_>,
-    shown_subjects: ShownSubjects<'_>,
-    contexts: &[QueryContext],
-    gapped: &KarlinParams,
     keys: psi_round::SubjectKeys<'_>,
-) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
-    use crate::algorithm::psiblast::pssm::{
-        query_pssm, PssmAlignment, PssmAncillary, PssmFiles, PssmQueryRecord, PssmScoring, PssmStop,
-    };
-    use crate::core::psi::KarlinBlk;
-    let subject = |s_idx: u32| keys.letters(shown_subjects, s_idx);
-    let scoring = PssmScoring {
-        matrix: args.scoring.matrix,
-        matrix_name: &args.matrix_name,
-        gap_open: args.scoring.gap_open,
-        gap_extend: args.scoring.gap_extend,
-    };
-    let gapped = KarlinBlk {
-        lambda: gapped.lambda,
-        k: gapped.k,
-        h: gapped.h,
-    };
-    // The rows of each query's PSSM are the handles of the Seq-align ids that it takes
-    // (`SubjectKeys`): keys that NCBI's handles can take for one, and giim ids, are refused before
-    // any PSSM is made (`rounds::HandleIndex`).
+) -> Result<Vec<Option<crate::algorithm::psiblast::pssm::PssmSeqAligns>>> {
+    use crate::algorithm::psiblast::pssm::{PssmAlignment, PssmSeqAligns};
     for hit_list in hit_lists.iter().flatten() {
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
         let rows: std::collections::BTreeSet<crate::algorithm::psiblast::rounds::SetKey> = hit_list
@@ -3264,21 +3232,73 @@ fn psiblast_pssms(
             .collect();
         crate::algorithm::psiblast::rounds::SetKey::check_handles(&rows)?;
     }
+    Ok(hit_lists
+        .iter()
+        .enumerate()
+        .map(|(query, hit_list)| {
+            let hit_list = hit_list.as_ref()?;
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            let q_shift = ranges.query_input.placements.offset(query);
+            Some(PssmSeqAligns::of(
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift)),
+            ))
+        })
+        .collect())
+}
+
+/// psiblast's PSSMs after its round (`-save_pssm_after_last_round` with `-out_pssm` and/or
+/// `-out_ascii_pssm`): one for each query whose results have alignments, in the order of the
+/// queries, from the query's whole record and its Seq-aligns before the formatter's cut
+/// (`aligns`, `psiblast_pssm_aligns`; `algorithm::psiblast::pssm`). They are made after the
+/// round's reports, with the letters that NCBI's reads by the Seq-align ids give there
+/// (`SubjectKeys::letters`), and their files are made ready then, before any report is written,
+/// and written after the reports (`PssmFiles`: the ASN.1 bytes staged beside each target, which
+/// is not changed before `commit`). A query whose PSSM fails or whose ASN.1 file cannot be
+/// written stops the run after its report (`PssmStop`, handled by `search`), with the PSSMs of
+/// the queries before it.
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:147-162
+// The query is its record's Bioseq, whole also with `-query_loc`; its Seq-align id is
+// `Query_<n>` (`n` its position in the input, as the reports name it); the ancillary data are
+// the query's (`CBlastAncillaryData`, blast_results.cpp:71-114: the ungapped block of its
+// context and the gapped one, and in the first round the PSI blocks are copies of them).
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn psiblast_pssms(
+    args: &ResolvedBlastpArgs,
+    request: &crate::algorithm::psiblast::pssm::PssmRequest,
+    aligns: &[Option<crate::algorithm::psiblast::pssm::PssmSeqAligns>],
+    ranges: &BlastpRanges<'_>,
+    shown_subjects: ShownSubjects<'_>,
+    contexts: &[QueryContext],
+    gapped: &KarlinParams,
+    keys: psi_round::SubjectKeys<'_>,
+) -> Result<crate::algorithm::psiblast::pssm::PssmFiles> {
+    use crate::algorithm::psiblast::pssm::{
+        query_pssm, PssmAncillary, PssmFiles, PssmQueryRecord, PssmScoring, PssmStop,
+    };
+    use crate::core::psi::KarlinBlk;
+    let scoring = PssmScoring {
+        matrix: args.scoring.matrix,
+        matrix_name: &args.matrix_name,
+        gap_open: args.scoring.gap_open,
+        gap_extend: args.scoring.gap_extend,
+    };
+    let gapped = KarlinBlk {
+        lambda: gapped.lambda,
+        k: gapped.k,
+        h: gapped.h,
+    };
     let mut files = PssmFiles::new(request);
-    for (query, hit_list) in hit_lists.iter().enumerate() {
-        let Some(hit_list) = hit_list else {
+    for (query, aligns) in aligns.iter().enumerate() {
+        let Some(aligns) = aligns.as_ref().filter(|aligns| !aligns.is_empty()) else {
             continue;
         };
-        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-        let q_shift = ranges.query_input.placements.offset(query);
-        let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
-            .iter()
-            .flat_map(|hsp_list| &hsp_list.hsps)
-            .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
-            .collect();
-        if alignments.is_empty() {
-            continue;
-        }
+        let alignments = aligns.alignments();
+        let subject = |s_idx: u32| keys.letters(shown_subjects, query, s_idx);
         let ordinal = ranges.query_input.ordinal(query);
         let record = &ranges.input_records[ordinal];
         let id = crate::algorithm::psiblast::pssm::fasta_query_id(
@@ -10877,8 +10897,8 @@ fn run_call(
         batch_prefetch,
         pssm_reads,
         mut psiblast_pssms,
+        pssm_making,
         psi_found_before,
-        pssm_made,
         psiblast_hits_found,
         engine_counts,
     } = report_prep::report_values(
@@ -11019,8 +11039,10 @@ fn run_call(
         pre_prune_replaced_titles: &pre_prune_replaced_titles,
         batch_ranges: &batch_ranges,
         batch_prefetch: &batch_prefetch,
-        pssm_made,
         pssm_reads: &pssm_reads,
+        pssm_making: &pssm_making,
+        contexts: &contexts,
+        gapped_params: &gapped_params,
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.

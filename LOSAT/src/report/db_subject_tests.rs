@@ -1498,7 +1498,7 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
         assert!(read(&subject.clone().found_instead(Some(found))).is_err());
     }
     // Another holder besides what the lookup gives is the walk's (`ListedTitles::
-    // check_pssm_holds` of BLASTP): a sequence loaded before whose definition line holds the
+    // pssm_holds` of BLASTP): a sequence loaded before whose definition line holds the
     // Seq-align id gives its blob for the subject's load, refused with its words.
     let holder = sequence(vec![gb("AAA00006", 1), gb("AAA00001", 0)], 6);
     let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
@@ -3714,6 +3714,16 @@ fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
     let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
     walk.failed_prefetch([(0, &s), (1, &t)]);
     assert_eq!(walk.load(&s), shown(Some(1), ShownBy::Order));
+
+    // Line DBID hr-3: another sequence that only a failed prefetch's maybe load puts in the scope
+    // (versioned `gb|AAA00001.1|`, OID 1, which matches unversioned `gb|AAA00001|` weakly) is
+    // given or not as the failure falls: `ShownBy::Order`, not `ShownBy::Weak`, which names a
+    // sequence that NCBI gives (psiblast's PSSM reads its letters, `ListedTitles::pssm_holds`).
+    let u0 = sequence(vec![gb_unversioned("AAA00001")], 0);
+    let u1 = sequence(vec![gb("AAA00001", 1)], 1);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(1, &u1)]);
+    assert_eq!(walk.load(&u0), shown(Some(1), ShownBy::Order));
 }
 
 #[test]

@@ -40,7 +40,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
-use crate::report::db_subject::{HitLoads, ParsedSubject};
+use crate::report::db_subject::{HitLoads, ParsedSubject, ShownBy, ShownInstead};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -2553,7 +2553,7 @@ impl ListedTitles<'_> {
             let mut beyond = Vec::new();
             // The PSSM's reads of the query in their order (the call's walk reads them after the
             // query's report, and NCBI's places may give another sequence for one,
-            // `check_pssm_holds`), each with the fewest letters from which a read of one of its
+            // `pssm_holds`), each with the fewest letters from which a read of one of its
             // included Seq-aligns takes letters (`PssmAlignment::subject_end`).
             let mut order = Vec::new();
             for (index, hsp_list) in hit_list.hsplist_array[..count]
@@ -2655,26 +2655,7 @@ impl ListedTitles<'_> {
                 match scope.letters() {
                     Some(blob) if blob == ordinal => {}
                     Some(other) => {
-                        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:443-451
-                        // `CSeqDBVol::GetBioseq` returns a null Bioseq when the signed 32-bit
-                        // `x_GetSequence` length is less than 1 (zero or 2^31 or more), so
-                        // `CSeqVector` throws and `x_GetSubjectSequence` yields an empty sequence.
-                        let len = database
-                            .db
-                            .protein_length_i32(other)
-                            .map_err(|error| shared::database_error(error, self.program))?;
-                        if len < 1 {
-                            reads.read.insert(rank, None);
-                        } else {
-                            let letters = database
-                                .db
-                                .read_sequence(other)
-                                .map_err(|error| shared::database_error(error, self.program))?
-                                .protein(0)
-                                .to_vec();
-                            reads.read.insert(rank, Some(letters));
-                        }
+                        reads.read.insert(rank, self.pssm_letters(database, other)?);
                     }
                     None => {
                         reads.read.insert(rank, None);
@@ -2693,38 +2674,71 @@ impl ListedTitles<'_> {
         Ok(reads)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:443-451
+    // `CSeqDBVol::GetBioseq` returns a null Bioseq when the signed 32-bit `x_GetSequence` length
+    // is less than 1 (zero or 2^31 or more), so `CSeqVector` throws and `x_GetSubjectSequence`
+    // yields an empty sequence.
+    /// The letters that psiblast's PSSM reads of the database sequence `ordinal` where NCBI's
+    /// scope gives its Bioseq for a subject's Seq-align id, in NCBIstdaa (by the subject reader by
+    /// ordinal id); `None` where that Bioseq is null (`Failed to retrieve sequence`). Each read of
+    /// an included Seq-align then takes them where they reach its range's end
+    /// (`psiblast::pssm::input_msa`).
+    fn pssm_letters(&self, database: &BlastpDatabase, ordinal: u32) -> Result<Option<Vec<u8>>> {
+        let len = database
+            .db
+            .protein_length_i32(ordinal)
+            .map_err(|error| shared::database_error(error, self.program))?;
+        if len < 1 {
+            return Ok(None);
+        }
+        Ok(Some(
+            database
+                .db
+                .read_sequence(ordinal)
+                .map_err(|error| shared::database_error(error, self.program))?
+                .protein(0)
+                .to_vec(),
+        ))
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-299 (cited at
     // `report_prep::report_values`: a round's reports, then the PSSM for the next round)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:411-451
     // The PSSM reads the range of each included Seq-align by its Seq-align id in the order of the
     // hit list, after the round's reports, in NCBI's scope of the query's batch and its BLAST
-    // database data loader: where the lookup of the id fails on a file, a sequence loaded before
-    // that holds the id (by its handle in the loader, or an id that the scope takes for it) is
-    // given without the lookup, so the lookup throws nothing (probe of line DBID pfoff-4's merge 7,
-    // `h2.Z.21.nb.it2.8`: `gi|5001|ref|NP_100001.1|`, read before `ref|NP_100001.1|` of a list
-    // with a database without the accession table, is read for it; `h2.G.21.b1.it2.8`: the second
-    // query's read, after the first query's PSSM loaded it). The read is a `CSeqVector` of the
-    // Seq-align's subject range in that sequence: where its letters end before the range does,
-    // the read throws, is caught, and NCBI writes `Failed to retrieve sequence` as for a lookup
-    // that throws (review 5 of line DBID pfoff-4, H1: a 45-letter holder of a read of 10..94
-    // warns; 94 letters warn, 95 read them).
-    /// LOSAT's refusal of a PSSM read where NCBI's places give another sequence for its Seq-align
-    /// id (`ShownInstead`, `report::db_subject::ScopeWalk`) and the read takes that sequence's
-    /// letters. Where the subject's lookup fails on a file and the other sequence's letters end
-    /// before every included Seq-align's range does (`PssmAlignment::subject_end`), every read
-    /// throws, and LOSAT writes NCBI's warning (`pssm_reads` reads no letters for the subject); any
-    /// other such read is refused (a holder that LOSAT cannot name too). The reads are those of
-    /// `reads` (`PssmReads::order`), which the call's one walk made after each query's report
-    /// (`hit_loads`: `HitLoads::read_after`, of `ListedTitles::hit_loads` with
-    /// `PssmReads::after_reads`): after the loads of the run's record, the batch's prefetch (also
-    /// beyond `-max_target_seqs`) and the query's report, each query in the scope of its batch.
-    /// A round whose PSSM is made asks it.
-    pub(super) fn check_pssm_holds(
+    // database data loader: a sequence loaded before that holds the id (by its handle in the
+    // loader, or an id that the scope takes for it) is given without the lookup (probe of line
+    // DBID pfoff-4's merge 7, `h2.Z.21.nb.it2.8`: `gi|5001|ref|NP_100001.1|`, read before
+    // `ref|NP_100001.1|` of a list with a database without the accession table, is read for it;
+    // `h2.G.21.b1.it2.8`: the second query's read, after the first query's PSSM loaded it), and
+    // the read takes that sequence's letters (line DBID hr-3, review 5 of pfoff-4, M3). The read
+    // is a `CSeqVector` of the Seq-align's subject range in that sequence: where its letters end
+    // before the range does, the read throws, is caught, and NCBI writes `Failed to retrieve
+    // sequence` as for a lookup that throws (review 5 of line DBID pfoff-4, H1: a 45-letter holder
+    // of a read of 10..94 warns; 94 letters warn, 95 read them), which `input_msa` does per
+    // Seq-align.
+    /// The letters of psiblast's PSSM reads of `reads` (`PssmReads::order`) for which NCBI's places
+    /// give another sequence (`HitLoads::read_after`, made by the call's one walk after each
+    /// query's report: after the loads of the run's record, the batch's prefetch, also beyond
+    /// `-max_target_seqs`, and the query's report, each query in the scope of its batch), kept in
+    /// `reads` for the PSSMs (`PssmReads::letters`): that sequence's letters where the walk names it
+    /// (`ShownBy::Holder`, `ShownBy::Weak`; `pssm_letters`). Returns LOSAT's refusal of the first
+    /// such read that it does not make as NCBI, for after the reports' refusals: one for which the
+    /// walk does not know the sequence (`ParsedSubject::pssm_held_reason`; but for a subject whose
+    /// lookup fails on a file where the other sequence's letters end before every included
+    /// Seq-align's range does, `PssmAlignment::subject_end`: every read throws either way, and the
+    /// PSSM writes NCBI's warning), and one whose load can write texts that LOSAT does not model
+    /// for it (`pssm_held_load_reason`). A round whose PSSM is made asks it.
+    pub(super) fn pssm_holds(
         &self,
         database: &BlastpDatabase,
         reads: &PssmReads,
         hit_loads: &HitLoads,
-    ) -> Result<()> {
+        prefetch: &shared::BatchPrefetch,
+    ) -> Result<Option<anyhow::Error>> {
+        let mut held = std::collections::BTreeMap::new();
+        let mut refusal = None;
         for (query, order) in &reads.order {
             for &(rank, reach) in order {
                 let Some(subject) = self.parsed_subject(rank) else {
@@ -2733,30 +2747,113 @@ impl ListedTitles<'_> {
                 let Some(shown) = hit_loads.read_after(*query, rank) else {
                     continue;
                 };
-                // A holder whose letters end before every included Seq-align's range, for a
-                // subject whose lookup fails: each read throws and warns, as LOSAT's.
-                if let Some(holder) = shown.holder.filter(|_| subject.lookup_throws().is_some()) {
-                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
-                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
-                    // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0; `GetBioseq`
-                    // returns a null Bioseq when the length is less than 1, so every range read
-                    // throws and warns.
-                    let letters = database
-                        .db
-                        .protein_length_i32(holder.ordinal())
-                        .map_err(|error| shared::database_error(error, self.program))?;
-                    if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
+                let refused = |reason: &str| {
+                    shared::parsed_refusal(
+                        self.oids.oid(self.listed.ordinals[rank]),
+                        reason,
+                        self.program,
+                    )
+                };
+                // The other sequence's load where the query's scope has not loaded it.
+                if let Some(holder) = shown.holder {
+                    let load = (database, prefetch, *query);
+                    if let Some(reason) = self.pssm_held_load_reason(load, rank, subject, holder)? {
+                        refusal.get_or_insert_with(|| refused(&reason));
                         continue;
                     }
                 }
-                return Err(shared::parsed_refusal(
-                    self.oids.oid(self.listed.ordinals[rank]),
-                    &subject.pssm_held_reason(shown),
-                    self.program,
-                ));
+                match shown {
+                    ShownInstead {
+                        holder: Some(holder),
+                        by: ShownBy::Holder | ShownBy::Weak,
+                    } => {
+                        held.insert(
+                            (*query, rank),
+                            self.pssm_letters(database, holder.ordinal())?,
+                        );
+                    }
+                    _ => {
+                        // A holder whose letters end before every included Seq-align's range,
+                        // for a subject whose lookup fails: each read throws and warns, as
+                        // LOSAT's.
+                        if let Some(holder) =
+                            shown.holder.filter(|_| subject.lookup_throws().is_some())
+                        {
+                            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+                            // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0
+                            // (`pssm_letters`: then every range read throws and warns).
+                            let letters = database
+                                .db
+                                .protein_length_i32(holder.ordinal())
+                                .map_err(|error| shared::database_error(error, self.program))?;
+                            if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
+                                continue;
+                            }
+                        }
+                        refusal.get_or_insert_with(|| refused(&subject.pssm_held_reason(shown)));
+                    }
+                }
             }
         }
-        Ok(())
+        if reads.held.set(held).is_err() {
+            bail!("internal error of LOSAT's PSIBLAST: the PSSM's reads were answered twice");
+        }
+        Ok(refusal)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1129-1140
+    // (cited at `shared::blob_taxids`)
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513 (cited at
+    // `shared::pssm_load_texts`)
+    // A read that another sequence holds loads that sequence's blob where the query's scope has
+    // not loaded it (the loader's `m_Ids` keeps it across the scopes of the run's queries and
+    // rounds, `ResetScopeHistory` does not), and nothing where it has; LOSAT does not know which.
+    // The load looks the taxids of the other sequence's lines up (`x_GetTaxonomy`): where such a
+    // load throws or writes texts, and where a header with a UTF8String can post NCBI's warning,
+    // the two give other bytes.
+    /// LOSAT's reason to refuse psiblast's PSSM read of the subject of rank `rank` (`subject`) of
+    /// the call's query `query` that the sequence `holder` holds, of `database` whose batches load
+    /// as `prefetch` says: where the holder's load can post NCBI's warning of a UTF8String header
+    /// (`SeqDb::scope_utf8_seen`), where it looks a positive taxid up (`shared::blob_taxids`) and
+    /// such a load throws (`shared::TaxdbRun::load_throws`), or, in a batch that reads one by one
+    /// (`shared::BatchPrefetch::loads_one_by_one`: a prefetch loaded it first elsewhere), writes
+    /// a text (`shared::TaxdbRun::loads_write_texts`). `None` elsewhere: the read takes the
+    /// holder's letters and writes nothing more (`pssm_load_texts`).
+    fn pssm_held_load_reason(
+        &self,
+        (database, prefetch, query): (&BlastpDatabase, &shared::BatchPrefetch, usize),
+        rank: usize,
+        subject: &ParsedSubject,
+        holder: crate::seqdb::DbSequence,
+    ) -> Result<Option<String>> {
+        let what = if database.db.scope_utf8_seen() {
+            "its load can post NCBI's warning of a header that holds a UTF8String"
+        } else {
+            let taxids = || {
+                shared::blob_taxids(
+                    &database.db,
+                    self.listed.ordinals[rank],
+                    Some(subject),
+                    holder.ordinal(),
+                    self.program,
+                )
+                .map(|lookups| !lookups.is_empty())
+            };
+            let throws = database.taxdb.load_throws(&database.db);
+            let texts = database.loads_write_texts() && prefetch.loads_one_by_one(query);
+            if !(throws || texts) || !taxids()? {
+                return Ok(None);
+            }
+            if throws {
+                "its load looks a taxid up in a taxonomy database that does not open, and throws"
+            } else {
+                "its load looks a taxid up in a taxonomy database whose lookups write texts among the PSSM's warnings"
+            }
+        };
+        Ok(Some(format!(
+            "has the Seq-align id {}, which database sequence {holder} also holds: psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and where NCBI BLAST+ 2.17.0's scope of the query has not loaded that sequence, {what}, which LOSAT does not model for such a read",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        )))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1182
@@ -2815,6 +2912,11 @@ impl ListedTitles<'_> {
             .chain(loads.beyond.iter().copied());
         let mut texts = Vec::new();
         for rank in ranks {
+            // A read that another sequence holds writes nothing (`pssm_held_load_reason`).
+            if reads.is_held(query, rank as usize) {
+                texts.push((rank, Vec::new()));
+                continue;
+            }
             let ordinal = self.listed.ordinals[rank as usize];
             // A subject without parsed Seq-ids loads its own blob.
             let blob = match self.parsed_subject(rank as usize) {
@@ -3201,7 +3303,7 @@ impl ListedTitles<'_> {
     /// batch's prefetch (psiblast's traceback hit lists beyond `-max_target_seqs`), the PSSM's
     /// reads after each query's report (`PssmReads::after_reads`) and a stopping batch's prefetch,
     /// whose answers the prefetch's checks (`prefetched_ranks`, `check_prefetched`,
-    /// `batch_prefetch`) and the PSSM's (`check_pssm_holds`) read.
+    /// `batch_prefetch`) and the PSSM's (`pssm_holds`) read.
     pub(super) fn hit_loads(
         &self,
         (database, batch_base): (Option<&BlastpDatabase>, usize),
@@ -3713,7 +3815,9 @@ fn x_taxids_allow_blocks(
 /// batch reads one by one with `taxdb.bti` on the search path (`QueryLoads`), `None` elsewhere;
 /// `other_blobs`: then, the subjects with parsed Seq-ids whose read loads the blob of another
 /// sequence (`shared::ScopeBioseq::taxonomy`), or none (`None`, also for a refused read), by rank.
-/// The reads themselves are made one query at a time, so the batch keeps no list of them.
+/// `held`: the reads for which the call's walk gives another sequence after the query's report
+/// (`ListedTitles::pssm_holds`), set once after the walk. The reads themselves are made one query
+/// at a time, so the batch keeps no list of them.
 #[derive(Default)]
 pub(super) struct PssmReads {
     read: std::collections::BTreeMap<usize, Option<Vec<u8>>>,
@@ -3729,8 +3833,13 @@ pub(super) struct PssmReads {
     /// ranks of those reads in their order and the fewest letters from which a read of one of the
     /// subject's included Seq-aligns takes letters (`PssmAlignment::subject_end`): the call's walk
     /// reads them after the query's report (`after_reads`, `HitLoads::read_after`), and
-    /// `ListedTitles::check_pssm_holds` refuses one that another sequence answers.
+    /// `ListedTitles::pssm_holds` answers those that another sequence holds (`held`).
     order: Vec<(usize, Vec<(usize, usize)>)>,
+    /// By query (of the call) and rank, the letters of the reads that another sequence holds
+    /// after the query's report (`ListedTitles::pssm_holds`: that sequence's, or `None` for no
+    /// sequence), before `read`; set where a PSSM is made, after the call's walk, for the round
+    /// only (nothing of it outlives the call).
+    held: std::sync::OnceLock<std::collections::BTreeMap<(usize, usize), Option<Vec<u8>>>>,
 }
 
 /// What the PSSM's reads of a query need beyond its hit list after the formatter's cut
@@ -3792,17 +3901,33 @@ impl PssmReads {
         }
     }
 
-    /// The letters that the PSSM reads by the Seq-align id of the subject of rank `s_idx`:
-    /// `own()` (its own letters), another sequence's, or `None` for no sequence.
+    /// The letters that the PSSM of the call's query `query` reads by the Seq-align id of the
+    /// subject of rank `s_idx`: another sequence's that holds the id after the query's report
+    /// (`held`), else what the lookup gives (`read`): another sequence's, `None` for no sequence,
+    /// or `own()` (its own letters).
     pub(super) fn letters(
         &self,
+        query: usize,
         s_idx: u32,
         own: impl FnOnce() -> Result<Vec<u8>>,
     ) -> Result<Option<Vec<u8>>> {
-        match self.read.get(&(s_idx as usize)) {
+        let held = self
+            .held
+            .get()
+            .and_then(|held| held.get(&(query, s_idx as usize)));
+        match held.or_else(|| self.read.get(&(s_idx as usize))) {
             Some(read) => Ok(read.clone()),
             None => own().map(Some),
         }
+    }
+
+    /// Whether the PSSM of the call's query `query` reads the subject of rank `rank` from another
+    /// sequence that holds its Seq-align id after the query's report (`held`): that read loads
+    /// none of the subject's blob (`ListedTitles::pssm_load_texts`, the run's record of loads).
+    pub(super) fn is_held(&self, query: usize, rank: usize) -> bool {
+        self.held
+            .get()
+            .is_some_and(|held| held.contains_key(&(query, rank)))
     }
 }
 

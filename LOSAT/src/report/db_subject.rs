@@ -805,18 +805,40 @@ enum Resolved {
     Nothing,
 }
 
+impl Resolved {
+    /// This place where LOSAT does not know that NCBI's places reach it (whether `m_Ids` still
+    /// holds a handle, whether a failed prefetch loaded a blob): a holder or a weak match answers
+    /// [`ShownBy::Order`], so that [`ShownBy::Holder`] and [`ShownBy::Weak`] with a holder name
+    /// the sequence that NCBI gives (whose letters psiblast's PSSM reads,
+    /// `ListedTitles::pssm_holds` of BLASTP).
+    fn unsure(self) -> Self {
+        match self {
+            Self::Blob(sequence, ShownBy::Holder | ShownBy::Weak) => {
+                Self::Blob(sequence, ShownBy::Order)
+            }
+            Self::Unknown(holder, ShownBy::Holder | ShownBy::Weak) => {
+                Self::Unknown(holder, ShownBy::Order)
+            }
+            other => other,
+        }
+    }
+}
+
 /// How a load came to another sequence than the subject ([`ShownInstead`]): the words of LOSAT's refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShownBy {
     /// The lookup itself (step 4), the loader's `m_Ids` by the exact handle (step 3), or the
-    /// scope's index by the exact handle or an id that it takes for the Seq-align id (step 2).
+    /// scope's index by the exact handle or an id that it takes for the Seq-align id (step 2),
+    /// where LOSAT knows that NCBI's places reach it.
     Holder,
-    /// The scope's index by a weak match (an accession with a version for one without, a name).
+    /// The scope's index by a weak match (an accession with a version for one without, a name),
+    /// where LOSAT knows that NCBI's places reach it.
     Weak,
     /// An order that LOSAT does not know: of a prefetch, two handles that no Seq-id orders (their
     /// infos' addresses); of a record of loads, two sequences of one batch that registered the
-    /// same handle; or whether NCBI keeps its scope for the run (a call whose formats LOSAT
-    /// refuses a throw for, `FormatThrow::Refused`).
+    /// same handle; whether `m_Ids` still holds a handle, or a failed prefetch loaded a blob
+    /// (`Resolved::unsure`); or whether NCBI keeps its scope for the run (a call whose formats
+    /// LOSAT refuses a throw for, `FormatThrow::Refused`).
     Order,
     /// The calls of the run before this one, of which LOSAT has no record
     /// ([`ScopeHolders`]).
@@ -1767,17 +1789,18 @@ impl ScopeWalk {
                 Some((Resolved::Blob(a, by), definite))
             }
             (Some((exact, false)), Some((weak, _))) => {
-                let (holder, by) = match weak {
-                    Resolved::Blob(sequence, by) => (Some(sequence), by),
-                    Resolved::Unknown(holder, by) => (holder, by),
-                    Resolved::Throws | Resolved::Nothing => (None, ShownBy::Order),
+                let holder = match weak {
+                    Resolved::Blob(sequence, _) => Some(sequence),
+                    Resolved::Unknown(holder, _) => holder,
+                    Resolved::Throws | Resolved::Nothing => None,
                 };
                 let holder = holder.or(match exact {
                     Resolved::Blob(sequence, _) => Some(sequence),
                     Resolved::Unknown(holder, _) => holder,
                     Resolved::Throws | Resolved::Nothing => None,
                 });
-                Some((Resolved::Unknown(holder, by), true))
+                // Which of the two NCBI's scope gives depends on what the failed prefetch loaded.
+                Some((Resolved::Unknown(holder, ShownBy::Order), true))
             }
             (Some((_, true)), _) => unreachable!("definite exact match returned above"),
         }
@@ -1957,7 +1980,7 @@ impl ScopeWalk {
                     self.ids.maybe_use(handle, registrant);
                     return Some(match subject.mine(registrant.sequence) {
                         true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-                        false => Self::place(registrant),
+                        false => Self::place(registrant).unsure(),
                     });
                 }
                 Held::Absent => None,
@@ -2144,11 +2167,12 @@ impl ScopeWalk {
                                         Some(Resolved::Unknown(holder, by)) => (holder, by),
                                         _ => (Some(sequence), ShownBy::Order),
                                     };
-                                    Some(Resolved::Unknown(holder, by))
+                                    Some(Resolved::Unknown(holder, by).unsure())
                                 }
                             }
                         }
                         other => {
+                            let other = other.unsure();
                             self.relock(subject, Some(other));
                             Some(other)
                         }
@@ -2504,7 +2528,7 @@ impl ScopeWalk {
                     return AloneResult {
                         resolved: Some(match subject.mine(registrant.sequence) {
                             true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-                            false => Self::place(registrant),
+                            false => Self::place(registrant).unsure(),
                         }),
                         requested_use: Some((handle, registrant, true)),
                         blob_load: None,
@@ -3361,7 +3385,7 @@ impl ParsedSubject {
     /// The reason of LOSAT's refusal of psiblast's PSSM read of this subject where NCBI's places
     /// give its Seq-align id another sequence (`shown`, [`ScopeWalk`]), whose letters the read
     /// takes for it (where they reach the end of an included Seq-align's range,
-    /// `ListedTitles::check_pssm_holds` of BLASTP). Not the words of a report that shows the
+    /// `ListedTitles::pssm_holds` of BLASTP). Not the words of a report that shows the
     /// holder (`shown_reason`): the PSSM reads by the id, also beyond `-max_target_seqs` and in
     /// the formats that show no subject (review 5 of line DBID pfoff-4, L1).
     pub fn pssm_held_reason(&self, shown: ShownInstead) -> String {
@@ -3691,7 +3715,7 @@ impl ParsedSubject {
     /// NCBI's exception, which the read catches, `prefetch_stops`: the caller reads no letters)
     /// and the same record whose read writes other taxonomy texts (`CopyApart::TaxonomyTexts`).
     /// Another sequence that NCBI's places give for the id is the walk's (`ListedTitles::
-    /// check_pssm_holds` of BLASTP, [`ScopeWalk`]). The reasons are what the lookup finds, also
+    /// pssm_holds` of BLASTP, [`ScopeWalk`]). The reasons are what the lookup finds, also
     /// for a subject whose definition line the formatters do not find (`unfetchable`), which the
     /// PSSM reads by the scope as any other (review 2 of line DBID pssmread, M2).
     pub fn pssm_read(&self) -> Result<(), String> {
@@ -5854,7 +5878,7 @@ pub struct HitLoads {
 /// `-max_target_seqs`, `report_prep`'s `psiblast_prefetched`; the batch's prefetch loads those
 /// of all its reports at once); `after`, the subjects read by their Seq-align ids after the
 /// report, in the order of the reads (psiblast's PSSM of the query, read after its report and
-/// before the next one, `ListedTitles::check_pssm_holds`); and `stop`, the prefetch of the batch
+/// before the next one, `ListedTitles::pssm_holds`); and `stop`, the prefetch of the batch
 /// after the reports whose lookup stops the run (`common::database::batch_prefetch`): its query
 /// batch and subjects. Empty for a call that loads nothing else.
 #[derive(Clone, Debug, Default)]

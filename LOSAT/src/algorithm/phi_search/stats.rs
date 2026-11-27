@@ -119,6 +119,38 @@ pub(crate) fn search_space(db_length: i64, db_num_seqs: i64, min_match_length: i
     db_length - db_num_seqs * min_match_length
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:556-571
+/// The context of a PHI search as psiblast's `-sum_stats true` links its preliminary HSPs
+/// (`BLAST_LinkHsps` with the score block of `s_PHIScoreBlkFill`, whose gapped block is the table's
+/// `karlin`): its Lambda and a `logK` of 0 (the block's `logK` is never set), the length of the
+/// batch's first query (`contexts[0]`, the context of every PHI HSP), the minimum pattern length as
+/// the length adjustment (`Blast_SetPHIPatternInfo`) and the pattern's search space
+/// (`search_space`).
+pub(crate) fn link_context(
+    karlin: &PhiKarlin,
+    query_length: usize,
+    min_match_length: i64,
+    search_space: i64,
+) -> crate::core::link_hsps::LinkContext {
+    crate::core::link_hsps::LinkContext {
+        lambda: karlin.lambda,
+        log_k: 0.0,
+        query_length: query_length as i32,
+        length_adjustment: min_match_length as i32,
+        eff_searchsp: search_space,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:339-373
+/// The smallest cutoff of the initial words of a PHI search (`word_params->cutoff_score_min`),
+/// which psiblast's `-sum_stats true` links with as its small-gap cutoff
+/// (`BlastLinkHSPParametersUpdate`): the gap trigger of `gap_trigger_bits` with the table's block
+/// as `kbp_std` (`logK` 0), at most the search's `cutoff` (`cutoff_score_max`).
+pub(crate) fn word_cutoff(gap_trigger_bits: f64, karlin: &PhiKarlin, cutoff: i32) -> i32 {
+    crate::core::x_drop::gap_trigger_raw_score_of_log_k(gap_trigger_bits, karlin.lambda, 0.0)
+        .min(cutoff)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:360-388
 /// `PhiBlastGetEffectiveNumberOfPatterns`: the occurrences that start more than half the minimum
 /// pattern length after the last one counted.

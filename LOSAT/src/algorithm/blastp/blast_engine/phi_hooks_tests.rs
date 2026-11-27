@@ -78,6 +78,7 @@ fn phi_hsp(
         score,
         evalue: 0.0,
         bit_score: 0.0,
+        num: 1,
         edit_script: Vec::new(),
     }
 }

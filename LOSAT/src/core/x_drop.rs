@@ -43,7 +43,14 @@ const NCBIMATH_LN2: f64 = std::f64::consts::LN_2;
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:338-345
 #[inline]
 pub(crate) fn gap_trigger_raw_score(bits: f64, lambda: f64, k: f64) -> i32 {
-    ncbi_int4_from_double((bits * NCBIMATH_LN2 + k.glibc_ln()) / lambda)
+    gap_trigger_raw_score_of_log_k(bits, lambda, k.glibc_ln())
+}
+
+/// [`gap_trigger_raw_score`] from the block's `logK` itself: PHI-BLAST's block of NCBI's table
+/// leaves `logK` at 0 whatever its `K` (`phi_search::stats::word_cutoff`).
+#[inline]
+pub(crate) fn gap_trigger_raw_score_of_log_k(bits: f64, lambda: f64, log_k: f64) -> i32 {
+    ncbi_int4_from_double((bits * NCBIMATH_LN2 + log_k) / lambda)
 }
 
 /// A context's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits, the context's ungapped

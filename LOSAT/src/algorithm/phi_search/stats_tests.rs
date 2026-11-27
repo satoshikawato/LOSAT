@@ -58,3 +58,22 @@ fn cutoff_evalue_and_bits_match_ncbi_rows() {
     assert_eq!(format!("{:.1}", evalue(9, &blosum62(), 2, 7)), "2.1");
     assert_eq!(format!("{:.0e}", evalue(312, &blosum62(), 2, 7)), "2e-34");
 }
+
+#[test]
+fn sum_statistics_link_with_the_table_lambda_and_a_log_k_of_zero() {
+    // 22 bits with BLOSUM62 11/1's 0.270 and logK 0: 22 ln 2 / 0.270 = 56.48, at most the cutoff.
+    assert_eq!(word_cutoff(22.0, &blosum62(), 100), 56);
+    assert_eq!(word_cutoff(22.0, &blosum62(), 30), 30);
+    // `-gap_trigger 1e300` leaves `Int4`: INT_MIN, as blastp's gap trigger.
+    assert_eq!(word_cutoff(1e300, &blosum62(), 30), i32::MIN);
+    assert_eq!(
+        link_context(&blosum62(), 300, 8, 66_050),
+        crate::core::link_hsps::LinkContext {
+            lambda: 0.270,
+            log_k: 0.0,
+            query_length: 300,
+            length_adjustment: 8,
+            eff_searchsp: 66_050,
+        }
+    );
+}

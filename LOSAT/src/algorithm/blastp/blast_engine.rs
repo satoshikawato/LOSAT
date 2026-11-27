@@ -5859,8 +5859,8 @@ impl<'a> BlastpSubjectSource<'a> {
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
     /// A subject longer than `MAX_DBSEQ_LEN`, which NCBI searches in overlapping parts: the first
-    /// such record of a subject set, or a database's longest sequence, described as the refusals
-    /// name it (`too_long_subject_refusal`, `too_long_phi_subject_refusal`) with its length.
+    /// such record of a subject set, or a database's longest sequence, described as the refusal
+    /// names it (`too_long_subject_refusal`) with its length.
     fn longest_split(self) -> Option<(String, usize)> {
         match self {
             Self::Fasta(records) => records
@@ -9942,9 +9942,8 @@ fn ungapped_setup_failure(
         }
     }
     // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal
-    // (hard-masked databases split and merge long subjects via `db_masked::hard_chunks`).
-    // PHI-BLAST refuses such a subject too, after NCBI's errors of its setup
-    // (`phi_hooks::phi_limits`).
+    // (hard-masked databases split and merge long subjects via `db_masked::hard_chunks`; PHI-BLAST
+    // searches NCBI's parts, `phi_hooks::long_subject_prelim`).
     if args.ungapped
         && !args
             .db_mask_resolved
@@ -11655,7 +11654,7 @@ fn start_phi_call<'s, 'a>(
         call_in.args,
         query_frames,
         query_batches,
-        phi_hooks::PhiLimits::new(requested_formats, subject_source),
+        phi_hooks::PhiLimits::new(requested_formats),
         db_length,
         db_num_seqs,
         |query, text| {
@@ -11747,19 +11746,6 @@ impl RowBuildInputs<'_> {
         }
         Ok(rows)
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-250
-/// The refusal of PHI-BLAST's search (`-phi_pattern`) of a subject longer than `MAX_DBSEQ_LEN`
-/// (`phi_hooks::phi_limits`): NCBI's parts keep the occurrences and the alignments that each part
-/// holds (an alignment past a part's end stops there unless the next part holds its occurrence),
-/// which LOSAT does not port yet. NCBI's output is the same at 1 and 8 threads (probe
-/// `PS/ncbi8/long`, 11-23); the parts and their merge are item PS8a-2's port.
-fn too_long_phi_subject_refusal(what: &str, length: usize) -> anyhow::Error {
-    anyhow::anyhow!(
-        "{what} has {length} residues; -phi_pattern with a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's PSIBLAST yet",
-        crate::core::subject_split::MAX_DBSEQ_LEN
-    )
 }
 
 #[cfg(test)]

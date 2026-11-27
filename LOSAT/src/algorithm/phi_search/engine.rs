@@ -27,8 +27,14 @@ pub(crate) struct PhiHsp {
     pub(crate) subject_start: i32,
     pub(crate) subject_end: i32,
     pub(crate) score: i32,
+    /// The e-value: 0 in the preliminary stage (NCBI computes none for PHI-BLAST) unless
+    /// psiblast's `-sum_stats true` links the subject's HSPs (`PhiSearch::link_preliminary`),
+    /// then the pattern's from the traceback (`PhiSearch::traceback`).
     pub(crate) evalue: f64,
     pub(crate) bit_score: f64,
+    /// The size of the HSP's linked set (`num`): 1, or the size that the preliminary linking of
+    /// `-sum_stats true` gives, which no later stage changes (the Seq-align's `sum_n`).
+    pub(crate) num: i32,
     pub(crate) edit_script: Vec<GapEditOp>,
 }
 
@@ -77,6 +83,17 @@ impl PhiSetupError {
     }
 }
 
+/// psiblast's `-sum_stats true` in a PHI search: the linking of each subject's preliminary HSPs
+/// (`BLAST_LinkHsps`: the preliminary stage's parameters, whose small-gap cutoff is
+/// `stats::word_cutoff`, and the context of `stats::link_context`) and the preliminary e-value
+/// that reaps them (`-evalue`, `hit_params->prelim_evalue`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PhiLink {
+    pub(crate) params: crate::core::link_hsps::EvenGapLinkParams,
+    pub(crate) context: crate::core::link_hsps::LinkContext,
+    pub(crate) prelim_evalue: f64,
+}
+
 /// The search of one query: its letters, matrix rows, occurrences and the stage parameters.
 pub(crate) struct PhiSearch<'p> {
     pub(crate) pattern: &'p PhiPattern,
@@ -89,6 +106,9 @@ pub(crate) struct PhiSearch<'p> {
     pub(crate) cutoff: i32,
     pub(crate) prelim: PhiGapCosts,
     pub(crate) last: PhiGapCosts,
+    /// psiblast's `-sum_stats true` (`PhiLink`), `None` without sum statistics; the caller sets
+    /// it (blastp's `phi_hooks::phi_start`: the context reads the query batch's first query).
+    pub(crate) link: Option<PhiLink>,
 }
 
 /// The X-dropoffs in raw score (`BlastExtensionParametersNew` with the table's Lambda).
@@ -194,6 +214,7 @@ pub(crate) fn setup<'p>(params: &PhiSetup<'p, '_>) -> Result<PhiSearch<'p>, PhiS
         cutoff,
         prelim: costs(x_prelim),
         last: costs(x_last),
+        link: None,
     })
 }
 
@@ -237,6 +258,7 @@ impl PhiSearch<'_> {
                         score: aligned.score,
                         evalue: 0.0,
                         bit_score: 0.0,
+                        num: 1,
                         edit_script: Vec::new(),
                     });
                 }
@@ -244,6 +266,44 @@ impl PhiSearch<'_> {
         }
         hsps.sort_by(score_compare);
         Ok((hsps, hits.len()))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
+    /// psiblast's `-sum_stats true` on a subject's preliminary HSPs `hsps` (`link`, sorted by
+    /// score), after NCBI's search of the subject's parts: `BLAST_LinkHsps` with the PHI block,
+    /// which gives each HSP its linked set's e-value and size and sorts the list by score again,
+    /// then the reap of the HSPs past the preliminary e-value (`s_Blast_HSPListReapByPrelimEvalue`,
+    /// the order kept). `subject_length` is the whole subject's. Without sum statistics the HSPs
+    /// keep the preliminary e-value 0, which the reap keeps.
+    pub(crate) fn link_preliminary(&self, hsps: &mut Vec<PhiHsp>, subject_length: usize) {
+        let Some(link) = &self.link else {
+            return;
+        };
+        crate::core::link_hsps::link_in_place(
+            hsps,
+            // `BlastHSP`'s 0-based offsets and exclusive ends, all in context 0.
+            |hsp| crate::core::link_hsps::LinkHsp {
+                context: 0,
+                subject_frame: 0,
+                query_offset: hsp.query_start,
+                query_end: hsp.query_end,
+                subject_offset: hsp.subject_start,
+                subject_end: hsp.subject_end,
+                score: hsp.score,
+            },
+            |_| link.context,
+            subject_length as i32,
+            &link.params,
+            |hsp, linked| {
+                hsp.evalue = linked.evalue;
+                hsp.num = linked.num;
+            },
+        );
+        hsps.sort_by(score_compare);
+        // `hsp->evalue > cutoff` frees the HSP.
+        hsps.retain(|hsp| {
+            hsp.evalue.partial_cmp(&link.prelim_evalue) != Some(std::cmp::Ordering::Greater)
+        });
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:740-815

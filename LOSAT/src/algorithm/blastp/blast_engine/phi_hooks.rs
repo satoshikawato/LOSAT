@@ -32,7 +32,9 @@ use crate::algorithm::blastp::hsp::{
 };
 use crate::algorithm::blastp::x_prelim_compact::{PhiPrelimOrdinal, XPrelimHsp};
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
-use crate::algorithm::phi_search::engine::{self, PhiHsp, PhiSearch, PhiSetup, PhiSetupError};
+use crate::algorithm::phi_search::engine::{
+    self, PhiHsp, PhiLink, PhiSearch, PhiSetup, PhiSetupError,
+};
 use crate::algorithm::phi_search::pattern::PhiError;
 use crate::algorithm::phi_search::stats;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
@@ -273,23 +275,15 @@ pub(super) enum PhiStart<'p> {
     EngineError { query: usize, text: String },
 }
 
-/// What LOSAT's limits of PHI-BLAST read besides the options (`phi_limits`): the call's formats
-/// and its subjects.
+/// What LOSAT's limits of PHI-BLAST read besides the options (`phi_limits`): the call's formats.
 pub(super) struct PhiLimits<'a> {
     formats: &'a [super::BlastpReport],
-    subject_source: super::BlastpSubjectSource<'a>,
 }
 
 impl<'a> PhiLimits<'a> {
-    /// The limits' inputs: the call's formats and subjects.
-    pub(super) fn new(
-        formats: &'a [super::BlastpReport],
-        subject_source: super::BlastpSubjectSource<'a>,
-    ) -> Self {
-        Self {
-            formats,
-            subject_source,
-        }
+    /// The limits' inputs: the call's formats.
+    pub(super) fn new(formats: &'a [super::BlastpReport]) -> Self {
+        Self { formats }
     }
 }
 
@@ -333,18 +327,15 @@ pub(super) fn phi_call<'p>(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
 /// LOSAT's limits of PHI-BLAST (item PS8a; their order after NCBI's errors is `phi_call`'s):
 /// outfmt 5 and 11 of the round (a later item, PS8b) and `-html` (NCBI's HTML PHI report is not
 /// ported yet), whatever is searched. Then only where the
 /// round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
-/// without it round 1 is the run's last whatever `-num_iterations` and `-sum_stats` say, probes
-/// `k.pam.it3.0`, `k.pam.ss3.0`): the rounds after it (PS8b), `-sum_stats true` (NCBI links the
-/// preliminary HSPs with the pattern's Karlin block and reaps them by the linked e-values; probe
-/// `op.sumstats.6`) and a subject longer than `MAX_DBSEQ_LEN` (NCBI's parts), both item PS8a-2.
-/// Outfmt 8, 9 and 12 are no exception: NCBI's engine error of their Seq-annot comes only where an
-/// alignment is found (`report_write::write_phi_report`; `-sum_stats true` with outfmt 8 ends with
-/// exit status 0 and no output, probe `PS/tmp/fix8a/ncbi5/k.ss.8`).
+/// without it round 1 is the run's last whatever `-num_iterations` says, probe `k.pam.it3.0`):
+/// the rounds after it (PS8b). Outfmt 8, 9 and 12 are no exception: NCBI's engine error of their
+/// Seq-annot comes only where an alignment is found (`report_write::write_phi_report`;
+/// `-sum_stats true` with outfmt 8 ends with exit status 0 and no output where nothing survives
+/// the linking, probe `PS/tmp/fix8a/ncbi5/k.ss.8`).
 fn phi_limits(
     args: &ResolvedBlastpArgs,
     limits: &PhiLimits<'_>,
@@ -369,19 +360,11 @@ fn phi_limits(
     if !searched {
         return None;
     }
-    if let Some(rounds) = args.psi_rounds.as_deref() {
-        return Some(anyhow::anyhow!(
-            "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
-            rounds.num_iterations
-        ));
-    }
-    if args.sum_stats {
-        return Some(anyhow::anyhow!(
-            "-phi_pattern with -sum_stats true is not supported by LOSAT's {program} yet"
-        ));
-    }
-    let (what, length) = limits.subject_source.longest_split()?;
-    Some(super::too_long_phi_subject_refusal(&what, length))
+    let rounds = args.psi_rounds.as_deref()?;
+    Some(anyhow::anyhow!(
+        "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
+        rounds.num_iterations
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:507-532
@@ -486,6 +469,18 @@ pub(super) fn phi_start<'p>(
             }
         }
     }
+    // psiblast's `-sum_stats true`: each batch's search links with its first query's context.
+    if args.sum_stats {
+        for batch in &batches {
+            if let Some(Some(search)) = searches.get_mut(batch.searched) {
+                search.link = Some(phi_link(
+                    args,
+                    search,
+                    query_frames[batch.first()][0].aa_len,
+                ));
+            }
+        }
+    }
     let mut shown_gaps = vec![None; query_frames.len()];
     for batch in batches.iter().filter(|batch| batch.shows_gaps()) {
         shown_gaps[batch.searched] =
@@ -502,8 +497,143 @@ pub(super) fn phi_start<'p>(
     }))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-646
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+/// psiblast's `-sum_stats true` for the search `search` of a batch whose first query has
+/// `first_length` letters (`engine::PhiLink`): the preliminary stage's linking parameters with the
+/// smallest cutoff of the initial words as the small-gap cutoff (`stats::word_cutoff`), the PHI
+/// block's context of the batch's first query (`stats::link_context`: every PHI HSP is in context
+/// 0), and `-evalue` as the preliminary e-value.
+#[cold]
+#[inline(never)]
+fn phi_link(args: &ResolvedBlastpArgs, search: &PhiSearch<'_>, first_length: usize) -> PhiLink {
+    PhiLink {
+        params: crate::core::link_hsps::EvenGapLinkParams::preliminary(stats::word_cutoff(
+            args.gap_trigger_bits,
+            &search.karlin,
+            search.cutoff,
+        )),
+        context: stats::link_context(
+            &search.karlin,
+            first_length,
+            search.pattern.min_match_length,
+            search.search_space,
+        ),
+        prelim_evalue: args.evalue,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-593
+/// The preliminary HSPs of the search `search` on one subject (`subject`: its `length` letters,
+/// then its sentinel) as NCBI's preliminary stage leaves them for the hit lists, with the
+/// subject's count of pattern hits (NCBI's `lookup_hits`): a subject of at most `MAX_DBSEQ_LEN`
+/// letters searched whole (`PhiSearch::prelim`), a longer one in NCBI's overlapping parts
+/// (`long_subject_prelim`); then psiblast's `-sum_stats true` (`PhiSearch::link_preliminary`).
+/// The one producer of a subject's preliminary list: the traceback calls it again for the
+/// subjects of the kept lists and selects the kept HSPs by their position in it
+/// (`PhiPrelimOrdinal`, `select_kept_prelim`).
+fn subject_prelim(
+    search: &PhiSearch<'_>,
+    subject: &[u8],
+    length: usize,
+    scratch: &mut PssmGapScratch,
+) -> std::result::Result<(Vec<PhiHsp>, usize), PhiError> {
+    let (mut hsps, hits) = if length > crate::core::subject_split::MAX_DBSEQ_LEN {
+        long_subject_prelim(search, subject, length, scratch)?
+    } else {
+        search.prelim(subject, length, scratch)?
+    };
+    search.link_preliminary(&mut hsps, length);
+    Ok((hsps, hits))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:516-593
+/// A subject longer than `MAX_DBSEQ_LEN` in NCBI's parts (`HardSplitState` of the full range: parts
+/// of `MAX_DBSEQ_LEN` letters overlapping by `DBSEQ_CHUNK_OVERLAP`, the last to the end), each
+/// searched as a subject of its own letters (`PhiSearch::prelim` on the subject from the part's
+/// start: its pattern hits counted, a hit in an overlap once per part, and its alignments ending at
+/// the part's ends), its HSPs moved by the part's start (`Blast_HSPListAdjustOffsets`) and merged
+/// into the parts before by blastp's merge of a split subject (`merge_prelim_subject_chunks`,
+/// `Blast_HSPListsMerge` with the part's overlap). An HSP merged with one of the next part keeps
+/// its own occurrence and subject hit length (`pat_info`), and takes the other's pattern starts
+/// and score where that scores higher (`s_BlastMergeTwoHSPs`), which the traceback aligns from.
+#[cold]
+#[inline(never)]
+fn long_subject_prelim(
+    search: &PhiSearch<'_>,
+    subject: &[u8],
+    length: usize,
+    scratch: &mut PssmGapScratch,
+) -> std::result::Result<(Vec<PhiHsp>, usize), PhiError> {
+    use crate::core::subject_split::{HardSplitState, DBSEQ_CHUNK_OVERLAP};
+    let mut split = HardSplitState::default();
+    split.start(length, vec![(0, length as i32)], false);
+    // Every part's HSPs, by the ordinal that their preliminary view carries through the merge.
+    let mut found: Vec<PhiHsp> = Vec::new();
+    let mut combined: Vec<BlastpPreliminaryHsp> = Vec::new();
+    let mut incoming: Vec<BlastpPreliminaryHsp> = Vec::new();
+    let mut hits = 0;
+    while let Some(part) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+        let offset = part.offset as i32;
+        let (hsps, part_hits) = search.prelim(&subject[part.offset..], part.letters(), scratch)?;
+        hits += part_hits;
+        if hsps.is_empty() {
+            continue;
+        }
+        incoming.clear();
+        for mut hsp in hsps {
+            hsp.subject_start += offset;
+            hsp.subject_end += offset;
+            hsp.s_pattern_offset += offset;
+            incoming.push(
+                preliminary_of(&hsp, 0, 0, 0)
+                    .with_phi_ordinal(PhiPrelimOrdinal::new(found.len()))
+                    .hsp,
+            );
+            found.push(hsp);
+        }
+        super::prelim_kernel::merge_prelim_subject_chunks(
+            &mut combined,
+            &mut incoming,
+            offset,
+            part.overlap as i32,
+            true,
+        );
+    }
+    let hsps = combined
+        .iter()
+        .map(|merged| {
+            let ordinal = XPrelimHsp {
+                hsp: *merged,
+                e_value: 0.0,
+            }
+            .phi_ordinal()
+            .expect("every PHI part HSP carries its ordinal");
+            let own = &found[ordinal.index()];
+            PhiHsp {
+                occurrence: own.occurrence,
+                s_pattern_length: own.s_pattern_length,
+                q_pattern_offset: merged.gapped_query_start,
+                s_pattern_offset: merged.gapped_subject_start,
+                query_start: merged.query_start,
+                query_end: merged.query_end,
+                subject_start: merged.subject_start,
+                subject_end: merged.subject_end,
+                score: merged.raw_score,
+                evalue: 0.0,
+                bit_score: 0.0,
+                num: 1,
+                edit_script: Vec::new(),
+            }
+        })
+        .collect();
+    Ok((hsps, hits))
+}
+
 /// The preliminary HSP that the hit lists keep for a PHI HSP of query `q_idx` and subject
-/// `s_idx`: its extent and score (the e-value of the preliminary stage is 0, NCBI computes none).
+/// `s_idx`: its extent, score and preliminary e-value (0 unless `-sum_stats true` links the
+/// subject's HSPs, `PhiSearch::link_preliminary`).
 fn preliminary_of(hsp: &PhiHsp, q_idx: usize, s_idx: usize, query_length: usize) -> XPrelimHsp {
     XPrelimHsp {
         hsp: BlastpPreliminaryHsp {
@@ -521,7 +651,7 @@ fn preliminary_of(hsp: &PhiHsp, q_idx: usize, s_idx: usize, query_length: usize)
             q_idx: q_idx as u32,
             s_idx: s_idx as u32,
         },
-        e_value: 0.0,
+        e_value: hsp.evalue,
     }
 }
 
@@ -562,8 +692,9 @@ pub(super) fn phi_prelim(
             let Some(search) = search else {
                 continue;
             };
-            let found = PHI_SCRATCH
-                .with(|scratch| search.prelim(letters, subject.aa_len, &mut scratch.borrow_mut()));
+            let found = PHI_SCRATCH.with(|scratch| {
+                subject_prelim(search, letters, subject.aa_len, &mut scratch.borrow_mut())
+            });
             let (hsps, hits) = match found {
                 Ok(found) => found,
                 Err(PhiError::Refusal(message)) | Err(PhiError::Ncbi(message)) => {
@@ -581,7 +712,7 @@ pub(super) fn phi_prelim(
                 continue;
             }
             let query_length = contexts[q_idx].aa_len;
-            let list = BlastpHspList {
+            let mut list = BlastpHspList {
                 oid: s_idx as u32,
                 query_index: q_idx as u32,
                 hsps: hsps
@@ -594,6 +725,8 @@ pub(super) fn phi_prelim(
                     .collect(),
                 best_evalue: 0.0,
             };
+            // 0 without sum statistics; the linked sets' best (`BLAST_LinkHsps`) with them.
+            update_best_evalue(&mut list);
             subject_result.x_compact_hsp_lists.push((q_idx, list));
         }
     };
@@ -714,8 +847,7 @@ pub(super) fn phi_traceback(
             let mut subject = Vec::with_capacity(residues.len() + 1);
             subject.extend_from_slice(residues);
             subject.push(0);
-            let (all_hsps, _) = search
-                .prelim(&subject, residues.len(), &mut scratch)
+            let (all_hsps, _) = subject_prelim(search, &subject, residues.len(), &mut scratch)
                 .map_err(|error| match error {
                     PhiError::Refusal(message) | PhiError::Ncbi(message) => {
                         anyhow::anyhow!("{message}")
@@ -756,6 +888,9 @@ pub(super) fn phi_traceback(
                     );
                     final_hsp.e_value = hsp.evalue;
                     final_hsp.bit_score = hsp.bit_score;
+                    // The linked set's size of `-sum_stats true` (`sum_n`), kept from the
+                    // preliminary stage: the PHI traceback does not link again.
+                    final_hsp.num = hsp.num;
                     final_hsp.with_phi_occurrence(PhiOccurrenceIndex::new(hsp.occurrence))
                 })
                 .collect();

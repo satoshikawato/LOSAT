@@ -90,3 +90,76 @@ fn setup_errors_and_a_self_search() {
     assert_eq!(kept[0].edit_script, vec![GapEditOp::Sub(10)]);
     assert_eq!(kept[0].occurrence, 0);
 }
+
+#[test]
+fn sum_statistics_link_the_preliminary_hsps_and_reap_them_by_the_preliminary_evalue() {
+    let pattern = PhiPattern::compile(b"G-K-S").unwrap();
+    let score = |q: u8, s: u8| blosum62(q, s);
+    let query = encode("MKAGKSTLLW");
+    let setup_params = PhiSetup {
+        pattern: &pattern,
+        query: &query,
+        segments: &[(0, 9)],
+        score: &score,
+        karlin: stats::phi_karlin("BLOSUM62", 11, 1).unwrap(),
+        db_length: 10,
+        db_num_seqs: 1,
+        evalue: 10.0,
+        gap_open: 11,
+        gap_extend: 1,
+        x_drop_bits: 15.0,
+        x_drop_final_bits: 25.0,
+    };
+    let mut search = setup(&setup_params).unwrap();
+    let at = |q: (i32, i32), s: (i32, i32), score: i32| PhiHsp {
+        occurrence: 0,
+        s_pattern_length: 3,
+        q_pattern_offset: q.0,
+        s_pattern_offset: s.0,
+        query_start: q.0,
+        query_end: q.1,
+        subject_start: s.0,
+        subject_end: s.1,
+        score,
+        evalue: 0.0,
+        bit_score: 0.0,
+        num: 1,
+        edit_script: Vec::new(),
+    };
+    // In order on both sequences (one set of two), the lower score first.
+    let hsps = vec![at((200, 260), (500, 560), 60), at((10, 60), (20, 70), 80)];
+    // Without sum statistics: nothing changes.
+    let mut unlinked = hsps.clone();
+    search.link_preliminary(&mut unlinked, 1000);
+    assert_eq!(unlinked, hsps);
+    let link = |prelim_evalue: f64| PhiLink {
+        params: crate::core::link_hsps::EvenGapLinkParams::preliminary(stats::word_cutoff(
+            22.0,
+            &search.karlin,
+            search.cutoff,
+        )),
+        context: stats::link_context(&search.karlin, 300, 3, 1_000_000),
+        prelim_evalue,
+    };
+    search.link = Some(link(f64::MAX));
+    let mut linked = hsps.clone();
+    search.link_preliminary(&mut linked, 1000);
+    assert_eq!(
+        linked
+            .iter()
+            .map(|hsp| (hsp.score, hsp.num))
+            .collect::<Vec<_>>(),
+        vec![(80, 2), (60, 2)]
+    );
+    let set = linked[0].evalue;
+    assert!(set > 0.0 && linked[1].evalue == set, "{linked:?}");
+    // The reap frees the HSPs past the preliminary e-value and keeps those at it.
+    search.link = Some(link(set));
+    let mut kept = hsps.clone();
+    search.link_preliminary(&mut kept, 1000);
+    assert_eq!(kept.len(), 2);
+    search.link = Some(link(set / 2.0));
+    let mut reaped = hsps;
+    search.link_preliminary(&mut reaped, 1000);
+    assert!(reaped.is_empty());
+}

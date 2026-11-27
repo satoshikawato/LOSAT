@@ -1193,3 +1193,24 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
         assert!(!outfmt_prefetches_taxdb(fmt), "{fmt}");
     }
 }
+
+// Line DBID hr-2 (fixtures db.id.pcs.*): NCBI's handles take `gb||locusy` and `gb||LOCUSY` for one,
+// so a holder whose own Seq-align id is the subject's in other letter case is refused
+// (`ShownHolders::shown`); the same spelling, or another id, is not.
+#[test]
+fn a_loaded_line_holds_the_seq_align_id_in_other_letter_case() {
+    let local = |id: &str| {
+        crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(id.as_bytes().to_vec()))
+    };
+    assert!(differs_in_case_only(b"lcl|abc", &[local("ABC")]));
+    assert!(differs_in_case_only(
+        b"lcl|abc",
+        &[local("x"), local("Abc")]
+    ));
+    assert!(!differs_in_case_only(b"lcl|abc", &[local("abc")]));
+    assert!(!differs_in_case_only(
+        b"lcl|abc",
+        &[local("abd"), local("abc")]
+    ));
+    assert!(!differs_in_case_only(b"lcl|abc", &[]));
+}

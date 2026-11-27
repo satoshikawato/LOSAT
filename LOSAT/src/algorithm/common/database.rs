@@ -4412,7 +4412,8 @@ impl<'d> ShownHolders<'d> {
     /// write texts (the holder's load writes them where the subject's would not), a subject that
     /// a query's scope finds (`seen_by_scope`), a holder shorter than the subject's ranges
     /// (NCBI's rows then end in gaps) or of another length where `exact`, the light `slen`, and
-    /// a holder whose id is the Seq-align id in other letter case (`differs_in_case_only`).
+    /// a holder whose own Seq-align id is the subject's in other letter case
+    /// (`differs_in_case_only`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shown<'r>(
         &self,
@@ -4437,13 +4438,19 @@ impl<'d> ShownHolders<'d> {
             )
         };
         let Some(record) = holder_record(holder.ordinal()) else {
-            return Err(refuse("where that sequence is not reported in the same call"));
+            return Err(refuse(
+                "where that sequence is not reported in the same call",
+            ));
         };
         if self.db.has_positive_list() {
-            return Err(refuse("under a positive list (the Seq-aligns' use_this_seqid)"));
+            return Err(refuse(
+                "under a positive list (the Seq-aligns' use_this_seqid)",
+            ));
         }
         if seen_by_scope {
-            return Err(refuse("where a query's scope finds the subject's Seq-align id"));
+            return Err(refuse(
+                "where a query's scope finds the subject's Seq-align id",
+            ));
         }
         if subject.header_utf8() || record.header_utf8() {
             return Err(refuse(
@@ -4486,9 +4493,12 @@ impl<'d> ShownHolders<'d> {
             subject.alignment_id(),
         )
         .map_err(|reason| parsed_refusal(self.db.oid(ordinal), &reason, self.program))?;
-        if differs_in_case_only(&subject.alignment_fasta(), bioseq.record.bioseq_ids()) {
+        if differs_in_case_only(
+            &subject.alignment_fasta(),
+            std::slice::from_ref(record.alignment_id()),
+        ) {
             return Err(refuse(
-                "where its id differs from the Seq-align id in letter case only (NCBI takes the two for one handle, whose spelling decides the sequence that its places give)",
+                "where its Seq-align id differs from this one in letter case only (NCBI takes the two for one handle, whose spelling decides the sequence that its places give)",
             ));
         }
         Ok(Some(bioseq))
@@ -4522,11 +4532,13 @@ impl<'d> ShownHolders<'d> {
     }
 }
 
-/// Whether an id of `ids` (a holder's loaded line, `ShownHolders::shown`) is the Seq-align id
+/// Whether an id of `ids` (a holder's own Seq-align id, `ShownHolders::shown`) is the Seq-align id
 /// `alignment` (its FASTA form) in other letter case: NCBI's handles compare such ids without
 /// case, so the two subjects' Seq-aligns share one handle, and which spelling it keeps (the
-/// sequence its lookup gives for both) is not the walk's (review of line DBID hr-2: `pir||PIRNAME`
-/// and `pir||pirname`, `gb||locusy` and `gb||LOCUSY` in two databases).
+/// sequence its lookup gives for both) is not the walk's (rows `db.id.pcs.*` of line DBID hr-2:
+/// `pir||PIRNAME` and `pir||pirname`, `gb||locusy` and `gb||LOCUSY` in two databases). An id
+/// in other letter case in another line of the holder alone is the walk's (review 4's `L`
+/// family: `ref|acc.1|` held by a sequence with `ref|ACC.1|` in another line).
 fn differs_in_case_only(alignment: &[u8], ids: &[crate::seqid::ParsedSeqId]) -> bool {
     let mut fasta = Vec::new();
     ids.iter().any(|id| {

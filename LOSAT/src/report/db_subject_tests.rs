@@ -304,6 +304,15 @@ fn shown(holder: Option<u32>, by: ShownBy) -> HitLoad {
     ))
 }
 
+/// [`shown`] with the line of `holder` that its Bioseq was loaded by (its B-line).
+fn shown_at(holder: u32, by: ShownBy, line: u32) -> HitLoad {
+    HitLoad::Shown(ShownInstead {
+        holder: Some(DbSequence::of_unrestricted(holder)),
+        by,
+        line,
+    })
+}
+
 fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
     let deflines = lines
         .into_iter()
@@ -729,7 +738,7 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
     assert_eq!(walk.load(&weak), HitLoad::Throws);
     assert_eq!(walk.load(&holder), HitLoad::Loaded);
     let load = walk.load(&weak);
-    assert_eq!(load, shown(Some(5), ShownBy::Weak));
+    assert_eq!(load, shown_at(5, ShownBy::Weak, 0));
     let error = weak.fetched(false, load).unwrap_err();
     assert!(
         error.contains("which can match an id of database sequence 5 weakly"),
@@ -1505,7 +1514,7 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     assert_eq!(walk.load(&holder), HitLoad::Loaded);
     let held = other.clone().in_database(DbSequence::of_unrestricted(1));
     let load = walk.load(&held);
-    assert_eq!(load, shown(Some(6), ShownBy::Holder));
+    assert_eq!(load, shown_at(6, ShownBy::Holder, 0));
     assert!(held
         .fetched(false, load)
         .unwrap_err()
@@ -1555,7 +1564,7 @@ fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
         walk.load(subject)
     };
     let load = after_holder(&weak);
-    assert_eq!(load, shown(Some(4), ShownBy::Weak));
+    assert_eq!(load, shown_at(4, ShownBy::Weak, 0));
     let error = weak.fetched(true, load).unwrap_err();
     assert!(
         error.contains("in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format"),
@@ -3184,7 +3193,7 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
         )
     };
     use HitLoad::{Loaded as L, Throws as T, Unread as U};
-    let held = shown(Some(10), ShownBy::Holder);
+    let held = shown_at(10, ShownBy::Holder, 0);
     for after in [
         AfterThrow::WritesHit,
         AfterThrow::WritesRow,
@@ -3461,9 +3470,9 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
                 .push(format!("{what}: {got:?}, want {want:?}"));
         }
     };
-    let exact = shown(Some(10), ShownBy::Holder);
-    let scope = shown(Some(11), ShownBy::Holder);
-    let weak = shown(Some(10), ShownBy::Weak);
+    let exact = shown_at(10, ShownBy::Holder, 0);
+    let scope = shown_at(11, ShownBy::Holder, 0);
+    let weak = shown_at(10, ShownBy::Weak, 0);
     // The holders in an earlier batch: the loader's hold for the run, the scope's only in outfmt 5.
     // The loader's answer puts its holder into the batch's scope, where it matches 4 weakly.
     let earlier = || vec![report(0, &[0, 1, 5]), report(1, &[2, 3, 4])];
@@ -3651,10 +3660,11 @@ fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
     assert_eq!(walk.load(&z), HitLoad::Loaded);
     // The scope keeps A's id unresolved: the read after gets nothing, not Z (NCBI warns).
     assert_eq!(walk.load(&a), HitLoad::Loaded);
-    // Z first: its line registers the handle, and A's load gives Z.
+    // Z first: its line registers the handle, and A's load gives Z by its second line, the
+    // first that holds A's id.
     let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
     assert_eq!(walk.load(&z), HitLoad::Loaded);
-    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    assert_eq!(walk.load(&a), shown_at(2, ShownBy::Holder, 1));
     // A record: a note of A alone keeps it unresolved for the batch's scope (psiblast's rounds
     // of a query), not for another batch's.
     let before = recorded(Some(0), &[&a], Some(0), false);
@@ -3665,7 +3675,7 @@ fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
     let mut walk = ScopeWalk::new(before, Some(false));
     walk.enter(Some(1));
     assert_eq!(walk.load(&z), HitLoad::Loaded);
-    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    assert_eq!(walk.load(&a), shown_at(2, ShownBy::Holder, 1));
     // A note where Z registers the handle too: the order of the note's loads decides, which
     // LOSAT does not know, so the later read asks the loader (`m_Ids` holds Z).
     let before = recorded(Some(0), &[&a, &z], Some(0), false);
@@ -3723,7 +3733,7 @@ fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
     let u1 = sequence(vec![gb("AAA00001", 1)], 1);
     let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
     walk.failed_prefetch([(1, &u1)]);
-    assert_eq!(walk.load(&u0), shown(Some(1), ShownBy::Order));
+    assert_eq!(walk.load(&u0), shown_at(1, ShownBy::Order, 0));
 }
 
 #[test]
@@ -3818,7 +3828,7 @@ fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches
     assert_eq!(answers[&2], shown(Some(3), ShownBy::Order));
     assert_eq!(answers[&3], HitLoad::Loaded);
     // `s2` was NOT cached as `Resolved::Nothing`; a later load sees `s3` in `m_Ids`.
-    assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Holder));
+    assert_eq!(walk.load(&s2), shown_at(3, ShownBy::Holder, 1));
 
     // A later batch of 1,100 fresh unpacked PDB ids evicts batch 0 from `m_Ids` and prunes
     // `blobs` / `scope_handles` on `enter(Some(1))`.
@@ -4063,4 +4073,121 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
         });
     assert!(nucl_source_throwing.description_may_throw());
     assert_long_id(&nucl_source_throwing, false, "BLASTN");
+}
+
+// Line DBID hr-2 (design `R/hr/DESIGN_hr.md` 3.3; NCBI's `CSeqDBVol::GetBioseq`, seqdbvol.cpp
+// 1305-1470): where the loads of a subject's Seq-align id give another database sequence, the
+// record writers write that sequence's Bioseq, loaded by one of its definition lines (the
+// B-line): the loader's `m_Ids` gives the first of its lines that holds the handle. LOSAT writes
+// it only where every load of the subject gives that sequence by that line, and no load throws or
+// gives the subject itself (`HitLoads::writes_shown_records`).
+#[test]
+fn the_writers_take_the_holder_where_every_load_gives_it_by_one_line() {
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let holder = DbSequence::of_unrestricted(10);
+    // 0: the holder, loaded by its own line 0; its lines 1 and 2 hold the ids of 1 (a lookup that
+    // finds 1 itself) and 2 (a lookup that fails).
+    let parsed: Vec<ParsedSubject> = vec![
+        lines(vec![
+            vec![gb("AAA00009", 1)],
+            vec![gb("AAA00001", 1)],
+            vec![gb("AAA00003", 1)],
+        ])
+        .in_database(holder),
+        sequence(vec![gb("AAA00001", 1)], 11),
+        sequence(vec![gb("AAA00003", 1)], 12).found_instead(failure()),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let report = |batch: usize, keys: &[usize]| {
+        (
+            ReportRead {
+                one_by_one: true,
+                batch: Some(batch),
+                prefetch_fails: false,
+            },
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    let loads = |reports: Vec<(ReportRead, ReportKeys)>| {
+        HitLoads::of(
+            LoadsBefore::none(),
+            Some(RunThrow::every_row(AfterThrow::WritesRow)),
+            reports,
+            subject,
+            none,
+        )
+    };
+    // The holder first: its blob registers every line, so the loader gives it for 1 and 2 by
+    // their lines (1 and 2), whose records the writers write.
+    let held = loads(vec![report(0, &[0]), report(0, &[1, 2])]);
+    for (key, line) in [(1, 1), (2, 2)] {
+        assert_eq!(
+            held.load(key),
+            HitLoad::Shown(ShownInstead {
+                holder: Some(holder),
+                by: ShownBy::Holder,
+                line,
+            }),
+            "{key}"
+        );
+        assert!(held.writes_shown_records(key), "{key}");
+        assert_eq!(held.written_holder(key), Some((holder, line as usize)));
+        assert!(held.loaded(key), "{key}");
+    }
+    assert!(held.writes_any_shown());
+    assert!(!held.writes_shown_records(0) && held.written_holder(0).is_none());
+    // 1 itself in an earlier batch's scope, the holder in the next: two answers, refused.
+    let own_first = loads(vec![report(0, &[1]), report(1, &[0]), report(1, &[1])]);
+    assert!(matches!(own_first.load(1), HitLoad::Shown(_)));
+    assert!(!own_first.writes_shown_records(1) && !own_first.loaded(1));
+    assert!(!own_first.writes_any_shown());
+    // 2's lookup throws in one report and finds the holder in a later one of the same scope.
+    let thrown_first = loads(vec![report(0, &[2, 0]), report(0, &[2])]);
+    assert!(matches!(thrown_first.load(2), HitLoad::Shown(_)));
+    assert!(!thrown_first.writes_shown_records(2));
+    // Only a holder and line that LOSAT knows are written.
+    let shown = |by, line| ShownInstead {
+        holder: Some(holder),
+        by,
+        line,
+    };
+    assert_eq!(shown(ShownBy::Weak, 0).written(), Some((holder, 0)));
+    for unknown in [
+        shown(ShownBy::Holder, NO_LINE),
+        shown(ShownBy::Order, 0),
+        shown(ShownBy::Calls, 0),
+        shown(ShownBy::Display, 0),
+        ShownInstead {
+            holder: None,
+            by: ShownBy::Holder,
+            line: 0,
+        },
+    ] {
+        assert_eq!(unknown.written(), None, "{unknown:?}");
+    }
+}
+
+// Line DBID hr-2: the holder's Bioseq names its B-line (ids, title) and the subject's Seq-align
+// id; its lines, source and sequence stay the holder's.
+#[test]
+fn the_holders_bioseq_is_its_record_by_its_loaded_line() {
+    let holder = DbSequence::of_unrestricted(10);
+    let record = lines(vec![vec![gb("AAA00009", 1)], vec![gb("AAA00001", 1)]]).in_database(holder);
+    let shown = ParsedSubject::shown_by(&record, 1, &gb("AAA00001", 1)).unwrap();
+    assert_eq!(shown.alignment_fasta(), b"gb|AAA00001.1|");
+    assert_eq!(shown.bioseq_ids(), &[gb("AAA00001", 1)]);
+    assert_eq!(shown.database_sequence(), Some(holder));
+    assert_eq!(shown.set.deflines.len(), 2);
+    assert!(!shown.header_utf8() && !shown.unfetchable());
+    assert!(ParsedSubject::shown_by(&record, 2, &gb("AAA00001", 1)).is_err());
+    let bioseq =
+        crate::report::shown_bioseq::ShownBioseq::new(&record, holder, 0, &gb("AAA00001", 1))
+            .unwrap();
+    assert_eq!(bioseq.ordinal(), 10);
+    assert_eq!(bioseq.record.bioseq_ids(), &[gb("AAA00009", 1)]);
 }

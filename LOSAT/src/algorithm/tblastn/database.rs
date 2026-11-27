@@ -1400,7 +1400,10 @@ pub(super) fn reported_subjects(
                         ordinal as usize,
                         (ordinal, subject),
                         |holder| titled(holder as usize),
-                        (shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?, true),
+                        (
+                            shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?,
+                            true,
+                        ),
                         (shown.light_length, seen_all.contains(&ordinal)),
                     )?
                 } else {
@@ -1408,17 +1411,26 @@ pub(super) fn reported_subjects(
                 };
                 let (subject, checked, load) = match &shown_bioseq {
                     Some(bioseq) => {
-                        holders.other_letters((ordinal, subject), bioseq, shown.table_identities, || {
-                            let letters = |ordinal| {
-                                database
-                                    .db
-                                    .nucleotide_iupac(ordinal)
-                                    .map_err(|error| shared::database_error(error, PROGRAM))
-                            };
-                            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
-                        })?;
+                        holders.other_letters(
+                            (ordinal, subject),
+                            bioseq,
+                            shown.table_identities,
+                            || {
+                                let letters = |ordinal| {
+                                    database
+                                        .db
+                                        .nucleotide_iupac(ordinal)
+                                        .map_err(|error| shared::database_error(error, PROGRAM))
+                                };
+                                Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
+                            },
+                        )?;
                         read_ordinal = bioseq.ordinal();
-                        (&bioseq.record, read_ordinal, crate::report::db_subject::HitLoad::Loaded)
+                        (
+                            &bioseq.record,
+                            read_ordinal,
+                            crate::report::db_subject::HitLoad::Loaded,
+                        )
                     }
                     None => (subject, ordinal, loads.load(ordinal as usize)),
                 };

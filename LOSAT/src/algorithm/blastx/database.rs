@@ -571,11 +571,7 @@ fn shown_records(
     }
     let holders = shared::ShownHolders::new(&database.db, true, database.program);
     let mut ends: BTreeMap<usize, usize> = BTreeMap::new();
-    for list in batches
-        .iter()
-        .flat_map(|batch| &batch.queries)
-        .flatten()
-    {
+    for list in batches.iter().flat_map(|batch| &batch.queries).flatten() {
         let end = ends.entry(list.oid).or_default();
         for hsp in &list.hsps {
             *end = (*end).max(usize::try_from(hsp.seqalign_ends().1).unwrap_or(0));
@@ -977,10 +973,11 @@ impl ReportedSubjects {
             let shown_record = shown_records.get(&oid);
             // The letters and the title of the holder whose record the reports write.
             let read_oid = shown_record.map_or(oid, |bioseq| bioseq.ordinal() as usize);
-            let title = shown_record.map_or(title, |bioseq| {
-                Arc::from(bioseq.record.first_title())
-            });
-            if let Some(subject) = shown_record.map(|bioseq| &bioseq.record).or(parsed.get(&oid)) {
+            let title = shown_record.map_or(title, |bioseq| Arc::from(bioseq.record.first_title()));
+            if let Some(subject) = shown_record
+                .map(|bioseq| &bioseq.record)
+                .or(parsed.get(&oid))
+            {
                 let load = match shown_record {
                     Some(_) => crate::report::db_subject::HitLoad::Loaded,
                     None => loads.load(oid),

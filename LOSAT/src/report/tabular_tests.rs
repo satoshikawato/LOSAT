@@ -1645,3 +1645,38 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         Program::Blastp
     ));
 }
+
+// Line DBID hr-2: a table whose `slen` is its only field of the subject's Bioseq asks NCBI's scope
+// for the length apart (`sequence::GetLength`, tabular.cpp:891-898: `light_length`), and a table
+// prints identities that NCBI counts on the Bioseq's letters (`prints_identities`, the default
+// fields too).
+#[test]
+fn a_table_reads_the_length_apart_and_prints_identities_by_its_fields() {
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+        )
+        .unwrap()
+    };
+    assert!(spec("qseqid slen evalue").light_length());
+    assert!(!spec("qseqid sseqid slen evalue").light_length());
+    assert!(!spec("qseqid stitle slen").light_length());
+    assert!(!spec("qseqid sseqid evalue").light_length());
+    assert!(prints_identities(None));
+    for fields in [
+        "qseqid nident",
+        "qseqid pident",
+        "qseqid mismatch",
+        "std qcovhsp",
+    ] {
+        assert!(prints_identities(Some(&spec(fields))), "{fields}");
+    }
+    assert!(!prints_identities(Some(&spec(
+        "qseqid sseqid slen positive"
+    ))));
+}

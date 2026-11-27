@@ -1080,13 +1080,14 @@ impl ScopePlaces {
             None => (found, false),
         };
         let &(first, by) = candidates.first()?;
-        let (sequence, line) = (self.sequence(first), self.line(first));
+        let sequence = self.sequence(first);
         if candidates
             .iter()
-            .any(|&(at, _)| (self.sequence(at), self.line(at)) != (sequence, line))
+            .any(|&(at, _)| self.sequence(at) != sequence)
         {
             return Some((Resolved::Unknown(Some(sequence), ShownBy::Order), definite));
         }
+        let line = one_line(candidates.iter().map(|&(at, _)| self.line(at)));
         Some((Resolved::Blob(sequence, by, line), definite))
     }
 
@@ -1104,6 +1105,20 @@ impl ScopePlaces {
 /// The B-line number of a definition line index ([`NO_LINE`] past `u32`).
 fn line_number(line: usize) -> u32 {
     u32::try_from(line).unwrap_or(NO_LINE)
+}
+
+/// The line of the loads of one sequence whose lines are `lines` where they are one line, else
+/// [`NO_LINE`]: the scope then holds that sequence's blob by several lines, and which Bioseq it
+/// gives is LOSAT's open point (the sequence is the same: the subject itself stays loaded, and no
+/// holder's record is written).
+fn one_line(mut lines: impl Iterator<Item = u32>) -> u32 {
+    let Some(first) = lines.next() else {
+        return NO_LINE;
+    };
+    match lines.all(|line| line == first) {
+        true => first,
+        false => NO_LINE,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:438-447 (the blob
@@ -1145,21 +1160,23 @@ impl RecordedBatchScope {
             .unresolved
             .get(&handle)
             .is_some_and(|at| at.iter().any(|&note| note < notes));
-        let mut found = self
+        let found = self
             .by_id
             .get(&handle)
             .into_iter()
             .flatten()
-            .filter(|&&(at, _)| at < loads)
-            .map(|&(at, sequence)| (sequence, self.places.line(at)));
-        let Some(first) = found.next() else {
+            .filter(|&&(at, _)| at < loads);
+        let Some(&(_, first)) = found.clone().next() else {
             return unresolved.then_some(Resolved::Nothing);
         };
-        Some(if !unresolved && found.all(|load| load == first) {
-            Resolved::Blob(first.0, ShownBy::Holder, first.1)
-        } else {
-            Resolved::Unknown(None, ShownBy::Order)
-        })
+        Some(
+            if !unresolved && found.clone().all(|&(_, sequence)| sequence == first) {
+                let line = one_line(found.map(|&(at, _)| self.places.line(at)));
+                Resolved::Blob(first, ShownBy::Holder, line)
+            } else {
+                Resolved::Unknown(None, ShownBy::Order)
+            },
+        )
     }
 
     /// Step 2 (`m_TSE_BySeqId`) among the first `loads` loads of this recorded scope.
@@ -1170,12 +1187,13 @@ impl RecordedBatchScope {
         let mut found: Vec<(u32, ShownBy)> = self.places.holders(keys, exact);
         found.retain(|&(at, _)| at < loads);
         let &(first, by) = found.first()?;
-        let (sequence, line) = (self.places.sequence(first), self.places.line(first));
+        let sequence = self.places.sequence(first);
         Some(
             if found
                 .iter()
-                .all(|&(at, _)| (self.places.sequence(at), self.places.line(at)) == (sequence, line))
+                .all(|&(at, _)| self.places.sequence(at) == sequence)
             {
+                let line = one_line(found.iter().map(|&(at, _)| self.places.line(at)));
                 Resolved::Blob(sequence, by, line)
             } else {
                 Resolved::Unknown(Some(sequence), ShownBy::Order)
@@ -1856,7 +1874,10 @@ impl ScopeWalk {
             (
                 Some((Resolved::Blob(a, by, line), false)),
                 Some((Resolved::Blob(b, _, other_line), definite)),
-            ) if (a, line) == (b, other_line) => Some((Resolved::Blob(a, by, line), definite)),
+            ) if a == b => Some((
+                Resolved::Blob(a, by, one_line([line, other_line].into_iter())),
+                definite,
+            )),
             (Some((exact, false)), Some((weak, _))) => {
                 let holder = match weak {
                     Resolved::Blob(sequence, ..) => Some(sequence),
@@ -2855,8 +2876,11 @@ impl ScopeWalk {
                     if let Some(ext) = &load.external {
                         self.scope.add_blob(ext, load.line);
                     } else {
-                        self.scope
-                            .add_ids(load.sequence, load.line, &subject.set.deflines[load.line].ids);
+                        self.scope.add_ids(
+                            load.sequence,
+                            load.line,
+                            &subject.set.deflines[load.line].ids,
+                        );
                     }
                 }
                 let ord = load.sequence.ordinal();
@@ -6019,11 +6043,11 @@ pub struct HitLoads {
     /// The sequence and its loaded line that the loads (each report's, or its batch's prefetch)
     /// give for a subject where that is another sequence ([`ShownInstead::written`]), by key:
     /// `None` where two loads give other ones, or one names no line ([`HitLoads::written_holder`]).
+    /// `None` also where another load gives the subject itself (one subject can be itself in one
+    /// batch's scope and another sequence in the next): the walk notes those loads only while it
+    /// runs (`HitLoads::after`'s `own`), so that a call keeps nothing per subject that no load
+    /// shows as another sequence.
     written: std::collections::HashMap<usize, Option<(DbSequence, usize)>>,
-    /// The subjects that some report's load gives as themselves (`HitLoad::Loaded`), also where
-    /// another report's gives another sequence (`shown`): one subject can be itself in one
-    /// batch's scope and another sequence in the next.
-    own: std::collections::HashSet<usize>,
     /// Whether the run's formats write the record of the sequence that a load gives for a subject
     /// (`ShownInstead::written`, the record writers of line DBID hr-2a: the tables of outfmt 6,
     /// 7, 10 and 20, BLAST XML, outfmt 13 to 16 and 18); not the pairwise reports and SAM yet, nor a
@@ -6179,6 +6203,8 @@ impl HitLoads {
         // The answers of the prefetch of the batch of the reports read last (`ScopeWalk::bulk`).
         let mut batch_answers: std::collections::HashMap<usize, HitLoad> = Default::default();
         let mut loaded = std::collections::HashSet::new();
+        // The subjects that some load gives as themselves (`HitLoads::written`).
+        let mut own = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
         // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
         // have loaded before its failure (`ReportRead::prefetch_fails`), and those of them noted
@@ -6256,7 +6282,7 @@ impl HitLoads {
                 }
                 if !ended.get() {
                     loaded.extend(keys.keys());
-                    loads.note_batch_answers(keys, &batch_answers);
+                    loads.note_batch_answers(keys, &batch_answers, &mut own);
                 }
                 continue;
             }
@@ -6333,7 +6359,7 @@ impl HitLoads {
                     _ => None,
                 };
                 let Some(exception) = exception else {
-                    loads.own.insert(first);
+                    own.insert(first);
                     loaded.extend(keys);
                     continue;
                 };
@@ -6371,6 +6397,11 @@ impl HitLoads {
             .partition(|key| failed_prefetched.contains(key));
         loads.prefetched_only = prefetched_only;
         loads.unread = unread;
+        for (key, holder) in &mut loads.written {
+            if own.contains(key) {
+                *holder = None;
+            }
+        }
         loads
     }
 
@@ -6381,12 +6412,13 @@ impl HitLoads {
         &mut self,
         keys: &ReportKeys,
         answers: &std::collections::HashMap<usize, HitLoad>,
+        own: &mut std::collections::HashSet<usize>,
     ) {
         for key in keys.keys() {
             match answers.get(&key) {
                 Some(&HitLoad::Shown(shown)) => self.note_shown(key, shown),
                 Some(_) => {
-                    self.own.insert(key);
+                    own.insert(key);
                 }
                 None => {}
             }
@@ -6505,7 +6537,11 @@ impl HitLoads {
         let mut registry: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> = Default::default();
         for (_, subject) in &subjects {
             if let Some(sequence) = subject.sequence {
-                places.add_ids(sequence, subject.target, &subject.set.deflines[subject.target].ids);
+                places.add_ids(
+                    sequence,
+                    subject.target,
+                    &subject.set.deflines[subject.target].ids,
+                );
                 for handle in subject.line_handles() {
                     registry.entry(handle).or_default().push(sequence);
                 }
@@ -6734,7 +6770,6 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|(old, holder)| Some((key(old)?, holder)))
                 .collect(),
-            own: self.own.into_iter().filter_map(&key).collect(),
             writes_shown: self.writes_shown,
         }
     }
@@ -6831,14 +6866,13 @@ impl HitLoads {
     /// Whether the record writers write, for the subject `key`, the record of the other sequence
     /// that its loads give (`HitLoad::Shown`): the run's formats write such records
     /// (`writes_shown`: not the pairwise reports and SAM yet), every load of the subject gives
-    /// that sequence and its line ([`HitLoads::written_holder`]), and no report's load gives the
-    /// subject itself or throws (`own`, `throws`: one report of a batch whose prefetch is off can
+    /// that sequence and its line ([`HitLoads::written_holder`]: none gives the subject itself),
+    /// and no report's load throws (`throws`: one report of a batch whose prefetch is off can
     /// fail the lookup where a later one finds the sequence that the first loaded). `false` where
     /// LOSAT refuses the subject for that sequence (`ParsedSubject::shown_reason`).
     pub fn writes_shown_records(&self, key: usize) -> bool {
         self.writes_shown
             && self.shown.contains_key(&key)
-            && !self.own.contains(&key)
             && !self.throws.contains_key(&key)
             && matches!(self.written.get(&key), Some(Some(_)))
     }

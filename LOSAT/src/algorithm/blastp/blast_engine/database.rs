@@ -3242,8 +3242,14 @@ impl ListedTitles<'_> {
             let rank = self.listed.ordinals.binary_search(&holder).ok()?;
             self.parsed_subject(rank)
         };
-        let Some(bioseq) =
-            holders.shown(loads, rank, (ordinal, subject), holder_record, (0, false), flags)?
+        let Some(bioseq) = holders.shown(
+            loads,
+            rank,
+            (ordinal, subject),
+            holder_record,
+            (0, false),
+            flags,
+        )?
         else {
             return Ok(None);
         };

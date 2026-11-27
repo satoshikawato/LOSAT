@@ -371,9 +371,33 @@ impl<F: RawFile> StreamBuf for FileBuf<F> {
 }
 
 impl<F: RawFile> Drop for FileBuf<F> {
-    /// The destructor of the stream closes its file.
+    /// The destructor of the stream closes its file. After the end at a closed pipe
+    /// ([`end_at_closed_pipe`]) the bytes it holds are dropped first, as NCBI's process, ended by
+    /// SIGPIPE, runs no destructor that would write them.
     fn drop(&mut self) {
+        if ENDED_AT_CLOSED_PIPE.load(std::sync::atomic::Ordering::Relaxed) {
+            self.held.clear();
+        }
         self.close();
+    }
+}
+
+/// Whether the command line's run has met a closed pipe where SIGPIPE ends NCBI's process
+/// ([`end_at_closed_pipe`]).
+static ENDED_AT_CLOSED_PIPE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The end of the command line's run at a write that met a closed pipe, where SIGPIPE ends
+/// NCBI's process (makeblastdb's log, `super::build_db::endl`; the writer's `cout` line,
+/// `super::writer::WriteDb::add_sequence_with_cout`): LOSAT's run goes on only to its end with
+/// exit status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10), and the file buffers dropped
+/// after this point drop the bytes they hold, as NCBI's file streams lose theirs (NCBI
+/// makeblastdb 2.17.0, a reader closed before "Adding sequences from FASTA": the volume's files
+/// hold the blocks its buffers wrote, empty for a small input; line RG item T8b). A library run
+/// is no process that the signal ends: its streams close as they do.
+pub(crate) fn end_at_closed_pipe() {
+    if crate::cli::is_command_line_run() {
+        ENDED_AT_CLOSED_PIPE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

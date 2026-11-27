@@ -243,12 +243,9 @@ These cases are about what the program prints around the search, not the search 
 
 ### A write that fails, a closed pipe, memory
 
-- **Tabular output (6, 7) cannot be written** (`-out /dev/full`, a full disk): NCBI aborts. LOSAT reports the write error and exits with a non-zero status. For outfmt 0 LOSAT gives NCBI's message and exit status (`BLAST failed to write output`, 6).
-- **A side file of outfmt 13 or 14 cannot be written**: NCBI reports it on the standard error and goes on, exit status 0. LOSAT stops with `BLAST failed to write output` (exit status 6).
 - **A search program runs out of memory**: NCBI catches it and writes `BLAST ran out of memory` (exit status 4). LOSAT aborts.
-- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` (`-show_filters`, `-stat`, and index outputs that are named pipes), the log of `makeblastdb` (a reader that is gone when it starts leaves no new file, and an existing database of the name stays as it was), `makeprofiledb` (its deletion log line and writer `cout` line), and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
+- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` (`-show_filters`, `-stat`, and index outputs that are named pipes), the log of `makeblastdb` (a reader that is gone when it starts leaves no new file, and an existing database of the name stays as it was), `makeprofiledb` (its deletion log line and writer `cout` line), `rpsbproc` (its report and its standard error), and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
 - **Standard output closed at the start** (`>&-`): NCBI fails on its first write. LOSAT writes the report to `/dev/null` and exits as the search ends.
-- **`rpsbproc` cannot write its report**: NCBI's `rpsbproc` drops the writes and exits with 0. LOSAT stops with `rpsbproc failed to write output` (exit status 4).
 
 These are error paths: when the output can be written, the output matches NCBI's.
 

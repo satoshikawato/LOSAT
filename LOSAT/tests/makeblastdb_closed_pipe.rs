@@ -200,3 +200,74 @@ fn a_logfile_that_is_the_closed_pipe_makes_no_file() {
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
     assert!(names(&tmp.0.join("p")).is_empty());
 }
+
+// A reader that closes the pipe after the line "Maximum file size", while makeblastdb waits for its
+// standard input: the next line ("Adding sequences from FASTA", after the input is read, the volume
+// still open) meets the closed pipe. NCBI makeblastdb 2.17.0 is ended by SIGPIPE there, and its
+// file streams lose what their buffers hold: the volume's files are empty (line RG item T8b,
+// `remaining-gaps-20261112/T/t8b/part3`, nucleotide and protein, versions 4 and 5). LOSAT ends
+// there with exit status 0 and drops those bytes too (`writedb::ofstream::end_at_closed_pipe`).
+// NCBI's ended process also leaves LMDB's lock files, which LOSAT does not make
+// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+#[test]
+fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
+    use std::io::{BufRead, Write};
+    for (name, input, words, volume) in [
+        (
+            "late_nucl",
+            NUC,
+            &["-dbtype", "nucl"][..],
+            ["d.00.nhr", "d.00.nin", "d.00.nsq"],
+        ),
+        (
+            "late_prot",
+            PROT,
+            &["-dbtype", "prot", "-parse_seqids"],
+            ["d.00.phr", "d.00.pin", "d.00.psq"],
+        ),
+    ] {
+        let dir = TempDir::new(name);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+        command
+            .current_dir(&dir.0)
+            .env("HOME", &dir.0)
+            .arg("makeblastdb")
+            .args(["-in", "-", "-out", "p/d", "-title", "t"])
+            .args(words)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (variable, _) in std::env::vars_os() {
+            let variable = variable.to_string_lossy().into_owned();
+            if variable.starts_with("LOSAT_")
+                || variable.starts_with("NCBI_CONFIG")
+                || variable == "BLASTDB"
+                || variable.starts_with("LMDB_")
+            {
+                command.env_remove(variable);
+            }
+        }
+        let mut child = command.spawn().expect("run losat makeblastdb");
+        let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while !line.starts_with("Maximum file size") {
+            line.clear();
+            assert!(reader.read_line(&mut line).unwrap() > 0, "{name}: the log ended");
+        }
+        drop(reader);
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(input.as_bytes()).unwrap();
+        drop(stdin);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{name}");
+        assert!(output.stderr.is_empty(), "{name}: {:?}", output.stderr);
+        let p = dir.0.join("p");
+        for file in volume {
+            assert_eq!(
+                std::fs::metadata(p.join(file)).unwrap().len(),
+                0,
+                "{name}: {file}"
+            );
+        }
+    }
+}

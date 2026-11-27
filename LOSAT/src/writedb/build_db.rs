@@ -46,12 +46,16 @@ use crate::utils::os_bytes::path_of_bytes;
 /// A write of the line that found the pipe closed, where SIGPIPE ends NCBI's process
 /// (`ncbi_app::files::ends_like_sigpipe`; NCBI 2.17.0 exits with status 141 at the line's flush),
 /// ends makeblastdb at once: [`WriteDbError::ClosedPipe`] (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-/// exception 10). Each line is made of values computed before its first insertion, so the end of
-/// the line is where NCBI's process ends. Any other failure of the log is not looked at, as
-/// makeblastdb does not read the stream's state.
+/// exception 10), the database's file buffers losing what they hold
+/// (`super::ofstream::end_at_closed_pipe`). Each line is made of values computed before its
+/// first insertion, so the end of the line is where NCBI's process ends. Any other failure of the
+/// log is not looked at, as makeblastdb does not read the stream's state.
 pub(crate) fn endl(log: &mut dyn Write) -> Result<(), WriteDbError> {
     match log.write_all(b"\n").and_then(|()| log.flush()) {
-        Err(error) if ends_like_sigpipe(&error) => Err(WriteDbError::ClosedPipe),
+        Err(error) if ends_like_sigpipe(&error) => {
+            super::ofstream::end_at_closed_pipe();
+            Err(WriteDbError::ClosedPipe)
+        }
         _ => Ok(()),
     }
 }

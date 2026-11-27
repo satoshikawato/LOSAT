@@ -63,7 +63,7 @@ For every option: `losat rpsbproc -help`.
 
 For nucleotide queries (from `rpstblastn`), each reading frame is classified separately. Its hits are shown with the frame after the query name, such as `Query_1[-2]`, at positions on the plus strand. The `DOMAINS` section is printed even when there are no hits.
 
-Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data. When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)).
+Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data. When the report cannot be written (a full disk), the rest of it is dropped and the run goes on to its end, as NCBI's does. When the reader of a pipe closes it, LOSAT stops at once with exit status 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)).
 
 ## Differences from NCBI BLAST+
 

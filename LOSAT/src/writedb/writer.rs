@@ -688,6 +688,7 @@ impl WriteDb {
                         cout.insert(&text);
                         cout.flush();
                         if cout.rdbuf().closed_pipe() {
+                            super::ofstream::end_at_closed_pipe();
                             return Err(WriteDbError::ClosedPipe);
                         }
                     }

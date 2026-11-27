@@ -498,14 +498,16 @@ pub type SubjectReadHook<'r, W> = &'r mut dyn FnMut(u32, &mut W) -> io::Result<(
 
 /// A place of a pairwise report (outfmt 0 to 4) where NCBI writes to the run's diagnostics between
 /// the report's bytes, after the report written before it (`cerr`, tied to `cout`): the load of a
-/// subject (`Load`: its read's text, `QueryWarnings::subject_read`) or, with `-html`, a read of
-/// NCBI's formatter registries (`Html`: `report::html_ids::HtmlPost`, whose text the run's
-/// `-html` links give, `HtmlLinks::posts_of`). The writers call their `ReportHook` at each, in the
-/// report's order; one that formats into a buffer keeps them with their offsets
-/// (`x_pairwise_par::format_piece`).
+/// subject (`Load`: its read's text, `QueryWarnings::subject_read`), the formatter's reads of a
+/// subject's definition line (`Titles`: the subject and the number of reads, each with its posts,
+/// `QueryWarnings::title_read`) or, with `-html`, a read of NCBI's formatter registries (`Html`:
+/// `report::html_ids::HtmlPost`, whose text the run's `-html` links give, `HtmlLinks::posts_of`).
+/// The writers call their `ReportHook` at each, in the report's order; one that formats into a
+/// buffer keeps them with their offsets (`x_pairwise_par::format_piece`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReportPlace {
     Load(u32),
+    Titles(u32, u8),
     Html(crate::report::html_ids::HtmlPost),
 }
 

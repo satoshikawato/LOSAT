@@ -908,6 +908,12 @@ pub(crate) fn at_place<W: io::Write>(
             Some(warnings) => warnings.subject_read(query, s_idx, writer),
             None => Ok(()),
         },
+        ReportPlace::Titles(s_idx, reads) => match warnings {
+            Some(warnings) if warnings.title_posts(s_idx) => {
+                (0..reads).try_for_each(|_| warnings.title_read(s_idx, writer))
+            }
+            _ => Ok(()),
+        },
         ReportPlace::Html(post) => html_at_place(warnings, links, post, writer),
     }
 }

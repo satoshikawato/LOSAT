@@ -1111,14 +1111,23 @@ impl SubjectHeading<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<Option<Vec<u8>>> {
         match self {
-            SubjectHeading::Database(db_heading) => write_database_subject_heading(
-                writer,
-                db_heading,
-                protein,
-                subject_length,
-                html,
-                place,
-            ),
+            SubjectHeading::Database(db_heading) => {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
+                // The heading of a loaded subject (`x_PrintDefLine`) reads its definition line
+                // once, before its bytes and the reads of its links, posting for the bytes of its
+                // title that NCBI replaces (`common::database::FormatterTitleReads::Pairwise`).
+                if !matches!(db_heading, DatabaseHeading::Skipped(_)) {
+                    place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer)?;
+                }
+                write_database_subject_heading(
+                    writer,
+                    db_heading,
+                    protein,
+                    subject_length,
+                    html,
+                    place,
+                )
+            }
             SubjectHeading::Record(title) => {
                 let defline = super::defline::generate_defline(title, protein, false);
                 match html {
@@ -4806,6 +4815,14 @@ fn write_description_row_start<W: Write>(
 ) -> io::Result<()> {
     match html {
         None => {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:396-397
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+            // The line's subject (`x_FillDeflineAndId`, not on the row of NCBI's `catch`) reads
+            // its definition line twice before the line, each read posting for the bytes of its
+            // title that NCBI replaces (`common::database::FormatterTitleReads::Pairwise`).
+            if !label.caught {
+                place(super::query_warnings::ReportPlace::Titles(rank.0, 2), writer)?;
+            }
             label.write_cut(writer)?;
             write!(writer, "  {bits:<max_score$}")
         }
@@ -4862,6 +4879,17 @@ impl<'a> HtmlRows<'a> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let parsed = self.parsed.get(s_idx as usize).and_then(Option::as_deref);
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:396-397
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494-498
+        // The two reads of the subject's definition line (`write_description_row_start`) come
+        // before and after the id link's reads of the registry (`GetIDUrl`).
+        let title_read = |place: super::query_warnings::ReportHook<'_, W>, writer: &mut W| {
+            match label.caught {
+                false => place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer),
+                true => Ok(()),
+            }
+        };
+        title_read(&mut *place, writer)?;
         let mut posts = Vec::new();
         let links = self
             .report
@@ -4869,6 +4897,7 @@ impl<'a> HtmlRows<'a> {
         for post in posts {
             place(super::query_warnings::ReportPlace::Html(post), writer)?;
         }
+        title_read(&mut *place, writer)?;
         let (link, score) = links?;
         label.write_html(writer, &link)?;
         writer.write_all(b"  ")?;

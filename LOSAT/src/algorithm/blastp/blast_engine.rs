@@ -4977,9 +4977,9 @@ fn read_cli_subjects(
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &BlastpArgs) -> Result<()> {
-    // `-db` is checked as the command line checks it: the database is opened by the run
-    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
-    let resolved = args.resolve()?;
+    // `-db`, `-in_pssm` and `-in_msa` are checked as the command line checks them without reading
+    // files: the run opens them from its working directory (`run_local` / `run_local_database`).
+    let resolved = args.resolve_without_files()?;
     validate_requested_blastp_support(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which `search` refuses where it
     // searches its first query batch.
@@ -5017,7 +5017,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
@@ -7000,10 +7006,10 @@ fn search(
                         XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
-                // Outfmt 13 to 16 ask for the same refusal of NCBI's taxonomy cache at the first
-                // batch that reports a subject with a positive taxid (`read_reported_taxonomy`),
-                // which can be in a later block too: the search of all queries, which refuses
-                // before any byte.
+                // Outfmt 13 to 16 follow the same slot of NCBI's taxonomy cache through the loads
+                // of every batch (their prefetch or reports' reads where it is off), whose refusal
+                // can come at a later block too: the search of all queries, which refuses before
+                // any byte.
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
@@ -10849,11 +10855,7 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(
-        database,
-        &query_batches,
-        report_prep::prefetch_format(args.app, &requested_formats),
-    );
+    let reads = database::CallTitles::new(database, &query_batches);
     let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     resolve_seen_queries(

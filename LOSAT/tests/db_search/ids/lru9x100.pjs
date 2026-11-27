@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "lru9x100",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "lru9x100 (parsed Seq-ids)",
+  "number-of-letters": 2200,
+  "number-of-sequences": 11,
+  "last-updated": "2026-11-25T21:54:00",
+  "number-of-volumes": 1,
+  "bytes-total": 175942,
+  "bytes-to-cache": 2412,
+  "files": [
+    "lru9x100.pdb",
+    "lru9x100.phr",
+    "lru9x100.pin",
+    "lru9x100.pog",
+    "lru9x100.pos",
+    "lru9x100.pot",
+    "lru9x100.psq",
+    "lru9x100.ptf",
+    "lru9x100.pto"
+  ]
+}

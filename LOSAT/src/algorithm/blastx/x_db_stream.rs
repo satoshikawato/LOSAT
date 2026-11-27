@@ -15,7 +15,7 @@
 //!   index that cannot be read and (outside `-db_hard_mask`) a longest above 5,000,000 residues
 //!   give the error of the check (`x_check_stores`, which reads the database once in blocks of
 //!   `PROTEIN_STORE_BLOCK_BYTES` with the checks of the copy in its order: the empty database,
-//!   `check_protein_sequence`, and outside `-db_hard_mask` the 5,000,000-residue limit), which
+//!   `protein_defect`, and outside `-db_hard_mask` the 5,000,000-residue limit), which
 //!   fails the first query batch with a valid context. The reads of the search check each block
 //!   they read the same way (`XStreamDb::x_check`) until they have checked every sequence once.
 //! - The preliminary search reads the sequences of each pass over the database in ascending order
@@ -63,7 +63,7 @@ use std::borrow::Cow;
 
 use anyhow::{anyhow, Result};
 
-use crate::algorithm::common::database::{check_protein_sequence, search_read_error};
+use crate::algorithm::common::database::{protein_defect, search_read_error};
 use crate::seqdb::{SeqDb, SequenceBlock};
 
 use super::database::{too_long, x_check_whole, MAX_DBSEQ_LEN};
@@ -200,7 +200,7 @@ impl<'a> XStreamDb<'a> {
     // residues) at every thread count, on one thread while the others waited (0.84 of 2.22 s for
     // one query at 16 threads), and the search then read every sequence again.
     /// Checks the sequences of `part`, just read, as `x_check_stores` checks them
-    /// (`check_protein_sequence`, `MAX_DBSEQ_LEN`) until the reads have checked every sequence of
+    /// (`protein_defect`, `MAX_DBSEQ_LEN`) until the reads have checked every sequence of
     /// the database; after that, nothing (the bytes are those already checked). A sequence that
     /// fails is an `XReadError`, which the run reports as the check's first error
     /// (`native::search_error`).
@@ -218,8 +218,10 @@ impl<'a> XStreamDb<'a> {
                 continue;
             }
             let ordinal = first + i as u32;
-            check_protein_sequence(with_sentinels, || self.db.oid(ordinal), self.app)
-                .map_err(XReadError)?;
+            // The name is taken on the error path only (`ProteinDefect::refusal`): this loop checks
+            // every sequence of the database once.
+            protein_defect(with_sentinels)
+                .map_err(|defect| XReadError(defect.refusal(self.db.oid(ordinal), self.app)))?;
             let length = with_sentinels.len() - 2;
             if !self.allow_long && length > MAX_DBSEQ_LEN {
                 return Err(XReadError(too_long(

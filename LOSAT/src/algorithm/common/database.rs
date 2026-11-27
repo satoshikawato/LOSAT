@@ -5255,22 +5255,41 @@ const NCBISTDAA_GAP: u8 = 0;
 // kernels score it: an ungapped extension stops at it and a gapped alignment goes round it
 // with a gap. A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past
 // its rows and is rejected.
-/// LOSAT's refusal of a protein database sequence (`oid` gives its OID, which the refusal names;
-/// `with_sentinels`: its residues with the byte before and the byte after them in the sequence
-/// file) when
-/// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, or one
-/// with a byte that is no NCBIstdaa residue.
-pub(crate) fn check_protein_sequence(
-    with_sentinels: &[u8],
-    oid: impl Fn() -> crate::seqdb::Oid,
-    program: &str,
-) -> Result<()> {
+/// What makes a protein database sequence one that LOSAT cannot search as NCBI does
+/// (`protein_defect`); `refusal` is LOSAT's refusal of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProteinDefect {
+    /// The sequence is not between two 0 bytes in its sequence file (the volume is damaged).
+    Sentinels,
+    /// The sequence holds a byte that is no NCBIstdaa residue at this position (from 1).
+    NonResidue(usize),
+}
+
+impl ProteinDefect {
+    /// LOSAT's refusal of the database sequence `oid` with this defect, naming the running
+    /// application `program`. The checks call it on their error path only, so a check of a
+    /// sequence takes no name (the BLASTX reads check every sequence of a database once,
+    /// `XStreamDb::x_check`).
+    #[cold]
+    pub(crate) fn refusal(self, oid: crate::seqdb::Oid, program: &str) -> anyhow::Error {
+        match self {
+            Self::Sentinels => anyhow::anyhow!(
+                "database sequence {oid} is not between two NUL bytes in its sequence file (the volume is damaged), which is not supported by LOSAT's {program}"
+            ),
+            Self::NonResidue(position) => anyhow::anyhow!(
+                "database sequence {oid} holds a byte that is no NCBIstdaa residue at position {position}, which is not supported by LOSAT's {program}"
+            ),
+        }
+    }
+}
+
+/// The defect of a protein database sequence (`with_sentinels`: its residues with the byte before
+/// and the byte after them in the sequence file) that LOSAT cannot search as NCBI does: a
+/// sequence not between two 0 bytes, or one with a byte that is no NCBIstdaa residue (the first).
+pub(crate) fn protein_defect(with_sentinels: &[u8]) -> std::result::Result<(), ProteinDefect> {
     let (first, last) = (with_sentinels[0], with_sentinels[with_sentinels.len() - 1]);
     if first != NCBISTDAA_GAP || last != NCBISTDAA_GAP {
-        bail!(
-            "database sequence {} is not between two NUL bytes in its sequence file (the volume is damaged), which is not supported by LOSAT's {program}",
-            oid()
-        );
+        return Err(ProteinDefect::Sentinels);
     }
     let residues = &with_sentinels[1..with_sentinels.len() - 1];
     // Every residue must be a byte below BLASTAA_SIZE. The largest byte, taken over all bytes
@@ -5281,17 +5300,13 @@ pub(crate) fn check_protein_sequence(
     if usize::from(largest) < crate::utils::matrix::BLASTAA_SIZE {
         return Ok(());
     }
-    if let Some(position) = residues
+    match residues
         .iter()
         .position(|&residue| usize::from(residue) >= crate::utils::matrix::BLASTAA_SIZE)
     {
-        bail!(
-            "database sequence {} holds a byte that is no NCBIstdaa residue at position {}, which is not supported by LOSAT's {program}",
-            oid(),
-            position + 1
-        );
+        Some(position) => Err(ProteinDefect::NonResidue(position + 1)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Bytes of the sequence file that one read of `x_check_protein_stores` holds at most
@@ -5303,7 +5318,7 @@ const PROTEIN_STORE_BLOCK_BYTES: u64 = 1 << 20;
 /// `PROTEIN_STORE_BLOCK_BYTES` in ordinal order, as its sequence files store them, and checks
 /// them: a reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
 /// reads every sequence there); a sequence `program` cannot search as NCBI does is LOSAT's
-/// refusal (`check_protein_sequence`). The number of residues of each sequence is handed to
+/// refusal (`protein_defect`). The number of residues of each sequence is handed to
 /// `each` (ordinal id, residues) and its bytes are dropped with its block. BLASTX's passes
 /// (`blastx/x_db_stream.rs`) check the blocks they read the same way and take this order's first
 /// error where one fails (`BlastxDatabase::x_check_stores`). NCBI searches the stored bytes in place
@@ -5330,7 +5345,8 @@ pub(crate) fn x_check_protein_stores(
                 each(ordinal, 0);
                 continue;
             }
-            check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
+            protein_defect(with_sentinels)
+                .map_err(|defect| defect.refusal(db.oid(ordinal), program))?;
             each(ordinal, with_sentinels.len() - 2);
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707

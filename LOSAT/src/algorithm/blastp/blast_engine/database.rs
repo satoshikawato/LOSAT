@@ -446,7 +446,8 @@ fn prepare_search_block(
             continue;
         }
         let ordinal = block.first_ordinal() + i as u32;
-        shared::check_protein_sequence(with_sentinels, || oids.oid(ordinal), program)?;
+        shared::protein_defect(with_sentinels)
+            .map_err(|defect| defect.refusal(oids.oid(ordinal), program))?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's {program}")
 }

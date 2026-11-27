@@ -726,12 +726,11 @@ fn stored(residues: &[u8]) -> Vec<u8> {
 }
 
 fn check(residues: &[u8]) -> std::result::Result<(), String> {
-    check_protein_sequence(
-        &stored(residues),
-        || crate::seqdb::Oid::of_unrestricted(7),
-        "blastx",
-    )
-    .map_err(|e| e.to_string())
+    protein_defect(&stored(residues)).map_err(|defect| {
+        defect
+            .refusal(crate::seqdb::Oid::of_unrestricted(7), "BLASTX")
+            .to_string()
+    })
 }
 
 /// The check as an `all` over the residues.
@@ -742,7 +741,7 @@ fn accepted_by_all(residues: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (cited at
-// `check_protein_sequence`): the bytes past the matrix are what the check refuses; the gap
+// `protein_defect`): the bytes past the matrix are what the check refuses; the gap
 // byte is a residue of the matrix. Not a port of an NCBI unit case.
 #[test]
 fn the_check_accepts_the_letters_and_names_the_first_bad_byte() {
@@ -771,18 +770,14 @@ fn the_check_accepts_the_letters_and_names_the_first_bad_byte() {
         }
     }
     // The sentinels.
-    assert!(check_protein_sequence(
-        &[1, first, 0],
-        || crate::seqdb::Oid::of_unrestricted(7),
-        "blastx"
-    )
-    .is_err());
-    assert!(check_protein_sequence(
-        &[0, first, 1],
-        || crate::seqdb::Oid::of_unrestricted(7),
-        "blastx"
-    )
-    .is_err());
+    assert_eq!(
+        protein_defect(&[1, first, 0]),
+        Err(ProteinDefect::Sentinels)
+    );
+    assert_eq!(
+        protein_defect(&[0, first, 1]),
+        Err(ProteinDefect::Sentinels)
+    );
 }
 
 // Random residues around the letters' bounds: the single pass accepts exactly what an `all`

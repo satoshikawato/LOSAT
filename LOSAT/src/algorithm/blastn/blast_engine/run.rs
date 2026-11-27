@@ -6553,6 +6553,16 @@ fn open_search_database(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
             );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let word_size =
+                crate::algorithm::blastn::coordination::determine_effective_word_size(args);
+            let database = database.with_mt_mode(
+                args.num_threads,
+                args.mt_mode,
+                word_size,
+                Some(args.query.as_path()),
+            );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),

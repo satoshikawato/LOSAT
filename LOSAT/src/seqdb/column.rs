@@ -23,7 +23,7 @@ use std::path::Path;
 
 use super::file::DbFile;
 use super::volume::with_extension;
-use super::{SeqDbError, SeqType};
+use super::{SeqDbAssert, SeqDbError, SeqType};
 
 /// The title of the column that holds the mask data (`CSeqDBImpl::x_GetMaskDataColumn`).
 pub const MASK_DATA_TITLE: &[u8] = b"BlastDb/MaskData";
@@ -209,10 +209,15 @@ impl Column {
     }
 
     /// The error of a failed `SEQDB_FILE_ASSERT` of the index file.
-    fn integrity_error(&self, message: impl Into<String>) -> SeqDbError {
+    fn integrity_error(
+        &self,
+        message: impl Into<String>,
+        assert: Option<SeqDbAssert>,
+    ) -> SeqDbError {
         SeqDbError::Integrity {
             path: self.index.path().to_path_buf(),
             message: message.into(),
+            assert,
         }
     }
 
@@ -242,10 +247,17 @@ impl Column {
         // Reading 32 bytes of a shorter file fails the check `SEQDB_FILE_ASSERT` that `m_Length` is
         // at least `end`.
         if self.index.len() < FIXED_FIELD_BYTES {
-            return Err(self.integrity_error(format!(
-                "the column index file has {} bytes, fewer than its 32 fixed bytes",
-                self.index.len()
-            )));
+            return Err(self.integrity_error(
+                format!(
+                    "the column index file has {} bytes, fewer than its 32 fixed bytes",
+                    self.index.len()
+                ),
+                Some(SeqDbAssert {
+                    cond: "m_Length >= end",
+                    file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                    line: 129,
+                }),
+            ));
         }
         let header = self.index.read_range(0, FIXED_FIELD_BYTES)?;
         let mut blob = Blob::new(&header, 0);
@@ -267,35 +279,70 @@ impl Column {
         self.offset_array_start = blob.read_i32().map_err(|e| self.format_error(e))?;
 
         if self.num_oids == 0 && self.data_length != 0 {
-            return Err(self.integrity_error(format!(
-                "the column index file states {} data bytes for no sequences",
-                self.data_length
-            )));
+            return Err(self.integrity_error(
+                format!(
+                    "the column index file states {} data bytes for no sequences",
+                    self.data_length
+                ),
+                Some(SeqDbAssert {
+                    cond: "m_NumOIDs || (! m_DataLength)",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 246,
+                }),
+            ));
         }
         if meta_data_start < 0 {
-            return Err(self.integrity_error(format!(
-                "the column index file states a negative metadata start ({meta_data_start})"
-            )));
+            return Err(self.integrity_error(
+                format!(
+                    "the column index file states a negative metadata start ({meta_data_start})"
+                ),
+                Some(SeqDbAssert {
+                    cond: "m_MetaDataStart >= 0",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 248,
+                }),
+            ));
         }
         if self.offset_array_start < meta_data_start {
-            return Err(self.integrity_error(format!(
-                "the column index file starts its offset array ({}) before its metadata \
-                 ({meta_data_start})",
-                self.offset_array_start
-            )));
+            return Err(self.integrity_error(
+                format!(
+                    "the column index file starts its offset array ({}) before its metadata \
+                     ({meta_data_start})",
+                    self.offset_array_start
+                ),
+                Some(SeqDbAssert {
+                    cond: "m_OffsetArrayStart >= m_MetaDataStart",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 249,
+                }),
+            ));
         }
         if self.index.len() < self.offset_array_start as u64 {
-            return Err(self.integrity_error(format!(
-                "the column index file has {} bytes, fewer than the start of its offset array \
-                 ({})",
-                self.index.len(),
-                self.offset_array_start
-            )));
+            return Err(self.integrity_error(
+                format!(
+                    "the column index file has {} bytes, fewer than the start of its offset array \
+                     ({})",
+                    self.index.len(),
+                    self.offset_array_start
+                ),
+                Some(SeqDbAssert {
+                    cond: "m_IndexFile.GetFileLength() >= m_OffsetArrayStart",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 250,
+                }),
+            ));
         }
         // Reading the range 0..meta_data_start fails the check `SEQDB_FILE_ASSERT` that `start` is
         // below `end` when it is empty.
         if meta_data_start == 0 {
-            return Err(self.integrity_error("the column index file states a metadata start of 0"));
+            return Err(self.integrity_error(
+                "the column index file states a metadata start of 0",
+                Some(SeqDbAssert {
+                    cond: "start    <  end",
+                    file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                    line: 128,
+                }),
+            ));
         }
         let head = self.index.read_range(0, meta_data_start as u64)?;
         // The blob keeps its read offset (32) when it is pointed at the longer range.
@@ -309,10 +356,24 @@ impl Column {
             .map_err(|e| self.format_error(e))?
             .to_vec();
         if self.title.is_empty() {
-            return Err(self.integrity_error("the column index file has an empty title"));
+            return Err(self.integrity_error(
+                "the column index file has an empty title",
+                Some(SeqDbAssert {
+                    cond: "m_Title.size()",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 263,
+                }),
+            ));
         }
         if self.date.is_empty() {
-            return Err(self.integrity_error("the column index file has an empty date"));
+            return Err(self.integrity_error(
+                "the column index file has an empty date",
+                Some(SeqDbAssert {
+                    cond: "m_Date.size()",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 264,
+                }),
+            ));
         }
         if blob.read_offset() != i64::from(meta_data_start) {
             return Err(self.format_error(FORMAT_ERROR));
@@ -326,7 +387,14 @@ impl Column {
         // Reading the range `begin..end` fails the check `SEQDB_FILE_ASSERT` that `start` is below
         // `end` when it is empty.
         if self.offset_array_start <= meta_data_start {
-            return Err(self.integrity_error("the column index file has no metadata"));
+            return Err(self.integrity_error(
+                "the column index file has no metadata",
+                Some(SeqDbAssert {
+                    cond: "start < end",
+                    file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                    line: 128,
+                }),
+            ));
         }
         let bytes = self
             .index
@@ -389,9 +457,14 @@ impl Column {
                 self.num_oids
             ))
         } else {
-            self.integrity_error(format!(
-                "the offset array of the column ends before the entry of sequence {oid}"
-            ))
+            self.integrity_error(
+                format!("the offset array of the column ends before the entry of sequence {oid}"),
+                Some(SeqDbAssert {
+                    cond: "m_Length >= end",
+                    file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                    line: 129,
+                }),
+            )
         }
     }
 
@@ -419,9 +492,16 @@ impl Column {
     /// in NCBI's order.
     fn check_blob(&self, oid: u32, dstart: i32, dend: i32) -> Result<(), SeqDbError> {
         if dend < dstart {
-            Err(self.integrity_error(format!(
-                "the data range of sequence {oid} ends ({dend}) before it starts ({dstart})"
-            )))
+            Err(self.integrity_error(
+                format!(
+                    "the data range of sequence {oid} ends ({dend}) before it starts ({dstart})"
+                ),
+                Some(SeqDbAssert {
+                    cond: "dend >= dstart",
+                    file: "src/objtools/blast/seqdb_reader/seqdbcol.cpp",
+                    line: 345,
+                }),
+            ))
         } else if dend == dstart {
             Ok(())
         } else if dstart < 0 {
@@ -436,7 +516,15 @@ impl Column {
             self.data
                 .x_check_range(dstart as u64, dend as u64)
                 .map_err(|error| match error {
-                    SeqDbError::Format { path, message } => SeqDbError::Integrity { path, message },
+                    SeqDbError::Format { path, message } => SeqDbError::Integrity {
+                        path,
+                        message,
+                        assert: Some(SeqDbAssert {
+                            cond: "m_Length >= end",
+                            file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                            line: 129,
+                        }),
+                    },
                     error => error,
                 })
         }

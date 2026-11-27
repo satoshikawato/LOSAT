@@ -501,27 +501,28 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         "out/keep", "a/b/keep", "in/q.fa",
     ])));
     let target = |name: &str| files.strategy_target(OsStr::new(name), &[]);
+    let file = |name: &str| T::File(name.as_bytes().to_vec());
     let long_component = "a".repeat(256);
     let component_255 = "a".repeat(255);
     for (name, read) in [
-        ("s.asn", T::File),
-        ("out/s.asn", T::File),
-        ("./s.asn", T::File),
-        (" s.asn", T::File),
-        ("../s.asn", T::File),
-        ("a/b/../s.asn", T::File),
-        ("a/s.asn", T::File),
-        ("in/s.asn", T::File),
-        ("in/../s.asn", T::File),
-        ("src/s.asn", T::File),
-        ("/tmp/s.asn", T::File),
-        ("/dev/shm/s.asn", T::File),
-        ("/var/lock/s.asn", T::File),
-        ("/home/me/s.asn", T::File),
-        ("/proc/self/cwd/s.asn", T::File),
-        ("/proc/self/cwd/out/s.asn", T::File),
-        ("/proc/thread-self/cwd/s.asn", T::File),
-        (component_255.as_str(), T::File),
+        ("s.asn", file("s.asn")),
+        ("out/s.asn", file("out/s.asn")),
+        ("./s.asn", file("s.asn")),
+        (" s.asn", file(" s.asn")),
+        ("../s.asn", file("../s.asn")),
+        ("a/b/../s.asn", file("a/s.asn")),
+        ("a/s.asn", file("a/s.asn")),
+        ("in/s.asn", file("in/s.asn")),
+        ("in/../s.asn", file("s.asn")),
+        ("src/s.asn", file("src/s.asn")),
+        ("/tmp/s.asn", file("/tmp/s.asn")),
+        ("/dev/shm/s.asn", file("/dev/shm/s.asn")),
+        ("/var/lock/s.asn", file("/var/lock/s.asn")),
+        ("/home/me/s.asn", file("/home/me/s.asn")),
+        ("/proc/self/cwd/s.asn", file("s.asn")),
+        ("/proc/self/cwd/out/s.asn", file("out/s.asn")),
+        ("/proc/thread-self/cwd/s.asn", file("s.asn")),
+        (component_255.as_str(), file(&component_255)),
         ("", T::Inaccessible),
         (".", T::Inaccessible),
         ("..", T::Inaccessible),
@@ -581,19 +582,55 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/dev/mqueue/q", T::System),
     ] {
         assert_eq!(target(name), read, "{name:?}");
+        // The *start*'s name of the file (`losat_web2_start`, before the run's files) is the run's.
+        if let T::File(made) = &read {
+            assert_eq!(
+                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
+                Some(made),
+                "{name:?}"
+            );
+        }
     }
     // Without those folders, as in a new directory that holds only the run's other files, the
-    // command line cannot open a name in them (NCBI's `File is not accessible`).
+    // command line cannot open a name in them (NCBI's `File is not accessible`); the *start* still
+    // names the file that a run with the folders makes.
     let bare = RunFiles::Receiver(Arc::new(Kept::default()));
-    for name in [
-        "out/s.asn",
-        "a/b/../s.asn",
-        "in/s.asn",
-        "/proc/self/cwd/out/s.asn",
+    for (name, made) in [
+        ("out/s.asn", "out/s.asn"),
+        ("a/b/../s.asn", "a/s.asn"),
+        ("in/s.asn", "in/s.asn"),
+        ("/proc/self/cwd/out/s.asn", "out/s.asn"),
     ] {
         assert_eq!(
             bare.strategy_target(OsStr::new(name), &[]),
             T::Inaccessible,
+            "{name:?}"
+        );
+        assert_eq!(
+            RunFiles::output_host_name(OsStr::new(name)),
+            Some(made.as_bytes().to_vec()),
+            "{name:?}"
+        );
+    }
+    // A name that makes no file in any run's files has no name in the *start*.
+    for name in [
+        "",
+        ".",
+        "..",
+        "s.asn/",
+        "/tmp",
+        "/etc/s.asn",
+        "//s.asn",
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/full",
+        "/proc/self/comm",
+        "/dev/mqueue/q",
+    ] {
+        assert_eq!(
+            RunFiles::output_host_name(OsStr::new(name)),
+            None,
             "{name:?}"
         );
     }
@@ -625,11 +662,13 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
         ("/data/", &[], T::Inaccessible),
         ("/data/s.asn", &[], T::Inaccessible),
         ("/data/q.fa/s.asn", &[], T::Inaccessible),
+        // `/data` is there, the folder of a registered file: a name may pass it on its way out.
+        ("/data/../tmp/s.asn", &[], T::File(b"/tmp/s.asn".to_vec())),
         ("../up.fa", &[], T::Existing),
-        ("../s.asn", &[], T::File),
+        ("../s.asn", &[], T::File(b"../s.asn".to_vec())),
         ("tfp.pal", &[], T::Existing),
         ("./tfp.pal", &[], T::Existing),
-        ("tfp.pin", &[], T::File),
+        ("tfp.pin", &[], T::File(b"tfp.pin".to_vec())),
         ("missing_sub/x.fa", &[], T::Inaccessible),
         ("missing_sub/s.asn", &[], T::Inaccessible),
     ] {
@@ -638,6 +677,15 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
             read,
             "{name:?}"
         );
+        // The *start* names each file that the run makes as the run does (`/tmp/s.asn` too,
+        // though `/data` is no directory of the model's).
+        if let T::File(made) = &read {
+            assert_eq!(
+                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
+                Some(made),
+                "{name:?}"
+            );
+        }
     }
 }
 
@@ -700,18 +748,25 @@ fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
         "tfp.pal",
         "./tfp.pal",
     ] {
-        let strategy = match run_files.strategy_target(OsStr::new(name), &[]) {
-            StrategyTarget::File => Read::File,
+        let strategy_target = run_files.strategy_target(OsStr::new(name), &[]);
+        let strategy = match &strategy_target {
+            StrategyTarget::File(_) => Read::File,
             StrategyTarget::Inaccessible => Read::Unopened,
             StrategyTarget::Existing => Read::Refused,
             other => panic!("{name:?}: strategy {other:?}"),
         };
-        let log = match run_files.log_target(Some(OsStr::new(name))) {
+        let log_target = run_files.log_target(Some(OsStr::new(name)));
+        let log = match &log_target {
             Ok((DiagTarget::Memory(_), Some(_))) => Read::File,
             Ok((DiagTarget::Stderr, None)) => Read::Unopened,
             Err(_) => Read::Refused,
             Ok(_) => panic!("{name:?}: log target"),
         };
+        // A file of both is the command line's one file, under one host name.
+        if let (StrategyTarget::File(made), Ok((_, Some(logged)))) = (&strategy_target, &log_target)
+        {
+            assert_eq!(made, logged, "{name:?}");
+        }
         let output = match open_files.create(name) {
             Ok(Created::File(_)) => Read::File,
             Err(Unopened) => Read::Unopened,
@@ -740,6 +795,7 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             .collect();
         files.strategy_target(OsStr::new(name), &others)
     };
+    let file = |name: &str| T::File(name.as_bytes().to_vec());
     for (name, others, read) in [
         ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
         ("./q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
@@ -748,7 +804,7 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("query", "q.fa")],
             T::OtherFile("query"),
         ),
-        ("q.fa", vec![("query", "../x/../w/q.fa")], T::File),
+        ("q.fa", vec![("query", "../x/../w/q.fa")], file("q.fa")),
         (
             "../w/q.fa",
             vec![("query", "../x/../w/q.fa")],
@@ -759,14 +815,18 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("query", "../../a/q.fa")],
             T::OtherFile("query"),
         ),
-        ("../a/q.fa", vec![("query", "../../a/q.fa")], T::File),
-        ("q.fa.asn", vec![("query", "q.fa")], T::File),
+        (
+            "../a/q.fa",
+            vec![("query", "../../a/q.fa")],
+            file("../a/q.fa"),
+        ),
+        ("q.fa.asn", vec![("query", "q.fa")], file("q.fa.asn")),
         (
             "/tmp/s.fa",
             vec![("query", "q.fa"), ("subject", "/tmp/s.fa")],
             T::OtherFile("subject"),
         ),
-        ("./-", vec![("query", "-")], T::File),
+        ("./-", vec![("query", "-")], file("-")),
         (
             "run.log",
             vec![("logfile", "run.log")],
@@ -783,8 +843,8 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("logfile", "../run.log")],
             T::OtherFile("logfile"),
         ),
-        ("run.log", vec![("logfile", "../run.log")], T::File),
-        ("./-", vec![("logfile", "-")], T::File),
+        ("run.log", vec![("logfile", "../run.log")], file("run.log")),
+        ("./-", vec![("logfile", "-")], file("-")),
         (
             "wm.obinary",
             vec![("window_masker_db", "wm.obinary")],

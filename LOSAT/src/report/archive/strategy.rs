@@ -422,8 +422,9 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// command line's (`create_strategy_file`); for a `Receiver` (LOSAT Web, which has no file system
 /// and no `-out`), the file that the command line on Linux makes of the name in the run's
 /// directory (`RunFiles::strategy_target`, read against the run's files as `-logfile` and a tool's
-/// output are), in the run's file in memory (`ReceivedFile`) under the name as typed, with the
-/// command line's error and refusals: NCBI's error at once for a name that the command line cannot
+/// output are), in the run's file in memory (`ReceivedFile`) under the command line's file name
+/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error
+/// and refusals: NCBI's error at once for a name that the command line cannot
 /// open (a folder that the run's files do not have, a folder of them, a name in a directory of
 /// root's); `-` and the standard output (`/dev/stdout`) refused at NCBI's first request; no file
 /// for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name
@@ -450,9 +451,9 @@ pub fn create_strategy_file_in(
         refusal: Some(not_in_the_browser(path, what)),
     };
     Ok(match files.strategy_target(path.as_os_str(), others) {
-        Target::File => StrategyFile {
+        Target::File(name) => StrategyFile {
             target: StrategyTarget::Received(ReceivedFile {
-                name: path.as_os_str().as_encoded_bytes().to_vec(),
+                name,
                 bytes: Vec::new(),
                 receiver: receiver.clone(),
                 handed: false,

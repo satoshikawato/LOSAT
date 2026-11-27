@@ -539,7 +539,7 @@ fn pssm_output_files(words: &[&str]) -> (Option<String>, Option<String>, bool) {
         return (None, None, false);
     };
     let host_name = |raw: Option<&std::path::Path>| {
-        raw.and_then(|name| RunFiles::pssm_host_name(name.as_os_str()))
+        raw.and_then(|name| RunFiles::output_host_name(name.as_os_str()))
             .and_then(|bytes| String::from_utf8(bytes).ok())
     };
     (
@@ -827,10 +827,11 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// version word, which the command line prints before it loads the file), the file of `-logfile`
 /// (NCBI's scan of it, `log_file`, and the command line's normalized file name under which a run
 /// gives it on `STREAM_RUN_FILES`, `log_file_name`, `RunFiles::log_host_name`), the file of
-/// `-export_search_strategy` (the name as the argv's parser reads it, `strategy_file`: a run gives
-/// it on `STREAM_RUN_FILES` too; none for an argv that the parser rejects), whether the run is a dry
-/// run, whether the run takes its inputs from `losat_web2_register_inputs` (`inputs_together`: an
-/// argv with `-parse_deflines`), whether it prints a text in place of a search (`prints`:
+/// `-export_search_strategy` (`strategy_file`: the command line's file name under which a run
+/// gives it on `STREAM_RUN_FILES` too, as `out_pssm`; none for an argv that the parser rejects),
+/// whether the run is a dry run, whether the run takes its inputs from
+/// `losat_web2_register_inputs` (`inputs_together`: an argv with `-parse_deflines`), whether it
+/// prints a text in place of a search (`prints`:
 /// `"help"` or `"version"`, `STREAM_PRINTED`), which needs no inputs, and whether it searches the
 /// database of `-db` (`searches_database`: its `run` takes no subject handle, and the engine opens
 /// the database from the run's files, line WQA D12a). An unknown program is an error.
@@ -880,15 +881,18 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
     Ok(out)
 }
 
-/// The name of the file of `-export_search_strategy` of the argv `words` (program name first), as
-/// the run gives the file (`losat::web_adapter::open_strategy_file`): the name as the argv's parser
-/// reads it. `None` without the option, for a name that is not UTF-8 (which the run refuses) and
-/// for an argv that the parser rejects or that prints a text.
+/// The name of the file of `-export_search_strategy` of the argv `words` (program name first),
+/// under which a run gives the file if it makes it (`losat::web_adapter::open_strategy_file`,
+/// `run_files::StrategyTarget::File`): the command line's file name (`RunFiles::output_host_name`,
+/// as for `-out_pssm`; `s.asn` for `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`; line RG
+/// item F1w-r2). `None` without the option, for a name that makes no file (`/dev/null`, `/dev/stdout`, `/etc/s.asn`),
+/// for a name that is not UTF-8 (which the run refuses) and for an argv that the parser rejects or
+/// that prints a text.
 fn strategy_file(words: &[&str]) -> Option<String> {
     let (_, command) = parse_words(words).ok()?;
     losat::web_adapter::export_search_strategy_of(&command)
-        .and_then(|path| path.to_str())
-        .map(str::to_string)
+        .and_then(|path| RunFiles::output_host_name(path.as_os_str()))
+        .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
 /// `losat_web2_start`: emits the *start* JSON (`start_json`) on stream 2.

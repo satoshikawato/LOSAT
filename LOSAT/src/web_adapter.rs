@@ -283,9 +283,14 @@ fn search_files(command: &Commands) -> Option<SearchFiles<'_>> {
 /// where the command line makes it (`strategy::open_strategy_file_in`, as the command line's
 /// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
 /// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
-/// that the command line cannot open); the run's other files that the name may be are its `-query`,
-/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and the files of the run's working directory
-/// that the search reads (`-db`, the lists of its filters, BLASTN's `-filtering_db`).
+/// that the command line cannot open, also a name in a folder that the run's files do not have);
+/// the file is named as the command line's file (`s.asn` for `./s.asn`). The run's other files that
+/// the name may be, which LOSAT Web refuses under their option, are its `-query`, `-subject`,
+/// the PSSM files (`-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`), `-logfile`, BLASTN's
+/// `-window_masker_db`, and the files of the run's working directory that the search reads (`-db`,
+/// the lists of its filters, BLASTN's `-filtering_db`); any other file of the run's files and a
+/// file that the search reads or checks, present or missing, is LOSAT Web's refusal of a file of
+/// the run's directory (`RunFiles::strategy_target`, `StrategyTarget::Existing`).
 pub fn open_strategy_file(
     command: &Commands,
     words: &[&str],

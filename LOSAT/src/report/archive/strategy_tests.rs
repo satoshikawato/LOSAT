@@ -591,8 +591,9 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     };
     let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
     // A name in a folder of the run's directory (`src`, of this test's working directory, the
-    // crate's) is a file under the name as typed.
-    let made = export(open("src/s.asn").unwrap());
+    // crate's) is a file under the command line's name of it (line RG item F1w-r2: `./src/s.asn`
+    // and `src/../src/s.asn` make `src/s.asn`).
+    let made = export(open("./src/../src/s.asn").unwrap());
     assert!(!made.refused());
     assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
     // The run's end hands the file over, while a clone of the export is still held; the drop

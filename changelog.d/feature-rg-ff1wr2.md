@@ -4,3 +4,6 @@
   the Web GUI wrote the file. A file of the run that no option names (such as `.ncbirc`) and a file that the search
   reads (such as the alias file of a `-db` database, even where it is missing) are refused in the Web GUI, as for
   `-logfile`; before, the Web GUI wrote a file of that name, where the command line's file takes the place of the run's.
+- LOSAT Web names the search strategy file of `-export_search_strategy` as the command line's file, as it names the
+  file of `-logfile` and the PSSM files: `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn` give a file `s.asn`,
+  shown and saved under that name; before, the Web GUI kept the name as it was typed.

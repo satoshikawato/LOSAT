@@ -151,31 +151,41 @@ fn row_argv<'a>(
     argv
 }
 
-/// Each row's file is a file of the run under the name as typed, with NCBI's bytes, whatever
-/// other searches the run makes (`blastp.sub.nd`: outfmt 0's hit list of 3 and outfmt 6's of 500
-/// are two searches, and the file is the argv's, outfmt 0's), next to the file of `-logfile`, and
-/// the outputs are those of the run without the option, also in the folder of the query
-/// (`outfmt11/s.asn` next to `-query outfmt11/...`: a folder of the run's files, line RG item
-/// F1w-r2). The start's JSON names the file (`strategy_file`).
+/// Each row's file is a file of the run under the command line's name of it (line RG item
+/// F1w-r2: `s.asn` for `./s.asn`, `outfmt11/../s.asn` and `/proc/self/cwd/s.asn`), with NCBI's
+/// bytes, whatever other searches the run makes (`blastp.sub.nd`: outfmt 0's hit list of 3 and
+/// outfmt 6's of 500 are two searches, and the file is the argv's, outfmt 0's), next to the file of
+/// `-logfile`, and the outputs are those of the run without the option, also in the folder of the
+/// query (`outfmt11/s.asn` next to `-query outfmt11/...`: a folder of the run's files). The start's
+/// JSON names the file as the run does (`strategy_file`).
 #[test]
 fn the_strategy_file_is_a_file_of_the_run_with_the_command_lines_bytes() {
     for row in &ROWS {
         let (name, _, query, subject, _) = *row;
-        for file in ["s.asn", "outfmt11/s.asn", "outfmt11/../s.asn", "/tmp/s.asn"] {
-            let words = row_argv(row, file);
+        for (typed, file) in [
+            ("s.asn", "s.asn"),
+            ("./s.asn", "s.asn"),
+            ("outfmt11/s.asn", "outfmt11/s.asn"),
+            ("outfmt11/./s.asn", "outfmt11/s.asn"),
+            ("outfmt11/../s.asn", "s.asn"),
+            ("/proc/self/cwd/s.asn", "s.asn"),
+            ("/tmp/s.asn", "/tmp/s.asn"),
+            ("/tmp//s.asn", "/tmp/s.asn"),
+        ] {
+            let words = row_argv(row, typed);
             validate(&words).unwrap();
             assert!(
                 start_json(&words)
                     .unwrap()
                     .contains(&format!("\"strategy_file\":\"{file}\"")),
-                "{name}"
+                "{name} {typed}"
             );
             let (result, streams) = run_files_of(&words, query, subject);
             result.unwrap();
             assert_eq!(
                 files(&streams),
                 [(file.to_string(), frozen(name))],
-                "{name} {file}"
+                "{name} {typed}"
             );
             let plain: Vec<&str> = words[..words.len() - 2].to_vec();
             let (_, without) = run_files_of(&plain, query, subject);
@@ -283,6 +293,10 @@ fn the_names_the_run_has_no_file_for() {
         }
     }
     let words = row_argv(row, "/dev/null");
+    // No file in any run's files: the start names none.
+    assert!(start_json(&words)
+        .unwrap()
+        .contains("\"strategy_file\":null"));
     let (result, streams) = run_files_of(&words, query, subject);
     result.unwrap();
     assert!(files(&streams).is_empty(), "/dev/null");

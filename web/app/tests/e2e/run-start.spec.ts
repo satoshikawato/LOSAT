@@ -620,9 +620,10 @@ test('a dry run says that it searched nothing', async ({ page, browserName }) =>
 });
 
 // The search strategy file of -export_search_strategy (line RG item F1w; ABI v2 §5 stream 8) is a file of the run as the
-// file of -logfile is: shown under its option after the formats and saved as the CLI writes it. A name that the CLI
-// cannot open is NCBI's error before the run, as on the command line: also a name in a folder that the run's files do not
-// have (line RG item F1w-r2: `out/s.asn`, as the CLI run in a folder of the query and the subject only).
+// file of -logfile is: shown under its option after the formats, named as the CLI's file (line RG item F1w-r2: `s.asn`
+// for `./s.asn`) and saved as the CLI writes it. A name that the CLI cannot open is NCBI's error before the run, as on the
+// command line: also a name in a folder that the run's files do not have (line RG item F1w-r2: `out/s.asn`, as the CLI
+// run in a folder of the query and the subject only).
 test('the file of -export_search_strategy is a file of the run, saved as the CLI writes it', async ({ page, browserName }, testInfo) => {
   if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the file: ${NO_NATIVE_REASON}` });
   await program(page, 'blastn');
@@ -636,7 +637,7 @@ test('the file of -export_search_strategy is a file of the run, saved as the CLI
     await expect(validation).toHaveAttribute('data-state', 'invalid');
     await expect(validation).toContainText(`Argument "export_search_strategy". File is not accessible:  \`${name}'`);
   }
-  await extra.fill('-export_search_strategy s.asn -logfile run.log');
+  await extra.fill('-export_search_strategy ./s.asn -logfile run.log');
   await expect(validation).toHaveAttribute('data-state', 'ok');
   await submit(page);
   await waitStatus(page, 1, 'completed');
@@ -661,8 +662,8 @@ test('the file of -export_search_strategy is a file of the run, saved as the CLI
     const missing = spawnSync(NATIVE, [...words, 'out/s.asn'], { cwd: directory });
     expect(missing.status, 'blastn -export_search_strategy out/s.asn without a folder out').toBe(1);
     expect(missing.stderr.toString('utf8')).toContain('Argument "export_search_strategy". File is not accessible:  `out/s.asn\'');
-    const cli = spawnSync(NATIVE, [...words, 's.asn'], { cwd: directory });
+    const cli = spawnSync(NATIVE, [...words, './s.asn'], { cwd: directory });
     expect(cli.status, cli.stderr.toString('utf8')).toBe(0);
-    expect(saved.bytes.equals(readFileSync(join(directory, 's.asn'))), "blastn -export_search_strategy s.asn: the CLI's file").toBe(true);
+    expect(saved.bytes.equals(readFileSync(join(directory, 's.asn'))), "blastn -export_search_strategy ./s.asn: the CLI's file s.asn").toBe(true);
   }
 });

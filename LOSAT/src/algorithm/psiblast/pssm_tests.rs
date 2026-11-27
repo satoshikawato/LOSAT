@@ -1417,11 +1417,11 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // Host name normalization helper matches RunFiles::log_host_name semantics.
     assert_eq!(
-        RunFiles::pssm_host_name(std::ffi::OsStr::new("./sub/a.pssm")),
+        RunFiles::output_host_name(std::ffi::OsStr::new("./sub/a.pssm")),
         Some(b"sub/a.pssm".to_vec())
     );
     assert_eq!(
-        RunFiles::pssm_host_name(std::ffi::OsStr::new("/dev/null")),
+        RunFiles::output_host_name(std::ffi::OsStr::new("/dev/null")),
         None
     );
 }

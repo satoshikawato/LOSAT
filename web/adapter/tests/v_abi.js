@@ -770,6 +770,10 @@ function checkSurface(reactor, native) {
   assert.equal(normalizedLog.status, 0, normalizedLog.error);
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file, "logs/");
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file_name, "logs");
+  // The strategy file's name is the command line's file, as a run names it on stream 8 (line RG item F1w-r2).
+  const normalizedStrategy = reactor.call("losat_web2_start", argvOf(["blastp", "-query", "q", "-subject", "s", "-export_search_strategy", "./out/../s.asn"]));
+  assert.equal(normalizedStrategy.status, 0, normalizedStrategy.error);
+  assert.equal(JSON.parse(normalizedStrategy.streams.get(2).toString()).strategy_file, "s.asn");
   const parsed = reactor.call("losat_web2_start", argvOf(["blastn", "-query", "q", "-subject", "s", "-parse_deflines"]));
   assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = argvOf(["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"]);
@@ -1364,8 +1368,8 @@ async function checkLogfileNames(engine, native, scratch) {
 // -export_search_strategy (line RG item F1w, review 1 S3): the file of a run of two or more query batches at NCBI's
 // default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
 // threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
-// CLI's file under the name, and the argv's output (outfmt 6, and outfmt 11's archive, whose options handle the
-// strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
+// CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, as the *start* names it; line RG item F1w-r2), and the
+// argv's output (outfmt 6, and outfmt 11's archive, whose options handle the strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
 // subject is pieces of the queries, so that the searches find hits.
 function seededFasta(seed, records, length, letters, prefix) {
   let state = seed >>> 0;
@@ -1428,9 +1432,13 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
       return registered.status;
     });
     for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
-      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", "s.asn"];
+      const typed = index % 2 === 0 ? "s.asn" : "./s.asn";
+      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed];
       const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
-      const label = `${engine.name} ${program} outfmt ${format}`;
+      const label = `${engine.name} ${program} outfmt ${format} ${typed}`;
+      const started = reactor.call("losat_web2_start", argvOf(argv));
+      assert.equal(started.status, 0, `${label}: start: ${started.error}`);
+      assert.equal(JSON.parse(started.streams.get(2).toString()).strategy_file, "s.asn", `${label}: the start names the CLI's file`);
       assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
       const file = fs.readFileSync(path.join(directory, "s.asn")), out = fs.readFileSync(path.join(directory, "o.out"));
       const requests = file.toString().split("Blast4-request ::=").length - 1;

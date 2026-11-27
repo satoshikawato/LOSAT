@@ -26,8 +26,9 @@ export interface DirectoryFile {
 }
 
 /**
- * A file that a run made besides its outputs (stream 8): the file of `-logfile NAME` or of
- * `-export_search_strategy NAME`, named NAME.
+ * A file that a run made besides its outputs (stream 8): the file of `-logfile NAME`, of
+ * `-export_search_strategy NAME` or of a PSSM option, named as the command line's file of NAME (the
+ * engine's *start*: `logs` for `-logfile logs/`, `s.asn` for `-export_search_strategy ./s.asn`).
  */
 export interface RunFile {
   readonly name: string;

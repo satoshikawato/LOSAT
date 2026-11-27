@@ -1920,6 +1920,22 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
         .unwrap(),
         r#"{"conffile":null,"log_file":"run.log","log_file_name":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
+    // The strategy file's name is the command line's file, as a run names it on stream 8 (line
+    // RG item F1w-r2), and none for a name that makes no file.
+    for (typed, file) in [
+        ("./out/../s.asn", "\"s.asn\""),
+        ("/proc/self/cwd/s.asn", "\"s.asn\""),
+        ("/tmp/./s.asn", "\"/tmp/s.asn\""),
+        ("/dev/null", "null"),
+        ("/etc/s.asn", "null"),
+    ] {
+        assert!(
+            start_json(&["blastp", "-export_search_strategy", typed])
+                .unwrap()
+                .contains(&format!(",\"strategy_file\":{file},")),
+            "{typed}"
+        );
+    }
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),

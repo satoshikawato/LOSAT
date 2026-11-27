@@ -1618,10 +1618,15 @@ fn nonasc_cross_program_parity() {
     // {304}` (OID 3 excluded) NCBI at 1 thread and `-mt_mode 1` never reads OID 3; at 2+ threads in
     // DB-split mode `x_FillSeqBuffer` reads the excluded OIDs after the last included one up to
     // the iteration range's end and crashes. A list that excludes every OID is scanned the same
-    // way. LOSAT refuses where NCBI crashes.
+    // way, and an alias file's OID range is read through the OID at its end. LOSAT refuses where
+    // NCBI crashes.
     let d_past = root.join("n4_amb_past_end");
     cp_db(&d_past, "n4", true);
     poke(d_past.join("n4.nin"), 108, "10000000");
+    // Alias files whose only filter is an OID range (OIDs 0..2 and 0..1): NCBI's iteration range
+    // ends at OID 3 (2), and its loop reads that OID too before it compares it with the end.
+    fs::write(d_past.join("n4r.nal"), b"TITLE r\nDBLIST n4\nFIRST_OID 1\nLAST_OID 3\n").unwrap();
+    fs::write(d_past.join("n4r2.nal"), b"TITLE r2\nDBLIST n4\nFIRST_OID 1\nLAST_OID 2\n").unwrap();
     let mut past_refusal: Option<Vec<u8>> = None;
     for (name, args) in [
         (
@@ -1669,6 +1674,32 @@ fn nonasc_cross_program_parity() {
                 n4_neg_gi_alls,
                 "-num_threads",
                 "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_range3_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_range2_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r2",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
             ],
         ),
     ] {
@@ -1733,6 +1764,19 @@ fn nonasc_cross_program_parity() {
                 "4",
             ],
         ),
+        (
+            "n4_ambpast_blastn_range3_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
     ] {
         // NCBI's frozen result (SIGSEGV, rc=-11, no output) stays beside the row for provenance.
         assert_eq!(load_nonasc_expected(name).2, -11, "{name}");
@@ -1744,11 +1788,8 @@ fn nonasc_cross_program_parity() {
         // byte.
         match &past_refusal {
             None => {
-                assert!(
-                    text(&err).contains("byte range 268435455..268435456 passes the end of the file"),
-                    "{name}: {:?}",
-                    text(&err)
-                );
+                let past = "byte range 268435455..268435456 passes the end of the file";
+                assert!(text(&err).contains(past), "{name}: {:?}", text(&err));
                 past_refusal = Some(err);
             }
             Some(first) => assert_eq!(text(&err), text(first), "{name}"),

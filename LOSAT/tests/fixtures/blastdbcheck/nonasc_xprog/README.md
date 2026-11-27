@@ -50,11 +50,15 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
   (OID 3's last byte lies 256 MiB past the 114-byte `.nsq`; NCBI reads it and crashes with
   `SIGSEGV`, `rc=-11`). `n4_ambpast_blastn_neggi_t1`, `n4_ambpast_blastn_neggi_mt1_t4`
   (`-negative_gilist` of GI 304, OID 3 excluded: NCBI never reads OID 3 at 1 thread or with
-  `-mt_mode 1`) and `n4_ambpast_blastn_negall_t1` (every OID excluded: `Filtering resulted in an
-  empty database.`) match NCBI BLAST+ 2.17.0 byte-for-byte. `n4_ambpast_blastn_t1`,
-  `n4_ambpast_blastn_t4`, `n4_ambpast_blastn_neggi_t4` and `n4_ambpast_blastn_negall_t4` crash in
-  NCBI and are refused by LOSAT with the same message (`byte range 268435455..268435456 passes
-  the end of the file`): in multithreaded DB-split mode NCBI's `x_FillSeqBuffer`
-  (`seqdbimpl.cpp:684-710`) reads the excluded OIDs after the last included one, up to the
-  iteration range's end, and every OID of a list that includes none (frozen 2026-11-27 for review
-  R5 F1 of PR #1660).
+  `-mt_mode 1`), `n4_ambpast_blastn_negall_t1` (every OID excluded: `Filtering resulted in an
+  empty database.`), `n4_ambpast_blastn_range3_t1` (`-db n4r`, an alias file whose only filter is
+  `FIRST_OID 1`, `LAST_OID 3`: OIDs 0..2, iteration range end 3) and `n4_ambpast_blastn_range2_t4`
+  (`-db n4r2`, `LAST_OID 2`: NCBI reads OID 2 at the range's end, not OID 3) match NCBI BLAST+
+  2.17.0 byte-for-byte. `n4_ambpast_blastn_t1`, `n4_ambpast_blastn_t4`,
+  `n4_ambpast_blastn_neggi_t4`, `n4_ambpast_blastn_negall_t4` and `n4_ambpast_blastn_range3_t4`
+  crash in NCBI and are refused by LOSAT with the same message (`byte range
+  268435455..268435456 passes the end of the file`): in multithreaded DB-split mode NCBI's
+  `x_FillSeqBuffer` (`seqdbimpl.cpp:684-710`) reads the excluded OIDs after the last included
+  one, up to the iteration range's end, every OID of a list that includes none, and the OID at
+  the range's end when it is inside a volume (it reads the next OID before it compares it with
+  the end) (frozen 2026-11-27 for review R5 F1 of PR #1660).

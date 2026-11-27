@@ -930,11 +930,8 @@ fn mt_scan_reads_the_excluded_oids_after_the_last_included_one() {
     let root: &std::path::Path = &dir;
     let path = SearchPath::new(root, None, None);
     let past_end = |err: &SeqDbError, range: &str, len: u64| {
-        matches!(
-            err,
-            SeqDbError::Format { message, .. }
-                if *message == format!("byte range {range} passes the end of the file ({len} bytes)")
-        )
+        let want = format!("byte range {range} passes the end of the file ({len} bytes)");
+        matches!(err, SeqDbError::Format { message, .. } if *message == want)
     };
 
     // 1. OID 0 regular (bytes 0..2); OID 1 (start 2, amb 10_002): `whole_bytes` 9_999, last byte

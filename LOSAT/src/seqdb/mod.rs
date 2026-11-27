@@ -2933,19 +2933,25 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1802
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1785-1802
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1838
     // In a multithreaded DB-split scan of a list-filtered database, NCBI hands out chunks of raw
     // OIDs until the iteration range's end and reads every OID of a chunk, so it also reads the
-    // excluded OIDs after the last included one, up to the first negative length. A negative
-    // length there changes nothing (no included OID is left), so only the reads' errors matter:
-    // a nucleotide's read of its last byte (`file[start + whole_bytes]`), which LOSAT checks
-    // against the readable length (`Volume::x_first_negative_nucleotide_in`). A protein's read
-    // reads no byte of the sequence file (pointer arithmetic on the index's offsets), so a
-    // protein database has nothing to check here.
-    /// The errors of NCBI's reads of the excluded OIDs `from_oid..end` of a list-filtered
-    /// nucleotide database (`end` the iteration range's end), up to the first negative length,
-    /// when [`Self::mt_stop_at_negative`] is enabled; `Ok` in every other case.
+    // excluded OIDs after the last included one, up to the first negative length. Its loop reads
+    // the OID after a chunk's last before it compares that OID with the range's end, so it also
+    // reads the OID at the end when that OID is in the same volume (past a volume's last OID the
+    // read returns -1 without reading). A negative length there changes nothing (no included OID
+    // is left), so only the reads' errors matter: a nucleotide's read of its last byte
+    // (`file[start + whole_bytes]`), which LOSAT checks against the readable length
+    // (`Volume::x_first_negative_nucleotide_in`). A protein's read reads no byte of the sequence
+    // file (pointer arithmetic on the index's offsets), so a protein database has nothing to
+    // check here. In a volume after the first, NCBI's loop compares the volume-relative OID with
+    // the range's end, so it reads on past the end as far as the chunk's byte budget goes; LOSAT
+    // does not model those reads.
+    /// The errors of NCBI's reads of the excluded OIDs from `from_oid` to the end of the
+    /// iteration range of a list-filtered nucleotide database (and the OID at the end, when it is
+    /// inside a volume), up to the first negative length, when [`Self::mt_stop_at_negative`] is
+    /// enabled; `Ok` in every other case.
     fn mt_check_trailing_excluded(&self, from_oid: u32) -> Result<(), SeqDbError> {
         if !self.mt_stop_at_negative || self.seqtype != SeqType::Nucleotide {
             return Ok(());
@@ -2953,8 +2959,14 @@ impl SeqDb {
         let Some(filter) = self.filter.as_deref() else {
             return Ok(());
         };
-        let (_, end) = filter.range();
-        self.x_has_negative_in_oid_range(from_oid, end).map(|_| ())
+        let (begin, end) = filter.range();
+        if begin >= end {
+            return Ok(());
+        }
+        let inside_volume =
+            end < self.num_oids() && self.volume_starts.binary_search(&end).is_err();
+        let scan_end = if inside_volume { end + 1 } else { end };
+        self.x_has_negative_in_oid_range(from_oid, scan_end).map(|_| ())
     }
 
     /// [`Self::mt_check_trailing_excluded`] after the block `range` that holds the last included

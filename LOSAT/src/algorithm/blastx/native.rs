@@ -398,7 +398,13 @@ fn run_inner(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(std::iter::once(
+                    crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+                )),
+            );
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -1260,7 +1266,7 @@ pub(super) fn batch_titles(
         results,
         gapped,
         (asks.pairwise, asks.titles),
-        (earlier, asks.one_by_one),
+        earlier,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let utf8 = Utf8Read::post_of(

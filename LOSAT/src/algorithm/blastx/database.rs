@@ -89,9 +89,15 @@ impl BlastxDatabase {
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
     /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
     /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
-    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+    pub(crate) fn keeping_scope(
+        mut self,
+        keeps: bool,
+        separate_xml2: bool,
+        record_keeps: Option<bool>,
+    ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
+        self.taxdb.set_record_keeps_scope(record_keeps);
         self
     }
 
@@ -615,7 +621,7 @@ impl ReportedSubjects {
         batches: &[BatchResults],
         gapped: bool,
         (pairwise, title_reads): (bool, shared::TitleReads),
-        (earlier, one_by_one): (shared::EarlierUtf8, bool),
+        earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -623,7 +629,7 @@ impl ReportedSubjects {
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
-        let headers = shared::HeaderReader::new(&database.db, one_by_one);
+        let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
         headers.note_earlier(earlier);
         // The first title or shown-source refusal that the reports refuse (`check_reported_title`,
         // `StoredTitle::check_shown_source`), held until the batch's header reads finish so an
@@ -913,11 +919,8 @@ impl ReportedSubjects {
                 if reports && reads {
                     // `handle_load_refusal` is checked in `check_handle_loads` after
                     // `refuse_ids_of_queries` has populated `seen`.
-                    let sought = shared::weak_sought(&database.db, subject, ordinal, one_by_one);
-                    sought
-                        .as_ref()
-                        .unwrap_or(subject)
-                        .fetched_with_scope(taxonomy, one_by_one, loads.load(oid), true)
+                    subject
+                        .fetched_with_scope(taxonomy, loads.load(oid), true)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -929,6 +932,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
+                        loads.load(oid),
                         ordinal,
                         subject.load_throws(),
                         database.program,
@@ -1128,7 +1132,7 @@ impl ReportedSubjects {
     ) {
         if database.parsed_seqids() {
             let rows = loads.reported_rows();
-            database.taxdb.note_loaded(&database.db, batch, || {
+            database.taxdb.note_loaded(batch, || {
                 batches
                     .iter()
                     .flat_map(move |batch| {
@@ -1624,6 +1628,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
+                        crate::report::db_subject::HitLoad::Loaded,
                         ordinal,
                         false,
                         database.program,

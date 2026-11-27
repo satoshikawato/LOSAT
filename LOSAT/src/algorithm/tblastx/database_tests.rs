@@ -128,14 +128,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
     let text = |database: &TblastxDatabase, ordinals: &[u32]| -> String {
         let ordered: Vec<TblastxHsp> = ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
         let mut titles = DatabaseTitles::new();
-        read_titles(
-            database,
-            &ordered,
-            0,
-            (Default::default(), true),
-            &mut titles,
-        )
-        .unwrap();
+        read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
         String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
     };
     let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
@@ -162,7 +155,9 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
 // only where no report of any sequence of the database can be refused (`report_stream`): a
 // sequence that NCBI's formatters do not find by its Seq-align id (nrefuse_v5) refuses the
 // tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
-// volumes) refuse outfmt 0 only, read on one thread and on four.
+// volumes) refuse outfmt 0 only; where a batch may read its subjects one by one, the scope's
+// index can give either for the other's id (a weak match; line DBID hr-1, the keys of NCBI's
+// places, `ParsedSubject::place_keys`), which refuses both. Read on one thread and on four.
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -186,11 +181,18 @@ fn a_report_of_any_sequence_that_could_be_refused_is_found() {
         ..ParsedShown::default()
     };
     let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
-        ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
+        [
+            ("nucl_v5", false),
+            ("nucl_v4", false),
+            ("nrefuse_v5", false),
+            ("njoined", false),
+            ("njoined", true),
+        ]
+        .map(|(name, one_by_one)| {
             let database = open(name);
             (
-                database.reports_may_refuse(tabular, false, None, pool),
-                database.reports_may_refuse(pairwise, false, None, pool),
+                database.reports_may_refuse(tabular, (false, one_by_one), None, pool),
+                database.reports_may_refuse(pairwise, (false, one_by_one), None, pool),
             )
         })
     };
@@ -203,6 +205,7 @@ fn a_report_of_any_sequence_that_could_be_refused_is_found() {
             (None, None),
             (Some(Headers), Some(Headers)),
             (None, Some(Joined)),
+            (Some(Headers), Some(Headers)),
         ]
     );
     let parallel =
@@ -234,8 +237,8 @@ fn a_lineless_defline_only_refuses_report_streaming_when_sallacc_is_shown() {
     };
     let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
         (
-            database.reports_may_refuse(without_sallacc, false, None, pool),
-            database.reports_may_refuse(with_sallacc, false, None, pool),
+            database.reports_may_refuse(without_sallacc, (false, false), None, pool),
+            database.reports_may_refuse(with_sallacc, (false, false), None, pool),
         )
     };
     let serial = answers(&crate::utils::threading::SearchPool::x_serial());

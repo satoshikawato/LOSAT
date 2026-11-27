@@ -142,8 +142,8 @@ export function makeFixtures(seed: number): FixtureLibrary {
 
 /** The alphabet of a role's input in a mode. */
 export function alphabetOf(program: string, role: 'query' | 'subject'): Alphabet {
-  const query: Record<string, Alphabet> = { blastn: 'nucleotide', blastp: 'protein', blastx: 'nucleotide', tblastn: 'protein', tblastx: 'nucleotide' };
-  const subject: Record<string, Alphabet> = { blastn: 'nucleotide', blastp: 'protein', blastx: 'protein', tblastn: 'nucleotide', tblastx: 'nucleotide' };
+  const query: Record<string, Alphabet> = { blastn: 'nucleotide', blastp: 'protein', psiblast: 'protein', blastx: 'nucleotide', tblastn: 'protein', tblastx: 'nucleotide' };
+  const subject: Record<string, Alphabet> = { blastn: 'nucleotide', blastp: 'protein', psiblast: 'protein', blastx: 'protein', tblastn: 'nucleotide', tblastx: 'nucleotide' };
   const alphabet = (role === 'query' ? query : subject)[program];
   if (alphabet === undefined) throw new Error(`no mode ${program}`);
   return alphabet;

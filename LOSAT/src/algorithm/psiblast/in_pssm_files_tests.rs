@@ -52,6 +52,7 @@ fn request(asn: bool, ascii: bool) -> PssmRequest {
         save_each: false,
         pseudocount: 0,
         versions: Default::default(),
+        run_files: Default::default(),
     }
 }
 

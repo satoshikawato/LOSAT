@@ -1363,7 +1363,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -4075,10 +4081,7 @@ fn run_batch_loop(
                 database,
                 ordered,
                 start,
-                (
-                    earlier,
-                    crate::algorithm::common::database::prefetch_may_be_off(prefetch_format),
-                ),
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
             // NCBI's reads of the titles where it makes the batch's Seq-aligns: each run of HSPs
@@ -4337,7 +4340,7 @@ fn run_batch_loop(
                     let xml_before = xml_cuts.reports_before(&reads, &prefetched);
                     let scope = || batch_scope(input_start..input_end);
                     let prefetch = super::super::database::batch_prefetch(
-                        database,
+                        (database, &run_loads),
                         super::super::database::LoadedBefore {
                             hits: &done.hits,
                             spans: &done.spans,

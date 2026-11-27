@@ -28,11 +28,12 @@ const ADAPTER_OWNED: [&str; 6] = [
     "index_name",
 ];
 
-/// The options of `program` that the browser's searches of records take none of (tblastn's
-/// `-in_pssm`, which the browser refuses until line PS's PSW1): the browser's list
-/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out. The
-/// search strategy files are described: `-import_search_strategy`, a named input file of kind 3
-/// (line RG's F2), and `-export_search_strategy`, a file of the run (line RG's F1w).
+/// The options of `program` that the browser's searches of records take none of: the browser's
+/// list (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out
+/// (`psiblast`'s `-phi_pattern`, item PS8a; `tblastn -in_pssm` and `psiblast` PSSM/MSA options are
+/// supported since line PS's PSW1). The search strategy files are described:
+/// `-import_search_strategy`, a named input file of kind 3 (line RG's F2, for the five programs
+/// that import strategies), and `-export_search_strategy`, a file of the run (line RG's F1w).
 fn records_refused(program: Program) -> &'static [&'static str] {
     losat::web_adapter::records_refused_options(program.api())
 }
@@ -129,7 +130,9 @@ mod tests {
 
     #[test]
     fn options_the_adapter_owns_or_refuses_are_not_described() {
-        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+        for program in [
+            "blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx",
+        ] {
             let described = describe(program).unwrap();
             for flag in ADAPTER_OWNED {
                 assert!(
@@ -154,35 +157,61 @@ mod tests {
         }
     }
 
-    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
-    // the adapter's `describe` does not list it (the browser's list, `records_refused`). The search
-    // strategy files of the five programs are listed: the one the run imports (a named input file,
-    // line RG's F2) and the one it writes (a file of the run, line RG's F1w).
+    // Since line PS's PSW1, tblastn's `-in_pssm` and psiblast's PSSM/MSA options are described
+    // and supported in the browser; `records_refused` holds `psiblast`'s `-phi_pattern` (item
+    // PS8a) and is empty for the other five programs. The search strategy files are listed:
+    // `-export_search_strategy` (a file of the run, line RG's F1w) for all six programs, and
+    // `-import_search_strategy` (a named input file, line RG's F2) for the five programs that
+    // import strategies.
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
-        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
         for program in [
             Program::Blastn,
             Program::Blastp,
             Program::Blastx,
+            Program::Tblastn,
             Program::Tblastx,
         ] {
             assert!(records_refused(program).is_empty());
         }
-        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+        assert_eq!(records_refused(Program::Psiblast), &["phi_pattern"]);
+        for program in [
+            "blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx",
+        ] {
             let described = describe(program).unwrap();
-            for flag in records_refused(Program::parse(program).unwrap()) {
+            assert!(
+                described.contains("\"-export_search_strategy\""),
+                "{program} does not list -export_search_strategy"
+            );
+            if program != "psiblast" {
                 assert!(
-                    !described.contains(&format!("\"-{flag}\"")),
-                    "{program} lists -{flag}"
+                    described.contains("\"-import_search_strategy\""),
+                    "{program} does not list -import_search_strategy"
                 );
             }
-            for flag in ["-import_search_strategy", "-export_search_strategy"] {
-                assert!(
-                    described.contains(&format!("\"{flag}\"")),
-                    "{program} does not list {flag}"
-                );
-            }
+        }
+        let tblastn = describe("tblastn").unwrap();
+        assert!(tblastn.contains("\"-in_pssm\""), "tblastn lists -in_pssm");
+        let psiblast = describe("psiblast").unwrap();
+        assert!(
+            !psiblast.contains("\"-phi_pattern\""),
+            "psiblast leaves out -phi_pattern"
+        );
+        for flag in [
+            "-in_pssm",
+            "-in_msa",
+            "-num_iterations",
+            "-out_pssm",
+            "-out_ascii_pssm",
+            "-save_pssm_after_last_round",
+            "-save_each_pssm",
+            "-inclusion_ethresh",
+            "-pseudocount",
+        ] {
+            assert!(
+                psiblast.contains(&format!("\"{flag}\"")),
+                "psiblast lists {flag}"
+            );
         }
     }
 }

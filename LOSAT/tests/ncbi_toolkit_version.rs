@@ -374,7 +374,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
                     let upper = program.to_ascii_uppercase();
-                    let refusal = match matches!(program, "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx") {
+                    let refusal = match losat::web_adapter::WEB_V2_PROGRAMS.contains(&program) {
                         true => format!("the option {word} runs on the command line and in LOSAT Web of LOSAT's {upper} only: the library API does not write NCBI's version text"),
                         false => format!("the option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"),
                     };

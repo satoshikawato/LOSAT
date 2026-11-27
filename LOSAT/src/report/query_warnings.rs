@@ -1264,12 +1264,11 @@ impl<'a> QueryWarnings<'a> {
         self
     }
 
-    /// Whether a read of the definition line of the subject `subject` (the key of the report's
-    /// writer) posts (`with_title_decodes`): a writer that formats into buffers writes them out
-    /// before `title_read` only then.
-    pub fn title_posts(&self, subject: u32) -> bool {
+    /// The posts of the formatter's reads of the reported subjects' definition lines
+    /// (`with_title_decodes`; `None` where none posts), which a table's row asks whether its read
+    /// posts (`report::tabular::TabularWriter::title_posts`).
+    pub fn title_decodes(&self) -> Option<&'a TitleDecodes> {
         self.titles
-            .is_some_and(|titles| !titles.of(subject).is_empty())
     }
 
     /// The report's formatter reads the definition line of the subject `subject` (the key of its

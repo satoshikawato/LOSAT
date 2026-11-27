@@ -816,7 +816,12 @@ fn each_formatter_read_of_a_title_posts_after_the_report_so_far() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings =
         QueryWarnings::of_posts(&before, None, &mut sink).with_title_decodes(Some(&titles));
-    assert!(warnings.title_posts(4) && warnings.title_posts(9) && !warnings.title_posts(5));
+    let posts = |key| {
+        warnings
+            .title_decodes()
+            .is_some_and(|titles| !titles.of(key).is_empty())
+    };
+    assert!(posts(4) && posts(9) && !posts(5));
     warnings.before_query(0, &mut report).unwrap();
     warnings.title_read(4, &mut report).unwrap();
     report.write_all(b"R4\n").unwrap();
@@ -833,5 +838,5 @@ fn each_formatter_read_of_a_title_posts_after_the_report_so_far() {
     let empty = TitleDecodes::default();
     let mut sink = Vec::new();
     let warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_title_decodes(Some(&empty));
-    assert!(!warnings.title_posts(4));
+    assert!(warnings.title_decodes().is_none());
 }

@@ -2863,14 +2863,10 @@ fn search(
             ungapped: args.ungapped,
             html: resolved.html.clone(),
             is_html: args.html,
+            // Made where the database has a title that posts (`shared::title_decodes`); each row
+            // asks whether its read posts (`TabularWriter::title_posts`).
             title_decodes: match (&reported, database) {
-                (Some(reported), Some(database))
-                    if tabular_specs
-                        .iter()
-                        .any(crate::report::tabular::TabularSpec::reads_defline) =>
-                {
-                    database.title_decodes(reported)
-                }
+                (Some(reported), Some(database)) => database.title_decodes(reported),
                 _ => Default::default(),
             },
         };

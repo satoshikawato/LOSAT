@@ -5705,15 +5705,11 @@ fn post_process_hits_and_write(
         // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         // NCBI's posts of each read of a subject's definition line by a table's rows
-        // (`BlastnDatabase::title_decodes`).
-        let title_decodes = match (
-            report.database_reader.zip(report.database_ordinals),
-            output_format.tabular_spec(),
-        ) {
-            (Some((database, ordinals)), Some(spec)) if spec.reads_defline() => {
-                database.title_decodes(ordinals)
-            }
-            _ => Default::default(),
+        // (`BlastnDatabase::title_decodes`), made where the database has a title that posts; each
+        // row asks whether its read posts (`TabularWriter::title_posts`).
+        let title_decodes = match report.database_reader.zip(report.database_ordinals) {
+            Some((database, ordinals)) => database.title_decodes(ordinals),
+            None => Default::default(),
         };
         let mut format_warnings = (warning_lines.is_some()
             || later.is_some()

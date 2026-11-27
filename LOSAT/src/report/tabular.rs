@@ -2212,6 +2212,22 @@ impl<'a> TabularWriter<'a> {
         )
     }
 
+    /// Whether the row of `subject` posts NCBI's error messages of its read of the subject's
+    /// definition line: a read of the title of the writer's key `key` posts (`titles`), the row's
+    /// fields read the definition line (`TabularSpec::reads_defline`) and the subject block reaches
+    /// `ExtractBlastDefline` (`reads_title`). The one gate of the rows of the five programs, which
+    /// then write the posts (`QueryWarnings::title_read`, `TitleDecodes::write_read`).
+    pub fn title_posts(
+        &self,
+        subject: &TabularSubject<'_>,
+        titles: Option<&crate::report::query_warnings::TitleDecodes>,
+        key: u32,
+    ) -> bool {
+        titles.is_some_and(|titles| !titles.of(key).is_empty())
+            && self.spec.reads_defline()
+            && self.reads_title(subject)
+    }
+
     /// The exception that ends the run at `program`'s row of `subject` with the engine's
     /// identities `num_ident` (`TabularSpec::row_throw` is `EndsRun` for a subject whose load
     /// throws, `SubjectLookup::Throws`: its first row that reads it, the first row of HSPs with

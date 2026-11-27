@@ -22,6 +22,13 @@ NCBI BLAST+ 2.17.0's makeblastdb), the version 4 databases of `tests/db_search/t
 - `tc_ps_p` / `tc_ps_n`: PS (`-parse_seqids`, `lcl|` ids; the title of one has such a byte);
 - `tc_u8_p` / `tc_u8_n`: U8 (OID 0 a clean title stored as a UTF8String, tag 0x0C, for which NCBI
   warns once; OID 1 such a byte; OID 2 a UTF8String with such a byte);
+- `tc_tax_p` / `tc_tax_n`: the subjects of `tc` with `-taxid 9606` (the loads' taxonomy lookups);
+- `tc_fam_p` / `tc_fam_n`: FAM (14 titles with such a byte in three families, one query each:
+  `tc_qbac`, `tc_qacb`, `tc_qaba`, the batches' order of NCBI's cache of 10 released sequences);
+- `tc_du_p` / `tc_du_n`: DU (a UTF8String title, such a byte and a title NCBI cannot read, one query
+  `tc_qdu` hits them in that order);
+- the queries `tc_q260` (BIG's OIDs 0 to 259 in one query) and `tc_qslotu` (BIG's OID 258 with OIDs
+  4 to 13, then OIDs 2 and 258);
 - the queries `tc_q1.faa` (one protein), `tc_q2.faa` (two), `tc_qslot.faa` (eight: OID 0's and OID
   256's letters, which read their slot in both orders, OID 2's, OID 258's and OID 2's again, OID 3's,
   BIG2's OID 215's and OID 3's again), `tc_qu8.faa` (U8's OID 0, then OID 1), and their
@@ -116,8 +123,30 @@ QUERIES = [(b"q1 query one", PROT), (b"q2 query two", mut(PROT, 2))]
 SLOT_QUERIES = [(b"qs%d" % (k + 1), letters)
                 for k, letters in enumerate([mut(PROT, 2), mut(PROT, 6), C, D, C, H, I, H])]
 U8_QUERIES = [(b"qu1 utf8", E), (b"qu2 fam", PROT)]
+# FAM: 14 subjects in three families (A: OIDs 0-5, B: 6-10, C: 11-13), each title with such a byte; one
+# query per family, so that BATCH_SIZE gives each its batch (the blob cache across batches).
+FAM_A, FAM_B, FAM_C = (lcg(60, seed) for seed in (501, 502, 503))
+FAM = [(b"f%02d fam#" % i, [b"\xe9"], mut(FAM_A if i < 6 else FAM_B if i < 11 else FAM_C, 1 + i % 6))
+       for i in range(14)]
+FAM_QUERIES = {"A": (b"qa famA", FAM_A), "B": (b"qb famB", FAM_B), "C": (b"qc famC", FAM_C)}
+# DU: a UTF8String title (v0, tag 0x0C), such a byte (v1) and a title NCBI cannot read (v2, tag 0x1B), which
+# one query hits in that order (v0's 120 letters score first).
+EU = lcg(120, 308)
+DU = [(b"v0 utf8 clean long", [], EU), (b"v1 fam#one", [b"\xe9"], PROT), (b"v2 damaged title", [], mut(PROT, 10))]
 DATABASES = {"tc": SUBJECTS, "tc_b": DBB, "tc_big": BIG, "tc_big2": BIG2, "tc_x": DBX, "tc_dmg": DMG,
-             "tc_ps": PS, "tc_u8": U8}
+             "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU}
+# More queries: one of the letters of BIG's OIDs 0 to 259 (a batch of 260 Seq-align ids, NCBI's prefetch in
+# pieces of 100, 100 and 60); BIG's OID 258 with OIDs 4 to 13 (11 loads, more than NCBI's cache of 10 keeps),
+# then OID 2 and OID 258 (OID 2 posts in the header cache slot of OID 258); the families in the orders B A C,
+# A C B and A B A; DU's v0 and v1 letters.
+MORE_QUERIES = {
+    "tc_q260": [(b"q260 big", "".join(BIG[i][2] for i in range(260)))],
+    "tc_qslotu": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14))), (b"qsu2 cee dee", C + D)],
+    "tc_qbac": [FAM_QUERIES[c] for c in "BAC"],
+    "tc_qacb": [FAM_QUERIES[c] for c in "ACB"],
+    "tc_qaba": [FAM_QUERIES[c] for c in "ABA"],
+    "tc_qdu": [(b"qdu utf8 then fam", EU + PROT)],
+}
 
 
 def fasta(records):
@@ -173,6 +202,8 @@ def main():
         open(os.path.join(HERE, "tc_q2" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in QUERIES]))
         open(os.path.join(HERE, "tc_qslot" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in SLOT_QUERIES]))
         open(os.path.join(HERE, "tc_qu8" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in U8_QUERIES]))
+        for name, records in MORE_QUERIES.items():
+            open(os.path.join(HERE, name + suffix), "wb").write(fasta([(t, encode(s)) for t, s in records]))
     for stem in stems:
         subjects = DATABASES[stem]
         for mol, dbtype, encode in (("p", "prot", lambda p: p), ("n", "nucl", nuc)):
@@ -183,7 +214,8 @@ def main():
             open(source, "wb").write(fasta([(t, encode(s)) for t, (_, _, s) in zip(titles, subjects)]))
             subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", source, "-dbtype", dbtype,
                             "-blastdb_version", "4", "-title", name, "-out", os.path.join(HERE, name)]
-                           + (["-parse_seqids"] if stem == "tc_ps" else []),
+                           + (["-parse_seqids"] if stem == "tc_ps" else [])
+                           + (["-taxid", "9606"] if stem == "tc_tax" else []),
                            check=True, stdout=subprocess.DEVNULL)
             os.remove(source)
             for ext in ("pjs", "njs"):
@@ -195,6 +227,9 @@ def main():
                 retag(header, [b"d1 damaged title"], b"\x1a", b"\x1b")
             if stem == "tc_u8":
                 retag(header, [b"u0 utf8 clean", raw_title(*U8[2][:2])], b"\x1a", b"\x0c")
+            if stem == "tc_du":
+                retag(header, [b"v0 utf8 clean long"], b"\x1a", b"\x0c")
+                retag(header, [b"v2 damaged title"], b"\x1a", b"\x1b")
     for mol in "pn":
         open(os.path.join(HERE, f"tc_alias_{mol}.{mol}al"), "w").write(
             f"TITLE tc alias\nDBLIST tc_{mol} tc_b_{mol}\n")

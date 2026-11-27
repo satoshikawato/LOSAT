@@ -1319,14 +1319,13 @@ pub(super) fn batch_titles(
             return Err(reported_error(error));
         }
     };
-    crate::algorithm::common::database::batch_title_posts(
-        &database.db,
-        aligned,
-        utf8.is_some(),
-        asks.titles == crate::algorithm::common::database::TitleReads::Prefetched,
-        database.program,
-    )?
-    .write(diagnostics, archive)?;
+    database
+        .batch_title_posts(
+            aligned,
+            utf8.is_some(),
+            asks.titles == crate::algorithm::common::database::TitleReads::Prefetched,
+        )?
+        .write(diagnostics, archive)?;
     Ok(Some(titles))
 }
 

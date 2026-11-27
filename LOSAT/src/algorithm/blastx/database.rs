@@ -216,6 +216,23 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's posts of the titles that a batch's Seq-aligns of the subjects `aligned` read and,
+    /// where its prefetch loads them (`prefetch`), of those loads (`shared::batch_title_posts`).
+    pub(crate) fn batch_title_posts(
+        &self,
+        aligned: impl IntoIterator<Item = u32> + Clone,
+        utf8_posted: bool,
+        prefetch: bool,
+    ) -> Result<crate::report::diag_log::Posts> {
+        shared::batch_title_posts(
+            &self.db,
+            aligned,
+            utf8_posted,
+            prefetch.then_some(&self.taxdb),
+            self.program,
+        )
+    }
+
     /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
     /// (`shared::TaxdbRun::loads_write_texts`).
     pub(crate) fn loads_write_texts(&self) -> bool {
@@ -1108,8 +1125,9 @@ impl ReportedSubjects {
             );
         }
         // NCBI's posts of each read of a reported sequence's definition line by a table's rows,
-        // by rank (`shared::title_decodes`, `report::query_warnings::ReadCursor::title_read`).
-        if reports && tabular_reads {
+        // by rank (`shared::title_decodes`, made where the database has a title that posts; each
+        // row asks whether its read posts, `TabularWriter::title_posts`).
+        if reports {
             reported.title_decodes =
                 shared::title_decodes(&database.db, &reported.ordinals, database.program);
         }

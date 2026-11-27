@@ -121,8 +121,6 @@ pub(crate) fn write_blastn_tabular(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
-    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
-    let reads_defline = spec.reads_defline();
     // Whether the rows read their subject (`TabularSpec::subject_fetch`).
     let fetches = spec.subject_fetch(crate::blastinput::app::Program::Blastn)
         != crate::report::tabular::SubjectFetch::Never;
@@ -314,9 +312,7 @@ pub(crate) fn write_blastn_tabular(
                 // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
                 // row's lookups.
                 if let Some(warnings) = warnings.as_deref_mut().filter(|warnings| {
-                    reads_defline
-                        && warnings.title_posts(hsp_list.oid)
-                        && table.reads_title(&subject)
+                    table.title_posts(&subject, warnings.title_decodes(), hsp_list.oid)
                 }) {
                     writer.write_all(&buf)?;
                     buf.clear();

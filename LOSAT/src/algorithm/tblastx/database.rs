@@ -172,6 +172,23 @@ impl TblastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's posts of the titles that a batch's Seq-aligns of the subjects `aligned` read and,
+    /// where its prefetch loads them (`prefetch`), of those loads (`shared::batch_title_posts`).
+    pub(crate) fn batch_title_posts(
+        &self,
+        aligned: impl IntoIterator<Item = u32> + Clone,
+        utf8_posted: bool,
+        prefetch: bool,
+    ) -> Result<crate::report::diag_log::Posts> {
+        shared::batch_title_posts(
+            &self.db,
+            aligned,
+            utf8_posted,
+            prefetch.then_some(&self.taxdb),
+            PROGRAM,
+        )
+    }
+
     /// The names of the taxonomy database that the rows of `spec` look up for the subjects
     /// `taxonomy` (`shared::tabular_names`).
     pub(crate) fn tabular_names(

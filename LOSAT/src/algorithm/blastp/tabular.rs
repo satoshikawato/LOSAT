@@ -727,8 +727,6 @@ fn write_tabular_rows<const RPS: bool>(
     let needs = spec.needs();
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastp);
-    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
-    let reads_defline = spec.reads_defline();
     let rows_read = if RPS {
         needs_rows(needs.rows, spec, tab.app)
     } else {
@@ -917,10 +915,10 @@ fn write_tabular_rows<const RPS: bool>(
                 // The row's read of the subject's definition line posts for the bytes of its
                 // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
                 // row's lookups.
-                if let (Some(warnings), true) = (warnings.as_deref_mut(), reads_defline) {
-                    if table.reads_title(&subject) {
-                        warnings.title_read(hsp.s_idx, &mut *writer)?;
-                    }
+                if let Some(warnings) = warnings.as_deref_mut().filter(|warnings| {
+                    table.title_posts(&subject, warnings.title_decodes(), hsp.s_idx)
+                }) {
+                    warnings.title_read(hsp.s_idx, &mut *writer)?;
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

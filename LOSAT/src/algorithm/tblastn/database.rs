@@ -749,7 +749,7 @@ impl<'a> CallReads<'a> {
                     &database.db,
                     aligned,
                     utf8,
-                    self.title_prefetch,
+                    self.title_prefetch.then_some(&database.taxdb),
                     PROGRAM,
                 )?;
                 if !posts.is_empty() {

@@ -1780,7 +1780,7 @@ impl BlastnDatabase {
             &self.db,
             aligned,
             warning.is_some(),
-            prefetch,
+            prefetch.then_some(&self.taxdb),
             PROGRAM,
         )?);
         Ok(())

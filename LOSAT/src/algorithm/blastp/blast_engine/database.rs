@@ -2230,7 +2230,13 @@ impl ListedTitles<'_> {
                 .utf8
                 .as_ref()
                 .is_some_and(|read| batch.contains(&read.query));
-            let batch_posts = shared::batch_title_posts(db, aligned, utf8, prefetch, self.program)?;
+            let batch_posts = shared::batch_title_posts(
+                db,
+                aligned,
+                utf8,
+                prefetch.then_some(&database.taxdb),
+                self.program,
+            )?;
             if !batch_posts.is_empty() {
                 posts.push((batch.start, batch_posts));
             }

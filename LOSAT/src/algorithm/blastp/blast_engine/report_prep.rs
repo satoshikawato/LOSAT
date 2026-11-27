@@ -940,11 +940,9 @@ pub(super) fn prefetch_reported_subjects(
                 .into_iter()
                 .chain(prefetch_posts)
                 .collect(),
-            if prefetched {
-                titles.title_decodes(database)
-            } else {
-                Default::default()
-            },
+            // Made where the database has a title that posts (`shared::title_decodes`); each row
+            // asks whether its read posts (`TabularWriter::title_posts`).
+            titles.title_decodes(database),
         ),
         _ => (prefetch_posts, Default::default()),
     };

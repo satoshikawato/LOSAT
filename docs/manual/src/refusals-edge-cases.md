@@ -229,8 +229,11 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-out_ascii_pssm`, a PSSM query with a residue that its coding does not have. NCBI prints its letter from memory it never set.
 - With `-out_pssm`, a PSSM in ASN.1 binary or XML form whose author names (`Auth-list` `names`, which NCBI reads again only when it writes them in ASN.1 text) give an error when they are read again, such as a number too large for its type: NCBI writes part of the file and stops with an exception. A byte outside the visible ASCII range there is not one of them: LOSAT gives NCBI's message for it and writes `#`, as NCBI does. Nor is the warning of a UTF8String tag: NCBI gives it once, when it first reads the file, and writes the names.
 - A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text, ASN.1 binary and XML are read as NCBI reads them.
-- With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused (both round 1 and PSSM rounds, with `-comp_based_stats` 0 to 3). Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
-- With `-use_sw_tback`, a query or round on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the query has kept a redone match. Where the query has kept none, the run ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`. For both `-use_sw_tback` refusals, LOSAT writes the results of the queries and rounds before and then stops with the error.
+
+With `-use_sw_tback`, in the first round and in the PSSM rounds (`-in_pssm`, `-in_msa` and the later rounds of a FASTA query), with `-comp_based_stats` 0 to 3, two cases are refused, as in `blastp`. LOSAT writes the results of the queries and rounds before, then stops with the error:
+
+- A query and subject whose Smith-Waterman alignment NCBI never finishes. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
+- A query or round on which NCBI crashes: one whose last Smith-Waterman alignment fails after the query has kept an alignment. Where the query has kept none, the run ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`. A later match of a database sequence that `-negative_seqidlist` keeps without any of its definition lines (NCBI skips its alignment) clears that failure, as in NCBI.
 
 ## tblastn with `-in_pssm`
 

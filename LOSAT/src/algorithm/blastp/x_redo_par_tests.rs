@@ -1,5 +1,5 @@
 use super::*;
-use crate::algorithm::blastp::blast_engine::{sw_batch_failed, sw_endless};
+use crate::algorithm::blastp::blast_engine::{sw_batch_failed, sw_endless, SwErrorText};
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::core::composition_adjustment::smith_waterman_match::SwRedoEndless;
 use crate::utils::glibc_fma_libm::GlibcLibm;
@@ -94,7 +94,7 @@ fn error_text(result: &Result<()>) -> Option<String> {
 
 /// The text of the error of a redo that does not end, in the batch that starts at `batch_start`.
 fn endless_in(batch_start: usize) -> Option<String> {
-    error_text(&Err(sw_endless("blastp", false, batch_start, None)))
+    error_text(&Err(sw_endless(SwErrorText::BLASTP, batch_start, None)))
 }
 
 /// The text of the error of the batch that starts at `batch_start` and fails at its end, its first
@@ -105,7 +105,7 @@ fn batch_failed_text(batch_start: usize, holds: bool) -> Option<String> {
         first_query.insert(list(0, 1e-9, false), 1e-9, 40, 0);
     }
     error_text(&Err(sw_batch_failed(
-        "blastp",
+        SwErrorText::BLASTP,
         batch_start,
         &first_query,
         None,
@@ -126,7 +126,7 @@ fn replay(
         lists,
         heaps,
         batches,
-        &mut XSwBatch::new(&[], &FetchNotes::none(), "blastp", false),
+        &mut XSwBatch::new(&[], &FetchNotes::none()),
         &mut None,
     )
 }
@@ -476,8 +476,6 @@ fn drive_expanding(
         expand,
         &[],
         &FetchNotes::none(),
-        "blastp",
-        false,
         &mut |lists, _, window, _| {
             window_seen(lists, window);
             window
@@ -1331,8 +1329,6 @@ fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
                     timing: false,
                     engine_positives: false,
                     sw_excluded: &[],
-                    program: "blastp",
-                    do_link_hsps: false,
                 };
                 let shared = || Arc::new(XSharedSubjectRanges::new());
                 for window in &windows {
@@ -1465,8 +1461,6 @@ fn windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store() 
                     timing: false,
                     engine_positives: false,
                     sw_excluded: &[],
-                    program: "blastp",
-                    do_link_hsps: false,
                 };
                 let kept = Arc::new(XSharedSubjectRanges::new());
                 let emptied = Arc::new(XSharedSubjectRanges::new());
@@ -1668,8 +1662,6 @@ fn sw_drive_expanding(
         expand,
         excluded,
         &FetchNotes::none(),
-        "blastp",
-        false,
         &mut |lists, heaps, window, _| {
             window_seen(lists, window);
             window
@@ -1782,7 +1774,9 @@ fn sw_one_thread_excluded(
                     }
                     SwKind::Purged => failed = false,
                     SwKind::Failed => failed = true,
-                    SwKind::Endless => return Err(sw_endless("blastp", false, batch.start, None)),
+                    SwKind::Endless => {
+                        return Err(sw_endless(SwErrorText::BLASTP, batch.start, None))
+                    }
                     SwKind::NotAsked => unreachable!(),
                 }
             }
@@ -1793,7 +1787,7 @@ fn sw_one_thread_excluded(
         }
         if failed && q_idx + 1 == batch.end {
             return Err(sw_batch_failed(
-                "blastp",
+                SwErrorText::BLASTP,
                 batch.start,
                 &heaps[batch.start],
                 None,
@@ -2808,8 +2802,6 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                     timing: false,
                     engine_positives: false,
                     sw_excluded: &[],
-                    program: "blastp",
-                    do_link_hsps: false,
                 };
                 // The one-thread loop's call with fresh scratch, its heap test answered by
                 // `answer`; the test's E-value and score, if it was asked; the state kept where

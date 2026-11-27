@@ -1,10 +1,12 @@
-//! The Smith-Waterman redo of one position-based match (`-use_sw_tback` with composition-based
-//! statistics 1 to 3; RPS-BLAST's, series PR, item PS11c-3): NCBI's
+//! The Smith-Waterman redo of one position-based match (`-use_sw_tback`): NCBI's
 //! `Blast_RedoOneMatchSmithWaterman` for the one window of a protein query and subject, then the
-//! steps of the X-drop redo after it (`RedoMatch::redo_match`); for RPS-TBLASTN's translated
-//! subject (item PS12c) the same function over the windows of the frames, then the steps of the
-//! X-drop redo of frames (`RedoMatch::evaluate_windows`). The kernels are
-//! `core::composition_adjustment::smith_waterman`'s, on the rows of the adjusted PSSM.
+//! steps of the X-drop redo after it (`RedoMatch::redo_match`), for psiblast's PSSM (modes 0 to 3,
+//! line PS-SW: `PssmSwStep`, the step of `PssmRedo1::redo_loop`) and RPS-BLAST's profiles (modes 1
+//! to 3, series PR, item PS11c-3); for RPS-TBLASTN's translated subject (item PS12c) the same
+//! function over the windows of the frames, then the steps of the X-drop redo of frames
+//! (`RedoMatch::evaluate_windows`). The kernels are `core::composition_adjustment::smith_waterman`'s,
+//! on the rows of the adjusted PSSM, or, without composition-based statistics, of the PSSM as the
+//! search made it.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
@@ -16,7 +18,7 @@
 use super::{
     blast_nint, frame_range, frame_windows, link_redone, old_test_near_identical,
     preliminary_test_near_identical, reap_contained, score_compare, window_composition, Align,
-    FrameSubject, RedoMatch, RedoRun, Redone, SCALING_FACTOR,
+    FrameSubject, MatchStep, PssmRedo1, PssmSwOptions, RedoMatch, RedoRun, Redone,
 };
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHspList};
@@ -30,12 +32,15 @@ use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::core::composition_adjustment::smith_waterman::{
     smith_waterman_redo_window, SwRedoScratch, SwSignificance, SwWindow, SwWindowRedo,
 };
-use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
+use crate::core::composition_adjustment::smith_waterman_match::{
+    SwBatchStatus, SwRedoEndless, SwRedoFailed,
+};
 
-/// RPS-BLAST's memory of the Smith-Waterman redo from one profile to the next: the round loop's
-/// (`SwRedoScratch::rounds`) and the subject's letters between NCBI's two sentinel bytes
-/// (`s_SequenceGetProteinRange`'s buffer; `SwRedoScratch::window`).
-pub(crate) type RpsSwScratch = SwRedoScratch<Vec<u8>>;
+/// The memory of the position-based Smith-Waterman redo from one match to the next (psiblast's
+/// subjects, RPS-BLAST's profiles): the round loop's (`SwRedoScratch::rounds`) and the subject's
+/// letters between NCBI's two sentinel bytes (`s_SequenceGetProteinRange`'s buffer;
+/// `SwRedoScratch::window`).
+pub(crate) type PssmSwScratch = SwRedoScratch<Vec<u8>>;
 
 /// NCBI's redo of a match whose Smith-Waterman loop does not end: the score of 0 is significant,
 /// the window has two or more HSPs and profile row 0 scores the window's first letter positive.
@@ -44,126 +49,163 @@ pub(crate) type RpsSwScratch = SwRedoScratch<Vec<u8>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwEndless;
 
-/// Internal failure outcome of [`RedoMatch::redo_one_match_smith_waterman_with`].
-enum SwWindowFailure {
+/// A position-based match whose Smith-Waterman redo gives no alignments
+/// ([`RedoMatch::redo_match_smith_waterman`]): NCBI's failed redo (`Failed`: a significant
+/// alignment of score 0 without an edit script, which frees the match's alignments and sets the
+/// status) or its endless one (`Endless`, as `SwEndless`). Each caller maps it: RPS-BLAST drops a
+/// failed profile and refuses an endless one (`for_rps`); psiblast keeps the batch's status
+/// (`PssmSwStep`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwMatchFailure {
     Failed,
     Endless,
 }
 
+impl SwMatchFailure {
+    /// RPS-BLAST's reading of the failure: a failed profile has no list (NCBI drops its
+    /// alignments; RPS-BLAST's redo keeps no status), an endless one is `SwEndless`.
+    #[inline(always)]
+    pub(crate) fn for_rps<T>(self) -> Result<Option<T>, SwEndless> {
+        match self {
+            SwMatchFailure::Failed => Ok(None),
+            SwMatchFailure::Endless => Err(SwEndless),
+        }
+    }
+}
+
+/// psiblast's step of `PssmRedo1::redo_loop` with `-use_sw_tback`: the subject read, the
+/// Smith-Waterman redo of the match (`RedoMatch::redo_match_smith_waterman`) and NCBI's status of
+/// the batch (`SwBatchStatus`: set by each redone match, cleared at a subject that the fetch
+/// excludes, `PssmSwOptions::on_query_done`; a failed status at the batch's end is its error,
+/// `PssmSwOptions::on_batch_failed`). A match whose redo NCBI never ends is refused where it comes
+/// (`PssmSwOptions::on_endless`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3646
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+pub(super) struct PssmSwStep<'a> {
+    options: &'a PssmSwOptions<'a>,
+    scratch: PssmSwScratch,
+    status: SwBatchStatus,
+    /// The position in the query's list of the last match whose redo set the status.
+    status_position: Option<usize>,
+}
+
+impl<'a> PssmSwStep<'a> {
+    pub(super) fn new(options: &'a PssmSwOptions<'a>) -> Self {
+        Self {
+            options,
+            scratch: PssmSwScratch::new(),
+            status: SwBatchStatus::default(),
+            status_position: None,
+        }
+    }
+}
+
+impl MatchStep for PssmSwStep<'_> {
+    fn redo(
+        &mut self,
+        redo: &PssmRedo1<'_>,
+        run: &mut RedoRun<'_>,
+        heaps: &mut [BlastCompoHeap],
+        q_idx: usize,
+        position: usize,
+        oid: u32,
+        hsps: &[BlastpPreliminaryHsp],
+    ) -> anyhow::Result<Option<(BlastpHspList, i32, f64)>> {
+        let subject_read = redo.subjects.read(oid)?;
+        let redone = redo
+            .matching()
+            .redo_match_smith_waterman(
+                run,
+                &mut self.scratch,
+                &mut heaps[q_idx],
+                oid,
+                hsps,
+                subject_read.residues(),
+            )
+            .map_err(|failure| match failure {
+                SwMatchFailure::Failed => anyhow::Error::from(SwRedoFailed),
+                SwMatchFailure::Endless => anyhow::Error::from(SwRedoEndless),
+            });
+        let on_endless = self.options.on_endless;
+        let matched = self
+            .status
+            .redone(redone, || on_endless(&*heaps, position))?;
+        self.status_position = Some(position);
+        Ok(matched.flatten())
+    }
+
+    fn query_done(&mut self, heaps: &[BlastCompoHeap]) {
+        (self.options.on_query_done)(self.status_position.take(), heaps, &mut self.status);
+    }
+
+    fn batch_done(&mut self, heaps: &[BlastCompoHeap]) -> anyhow::Result<()> {
+        if self.status.failed() {
+            return Err((self.options.on_batch_failed)(heaps));
+        }
+        Ok(())
+    }
+}
+
 impl RedoMatch<'_> {
     /// The Smith-Waterman redo of one match (the HSPs of the query and one subject):
-    /// `Blast_RedoOneMatchSmithWaterman`, then the X-drop redo's steps (`redo_match`).
-    /// `heap` is the query's heap of redone matches, which the first alignment's significance
-    /// asks (`BlastCompo_HeapWouldInsert`); `Ok(None)` when no HSP is left, also where NCBI's
-    /// redo of the match fails (an alignment without an edit script).
+    /// `Blast_RedoOneMatchSmithWaterman`, then the X-drop redo's steps (`redo_match`), at the
+    /// run's scale (`RedoRun::scale`). `heap` is the query's heap of redone matches, which the
+    /// first alignment's significance asks (`BlastCompo_HeapWouldInsert`); `Ok(None)` when no HSP
+    /// is left, `SwMatchFailure` where NCBI's redo of the match fails or does not end.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
-    // One function for the window loop and the steps after it, called by RPS-BLAST's traceback
-    // per profile where `-use_sw_tback` asks for it (its X-drop redo keeps its own code).
+    // One function for the window loop and the steps after it, called by psiblast's redo loop and
+    // by RPS-BLAST's traceback per profile where `-use_sw_tback` asks for it (their X-drop redos
+    // keep their own code).
     #[inline(never)]
     pub(crate) fn redo_match_smith_waterman(
         &self,
         run: &mut RedoRun<'_>,
-        sw: &mut RpsSwScratch,
+        sw: &mut PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
         subject: &[u8],
-    ) -> Result<Option<(BlastpHspList, i32, f64)>, SwEndless> {
-        let alignments = match self
-            .redo_one_match_smith_waterman_with(run, sw, heap, oid, hsps, subject, true)
-        {
-            Ok(alignments) => alignments,
-            Err(SwWindowFailure::Failed) => return Ok(None),
-            Err(SwWindowFailure::Endless) => return Err(SwEndless),
-        };
-        Ok(self.evaluate_with(run, oid, hsps, subject, alignments, SCALING_FACTOR))
-    }
-
-    /// psiblast's Smith-Waterman position-based redo of one match (`-use_sw_tback`, CBS 0 to 3):
-    /// propagates `SwRedoFailed` and `SwRedoEndless` so `PssmRedo1::run_smith_waterman` tracks
-    /// NCBI's `status_code_tld` across matches.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3646
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1406-1548
-    #[inline(never)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn redo_match_smith_waterman_psiblast(
-        &self,
-        run: &mut RedoRun<'_>,
-        sw: &mut RpsSwScratch,
-        heap: &mut BlastCompoHeap,
-        oid: u32,
-        hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
-        compo_adjust: bool,
-    ) -> anyhow::Result<Option<(BlastpHspList, i32, f64)>> {
-        let scaling_factor = if compo_adjust { SCALING_FACTOR } else { 1.0 };
-        let alignments = match self.redo_one_match_smith_waterman_with(
-            run,
-            sw,
-            heap,
-            oid,
-            hsps,
-            subject,
-            compo_adjust,
-        ) {
-            Ok(alignments) => alignments,
-            Err(SwWindowFailure::Failed) => return Err(SwRedoFailed.into()),
-            Err(SwWindowFailure::Endless) => return Err(SwRedoEndless.into()),
-        };
-        Ok(self.evaluate_with(run, oid, hsps, subject, alignments, scaling_factor))
+    ) -> Result<Option<(BlastpHspList, i32, f64)>, SwMatchFailure> {
+        let alignments = self.redo_one_match_smith_waterman(run, sw, heap, oid, hsps, subject)?;
+        Ok(self.evaluate(run, oid, hsps, subject, alignments))
     }
 
     /// `Blast_RedoOneMatchSmithWaterman` for the one window of a protein query and subject (the
     /// whole query, the whole subject, `s_WindowsFromProteinAligns`): the window's alignments, the
-    /// list's head first (the last one made), or `None` for NCBI's failed redo.
-    #[cfg(test)]
+    /// list's head first (the last one made). With composition-based statistics
+    /// (`RedoScale::compo_adjust`) the subject range is SEG-masked unless the window's first
+    /// alignment is near identical and the matrix is adjusted to the range's composition; without
+    /// them (psiblast's `-comp_based_stats 0`) neither runs and the rows are the PSSM's as the run
+    /// holds them (the search's, unscaled).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1366-1430
+    /// The subject range's last argument is `NULL`: SEG runs (with composition-based statistics)
+    /// unless the window's first alignment is near identical (`RedoMatch::subject_range`). The
+    /// composition adjustment is the X-drop redo's (`RedoMatch::redo_one_match`,
+    /// `Blast_AdjustScores` of a position-based search), with this redo's instance (`SwRedo`) of
+    /// the shared steps.
     fn redo_one_match_smith_waterman(
         &self,
         run: &mut RedoRun<'_>,
-        sw: &mut RpsSwScratch,
+        sw: &mut PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
         subject: &[u8],
-    ) -> Result<Option<Vec<Align>>, SwEndless> {
-        match self.redo_one_match_smith_waterman_with(run, sw, heap, oid, hsps, subject, true) {
-            Ok(alignments) => Ok(Some(alignments)),
-            Err(SwWindowFailure::Failed) => Ok(None),
-            Err(SwWindowFailure::Endless) => Err(SwEndless),
-        }
-    }
-
-    /// `Blast_RedoOneMatchSmithWaterman` for the one window of a protein query and subject, with
-    /// composition-based adjustment (`compo_adjust == true`, scaling factor 32) or without
-    /// (`compo_adjust == false`, `-comp_based_stats 0`, scaling factor 1, unadjusted PSSM, no SEG).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1366-1475
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1625-1639
-    #[allow(clippy::too_many_arguments)]
-    fn redo_one_match_smith_waterman_with(
-        &self,
-        run: &mut RedoRun<'_>,
-        sw: &mut RpsSwScratch,
-        heap: &mut BlastCompoHeap,
-        oid: u32,
-        hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
-        compo_adjust: bool,
-    ) -> Result<Vec<Align>, SwWindowFailure> {
+    ) -> Result<Vec<Align>, SwMatchFailure> {
         let query_length = run.query.len();
         let Some(first) = hsps.first() else {
             return Ok(Vec::new());
         };
-        let scaling_factor = if compo_adjust { SCALING_FACTOR } else { 1.0 };
         let hspcnt = hsps.len();
         let (matrix_adjust_rule, subject_masked);
-        let subject_slice: &[u8] = if compo_adjust {
+        let subject_slice: &[u8] = if run.scale.compo_adjust {
             // The window's first alignment (`window->align`), scaled as the X-drop redo's incoming
             // alignments (blast_kappa.c:788-797, cited at `RedoMatch::redo_one_match`).
             let window_align = Align {
-                score: (first.raw_score as f64 * scaling_factor) as i32,
+                score: (first.raw_score as f64 * run.scale.factor) as i32,
                 rule: EMatrixAdjustRule::DontAdjustMatrix,
                 query_start: first.query_start,
                 query_end: first.query_end,
@@ -217,10 +259,10 @@ impl RedoMatch<'_> {
             }
             &subject_masked
         } else {
+            // Without composition-based statistics the range is the subject's letters (no SEG:
+            // `compo_adjust_mode` is 0), no adjustment runs and the rule is `eDontAdjustMatrix`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1625-1639
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1410-1411
-            // Without composition-based statistics, SEG and `Blast_AdjustScores` are skipped and
-            // the unadjusted PSSM is used directly.
             matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
             subject
         };
@@ -292,8 +334,8 @@ impl RedoMatch<'_> {
                     edit_script: align.edit_script,
                 })
                 .collect(),
-            SwWindowRedo::Failed => return Err(SwWindowFailure::Failed),
-            SwWindowRedo::Endless => return Err(SwWindowFailure::Endless),
+            SwWindowRedo::Failed => return Err(SwMatchFailure::Failed),
+            SwWindowRedo::Endless => return Err(SwMatchFailure::Endless),
         };
         alignments.reverse();
         Ok(alignments)
@@ -326,7 +368,7 @@ impl RedoMatch<'_> {
     pub(crate) fn redo_windows_smith_waterman(
         &self,
         run: &mut RedoRun<'_>,
-        sw: &mut RpsSwScratch,
+        sw: &mut PssmSwScratch,
         heap: &mut BlastCompoHeap,
         oid: u32,
         hsps: &[BlastpPreliminaryHsp],
@@ -470,13 +512,13 @@ impl RedoMatch<'_> {
     }
 
     /// The steps of the redo after the window's alignments: `s_HSPListFromDistinctAlignments`,
-    /// `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge` and, for a list whose best e-value
-    /// passes `-evalue`, `s_HSPListNormalizeScores` and `s_ComputeNumIdentities`; `RedoMatch::
-    /// redo_match`'s without sum statistics (its quotes give NCBI's lines). These lines are a copy
-    /// of `redo_match`'s, which keeps them in its body (moved into a function shared by both redos
-    /// they changed psiblast's machine code; line PS `DECISIONS.md` 63); the test
-    /// `the_evaluation_is_the_x_drop_redos` holds the two together.
-    #[cfg(test)]
+    /// `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge` (with psiblast's `-sum_stats true`,
+    /// the link of the redone alignments, `link_redone`) and, for a list whose best e-value passes
+    /// `-evalue`, `s_HSPListNormalizeScores` and `s_ComputeNumIdentities`, at the run's scale
+    /// (`RedoRun::scale`); `RedoMatch::redo_match`'s (its quotes give NCBI's lines). These lines
+    /// are a copy of `redo_match`'s, which keeps them in its body (moved into a function shared by
+    /// both redos they changed psiblast's machine code; line PS `DECISIONS.md` 63); the test
+    /// `the_evaluation_is_the_x_drop_redos` holds the two together, with and without the link.
     fn evaluate(
         &self,
         run: &RedoRun<'_>,
@@ -485,22 +527,7 @@ impl RedoMatch<'_> {
         subject: &[u8],
         alignments: Vec<Align>,
     ) -> Option<(BlastpHspList, i32, f64)> {
-        self.evaluate_with(run, oid, hsps, subject, alignments, SCALING_FACTOR)
-    }
-
-    /// `evaluate` with explicit `scaling_factor` (`SCALING_FACTOR` for CBS 1..3, `1.0` for CBS 0)
-    /// and support for psiblast's `-sum_stats true` (`self.link`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116,409-446,3670-3707
-    fn evaluate_with(
-        &self,
-        run: &RedoRun<'_>,
-        oid: u32,
-        hsps: &[BlastpPreliminaryHsp],
-        subject: &[u8],
-        alignments: Vec<Align>,
-        scaling_factor: f64,
-    ) -> Option<(BlastpHspList, i32, f64)> {
+        let scaling_factor = run.scale.factor;
         let mut redone: Vec<Redone> = alignments
             .into_iter()
             .map(|align| Redone {

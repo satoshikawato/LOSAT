@@ -1077,6 +1077,8 @@ pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     sw_oid_order: bool,
     /// Whether the PSSM's position-based redo ran and noted its own.
     pssm_redone: std::cell::Cell<bool>,
+    /// What the Smith-Waterman redo's errors name (`redo_run::SwErrorText`).
+    sw_text: super::redo_run::SwErrorText,
 }
 
 impl<'a> FetchNotes<'a> {
@@ -1084,13 +1086,22 @@ impl<'a> FetchNotes<'a> {
         listed: Option<&'a ListedSubjects>,
         database: Option<&'a BlastpDatabase>,
         sw_oid_order: bool,
+        sw_text: super::redo_run::SwErrorText,
     ) -> Self {
         Self {
             listed,
             database,
             sw_oid_order,
             pssm_redone: std::cell::Cell::new(false),
+            sw_text,
         }
+    }
+
+    /// What the Smith-Waterman redo's errors name: the search's application and whether it links
+    /// HSPs (`redo_run::SwErrorText`).
+    #[inline]
+    pub(super) fn sw_text(&self) -> super::redo_run::SwErrorText {
+        self.sw_text
     }
 
     /// The notes of a search with neither a seqid list nor a database: none to read.
@@ -1100,7 +1111,7 @@ impl<'a> FetchNotes<'a> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(in crate::algorithm::blastp) fn none() -> FetchNotes<'static> {
-        FetchNotes::new(None, None, false)
+        FetchNotes::new(None, None, false, super::redo_run::SwErrorText::BLASTP)
     }
 
     /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which

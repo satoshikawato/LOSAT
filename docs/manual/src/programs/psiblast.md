@@ -78,6 +78,7 @@ A pattern search runs one round (`-num_iterations 1`, the default). With a matri
 | `-save_pssm_after_last_round` | off | Also save the PSSM built after the last round |
 | `-save_each_pssm` | off | Save the PSSM of every round |
 | `-comp_based_stats N` | 2 | Composition-based statistics, 0 to 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-matrix NAME` | BLOSUM62 | Scoring matrix |
 | `-gapopen N`, `-gapextend N` | 11, 1 | Gap costs (the matrix's own values for other matrices) |
 | `-phi_pattern FILE` | | Search for a pattern (PROSITE syntax) found in the query (PHI-BLAST) |
@@ -113,7 +114,7 @@ Not yet supported:
 Also refused:
 
 - `-remote`, `-entrez_query` and `-import_search_strategy`.
-- `-use_sw_tback`.
+- With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI BLAST+ never finishes, and a query or round on which it crashes. The results of the queries and rounds before are written. See [Rare and pathological inputs](../refusals-edge-cases.md#psiblast).
 - With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.
 - With `-in_msa`, where NCBI BLAST+ crashes or reads memory that the file does not give: a PHYLIP header with 0 sequences, an empty command (a lone `;`) in a NEXUS file, a FASTA alignment whose rows have different lengths where the shorter row is read past its end, a `secondary-accession` range that runs backwards or has a number of more than 18 digits. See [Refusals](../refusals.md).
 - A `-subject` file whose sequences all have no letters.

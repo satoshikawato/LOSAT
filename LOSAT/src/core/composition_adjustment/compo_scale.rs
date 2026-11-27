@@ -23,8 +23,8 @@ pub(crate) const COMPO_SCORE_MIN: i32 = i16::MIN as i32;
 /// module's scaling, `RedoMatch`'s subject range, reap and evaluation): one source, one instance
 /// for each, so that each instance has one caller and stays inlined where it is, as before the
 /// second redo (line PS `DECISIONS.md` 11 and 63; series PR, item PS11c-3). `XDropRedo` is
-/// psiblast's and rpsblast's redo (`Blast_RedoOneMatch`), `SwRedo` rpsblast's `-use_sw_tback`
-/// (`Blast_RedoOneMatchSmithWaterman`), `FrameRedo` rpstblastn's (`Blast_RedoOneMatch` with a
+/// psiblast's and rpsblast's redo (`Blast_RedoOneMatch`), `SwRedo` psiblast's and rpsblast's
+/// `-use_sw_tback` (`Blast_RedoOneMatchSmithWaterman`), `FrameRedo` rpstblastn's (`Blast_RedoOneMatch` with a
 /// translated subject: series PR, item PS12b) and `SwFrameRedo` rpstblastn's `-use_sw_tback`
 /// (`Blast_RedoOneMatchSmithWaterman` with a translated subject: item PS12c).
 pub(crate) trait RedoInstance {

@@ -1448,6 +1448,16 @@ without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after 
 match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
 the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
 
+`pssw/`: rows `db.sw.fail.inpssm.*`, `db.sw.excl.*`, `db.sw.rej.endless.inpssm.*`, `db.sw.rej.crash.pswk.*` and
+`db.sw.scores.*` (line PS-SW, PSIBLAST `-use_sw_tback`). `pssw/make_pssw.py` (its docstring has the usage and the
+records) writes the version 5 databases `pssw/psw` (sx_frag, whose only line has a ti, then sfail) and `pssw/pswk`
+(sexact, sx_frag, then sfail) with `makeblastdb -parse_seqids`, the subjects `tests/fasta/pssw/sfail.faa` (a failing
+Smith-Waterman redo) and `tests/fasta/pssw/smm.faa` (tks_M twice, a redo that NCBI never ends), and the scores-only PSSM
+`tests/fixtures/pssm/ps_sw_tk_scores.asn.gz`. Searched with `x4excl/neg.txt`, the negative list keeps sx_frag without a
+line, and NCBI's fetch of the redo excludes it, which sets the redo's status back to 0. The redo takes the matches in OID
+order at `-comp_based_stats 0` and in e-value order at 1 to 3, so the excluded subject's mark comes before sfail's
+failing match in the one and after it in the other: the same search fails, crashes NCBI or ends with exit 0 by the mode.
+
 ## Alias files with OIDLIST (line RG, series D, D1b-1)
 
 `oidlist/` (`make_oidlist.py`): alias files with `OIDLIST` over taxfilter's `tfp` (23 proteins) and `tfn` (two volumes of

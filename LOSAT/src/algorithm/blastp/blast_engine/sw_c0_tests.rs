@@ -2,8 +2,7 @@
 //! parallel replay (`sw_c0`).
 
 use super::*;
-use crate::algorithm::blastp::hsp::{fill_results_from_compo_heaps, BlastpHsp};
-use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
+use crate::algorithm::blastp::hsp::BlastpHsp;
 
 fn dummy_hsp(oid: u32, q_idx: usize, score: i32, evalue: f64) -> BlastpHsp {
     BlastpHsp {
@@ -123,7 +122,9 @@ fn batch_stream_orders_by_database_ordinal_asc_and_query_desc_with_excluded_mark
 ))]
 mod par_tests {
     use super::*;
+    use crate::algorithm::blastp::hsp::fill_results_from_compo_heaps;
     use crate::algorithm::blastp::x_redo_par::x_sw_heap_test;
+    use crate::core::composition_adjustment::smith_waterman_match::{SwRedoEndless, SwRedoFailed};
 
     const ECUTOFF: f64 = 0.002;
 

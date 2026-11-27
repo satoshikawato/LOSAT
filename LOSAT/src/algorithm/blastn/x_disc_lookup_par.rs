@@ -1198,7 +1198,10 @@ impl Fill<'_, '_> {
 }
 
 /// No NCBI counterpart (scheduling only): how far ahead phase B prefetches the cells of a bucket
-/// on x86_64 (as the delay of `x_mb_lookup_par`'s fill).
+/// on x86_64 (as the delay of `x_mb_lookup_par`'s fill). The distance of the chains fills (an
+/// update reads and writes a cell's head and a `next_pos` link), kept apart from the count and
+/// place passes of the CSR builds (`x_dc_csr::AHEAD`), so that a change of one does not change the
+/// other.
 #[cfg(target_arch = "x86_64")]
 const X_AHEAD: usize = 16;
 
@@ -1372,7 +1375,7 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 /// the owners' cells follow each other in cell order) and makes every write to its cells:
 /// - it zeroes `offsets` over its cells; per chunk, after the readers, for `a` in `0..parts`,
 ///   for each entry of bucket `(a, o)` in order: `offsets[ecode] += 1` (the element of the entry
-///   16 ahead prefetched), adding up its entries;
+///   `x_dc_csr::AHEAD` ahead prefetched), adding up its entries;
 /// - after the last chunk, its base is the number of entries of the owners before it, and it
 ///   runs the sum pass (`x_dc_csr::sum_cells`) over its cells from that base, with the
 ///   presence-vector words and counters of its blocks (a block owns whole ones);
@@ -1448,7 +1451,7 @@ pub(super) fn csr(
         return (csr, true);
     }
     let _ = parts;
-    // EXPERIMENT (LOSAT_X_DCQSAHEAD): the serial build places as before.
+    // EXPERIMENT (LOSAT_X_DCQSAHEAD): the serial build places without bringing in `qs`.
     if super::x_dc_csr::qs_ahead_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", false);
     }
@@ -1481,7 +1484,7 @@ fn csr_on_pool(
     x_offsets: Vec<u32>,
     x_qs: Option<Vec<u32>>,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier, AHEAD};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1598,7 +1601,7 @@ fn csr_on_pool(
                     let es = fill.first.at(a, o);
                     got += es.len() as u64;
                     for j in 0..es.len() {
-                        if let Some(ahead) = es.get(j + 16) {
+                        if let Some(ahead) = es.get(j + AHEAD) {
                             prefetch(ob.ptr.wrapping_add(ahead.value as usize));
                         }
                         let cell = es[j].value as usize;
@@ -1845,11 +1848,11 @@ unsafe fn steps_pass(
 /// `csr_on_pool` waits twice per chunk (after the reading, after the owners' work), so each
 /// chunk costs the slowest reading plus the slowest owner's work; here a step costs the slowest
 /// thread's reading and owner's work together (about as many barriers per pass: half-size
-/// chunks, one barrier each). The place pass prefetches the `offsets` element of the entry 16
-/// ahead, as the count pass does; EXPERIMENT (LOSAT_X_DCQSAHEAD) with `qs_ahead` it also reads the
-/// `offsets` element of the entry `QS_AHEAD` ahead and brings in the `qs` line it points to
-/// (`x_dc_csr.rs` module comment). Chunks of `chunk` positions (`STEP_POSITIONS`; the tests take
-/// others).
+/// chunks, one barrier each). The place pass prefetches the `offsets` element of the entry
+/// `x_dc_csr::AHEAD` ahead, as the count pass does; EXPERIMENT (LOSAT_X_DCQSAHEAD) with
+/// `qs_ahead` it also reads the `offsets` element of the entry `QS_AHEAD` ahead and brings in the
+/// `qs` line it points to (`x_dc_csr.rs` module comment). Chunks of `chunk` positions
+/// (`STEP_POSITIONS`; the tests take others).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1867,7 +1870,7 @@ fn csr_on_pool_steps(
     x_qs: Option<Vec<u32>>,
     qs_ahead: bool,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier, QS_AHEAD};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier, AHEAD, QS_AHEAD};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1957,7 +1960,7 @@ fn csr_on_pool_steps(
             std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
             let mut got = 0u64;
             steps_pass(&c, &span, |es, j| {
-                if let Some(ahead) = es.get(j + 16) {
+                if let Some(ahead) = es.get(j + AHEAD) {
                     prefetch(ob.ptr.wrapping_add(ahead.value as usize));
                 }
                 let cell = es[j].value as usize;
@@ -1980,11 +1983,11 @@ fn csr_on_pool_steps(
                 );
             }
             steps_pass(&c, &span, |es, j| {
-                if let Some(ahead) = es.get(j + 16) {
+                if let Some(ahead) = es.get(j + AHEAD) {
                     prefetch(ob.ptr.wrapping_add(ahead.value as usize));
                 }
                 // EXPERIMENT (LOSAT_X_DCQSAHEAD): the `qs` line of the entry `QS_AHEAD` ahead (its
-                // `offsets` element came in `16 - QS_AHEAD` entries ago); the value only chooses
+                // `offsets` element came in `AHEAD - QS_AHEAD` entries ago); the value only chooses
                 // the line (a place between may lower it).
                 if qs_ahead {
                     if let Some(ahead) = es.get(j + QS_AHEAD) {

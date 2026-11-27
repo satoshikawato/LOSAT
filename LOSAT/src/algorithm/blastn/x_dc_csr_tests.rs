@@ -285,6 +285,52 @@ fn the_ring_emits_every_word_once_in_order() {
     }
 }
 
+// The look-ahead ring of the count and place passes (`Ahead`): every word reaches `step` once, in
+// push order, `AHEAD` pushes late on x86_64 (where it prefetches) and at once elsewhere; `finish`
+// steps the rest and returns the number pushed. Repeated elements (equal `i`) keep their order,
+// and a ring used again after `finish` starts empty (no word of the round before comes back).
+#[test]
+fn the_look_ahead_ring_steps_every_word_once_in_push_order() {
+    use std::cell::RefCell;
+    let late = if cfg!(target_arch = "x86_64") {
+        AHEAD
+    } else {
+        0
+    };
+    let table = [0u32; 8];
+    let stepped = RefCell::new(Vec::new());
+    for n in [0usize, 1, 15, 16, 17, 32, 33] {
+        let mut ring = Ahead::new(|w: (usize, u32)| stepped.borrow_mut().push(w));
+        for round in 0..3 {
+            // the element `i` of a word: few distinct ones, so most repeat within `AHEAD` words
+            let word = |k: usize| ((k * 5 + round) % 3, (round * 1000 + k) as u32);
+            // round 1 pushes fewer words than the ring holds after rounds of `n`
+            let m = if round == 1 { n / 2 } else { n };
+            stepped.borrow_mut().clear();
+            for k in 0..m {
+                let (i, value) = word(k);
+                ring.push(table.as_ptr().wrapping_add(i), (i, value));
+                let want = (k + 1).saturating_sub(late);
+                assert_eq!(stepped.borrow().len(), want, "n {n} round {round} k {k}");
+            }
+            assert_eq!(ring.finish(), m, "n {n} round {round}");
+            let want: Vec<_> = (0..m).map(word).collect();
+            assert_eq!(*stepped.borrow(), want, "n {n} round {round}");
+        }
+    }
+}
+
+// A pass that forgets `finish` would lose up to `AHEAD` words: the ring's drop says so in a debug
+// build (the tests' profile keeps debug assertions).
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "Ahead dropped without finish")]
+fn a_look_ahead_ring_dropped_unfinished_fails_a_debug_assertion() {
+    let table = [0u32; 1];
+    let mut ring = Ahead::new(|_: usize| {});
+    ring.push(table.as_ptr(), 0);
+}
+
 // LOSAT_X_BNCSRPACK: the byte counts of a packed build give each cell its number of words, past
 // 255 too, and the presence bits of the non-zero counts and the ranks in cell order, built by
 // two owners of 32 blocks each; a single non-zero byte of any value sets its bit only.

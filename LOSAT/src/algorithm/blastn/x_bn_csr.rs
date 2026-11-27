@@ -85,8 +85,8 @@
 //! times are in `[TIMING] x_mb_lookup_build`; LOSAT_X_BNPOPCNT, `x_dc_csr::XPop`).
 
 use super::x_dc_csr::{
-    assemble, prefetch, sum_cells, x_assemble_packed, x_count8, x_presence8, x_rank,
-    x_rank_counts8, x_sum_packed, Csr, PlaceAhead, XPop,
+    assemble, sum_cells, x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8,
+    x_sum_packed, Ahead, Csr, XPop,
 };
 use super::x_mb_lookup_par::Words;
 use super::{build_unmasked_ranges, x_range_words, PvArrayType};
@@ -335,10 +335,17 @@ pub(super) fn count_shift(ascending_cells: bool) -> usize {
     }
 }
 
-/// The serial build (module comment): the count pass (each word's count prefetched and counted
-/// 16 words later), the sum pass with the presence bits and helper counters into `pv_array` and
-/// `helper_array` (zeroed, of the fill's lengths), and the place pass (each word's cursor
-/// prefetched and the word placed 16 words later, `place_pass`).
+/// No NCBI counterpart: the element of `offsets` that is the place pass's cursor of cell 0 (module
+/// comment: `offsets[cell + 1]` in reading order, which walks the cell's run from its start, and
+/// `offsets[cell]` newest first, which walks it back from its end).
+pub(super) fn cursor_shift(ascending_cells: bool) -> usize {
+    usize::from(ascending_cells)
+}
+
+/// The serial build (module comment): the count pass (`x_dc_csr::Ahead`: on x86_64 each word's
+/// count prefetched and counted `x_dc_csr::AHEAD` words later), the sum pass with the presence
+/// bits and helper counters into `pv_array` and `helper_array` (zeroed, of the fill's lengths),
+/// and the place pass (`place_pass`).
 pub(super) fn serial(
     words: &Words<'_>,
     cells: usize,
@@ -389,25 +396,15 @@ pub(super) fn x_serial_unpacked(
     // SAFETY: `cells + 2` elements of the capacity, written here before anything reads them.
     unsafe { std::ptr::write_bytes(ob, 0, cells + 2) };
     let cnt = ob.wrapping_add(count_shift(ascending));
-    const AHEAD: usize = 16;
-    let mut ring = [0usize; AHEAD];
-    let mut seen = 0usize;
+    let mut count = Ahead::new(move |cell: usize| {
+        // SAFETY: `cell < cells` (asserted when it was read); `cnt` has `cells` elements.
+        unsafe { *cnt.add(cell) += 1 };
+    });
     each_word(words, |cell, _| {
         assert!(cell < cells);
-        prefetch(cnt.wrapping_add(cell));
-        let slot = seen % AHEAD;
-        if seen >= AHEAD {
-            // SAFETY: `ring[slot] < cells` (asserted when it entered); `cnt` has `cells` elements.
-            unsafe { *cnt.add(ring[slot]) += 1 };
-        }
-        ring[slot] = cell;
-        seen += 1;
+        count.push(cnt.wrapping_add(cell), cell);
     });
-    for i in seen.saturating_sub(AHEAD)..seen {
-        // SAFETY: as above.
-        unsafe { *cnt.add(ring[i % AHEAD]) += 1 };
-    }
-    let n_words = seen;
+    let n_words = count.finish();
     assert!(
         n_words <= u32::MAX as usize,
         "BNCSR: more words than u32 offsets"
@@ -433,8 +430,8 @@ pub(super) fn x_serial_unpacked(
         place_pass(
             words,
             ob,
-            |cell| cell + 1,
-            |i, q_off_1| {
+            |cell| cell + cursor_shift(true),
+            move |(i, q_off_1)| {
                 // SAFETY: `i = cell + 1` with `cell < cells` (the same words as the count pass);
                 // `offsets[cell + 1]` walks the cell's run from its start, one place per word of
                 // the cell, so the place is below `n_words`, in the capacity.
@@ -451,14 +448,14 @@ pub(super) fn x_serial_unpacked(
         place_pass(
             words,
             ob,
-            |cell| cell,
-            |cell, q_off_1| {
-                // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the
-                // end of the cell's non-empty run (>= 1), so the place `e < n_words` is in the
-                // capacity.
+            |cell| cell + cursor_shift(false),
+            move |(i, q_off_1)| {
+                // SAFETY: `i = cell < cells` (the same words as the count pass), `offsets[cell]`
+                // is the end of the cell's non-empty run (>= 1), so the place `e < n_words` is in
+                // the capacity.
                 unsafe {
-                    let e = *ob.add(cell) - 1;
-                    *ob.add(cell) = e;
+                    let e = *ob.add(i) - 1;
+                    *ob.add(i) = e;
                     *qb.add(e as usize) = q_off_1;
                 }
             },
@@ -470,7 +467,7 @@ pub(super) fn x_serial_unpacked(
 }
 
 /// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the count pass into
-/// one byte per cell (`x_count8`, each word's byte prefetched and counted 16 words later), the
+/// one byte per cell (`x_count8`; `x_dc_csr::Ahead`, as `x_serial_unpacked`'s count pass), the
 /// presence bits of the non-zero counts (`x_presence8`), the ranks of the blocks and the counts by
 /// rank (`x_rank_counts8`; the bytes are in `qs`'s capacity, which the place pass writes then), the
 /// sum pass (`x_sum_packed`, with the presence bits and helper counters), and the place pass, as
@@ -495,24 +492,18 @@ pub(super) fn x_serial_packed(
     // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
     unsafe { std::ptr::write_bytes(cb, 0, cells) };
     let mut more = HashMap::new();
-    const AHEAD: usize = 16;
-    let mut ring = [0usize; AHEAD];
-    let mut seen = 0usize;
-    each_word(words, |cell, _| {
-        debug_assert!(cell < cells);
-        prefetch(cb.wrapping_add(cell));
-        let slot = seen % AHEAD;
-        if seen >= AHEAD {
-            // SAFETY: `ring[slot] < cells`, a byte of the counts; one thread.
-            unsafe { x_count8(cb, &mut more, ring[slot]) };
-        }
-        ring[slot] = cell;
-        seen += 1;
-    });
-    for i in seen.saturating_sub(AHEAD)..seen {
-        // SAFETY: as above.
-        unsafe { x_count8(cb, &mut more, ring[i % AHEAD]) };
-    }
+    let n_words = {
+        let more = &mut more;
+        let mut count = Ahead::new(move |cell: usize| {
+            // SAFETY: `cell < cells`, a byte of the counts; one thread.
+            unsafe { x_count8(cb, more, cell) };
+        });
+        each_word(words, |cell, _| {
+            debug_assert!(cell < cells);
+            count.push(cb.wrapping_add(cell), cell);
+        });
+        count.finish()
+    };
     let mut bits = vec![0u64; 2 * blocks];
     // EXPERIMENT (LOSAT_X_BNPOPCNT): the form of the bit counts, read once per build.
     let pop = XPop::get();
@@ -526,7 +517,6 @@ pub(super) fn x_serial_packed(
     let ranked = unsafe { x_rank_counts8(bits.as_mut_ptr(), cb, &more, sb, 0, blocks, 0) };
     debug_assert_eq!(ranked, present);
     drop(more);
-    let n_words = seen;
     assert!(
         n_words <= u32::MAX as usize,
         "BNCSR: more words than u32 offsets"
@@ -556,7 +546,7 @@ pub(super) fn x_serial_packed(
         words,
         sb,
         |cell| x_rank(&bits, cell, pop).expect("BNCSRPACK: a word of an empty cell"),
-        |r, q_off_1| {
+        move |(r, q_off_1)| {
             // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so
             // the place `e < n_words` is in the capacity.
             unsafe {
@@ -571,27 +561,24 @@ pub(super) fn x_serial_packed(
     unsafe { x_assemble_packed(starts, bits, qs, present, n_words) }
 }
 
-/// The place pass of `serial` (module comment), in the loop's order: each word's cursor, element
-/// `index(cell)` of `cursors` (`offsets` or a packed head's `starts`), prefetched where the word is
-/// read, and the word placed `x_dc_csr::PLACE_AHEAD` words later by `place(index, q_off_1)`
-/// (`PlaceAhead`: the places are those of placing each word where it is read).
+/// No NCBI counterpart (scheduling only): the place pass of `serial` (module comment), in the
+/// loop's order: each word's cursor is element `index(cell)` of `cursors` (`offsets` or a packed
+/// head's `starts`), and `place((index, q_off_1))` places the word (`x_dc_csr::Ahead`: on x86_64
+/// the cursor prefetched where the word is read and the word placed `x_dc_csr::AHEAD` words later,
+/// at the place it gets when placed where it is read).
 #[inline(always)]
 fn place_pass(
     words: &Words<'_>,
     cursors: *const u32,
     mut index: impl FnMut(usize) -> usize,
-    mut place: impl FnMut(usize, u32),
+    place: impl FnMut((usize, u32)),
 ) {
-    let mut ahead = PlaceAhead::new();
+    let mut place = Ahead::new(place);
     each_word(words, |cell, q_off_1| {
         let i = index(cell);
-        if let Some((i, q_off_1)) = ahead.push(cursors.wrapping_add(i), i, q_off_1) {
-            place(i, q_off_1);
-        }
+        place.push(cursors.wrapping_add(i), (i, q_off_1));
     });
-    for (i, q_off_1) in ahead.drain() {
-        place(i, q_off_1);
-    }
+    place.finish();
 }
 
 /// No NCBI counterpart: whether `run` (a cell's run, sorted: increasing in reading order,

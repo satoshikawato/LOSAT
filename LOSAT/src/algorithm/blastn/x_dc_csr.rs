@@ -49,14 +49,15 @@
 //! pass of a table built on the pool by `x_disc_lookup_par::csr_on_pool_steps` (LOSAT_X_DCSEEDLEAN's
 //! build, at two threads or more) brings in the line of `qs` each entry will be written to before
 //! it writes it. The place pass reads `offsets[cell]`, decrements it and writes `qs` there; it
-//! brought in the `offsets` element of the entry 16 places ahead, but not the `qs` line, and `qs`
-//! has one element per word (tens of MiB for a large query set), so a store's line was often not
-//! in the caches. Now the owner also reads the `offsets` element of the entry `QS_AHEAD` (8)
-//! places ahead (brought in 8 entries before) and brings in the `qs` line it points to. The
-//! entries are placed in the same order at the same places (the value read ahead only chooses
-//! which line is brought in), so the CSR is the same; only the bringing in is new (`prefetch`,
-//! nothing on targets without one). Its sides are DCSEEDLEAN's pooled build's: the serial build
-//! (one thread, no pool) and `csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) place as before.
+//! brought in the `offsets` element of the entry `AHEAD` (16) places ahead, but not the `qs` line,
+//! and `qs` has one element per word (tens of MiB for a large query set), so a store's line was
+//! often not in the caches. Now the owner also reads the `offsets` element of the entry
+//! `QS_AHEAD` (8) places ahead (brought in 8 entries before) and brings in the `qs` line it points
+//! to. The entries are placed in the same order at the same places (the value read ahead only
+//! chooses which line is brought in), so the CSR is the same; only the bringing in is new
+//! (`prefetch`, nothing on targets without one). Its sides are DCSEEDLEAN's pooled build's: the
+//! serial build (one thread, no pool) and `csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) place without
+//! bringing in `qs`.
 //!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
 //! words and leaves it, unchanged and in order, `RING` words later. Every `GROUP` words, the
@@ -105,8 +106,8 @@ pub(super) fn qs_ahead_on() -> bool {
 }
 
 /// No NCBI counterpart (scheduling only, LOSAT_X_DCQSAHEAD): how many entries before its place an
-/// entry's `qs` line is brought in; its `offsets` element was brought in `16 - QS_AHEAD` entries
-/// before that.
+/// entry's `qs` line is brought in; its `offsets` element was brought in `AHEAD - QS_AHEAD`
+/// entries before that.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -751,55 +752,111 @@ pub(crate) fn prefetch<T>(p: *const T) {
     let _ = p;
 }
 
-/// How many words a CSR build's place pass reads ahead of the word it places (`PlaceAhead`): the
-/// distance of the count passes.
-pub(super) const PLACE_AHEAD: usize = 16;
+/// No NCBI counterpart (scheduling only): how many words the count and place passes of the CSR
+/// builds read ahead of the word whose counter or cursor they move, on x86_64 (where `prefetch`
+/// brings a line in): the line of the element is prefetched where the word is read and the element
+/// moved `AHEAD` words later, so the misses on the table overlap instead of coming one after
+/// another. Words read one at a time go through `Ahead`; words already in a slice prefetch the
+/// element of the entry `AHEAD` places on (`es.get(j + AHEAD)`; see `Ahead`). The chains fills
+/// keep their own distance (`x_mb_lookup_once`'s and `x_disc_lookup_par`'s `X_AHEAD`).
+pub(super) const AHEAD: usize = 16;
 
-/// No NCBI counterpart (memory order only): the words a CSR build's place pass has read but not yet
-/// placed (`build`, `x_bn_csr::serial` and `x_mb_lookup_once`'s builds on a pool). The cursor of a
-/// word (the element of `offsets` or of a packed head's `starts` that its place is taken from) is
-/// prefetched where the word is read, and the word is placed `PLACE_AHEAD` words later, as the
-/// count passes count, so the misses on the cursors overlap instead of coming one after another.
-/// The words are placed in the order they were read, so each cursor moves as it does when every
-/// word is placed where it is read, and every place is the same.
-pub(super) struct PlaceAhead {
-    held: [(usize, u32); PLACE_AHEAD],
+/// No NCBI counterpart (scheduling only): the words a CSR build's count or place pass has read
+/// but not yet moved its element for. `push` prefetches the line of the word's element (its count
+/// in `offsets` or in a packed head's bytes, or its cursor: an element of `offsets` or of a packed
+/// head's `starts`) and gives `step` (count or place) the word read `AHEAD` words before it;
+/// `finish` gives `step` the words still held and leaves the ring empty. The words reach `step`
+/// in the order they were read, so every counter and cursor moves as it does when each word is
+/// stepped where it is read, and every count and place is the same. A ring dropped with words not
+/// stepped fails a debug assertion (`Drop`; the tests run with them), so a pass cannot lose its
+/// last words unnoticed. (A `finish` that consumes the ring would move it, and its held words
+/// with it: a copy of the ring per pass, and on x86_64 the step's pointers read from memory at
+/// every word.)
+///
+/// On every target where `prefetch` is nothing (all but x86_64: the same `cfg`), there is no line
+/// to bring in, so the ring holds nothing: `push` steps the word at once and the pass does the
+/// work it did before the ring (only the count of the words, which the count passes return, is
+/// kept; a place pass does not read it).
+///
+/// The ring serves the passes whose words come one at a time from the query loop (the count and
+/// place passes of `build`, `x_bn_csr::x_serial_unpacked` and `x_bn_csr::x_serial_packed`) and
+/// the place passes of `x_mb_lookup_once::csr_on_pool` (both heads). Those read their entries
+/// from slices (`Fill::subrange`), but a packed head's cursor index is a rank (`x_rank`), which a
+/// look-ahead by index would compute twice per word, and the ring runs on over the `parts`
+/// sub-ranges of a chunk and over the chunks, where a look-ahead by index stops at each slice's
+/// end. The other passes over entries already in a slice keep the look-ahead by index
+/// (`es.get(j + AHEAD)`): the entry `AHEAD` places on is in memory, so its element is prefetched
+/// from it with no copy through a ring: the count passes of `x_mb_lookup_once::csr_on_pool` and
+/// `x_disc_lookup_par`'s builds on a pool, and the place pass of
+/// `x_disc_lookup_par::csr_on_pool_steps`, which also reads the cursor of the entry `QS_AHEAD`
+/// places on (LOSAT_X_DCQSAHEAD). `x_disc_lookup_par::csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) places
+/// without a prefetch.
+pub(super) struct Ahead<T, F> {
+    /// The last `AHEAD` words pushed, word `k` (`k < seen`) in slot `k % AHEAD`.
+    #[cfg(target_arch = "x86_64")]
+    held: [T; AHEAD],
+    /// Nothing held: no line to wait for.
+    #[cfg(not(target_arch = "x86_64"))]
+    held: std::marker::PhantomData<[T; AHEAD]>,
     seen: usize,
+    step: F,
 }
 
-impl PlaceAhead {
+impl<T: Copy + Default, F: FnMut(T)> Ahead<T, F> {
     #[inline(always)]
-    pub(super) fn new() -> Self {
+    pub(super) fn new(step: F) -> Self {
         Self {
-            held: [(0, 0); PLACE_AHEAD],
+            #[cfg(target_arch = "x86_64")]
+            held: [T::default(); AHEAD],
+            #[cfg(not(target_arch = "x86_64"))]
+            held: std::marker::PhantomData,
             seen: 0,
+            step,
         }
     }
 
-    /// Takes the word whose cursor is element `i`, at `cursor` (prefetched here), and whose value
-    /// is `value`; returns the word read `PLACE_AHEAD` words before it, which the caller places now.
+    /// Takes the word `word`, whose element is at `line` (prefetched here), and steps the word
+    /// read `AHEAD` words before it (on x86_64; elsewhere `word` itself, at once).
     #[inline(always)]
-    pub(super) fn push<T>(
-        &mut self,
-        cursor: *const T,
-        i: usize,
-        value: u32,
-    ) -> Option<(usize, u32)> {
-        prefetch(cursor);
-        let slot = self.seen % PLACE_AHEAD;
-        let due = (self.seen >= PLACE_AHEAD).then(|| self.held[slot]);
-        self.held[slot] = (i, value);
+    pub(super) fn push<C>(&mut self, line: *const C, word: T) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            prefetch(line);
+            let slot = self.seen % AHEAD;
+            if self.seen >= AHEAD {
+                (self.step)(self.held[slot]);
+            }
+            self.held[slot] = word;
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let _ = line;
+            (self.step)(word);
+        }
         self.seen += 1;
-        due
     }
 
-    /// The words still held, in the order they were read, for the caller to place; the ring is
-    /// empty after them.
+    /// Steps the words still held, in the order they were read, and empties the ring; returns
+    /// the number of words pushed since it was made or last finished.
     #[inline(always)]
-    pub(super) fn drain(&mut self) -> impl Iterator<Item = (usize, u32)> + '_ {
-        let end = self.seen;
+    pub(super) fn finish(&mut self) -> usize {
+        let seen = self.seen;
+        #[cfg(target_arch = "x86_64")]
+        for k in seen.saturating_sub(AHEAD)..seen {
+            (self.step)(self.held[k % AHEAD]);
+        }
         self.seen = 0;
-        (end.saturating_sub(PLACE_AHEAD)..end).map(move |k| self.held[k % PLACE_AHEAD])
+        seen
+    }
+}
+
+impl<T, F> Drop for Ahead<T, F> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        debug_assert!(
+            self.seen == 0 || std::thread::panicking(),
+            "Ahead dropped without finish: its last words were not stepped"
+        );
     }
 }
 
@@ -952,10 +1009,11 @@ pub(super) fn count_build(csr: &Csr, on_pool: bool) {
     BUILT_WORDS.fetch_add(csr.words() as u64, Ordering::Relaxed);
 }
 
-/// The serial build (module comment): the count pass (each word's `offsets` element prefetched
-/// and counted 16 words later), the sum pass with the presence bits and helper counters into
-/// `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the place pass (each word's
-/// cursor prefetched and the word placed 16 words later, `PlaceAhead`).
+/// The serial build (module comment): the count pass (`Ahead`: on x86_64 each word's `offsets`
+/// element prefetched and counted `AHEAD` words later), the sum pass with the presence bits and
+/// helper counters into `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the
+/// place pass (`Ahead`: on x86_64 each word's cursor prefetched and the word placed `AHEAD` words
+/// later).
 pub(super) fn build(
     words: &DiscWords<'_>,
     cells: usize,
@@ -973,25 +1031,15 @@ pub(super) fn build(
     let ob = offsets.as_mut_ptr();
     // SAFETY: `cells + 1` elements of the capacity, written here before anything reads them.
     unsafe { std::ptr::write_bytes(ob, 0, cells + 1) };
-    const AHEAD: usize = 16;
-    let mut ring = [0usize; AHEAD];
-    let mut seen = 0usize;
+    let mut count = Ahead::new(move |cell: usize| {
+        // SAFETY: `cell < cells` (asserted when it was read), an initialized element.
+        unsafe { *ob.add(cell) += 1 };
+    });
     each_word(words, |cell, _| {
         assert!(cell < cells);
-        prefetch(ob.wrapping_add(cell));
-        let slot = seen % AHEAD;
-        if seen >= AHEAD {
-            // SAFETY: `ring[slot] < cells` (asserted when it entered), an initialized element.
-            unsafe { *ob.add(ring[slot]) += 1 };
-        }
-        ring[slot] = cell;
-        seen += 1;
+        count.push(ob.wrapping_add(cell), cell);
     });
-    for i in seen.saturating_sub(AHEAD)..seen {
-        // SAFETY: as above.
-        unsafe { *ob.add(ring[i % AHEAD]) += 1 };
-    }
-    let n_words = seen;
+    let n_words = count.finish();
     assert!(
         n_words <= u32::MAX as usize,
         "DCCSR: more words than u32 offsets"
@@ -1019,7 +1067,8 @@ pub(super) fn build(
     // a kept `qs` needs no zeroing.
     let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, n_words);
     let qb = qs.as_mut_ptr();
-    let place = |cell: usize, index: u32| {
+    // The cursor of a word is `offsets[cell]`.
+    let mut place = Ahead::new(move |(cell, index): (usize, u32)| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
         // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.
         unsafe {
@@ -1027,17 +1076,11 @@ pub(super) fn build(
             *ob.add(cell) = e;
             *qb.add(e as usize) = index;
         }
-    };
-    // Each word's cursor `offsets[cell]` prefetched, the word placed `PLACE_AHEAD` words later.
-    let mut ahead = PlaceAhead::new();
-    each_word(words, |cell, index| {
-        if let Some((cell, index)) = ahead.push(ob.wrapping_add(cell), cell, index) {
-            place(cell, index);
-        }
     });
-    for (cell, index) in ahead.drain() {
-        place(cell, index);
-    }
+    each_word(words, |cell, index| {
+        place.push(ob.wrapping_add(cell), (cell, index))
+    });
+    place.finish();
     // SAFETY: `offsets` was written in full; the runs partition `0 .. n_words`, and the place
     // pass wrote each place once.
     unsafe { assemble(offsets, qs, cells, n_words) }

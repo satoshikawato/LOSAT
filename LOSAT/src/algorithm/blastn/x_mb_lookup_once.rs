@@ -195,7 +195,10 @@ fn chunk_positions(parts: usize) -> usize {
 }
 
 /// No NCBI counterpart (scheduling only): how far ahead phase B prefetches the cells of a
-/// sub-range on x86_64 (as `x_mb_lookup_par`'s fill and LOSAT_X_DISCLUTPAR's phase B).
+/// sub-range on x86_64 (as `x_mb_lookup_par`'s fill and LOSAT_X_DISCLUTPAR's phase B). The
+/// distance of the chains fills (an update reads and writes a cell's head and a `next_pos` link),
+/// kept apart from the count and place passes of the CSR builds (`x_dc_csr::AHEAD`), so that a
+/// change of one does not change the other.
 #[cfg(target_arch = "x86_64")]
 const X_AHEAD: usize = 16;
 
@@ -1231,14 +1234,17 @@ impl Fill<'_, '_, '_> {
 /// and makes every write to its cells' counts and cursors (`x_bn_csr.rs`: the count of `cell` is
 /// `offsets[cell + count_shift]`):
 /// - it zeroes its cells' counts; per chunk, after the readers, for `a` in `0..parts`, for each
-///   entry of sub-range `(a, o)` in order: the cell's count + 1 (the count of the entry 16 ahead
-///   prefetched), adding up its entries;
+///   entry of sub-range `(a, o)` in order: the cell's count + 1 (the count of the entry
+///   `x_dc_csr::AHEAD` ahead prefetched), adding up its entries;
 /// - after the last chunk, its base is the number of entries of the owners before it, and it runs
 ///   the sum pass (`x_dc_csr::sum_cells`) over its cells' counts from that base, with the
 ///   presence-vector words and counters of its blocks (a block owns whole ones);
 /// - per chunk, after the readers, for `a` in `0..parts`, for each entry of sub-range `(a, o)` in
 ///   order, the place of `x_bn_csr::serial`: `qs[--offsets[cell]] = index` (newest first) or
-///   `qs[offsets[cell + 1]++] = index` (`ascending_cells`).
+///   `qs[offsets[cell + 1]++] = index` (`ascending_cells`), through `x_dc_csr::Ahead` (on x86_64
+///   the entry's cursor prefetched when it is read and the entry placed `x_dc_csr::AHEAD` entries
+///   later, in the same order; the last entries of a chunk are placed in the next chunk's place
+///   phase, after the last chunk's by `finish`).
 ///
 /// A cell gets its words in the loop's order (chunks in order, the readers' spans in stream order,
 /// a sub-range in reading order), so the counts, sums and runs are those of `x_bn_csr::serial`.
@@ -1315,7 +1321,7 @@ fn csr_on_pool(
     chunk: usize,
     x_offsets: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, PlaceAhead, Poison, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Ahead, Poison, SpinBarrier, AHEAD};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1463,7 +1469,7 @@ fn csr_on_pool(
                         let es = fill.subrange(a, o);
                         got += es.len() as u64;
                         for j in 0..es.len() {
-                            if let Some(ahead) = es.get(j + 16) {
+                            if let Some(ahead) = es.get(j + AHEAD) {
                                 prefetch(cb.ptr.wrapping_add(ahead.value as usize));
                             }
                             x_count8(cb.ptr, &mut more, es[j].value as usize);
@@ -1501,14 +1507,14 @@ fn csr_on_pool(
                         pop,
                     );
                 }
-                let place = |r: usize, index: u32| {
+                // The cursor of a word is `starts[rank]`. The ring holds copies of the words, and
+                // the cursors and places are the owner's alone, so the words it still holds at a
+                // chunk's end are placed in the next chunk's place phase, the last by `finish`.
+                let mut place = Ahead::new(move |(r, index): (usize, u32)| {
                     let p = sb.get(r) - 1;
                     sb.set(r, p);
                     qb.set(p as usize, index);
-                };
-                // Each word's cursor `starts[r]` prefetched, the word placed `PLACE_AHEAD` words
-                // later; the chunk's words are all placed before the barrier after it.
-                let mut ahead = PlaceAhead::new();
+                });
                 for c in 0..chunks {
                     let (s0, s1) = span(c, o);
                     fill.read::<false, false>(o, s0, s1);
@@ -1516,19 +1522,14 @@ fn csr_on_pool(
                     for a in 0..parts {
                         for e in fill.subrange(a, o) {
                             let r = rank(e.value);
-                            if let Some((r, index)) = ahead.push(sb.ptr.wrapping_add(r), r, e.index)
-                            {
-                                place(r, index);
-                            }
+                            place.push(sb.ptr.wrapping_add(r), (r, e.index));
                         }
-                    }
-                    for (r, index) in ahead.drain() {
-                        place(r, index);
                     }
                     if c + 1 < chunks {
                         bar.wait();
                     }
                 }
+                place.finish();
             }
         });
         let n_words: u64 = own_words.iter().sum();
@@ -1549,7 +1550,7 @@ fn csr_on_pool(
     // and by this thread (the elements before the first count, and `offsets[cells]` newest first);
     // `qs` gets one element per word (`total` positions bound them).
     let ascending = words.ascending_cells;
-    let shift = super::x_bn_csr::count_shift(ascending);
+    let count_shift = super::x_bn_csr::count_shift(ascending);
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
     let mut qs: Vec<u32> = Vec::with_capacity(total);
@@ -1557,8 +1558,8 @@ fn csr_on_pool(
         ptr: offsets.as_mut_ptr(),
         len: cells + 2,
     };
-    // SAFETY: the first `shift` elements of the capacity, which no owner writes.
-    unsafe { std::ptr::write_bytes(ob.ptr, 0, shift) };
+    // SAFETY: the first `count_shift` elements of the capacity, which no owner writes.
+    unsafe { std::ptr::write_bytes(ob.ptr, 0, count_shift) };
     let qb = Shared {
         ptr: qs.as_mut_ptr(),
         len: total,
@@ -1583,16 +1584,16 @@ fn csr_on_pool(
         let _poison = Poison(bar);
         let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
         let (c0, c1) = own[o];
-        let cnt = ob.ptr.wrapping_add(shift);
+        let cnt = ob.ptr.wrapping_add(count_shift);
         // SAFETY (all of the job's accesses): reader `o` uses only its own region and row of the
         // arena and owner `o` only the sub-ranges `(*, o)`, between barriers that separate the
         // readers from the owners; owner `o` alone writes its cells' counts and cursors
-        // (`cnt[c0 .. c1]`, i.e. `offsets[c0 + shift .. c1 + shift]`, then `offsets[c0 + 1 .. c1 +
-        // 1]` or `offsets[c0 .. c1]`), the presence-vector words and counters of its blocks, its
-        // entry of the owners' words (read by the later owners after a barrier) and `qs` at its
-        // places, which lie in `base .. base + its words` (disjoint from the other owners'); every
-        // element read was written before by the same thread or before a barrier (the function's
-        // documentation for the cursor of `c0`).
+        // (`cnt[c0 .. c1]`, i.e. `offsets[c0 + count_shift .. c1 + count_shift]`, then
+        // `offsets[c0 + 1 .. c1 + 1]` or `offsets[c0 .. c1]`), the presence-vector words and
+        // counters of its blocks, its entry of the owners' words (read by the later owners after a
+        // barrier) and `qs` at its places, which lie in `base .. base + its words` (disjoint from
+        // the other owners'); every element read was written before by the same thread or before
+        // a barrier (the function's documentation for the cursor of `c0`).
         // SAFETY (`o`, `read`): `o = ctx.index() < parts` (the caller runs this only on a pool of
         // `parts` threads), and `span(c, o)` has at most `shape.half` positions (`read`).
         unsafe {
@@ -1606,7 +1607,7 @@ fn csr_on_pool(
                     let es = fill.subrange(a, o);
                     got += es.len() as u64;
                     for j in 0..es.len() {
-                        if let Some(ahead) = es.get(j + 16) {
+                        if let Some(ahead) = es.get(j + AHEAD) {
                             prefetch(cnt.wrapping_add(ahead.value as usize));
                         }
                         *cnt.add(es[j].value as usize) += 1;
@@ -1630,10 +1631,12 @@ fn csr_on_pool(
                     pv_array_bts,
                 );
             }
-            // The cursor of a word of `cell`: `offsets[cell + 1]` (reading order) or
-            // `offsets[cell]` (newest first).
-            let shift = usize::from(ascending);
-            let place = |i: usize, index: u32| {
+            // The cursor of a word of `cell` is `offsets[cell + cursor_shift]`: `offsets[cell + 1]`
+            // (reading order) or `offsets[cell]` (newest first). The ring holds copies of the
+            // words, and the cursors and places are the owner's alone, so the words it still holds
+            // at a chunk's end are placed in the next chunk's place phase, the last by `finish`.
+            let cursor_shift = super::x_bn_csr::cursor_shift(ascending);
+            let mut place = Ahead::new(move |(i, index): (usize, u32)| {
                 if ascending {
                     let cursor = ob.ptr.add(i);
                     qb.set(*cursor as usize, index);
@@ -1643,29 +1646,22 @@ fn csr_on_pool(
                     ob.set(i, p);
                     qb.set(p as usize, index);
                 }
-            };
-            // Each word's cursor prefetched, the word placed `PLACE_AHEAD` words later; the
-            // chunk's words are all placed before the barrier after it.
-            let mut ahead = PlaceAhead::new();
+            });
             for c in 0..chunks {
                 let (s0, s1) = span(c, o);
                 fill.read::<false, false>(o, s0, s1);
                 bar.wait();
                 for a in 0..parts {
                     for e in fill.subrange(a, o) {
-                        let i = e.value as usize + shift;
-                        if let Some((i, index)) = ahead.push(ob.ptr.wrapping_add(i), i, e.index) {
-                            place(i, index);
-                        }
+                        let i = e.value as usize + cursor_shift;
+                        place.push(ob.ptr.wrapping_add(i), (i, e.index));
                     }
-                }
-                for (i, index) in ahead.drain() {
-                    place(i, index);
                 }
                 if c + 1 < chunks {
                     bar.wait();
                 }
             }
+            place.finish();
         }
     });
     let n_words: u64 = own_words.iter().sum();

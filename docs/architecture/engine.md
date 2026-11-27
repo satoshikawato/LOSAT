@@ -327,7 +327,10 @@ tblastn spread their stages over files (blastx `preliminary.rs`, `traceback.rs`,
 - **Long queries.** Both re-enter their batch function for NCBI's query chunks (`SplitQuery_GetChunkSize`,
   `CQuerySplitter`): blastn through `search_query_chunks`, blastp through
   `search_split_query_batches`. Only the preliminary stage runs per chunk; the chunks' hit lists are
-  merged and the traceback runs on the whole batch. blastn also splits subjects longer than
+  merged and the traceback runs on the whole batch. NCBI builds no lookup table for a batch it
+  splits: blastp's call of the search keeps such a batch's queries (their set-up and the subjects'
+  reads) but its table, and the block plan's count of words, hold no word of them
+  (`CallTableWords`); each chunk's call builds its own. blastn also splits subjects longer than
   5,000,000 letters into overlapping chunks (`s_GetNextSubjectChunk`).
 
 ### `-subject` and `-db`

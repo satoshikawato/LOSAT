@@ -134,7 +134,10 @@
   its reports after the loop), and after the failing batch's messages that NCBI writes to stderr
   before that row (its reader messages, posts, and for each of its queries up to the row's its own
   warnings, its formatter's taxdb warning and its subject reads up to the row; TBLASTN, TBLASTX and
-  BLASTN dropped its reader messages, every program the rest); on 2026-11-27 line RG item X7-1
+  BLASTN dropped its reader messages, every program the rest); on 2026-11-27 line RG (series D) wrote
+  such sequences of a profile database in `rpsblast` and `rpstblastn` as NCBI writes them, which
+  item D1c-1c-b had left refused and not compared (refused at `sallacc` and in the organism report
+  as in the other programs); on 2026-11-27 line RG item X7-1
   refused in all eight search programs a reported sequence whose Seq-align id NCBI's scope finds
   as the generated id `lcl|Query_N` of a query of its batch, or the id of a PSSM query, in each
   format that shows that query in its place (outfmt 0 to 5 and 13 to 16, the tables and the
@@ -1228,7 +1231,6 @@ a result that LOSAT does not reproduce.
 | A stored Seq-id with a byte outside ' ' to '~', or a stored title with such a byte in the remaining refused cases of `PD-LOSAT-NCBI-DEFECTS` 1.120 (makeblastdb stores `#` for such a byte; line RG-KB item 9(b)) | stored Seq-id: every format; stored title (except a query batch that ends at a header NCBI cannot read, which writes NCBI's `Error: (803.7)` messages then NCBI's error in any format of all eight search programs): every format for `psiblast`, `rpsblast` and `rpstblastn`, formats other than 8, 9, 11 and 12 (or 8, 9 and 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`), searches with a seqid, GI or taxid list or an alias/volume list or OID mask, or a query batch with a UTF8String header warning | Prints `#` and an error message (`Error: (803.7)`) each time it reads the line, exit 0 | 2 |
 | A definition line without a Seq-id (makeblastdb writes none) that no list of the search erases, in a sequence with a Seq-id in another line (the paragraph below the table): the `sallacc` of each row of the sequence | 6, 7, 10, 20 with `sallacc` | Stops at the row's `sallacc` after its earlier fields (null pointer, exit 255) | 3 |
 | The same line in the organism report | 18 | Stops at that line for each HSP of the sequence and shows the lines before it once per HSP (Owner question Q-D1c1cb-18 of line RG item D1c-1c-b) | 2 |
-| The same line in `rpsblast` and `rpstblastn` | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A title in no encoding that NCBI recognises (or the name in the taxonomy database from which NCBI makes an empty title, or which `x_AdjustProteinTitleSuffix` writes at the end of a protein title ending in ` [ ]`), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
@@ -1236,8 +1238,12 @@ a result that LOSAT does not reproduce.
 A definition line without a Seq-id (a hand-edited database: makeblastdb writes none; under any list,
 also one left without ids or taxids, NCBI's header read erases such a line and LOSAT does the same:
 rows `db.il.*.ln.*`) is NCBI's in BLASTP, psiblast, BLASTN, BLASTX, TBLASTN and TBLASTX, since line
-RG item D1c-1c-b. A sequence whose lines all lack one gets no Seq-align: its hits leave the report
-after the cut of the hit list, which they keep counting (rows `db.il.*.ln.q2*`, `db.il.*.lnn.*`). Beside
+RG item D1c-1c-b, and in `rpsblast` and `rpstblastn` (makeprofiledb writes none either; rows
+`db.il.rps.ln.*`, `db.il.rtbn.ln.*`) since 2026-11-27. A sequence whose lines all lack one gets no
+Seq-align: its hits leave the report after the cut of the hit list, which they keep counting (rows
+`db.il.*.ln.q2*`, `db.il.*.lnn.*`, `db.il.rps.ln.c.*`; a profile of an RPS database of several volumes
+leaves in its own volume's search, before the volumes' lists are merged, and takes no place there:
+`db.il.rps.ln.3vc.*`). Beside
 lines with Seq-ids, each format's walk of the lines takes the best id of such a line, null, and its
 `catch` decides (rows `db.il.*.x1.*`, `db.il.bp.xw.*`, `db.il.*.ln.qa.*`, `db.il.*.pn.qa.*`): the
 outfmt 0 to 4 description line is the Seq-align id and `Unknown` (its GI with `-show_gis`; with

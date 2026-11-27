@@ -630,6 +630,26 @@ impl Column {
 /// Opens every column of the volume `base` (`CSeqDBVol::x_OpenAllColumns`): for the letters
 /// `a` to `z`, the columns whose index file exists, in letter order. `volume_oids` is the
 /// number of sequences of the volume.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3333-3347
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcol.cpp:154-162
+/// The files whose existence `x_OpenAllColumns` checks in the volume `base` ([`open_all`]): each
+/// letter's index file, and its two data files where the index file exists. `DoesFileExist`
+/// measures each one that exists in NCBI's atlas (`super::atlas::Atlas`).
+pub(super) fn checked_files(base: &Path, seqtype: SeqType) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for letter in b'a'..=b'z' {
+        let letter = char::from(letter);
+        let index_path = with_extension(base, seqtype, &format!("{letter}a"));
+        if !super::alias::exists(&index_path) {
+            continue;
+        }
+        files.push(index_path);
+        files.push(with_extension(base, seqtype, &format!("{letter}b")));
+        files.push(with_extension(base, seqtype, &format!("{letter}c")));
+    }
+    files
+}
+
 pub(super) fn open_all(
     base: &Path,
     seqtype: SeqType,

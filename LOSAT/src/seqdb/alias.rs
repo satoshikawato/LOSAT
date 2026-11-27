@@ -999,25 +999,6 @@ pub(crate) fn database_lookup_files(
     out
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-195
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:556-558,665-667
-/// The size of the largest file that NCBI's atlas measures while it resolves `dbname` and reads
-/// the alias files' keys (`CSeqDBAtlas::GetFileSizeL`, which `DoesFileExist` and the reads of an
-/// alias file call): the files [`resolve_in_recording`] and [`compute_masks_recording`] check or
-/// open, those that exist. 0 where none does or the name does not resolve.
-pub(super) fn largest_resolution_file(dbname: &[u8], seqtype: SeqType, search: &SearchPath) -> u64 {
-    let mut raw = Vec::new();
-    if let Ok(mut tree) = resolve_in_recording(dbname, seqtype, search, Some(&mut raw)) {
-        let _ = compute_masks_recording(&mut tree.root, Some(&mut raw));
-    }
-    raw.iter()
-        .filter_map(|path| std::fs::metadata(path_of_bytes(path)).ok())
-        .filter(|meta| meta.is_file())
-        .map(|meta| meta.len())
-        .max()
-        .unwrap_or(0)
-}
-
 fn collect_volumes(node: &AliasNode, out: &mut Vec<Vec<u8>>) {
     out.extend(node.vol_names.iter().cloned());
     for subnode in &node.subnodes {
@@ -1080,6 +1061,23 @@ pub(super) fn resolve_in(
     search: &SearchPath,
 ) -> Result<AliasTree, SeqDbError> {
     resolve_in_recording(dbname, seqtype, search, None)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-195
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:556-558,665-667
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:240-262
+// `DoesFileExist` measures the file it checks in the atlas (`GetFileSizeL`), as do the reads of
+// an alias file's keys.
+/// [`resolve_in`] with the files that NCBI's resolution checks or reads, which its atlas
+/// measures (`super::atlas::Atlas`): those [`resolve_in_recording`] records.
+pub(super) fn resolve_in_checked(
+    dbname: &[u8],
+    seqtype: SeqType,
+    search: &SearchPath,
+) -> Result<(AliasTree, Vec<Vec<u8>>), SeqDbError> {
+    let mut checked = Vec::new();
+    let tree = resolve_in_recording(dbname, seqtype, search, Some(&mut checked))?;
+    Ok((tree, checked))
 }
 
 /// [`resolve_in`], optionally recording every file path checked or opened (`record`) for
@@ -1675,7 +1673,9 @@ pub(super) struct TreeVolume<'a> {
 /// Pass 2 reads its Seq-ids and taxids ([`super::filter::DeflineRule`]), and `lmdb` the database's
 /// LMDB entries (opened only when version 5 Pass 2 reads a `SEQIDLIST` or `TAXIDLIST`). The OID
 /// list files and the id lists are read once each (`files`, [`ListSet`]), in NCBI's order
-/// ([`volume_set`], then Pass 2 [`v5_list_filters`]): the first that fails is the error.
+/// ([`volume_set`], then Pass 2 [`v5_list_filters`]): the first that fails is the error. The
+/// files that NCBI's atlas measures on the way (the OID list files, the id list files that
+/// `CSeqDBNodeFileIdList` reads and the ISAMs that translate them) are noted in `atlas`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn alias_oids(
     root: &AliasNode,
@@ -1686,6 +1686,7 @@ pub(super) fn alias_oids(
     user: UserList<'_>,
     user_rule: Option<&super::filter::DeflineRule>,
     lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
+    atlas: &super::atlas::Atlas,
 ) -> Result<AliasOids, OidListError> {
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
     let mut all = Shape::new(0, u64::from(num_oids), Special::None);
@@ -1694,6 +1695,7 @@ pub(super) fn alias_oids(
         seqtype,
         version5,
         user,
+        atlas,
         loaded: Vec::new(),
     };
     let mut mask_types = vec![0u32; volumes.len()];
@@ -1798,6 +1800,8 @@ struct ListSet<'a, 'u> {
     seqtype: SeqType,
     version5: bool,
     user: UserList<'u>,
+    /// The files NCBI's atlas measures (`super::atlas::Atlas`).
+    atlas: &'u super::atlas::Atlas,
     loaded: Vec<LoadedList<'a>>,
 }
 
@@ -1963,6 +1967,8 @@ impl<'a> ListSet<'a, '_> {
         if !exists(at) {
             return Err(OidListError::NotAFile(path.to_vec()));
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:93-95
+        self.atlas.size(at);
         let keep = OidListError::reader;
         let file = DbFile::open(at).map_err(keep)?;
         let bytes = if file.is_empty() {
@@ -2103,6 +2109,10 @@ impl<'a> ListSet<'a, '_> {
                     super::isam_num::NumericIsam::open_for_list(base, self.seqtype, kind, num_oids)
                         .map_err(keep)?
                         .ok_or_else(|| no_isam(what))?;
+                // The volume's ISAM is made (`CSeqDBIsam`): its `x_InitSearch` measures its files.
+                let (index, data) =
+                    super::isam_num::NumericIsam::list_file_names(base, self.seqtype, kind);
+                self.atlas.isam(&index, &data, false);
                 match (&mut list.ids, isam) {
                     (ListIds::Gi(gis), super::isam_num::Opened::Ready(isam)) => {
                         isam.ids_to_oids(volume.start, gis).map_err(keep)?;
@@ -2137,6 +2147,9 @@ impl<'a> ListSet<'a, '_> {
                 let Some(isam) = isam else {
                     return Err(no_isam("SI"));
                 };
+                if let Ok((index, data)) = super::isam::StringIsam::file_names(base, protein) {
+                    self.atlas.isam(&index, &data, true);
+                }
                 isam.ids_to_oids(volume.start, ids, sorted).map_err(keep)?;
                 Ok(bits_of(&mut ids.iter().map(|id| id.oid)))
             }
@@ -2208,7 +2221,11 @@ fn volume_set<'a>(
     if let Some(path) = node.oid_list {
         let file = match reach.files.entry(path) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(oid_list::read(path)?),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:475-481
+                reach.lists.atlas.size(path_of_bytes(path).into_owned());
+                entry.insert(oid_list::read(path)?)
+            }
         };
         let bits = file.volume_words((frame.end - frame.start) as u32)?;
         filter = filter.intersect_with(OidSet::array(frame, bits), frame);

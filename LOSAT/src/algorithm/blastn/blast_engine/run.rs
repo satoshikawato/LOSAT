@@ -6555,10 +6555,15 @@ fn open_search_database(
             );
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:374-399
+            // The search of the repeats of `-filtering_db` (`hits_only`) is NCBI's `CLocalBlast`
+            // without threads, whatever threads LOSAT gives it: its scan neither stops at a
+            // negative length nor reads in chunks, and its traceback's read errors are those of
+            // one thread.
             let word_size =
                 crate::algorithm::blastn::coordination::determine_effective_word_size(args);
             let database = database.with_mt_mode(
-                args.num_threads,
+                if args.hits_only { 1 } else { args.num_threads },
                 args.mt_mode,
                 word_size,
                 Some(args.query.as_path()),
@@ -7193,9 +7198,12 @@ pub(crate) fn repeat_search_hits(
         crate::seqdb::SeqType::Nucleotide,
         filter.settings(),
     );
-    let failed = match opened {
-        Ok(database) => database.check_alias_values().err(),
-        Err(error) => Some(error),
+    let (opened, failed) = match opened {
+        Ok(database) => {
+            let failed = database.check_alias_values().err();
+            (Some(database), failed)
+        }
+        Err(error) => (None, Some(error)),
     };
     if let Some(error) = failed {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639
@@ -7254,6 +7262,16 @@ pub(crate) fn repeat_search_hits(
         },
         Err(error) => RepeatError::Search(error),
     })?;
+    // NCBI's atlas measures the files of the search of the repeats, which raise the budget of the
+    // main search's scan (`SeqDb::note_single_thread_search`).
+    if let Some(database) = &opened {
+        database.note_single_thread_search(
+            collected
+                .iter()
+                .flat_map(|list| list.iter().map(|hit| hit.hit.s_idx)),
+            filter.reads(),
+        );
+    }
     Ok(collected)
 }
 
@@ -8772,7 +8790,12 @@ fn run_in_pool(
                     .collect()
             });
             let searched = batch_records.searched();
-            match repeat_batch_masks(&args, filter, searched, ranged, parallel_pool)? {
+            let masks = repeat_batch_masks(&args, filter, searched, ranged, parallel_pool)?;
+            // The files that the search of the repeats measured, before the batch's scan.
+            if let SubjectSource::Database(database) = source {
+                database.db.absorb_atlas(filter.reads());
+            }
+            match masks {
                 Ok((masks, outside, hits)) => {
                     window_masker_masks = Some(masks);
                     masks_outside = outside;
@@ -9406,6 +9429,14 @@ fn run_in_pool(
                     (database::prefetch_format(&output_formats), first_rows),
                 );
             }
+            // NCBI's atlas measures the files that the data loader's lookups of the batch's loads
+            // read, before the next batch's scan (`BlastnDatabase::note_batch_lookups`).
+            database.note_batch_lookups(
+                &titles,
+                &batch_hit_lists,
+                !args.ungapped,
+                (database::prefetch_format(&output_formats), first_rows),
+            );
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
             database.reset_scope();

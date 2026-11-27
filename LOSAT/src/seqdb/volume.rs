@@ -455,27 +455,19 @@ impl Volume {
         }
     }
 
-    /// The size of the volume's sequence file, which NCBI's atlas measures when the volume's
-    /// first sequence is read (`x_OpenSeqFile`).
-    pub(super) fn sequence_file_len(&self) -> Result<u64, SeqDbError> {
-        self.seq_file().map(DbFile::len)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
-    /// Opens the volume's sequence file (matching `x_OpenSeqFile` before `x_GetSequence`) and
-    /// returns an empty `SequenceBlock` marked `stopped_at_negative`.
-    pub(super) fn empty_stopped_block(
-        &self,
-        first_ordinal: u32,
-        first_oid: u32,
-    ) -> Result<SequenceBlock, SeqDbError> {
-        let path = self.seq_file()?.path().to_path_buf();
-        Ok(SequenceBlock::empty_stopped(
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// An empty `SequenceBlock` of the volume marked `stopped_at_negative`: NCBI's scan stopped
+    /// before the block and reads none of its sequences, so it opens no file of the volume here
+    /// (the scan opened the sequence file of each volume it read, `x_OpenSeqFile`, where the
+    /// readers of the OIDs before the stop did: `SeqDb::x_has_negative_in_oid_range`, the
+    /// block readers).
+    pub(super) fn empty_stopped_block(&self, first_ordinal: u32, first_oid: u32) -> SequenceBlock {
+        SequenceBlock::empty_stopped(
             self.index.seqtype,
             first_ordinal,
             first_oid,
-            path,
-        ))
+            with_extension(&self.base, self.index.seqtype, "sq"),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
@@ -1065,7 +1057,7 @@ impl Volume {
                 Some(ScanProblem::Negative(0))
             )
         {
-            return self.empty_stopped_block(first_ordinal, first_oid);
+            return Ok(self.empty_stopped_block(first_ordinal, first_oid));
         }
         // `seq_offsets[i] < amb <= seq_offsets[i + 1]` for every `i` implies `seq_offsets` is
         // strictly ascending, so one pass validates both offset arrays for the contiguous fast path.

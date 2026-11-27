@@ -1195,3 +1195,54 @@ fn alias_taxid_list_rescues_lines_before_negative_user_taxids() {
         Some(vec![false, true, true])
     );
 }
+
+/// `approx_nucleotide_length` of an ambiguity offset at or before the sequence's start: NCBI's
+/// negative `GetSeqLengthApprox` while the whole bytes fit a signed 32-bit `int`, and the positive
+/// count that the narrowing to `int` gives where the offsets are further apart; the totals of a
+/// negative length (`ScanTotals::add_nucleotide`): `total` wraps as NCBI's `Uint8` sum does,
+/// `shortest` takes it, `longest` and `searchable_total` stay.
+#[test]
+fn approx_nucleotide_length_narrows_the_whole_bytes_and_totals_a_negative_one() {
+    // amb == seq: -1 whole bytes, `oid & 3` bases more.
+    assert_eq!(approx_nucleotide_length(&[100], &[100], 0, 0), -4);
+    assert_eq!(approx_nucleotide_length(&[100], &[100], 0, 7), -1);
+    // amb before seq: -(seq - amb + 1) whole bytes.
+    assert_eq!(approx_nucleotide_length(&[1000], &[10], 0, 1), 4 * -991 + 1);
+    // The most negative whole bytes an `int` holds: seq - amb + 1 == 2^31.
+    let seq = 0x8000_0000u32;
+    assert_eq!(
+        approx_nucleotide_length(&[seq], &[1], 0, 0),
+        4 * i64::from(i32::MIN)
+    );
+    // One byte further: the difference narrows to `INT4_MAX` whole bytes, which the four bases
+    // a byte take past `u32::MAX` (the cap of the lengths LOSAT keeps).
+    assert_eq!(
+        approx_nucleotide_length(&[seq], &[0], 0, 0),
+        i64::from(u32::MAX)
+    );
+    // Far apart: amb - seq - 1 == 16 - 0x9000_0000 - 1 narrows to 0x7000_000f whole bytes.
+    assert_eq!(
+        approx_nucleotide_length(&[0x9000_0000], &[16], 0, 2),
+        i64::from(u32::MAX)
+    );
+    let narrowed = (16i64 - 0x9000_0000 - 1) as i32;
+    assert_eq!(narrowed, 0x7000_000f);
+    // A short positive one is unchanged.
+    assert_eq!(approx_nucleotide_length(&[100], &[126], 0, 6), 4 * 25 + 2);
+
+    let mut totals = ScanTotals::default();
+    totals.add_nucleotide(102);
+    totals.add_nucleotide(approx_nucleotide_length(&[100], &[100], 0, 1));
+    assert_eq!(totals.count, 2);
+    assert_eq!(totals.total, 102u64.wrapping_add(-3i64 as u64));
+    assert_eq!(totals.total, 99);
+    assert_eq!(totals.shortest, -3);
+    assert_eq!(totals.longest, 102);
+    assert_eq!(totals.searchable_total, 102);
+    let mut negative = ScanTotals::default();
+    negative.add_nucleotide(-4);
+    assert_eq!(
+        (negative.total, negative.shortest, negative.longest),
+        (u64::MAX - 3, -4, 0)
+    );
+}

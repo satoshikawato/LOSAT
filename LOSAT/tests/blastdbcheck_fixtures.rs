@@ -1873,7 +1873,9 @@ fn write_padded_alias(path: &Path, head: &str, size: usize) {
 /// with its last byte `2^28` past the file): a block that the scan's own gap stops, before a
 /// last block whose trailing excluded OID would crash. NCBI's results (`n6_<row>.{out,err,rc}`)
 /// are `SIGSEGV` at one thread without a list, and rows without a crash otherwise (OID 0's rows
-/// only with `-num_threads 4`); LOSAT is byte-identical, and refuses the crash.
+/// only with `-num_threads 4`); LOSAT is byte-identical, and refuses the crash. A row at more
+/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
+/// row, where one was frozen.
 #[test]
 fn nonasc_gap_stop_before_crash_parity() {
     let root = scratch("n6-gapstop");
@@ -1902,15 +1904,22 @@ fn nonasc_gap_stop_before_crash_parity() {
         fs::write(root.join(format!("{name}.txt")), gis).unwrap();
     }
     let query = query.to_str().unwrap().to_string();
-    for (label, list, threads) in [
-        ("t1", None, "1"),
-        ("t4", None, "4"),
-        ("neg135_t1", Some("neg135"), "1"),
-        ("neg135_t4", Some("neg135"), "4"),
-        ("neg35_t4", Some("neg35"), "4"),
-        ("neg5_t4", Some("neg5"), "4"),
-        ("neg5_t1", Some("neg5"), "1"),
+    let base = fixtures().join("nonasc_xprog");
+    for (named, list, requested) in [
+        ("t", None, 1),
+        ("t", None, 4),
+        ("neg135_t", Some("neg135"), 1),
+        ("neg135_t", Some("neg135"), 4),
+        ("neg35_t", Some("neg35"), 4),
+        ("neg5_t", Some("neg5"), 4),
+        ("neg5_t", Some("neg5"), 1),
     ] {
+        let threads = effective_threads(requested);
+        let label = format!("{named}{threads}");
+        if !base.join(format!("n6_{label}.rc")).exists() {
+            continue;
+        }
+        let threads = threads.to_string();
         let mut args = vec!["-query", &query, "-db", "n6", "-outfmt", "6"];
         let list_path;
         if let Some(list) = list {
@@ -1921,9 +1930,8 @@ fn nonasc_gap_stop_before_crash_parity() {
                 .to_string();
             args.extend(["-negative_gilist", &list_path]);
         }
-        args.extend(["-num_threads", threads]);
+        args.extend(["-num_threads", &threads]);
         let got = run_losat_sub(&root, &db, "blastn", &args);
-        let base = fixtures().join("nonasc_xprog");
         let read = |ext: &str| fs::read(base.join(format!("n6_{label}.{ext}"))).unwrap();
         let rc: i32 = String::from_utf8(read("rc"))
             .unwrap()
@@ -1942,13 +1950,43 @@ fn nonasc_gap_stop_before_crash_parity() {
     let _ = fs::remove_dir_all(&root);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-638
+/// The threads that NCBI and LOSAT run for `-num_threads threads`: at most the host's online CPUs
+/// (`CMTArgs::x_ExtractAlgorithmOptions`, LOSAT's `ncbi_effective_threads`), so a frozen row of
+/// NCBI's results at more threads than the host has is checked against the row of the threads
+/// that run.
+fn effective_threads(threads: i64) -> i64 {
+    let online = fs::read_to_string("/sys/devices/system/cpu/online")
+        .ok()
+        .and_then(|list| {
+            let mut count = 0i64;
+            for part in list.trim().split(',').filter(|part| !part.is_empty()) {
+                count += match part.split_once('-') {
+                    Some((a, b)) => b.parse::<i64>().ok()? - a.parse::<i64>().ok()? + 1,
+                    None => {
+                        part.parse::<i64>().ok()?;
+                        1
+                    }
+                };
+            }
+            (count > 0).then_some(count)
+        })
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get() as i64));
+    threads.min(online)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:301-373
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
 /// The reads past an alias OID range's end in a later volume (RG-D2 tail, item 2). `mv3_reach.tsv`
 /// holds NCBI's exit status for three copies of the `n4` database as volumes `m0..m2` (an alias
 /// `n`, an alias `r` of `FIRST_OID 1`, `LAST_OID E`, both padded to `pad` bytes so that the
 /// largest file the atlas measures gives chunks of several OIDs) with the OID `poked_oid`
 /// (past `E`) made to crash when read: NCBI's multithreaded scan reads the OIDs of the chunks
 /// that begin inside the range, in the volume that holds `E`, as far as its budget goes
-/// (`seqdbimpl.cpp:301-373, 684-710`). LOSAT refuses exactly where NCBI crashes.
+/// (`CSeqDBImpl::x_FillSeqBuffer`). LOSAT refuses exactly where NCBI crashes. A row at more
+/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
+/// row, where the table has one.
 #[test]
 fn nonasc_mt_reads_past_range_end_in_later_volume() {
     let root = scratch("mv3-reach");
@@ -1980,18 +2018,26 @@ fn nonasc_mt_reads_past_range_end_in_later_volume() {
     let n4_nin = fs::read(root.join("n4/n4.nin")).unwrap();
     let (oids, ..) = nin_v4_layout(&n4_nin);
     let table = fs::read_to_string(base.join("mv3_reach.tsv")).unwrap();
+    let rows: Vec<Vec<i64>> = table
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').map(|c| c.parse().unwrap()).collect())
+        .collect();
     let mut seen = std::collections::BTreeSet::new();
     let mut completed = 0;
     let mut refused = 0;
-    for line in table.lines().skip(1) {
-        let cell: Vec<i64> = line.split('\t').map(|c| c.parse().unwrap()).collect();
-        let (pad, end, threads, poked, ncbi_rc) = (
-            cell[0] as usize,
-            cell[1],
-            cell[2],
-            cell[3] as usize,
-            cell[4] as i32,
-        );
+    let mut skipped = 0;
+    for cell in &rows {
+        let (pad, end, threads, poked) = (cell[0] as usize, cell[1], cell[2], cell[3] as usize);
+        let run = effective_threads(threads);
+        let Some(ncbi_rc) = rows
+            .iter()
+            .find(|row| row[..4] == [cell[0], cell[1], run, cell[3]])
+            .map(|row| row[4] as i32)
+        else {
+            skipped += 1;
+            continue;
+        };
         write_padded_alias(&run_dir.join("n.nal"), "TITLE n\nDBLIST m0 m1 m2\n", pad);
         write_padded_alias(
             &run_dir.join("r.nal"),
@@ -2009,7 +2055,7 @@ fn nonasc_mt_reads_past_range_end_in_later_volume() {
             "-outfmt",
             "6",
             "-num_threads",
-            &threads.to_string(),
+            &run.to_string(),
         ];
         let got = run_losat_sub(&root, &run_dir, "blastn", &args);
         fs::copy(root.join("n4/n4.nin"), &nin).unwrap();
@@ -2024,11 +2070,132 @@ fn nonasc_mt_reads_past_range_end_in_later_volume() {
         }
         seen.insert((pad, end, threads));
     }
-    // The table covers both pads, five ends, and the one-thread rows that complete.
-    assert!(seen.len() >= 30, "{} (pad, E, threads) cells", seen.len());
-    assert!(
-        refused >= 20 && completed >= 20,
-        "{refused} refused, {completed} completed"
+    // The table covers both pads, five ends, and the one-thread rows that complete (on a host
+    // with fewer CPUs than a row's threads, the rows left).
+    if skipped == 0 {
+        assert!(seen.len() >= 30, "{} (pad, E, threads) cells", seen.len());
+        assert!(
+            refused >= 20 && completed >= 20,
+            "{refused} refused, {completed} completed"
+        );
+    } else {
+        assert!(refused + completed > 0, "every row skipped");
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1802
+/// A protein database whose multithreaded scan stops at a negative length before a volume whose
+/// sequence file has no bytes or is missing (RG-D2 tail R2, review finding 8). `p2db/` has the
+/// volumes `pv0` (GIs 7001-7003) and `pv1` (7004-7006) under an alias `p`; `p2_<row>` holds
+/// NCBI's results. `gapstop`: OID 1 of `pv0` has the length -1 and the GI list leaves it out
+/// before the block of `pv1`, so the scan stops before `pv1` and never opens its sequence file
+/// (at 2 threads NCBI completes whether that file is empty or missing; at 1 thread it reads
+/// `pv1`). `v1gap`: the negative OID is in `pv1` itself, after its first OID, so the scan opens
+/// the file first (missing: NCBI's error). `emptyv1_skipfirst`: no stop before the empty file,
+/// which NCBI crashes on. A row at more threads than the host's CPUs runs the threads that run
+/// (`effective_threads`) against their row, where one was frozen.
+#[test]
+fn nonasc_protein_scan_stop_before_empty_or_missing_sequence_file() {
+    let root = scratch("p2-stop");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    let query = root.join("q.faa");
+    fs::write(
+        &query,
+        b">q\nYKNTARICGENSIPVEWIAHQKGPGDFYYRFFAAHHGGLMHVHGHPLANQGFKDMLYWAY\n",
+    )
+    .unwrap();
+    let query = query.to_str().unwrap().to_string();
+    // Protein `oid` of the volume index `pin` gets the length -1: its end (the next start) is
+    // set to its start.
+    let negative = |pin: &Path, oid: usize| {
+        let mut bytes = fs::read(pin).unwrap();
+        let (count, _, seq, _) = nin_v4_layout(&bytes);
+        assert!(oid + 1 <= count);
+        let start: [u8; 4] = bytes[seq + 4 * oid..seq + 4 * oid + 4].try_into().unwrap();
+        bytes[seq + 4 * (oid + 1)..seq + 4 * (oid + 1) + 4].copy_from_slice(&start);
+        fs::write(pin, bytes).unwrap();
+    };
+    let mut ran = 0;
+    for (named, requested) in [
+        ("gapstop", 1),
+        ("gapstop", 2),
+        ("gapstop_emptyv1", 1),
+        ("gapstop_emptyv1", 2),
+        ("gapstop_missingv1", 1),
+        ("gapstop_missingv1", 2),
+        ("v1gap_emptyv1", 1),
+        ("v1gap_emptyv1", 2),
+        ("v1gap_missingv1", 1),
+        ("v1gap_missingv1", 2),
+        ("emptyv1_skipfirst", 1),
+        ("emptyv1_skipfirst", 2),
+    ] {
+        let threads = effective_threads(requested);
+        let label = format!("p2_{named}_t{threads}");
+        if !base.join(format!("{label}.rc")).exists() {
+            continue;
+        }
+        let dir = root.join(format!("run_{named}_t{requested}"));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(base.join("p2db")).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        fs::write(dir.join("p.pal"), "TITLE p\nDBLIST pv0 pv1\n").unwrap();
+        let list = if named.starts_with("gapstop") {
+            negative(&dir.join("pv0.pin"), 1);
+            "7001\n7004\n7005\n7006\n"
+        } else if named.starts_with("v1gap") {
+            negative(&dir.join("pv1.pin"), 1);
+            "7001\n7006\n"
+        } else {
+            "7001\n7006\n"
+        };
+        fs::write(dir.join("gl.txt"), list).unwrap();
+        if named.ends_with("emptyv1") || named == "emptyv1_skipfirst" {
+            fs::write(dir.join("pv1.psq"), b"").unwrap();
+        } else if named.ends_with("missingv1") {
+            fs::remove_file(dir.join("pv1.psq")).unwrap();
+        }
+        let threads = threads.to_string();
+        let args = [
+            "-query",
+            &query,
+            "-db",
+            "p",
+            "-outfmt",
+            "6",
+            "-gilist",
+            "gl.txt",
+            "-num_threads",
+            &threads,
+        ];
+        let got = run_losat_sub(&root, &dir, "blastp", &args);
+        let read = |ext: &str| fs::read(base.join(format!("{label}.{ext}"))).unwrap();
+        let rc: i32 = String::from_utf8(read("rc"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_tail_row(&label, &got, (rc, &read("out"), &read("err")));
+        ran += 1;
+    }
+    assert!(ran >= 6, "{ran} rows");
+    // NCBI's results: the stop before `pv1` completes at 2 threads with `pv1.psq` empty or
+    // missing; the empty file that the scan reaches crashes it.
+    let rc = |label: &str| load_nonasc_expected(&format!("p2_{label}")).2;
+    assert_eq!(
+        (
+            rc("gapstop_emptyv1_t2"),
+            rc("gapstop_missingv1_t2"),
+            rc("emptyv1_skipfirst_t2")
+        ),
+        (0, 0, -11)
     );
     let _ = fs::remove_dir_all(&root);
 }
@@ -2039,7 +2206,9 @@ fn nonasc_mt_reads_past_range_end_in_later_volume() {
 /// signed length `-4`; `zero`: and the first sequence offset of `v1` 0; `negzero`: both), the
 /// aliases `n` (the three volumes), `r_head`, `r_tail` and `r_pre` (OID ranges), with or without
 /// a GI list, at 1, 2 and 4 threads. NCBI stops its scan where an empty file's sequence offset
-/// is 0 (a null pointer) and crashes where it reads another offset; LOSAT matches both.
+/// is 0 (a null pointer) and crashes where it reads another offset; LOSAT matches both. A row at
+/// more threads than the host's CPUs runs the threads that run (`effective_threads`) against
+/// their row, where the table has one.
 #[test]
 fn nonasc_empty_later_volume_sequence_file_parity() {
     let root = scratch("mv3-empty");
@@ -2104,14 +2273,28 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
         .map(|kind| (kind.to_string(), setup(kind)))
         .collect();
     let table = fs::read_to_string(base.join("mv3e_rows.tsv")).unwrap();
-    let (mut refused, mut completed) = (0, 0);
-    for line in table.lines().skip(1) {
-        let cell: Vec<&str> = line.split('\t').collect();
-        let label = cell[0];
+    let rows: Vec<Vec<&str>> = table
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').collect())
+        .collect();
+    let (mut refused, mut completed, mut skipped) = (0, 0, 0);
+    for row in &rows {
+        // A row at more threads than the host's CPUs: the row of the threads that run, where
+        // the table has one (`effective_threads`).
+        let (named, frozen) = row[0].rsplit_once("_t").unwrap();
+        let run = effective_threads(frozen.parse().unwrap());
+        let run_label = format!("{named}_t{run}");
+        let Some(cell) = rows.iter().find(|other| other[0] == run_label) else {
+            skipped += 1;
+            continue;
+        };
+        let label = row[0];
         let ncbi_rc: i32 = cell[1].parse().unwrap();
         let rest = label.strip_prefix("mv3e_").unwrap();
         let (kind, rest) = rest.split_once('_').unwrap();
-        let (rest, threads) = rest.rsplit_once("_t").unwrap();
+        let rest = rest.rsplit_once("_t").unwrap().0;
+        let threads = run.to_string();
         let (db, list) = ["r_head_", "r_tail_", "r_pre_", "n_"]
             .iter()
             .find_map(|prefix| {
@@ -2128,7 +2311,7 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
             "-outfmt",
             "6",
             "-num_threads",
-            threads,
+            &threads,
         ];
         let list_path = dir.join(format!("{list}.txt"));
         if let Some((flag, content)) = list_of(list) {
@@ -2150,9 +2333,13 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
             completed += 1;
         }
     }
-    assert!(
-        refused >= 20 && completed >= 80,
-        "{refused} refused, {completed} completed"
-    );
+    if skipped == 0 {
+        assert!(
+            refused >= 20 && completed >= 80,
+            "{refused} refused, {completed} completed"
+        );
+    } else {
+        assert!(refused + completed > 0, "every row skipped");
+    }
     let _ = fs::remove_dir_all(&root);
 }

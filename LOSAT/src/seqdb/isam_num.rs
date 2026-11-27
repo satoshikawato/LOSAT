@@ -89,6 +89,26 @@ impl NumericIsam {
         )
     }
 
+    /// The index and data files of the volume's ISAM of `kind` (`x_MakeFilenames` with
+    /// `file_ext_char` `n`, `t` or `p`).
+    pub(crate) fn list_file_names(
+        base: &Path,
+        seqtype: SeqType,
+        kind: ListIsam,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        match kind {
+            ListIsam::Gi => (
+                with_extension(base, seqtype, "ni"),
+                with_extension(base, seqtype, "nd"),
+            ),
+            ListIsam::Ti => (
+                with_extension(base, seqtype, "ti"),
+                with_extension(base, seqtype, "td"),
+            ),
+            ListIsam::Pig => Self::pig_file_names(base, seqtype),
+        }
+    }
+
     /// The ISAM of `index` and `data`, an index of the numbers `what` names: `None` where the
     /// data file has another length than the index says (`NumericIsam::open_files`).
     fn from_files(index: DbFile, data: DbFile, what: &str) -> Result<Option<Self>, SeqDbError> {

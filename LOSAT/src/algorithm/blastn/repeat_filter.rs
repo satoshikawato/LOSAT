@@ -117,6 +117,10 @@ const SEARCH_OPTIONS: [&str; 20] = [
 pub struct RepeatFilter {
     database: OsString,
     settings: ApplicationSettings,
+    /// The files that NCBI's atlas measures in the searches of the repeats so far
+    /// (`SeqDb::note_single_thread_search`): the main search's database takes them before each
+    /// batch's scan (`SeqDb::absorb_atlas`).
+    reads: crate::seqdb::Atlas,
 }
 
 /// Why the repeat search of a batch or chunk failed.
@@ -135,7 +139,16 @@ pub(crate) enum RepeatError {
 impl RepeatFilter {
     /// The repeat search of the database `database`, looked up with `settings`.
     pub(crate) fn new(database: OsString, settings: ApplicationSettings) -> Self {
-        Self { database, settings }
+        Self {
+            database,
+            settings,
+            reads: Default::default(),
+        }
+    }
+
+    /// The files that NCBI's atlas measures in the searches of the repeats so far.
+    pub(crate) fn reads(&self) -> &crate::seqdb::Atlas {
+        &self.reads
     }
 
     /// The settings that look the database up.

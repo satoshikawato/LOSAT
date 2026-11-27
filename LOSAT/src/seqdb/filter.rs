@@ -2700,12 +2700,17 @@ fn approx_protein_length(seq: &[u32], i: usize) -> i32 {
     super::ncbi_protein_length(raw)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:325-345
 /// The approximate length of nucleotide `i` of a window of the index (`seq`, `amb`: its sequence
 /// and ambiguity offsets; `oid`: its volume-relative OID) as NCBI's `GetSeqLengthApprox` computes
-/// it, widened without signed overflow (`scan_totals`). It is negative when the ambiguity offset
-/// is not past the sequence's start (`amb == seq` gives `oid & 3 - 4`).
+/// it (`scan_totals`): the whole bytes, the offsets' 64-bit difference less one, narrowed to a
+/// signed 32-bit `int` (a defined conversion, kept), then four bases a byte and `oid & 3`,
+/// widened without signed overflow. It is negative when the ambiguity offset is not past the
+/// sequence's start (`amb == seq` gives `oid & 3 - 4`) and is at most `2^31` bytes before it;
+/// one further before narrows to a positive whole-byte count.
 fn approx_nucleotide_length(seq: &[u32], amb: &[u32], i: usize, oid: u32) -> i64 {
-    let length = 4 * (i64::from(amb[i]) - i64::from(seq[i]) - 1) + i64::from(oid & 3);
+    let whole_bytes = (i64::from(amb[i]) - i64::from(seq[i]) - 1) as i32;
+    let length = 4 * i64::from(whole_bytes) + i64::from(oid & 3);
     length.min(i64::from(u32::MAX))
 }
 

@@ -847,6 +847,45 @@ impl BlastnDatabase {
             })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-406
+    /// Notes in NCBI's atlas the files that the data loader's lookups of the Seq-align ids of the
+    /// sequences it loads for a query batch whose final hit lists are `hit_lists` read
+    /// (`loaded_subjects` of the batch alone, `rows`: the first format's;
+    /// `SeqDb::note_lookup_reads`), where they can change a later batch's scan
+    /// (`SeqDb::notes_batch_reads`). A giim id is not looked up in a version 4 database
+    /// (`HeaderReader::resolution`), and a version 5 database looks it up in its LMDB files. A
+    /// lookup table that does not open fails where the reports' lookups do
+    /// (`HeaderReader::resolution`), not here.
+    pub(super) fn note_batch_lookups(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+        gapped: bool,
+        (format, rows): (shared::PrefetchFormat, SubjectFetch),
+    ) {
+        if !self.parsed_seqids() || !self.db.notes_batch_reads() {
+            return;
+        }
+        let batch = [0..hit_lists.len()];
+        let loaded = Self::loaded_subjects(
+            titles,
+            LoadedBefore {
+                hits: hit_lists,
+                spans: &batch,
+                format,
+                rows,
+                cuts: shared::XmlCuts::NONE,
+            },
+            gapped,
+        );
+        let ids: Vec<&crate::seqid::ParsedSeqId> = loaded
+            .filter_map(|subject| subject.parsed)
+            .map(|subject| subject.alignment_id())
+            .filter(|id| !matches!(id, crate::seqid::ParsedSeqId::Giim(_)))
+            .collect();
+        let _ = self.db.note_lookup_reads(ids);
+    }
+
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
     pub(super) fn name(&self) -> &[u8] {
         &self.name
@@ -1739,6 +1778,17 @@ impl BlastnDatabase {
         hit_lists: &mut [Option<BlastnHitList>],
         (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
     ) -> Result<()> {
+        // NCBI's atlas measures the header files of the subjects of the batch's Seq-aligns,
+        // those that make none included (`SeqDb::note_header_reads`).
+        if self.db.notes_batch_reads() {
+            self.db
+                .note_header_reads(hit_lists.iter().flatten().flat_map(|hit_list| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .map(|hsp_list| hsp_list.oid)
+                }));
+        }
         let aligned = drop_unaligned(self, hit_lists);
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, earlier, titles);

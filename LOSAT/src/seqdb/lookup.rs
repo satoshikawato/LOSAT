@@ -13,6 +13,7 @@ use super::isam::{
 };
 use super::isam_num::{ListIsam, NumericIsam, Opened};
 use super::lmdb_read::Env;
+use super::volume::with_extension;
 use super::{SeqDb, SeqDbError, SeqType};
 use crate::ncbi_exception::NcbiException;
 use crate::seqid::model::ObjectId;
@@ -32,6 +33,9 @@ pub struct IdLookup<'a> {
     isams: Isams<'a>,
     /// The first read of a candidate's header that `x_CheckVersions` makes (`take_utf8`).
     utf8: super::Utf8Reads,
+    /// The volumes whose headers `x_CheckVersions` read since the last
+    /// [`SeqidLookup::note_sized_files`] (the header files NCBI's atlas measures).
+    header_reads: std::sync::Mutex<Vec<usize>>,
 }
 
 /// The ISAMs of each volume (GIs; for version 4 also the strings, the PIGs and the trace ids),
@@ -97,6 +101,7 @@ impl SeqDb {
             entries,
             isams: Isams::Own(VolumeIsams::new(self.volumes.len(), false)),
             utf8: Default::default(),
+            header_reads: Default::default(),
         })
     }
 }
@@ -249,6 +254,9 @@ impl IdLookup<'_> {
                         vol_oid: oid,
                         id: self.db.volume_starts[at] + oid,
                     };
+                    if let Ok(mut reads) = self.header_reads.lock() {
+                        reads.push(at);
+                    }
                     // A read that fails may have posted the warning before (the note's path is
                     // then that of the string before the failure, `utf8_string_path`).
                     let set = volume
@@ -525,6 +533,7 @@ impl SeqDb {
                 entries: Vec::new(),
                 isams: Isams::Shared(isams),
                 utf8: Default::default(),
+                header_reads: Default::default(),
             },
             kept: std::cell::RefCell::new(envs.iter().map(|_| LmdbKept::default()).collect()),
             envs,
@@ -844,5 +853,94 @@ impl SeqidLookup<'_> {
             }
         }
         Ok(oids)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:136-224
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1201-1209
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:58-121
+    // NCBI's lookup makes the ISAM of the id's kind in each volume it reaches that has OIDs (the
+    // GIs' always; the strings', TIs' and PIGs' where both files exist, `IndexExists`), whose
+    // constructor measures its files in the atlas, and the version check of an accession reads
+    // the headers of its candidates (the volume's header file, measured where it opens); the
+    // version 5 lookup of a text id reads the LMDB files, which the atlas does not measure.
+    /// Notes in `atlas` the files that NCBI's lookup of `seqid` (`SeqidToOid`, as
+    /// [`SeqidLookup::seqid_to_oid`] makes it) measures, and the header file of the volume of the
+    /// sequence it gives, whose Bioseq the data loader then reads.
+    pub(super) fn note_sized_files(&self, seqid: &ParsedSeqId, atlas: &super::atlas::Atlas) {
+        if self.keys_in_lmdb(seqid) {
+            return;
+        }
+        let Ok(simplified) = seqdb_simplify_seqid(seqid) else {
+            return;
+        };
+        let db = self.volumes.db;
+        let both = |index: &std::path::Path, data: &std::path::Path| {
+            super::alias::exists(index) && super::alias::exists(data)
+        };
+        let protein = db.seqtype == SeqType::Protein;
+        let mut fasta = Vec::new();
+        label::fasta(seqid, &mut fasta);
+        if let Ok(mut reads) = self.volumes.header_reads.lock() {
+            reads.clear();
+        }
+        for at in 0..db.volumes.len() {
+            let volume = &db.volumes[at];
+            let base = volume.base();
+            if volume.num_oids() > 0 {
+                let string_isam = || {
+                    if let Ok((index, data)) = StringIsam::file_names(base, protein) {
+                        if both(&index, &data) {
+                            atlas.isam(&index, &data, true);
+                        }
+                    }
+                };
+                match simplified.id_type {
+                    SeqDbIdType::Gi => {
+                        let (index, data) =
+                            NumericIsam::list_file_names(base, db.seqtype, ListIsam::Gi);
+                        atlas.isam(&index, &data, false);
+                    }
+                    SeqDbIdType::Pig => {
+                        let (index, data) = NumericIsam::pig_file_names(base, db.seqtype);
+                        if both(&index, &data) {
+                            atlas.isam(&index, &data, false);
+                        }
+                    }
+                    SeqDbIdType::Ti => {
+                        let (index, data) =
+                            NumericIsam::list_file_names(base, db.seqtype, ListIsam::Ti);
+                        if both(&index, &data) {
+                            atlas.isam(&index, &data, false);
+                        } else {
+                            string_isam();
+                        }
+                    }
+                    SeqDbIdType::String => string_isam(),
+                    SeqDbIdType::Oid => {}
+                }
+            }
+            let found = self.volumes.volume_string_to_oids(at, &fasta, &simplified);
+            if let Ok(mut reads) = self.volumes.header_reads.lock() {
+                for read in reads.drain(..) {
+                    atlas.size(with_extension(db.volumes[read].base(), db.seqtype, "hr"));
+                }
+            }
+            let Ok(vol_oids) = found else {
+                return;
+            };
+            let ident = simplified.num_id;
+            if !(ident == -1 || ident >> 32 == 0) {
+                return;
+            }
+            let vol_start = i64::from(db.volume_starts[at]);
+            if vol_oids.into_iter().any(|oid| {
+                u32::try_from(i64::from(oid) + vol_start)
+                    .ok()
+                    .is_some_and(|oid| self.volumes.visible(oid))
+            }) {
+                atlas.size(with_extension(base, db.seqtype, "hr"));
+                return;
+            }
+        }
     }
 }

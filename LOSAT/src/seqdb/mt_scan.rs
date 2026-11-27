@@ -10,8 +10,8 @@
 //! negative length allow. Those reads cannot change what a search reports (the chunk is cut at the
 //! end afterwards), but a read of a nucleotide's last byte past the mapping crashes NCBI.
 
-use super::volume::ScanProblem;
-use super::{alias, SeqDb, SeqDbError, SeqType};
+use super::volume::with_extension;
+use super::{Atlas, SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697
@@ -110,48 +110,153 @@ impl SeqDb {
         (at > 0 && self.volume_starts[at] != end).then_some(at)
     }
 
-    /// The first OID of volume `at` from its OID `from` on (volume-relative) that stops or
-    /// crashes NCBI's scan, `None` where there is none.
-    fn first_scan_problem_from(
-        &self,
-        at: usize,
-        from: u32,
-    ) -> Result<Option<ScanProblem>, SeqDbError> {
-        const CHUNK: u32 = 131_072;
-        let volume = &self.volumes[at];
-        let start = self.volume_starts[at];
-        let mut cur = from;
-        while cur < volume.num_oids() {
-            let hi = volume.num_oids().min(cur.saturating_add(CHUNK));
-            if let Some(problem) = volume.x_first_scan_problem_in(cur, hi, start + cur)? {
-                return Ok(Some(problem));
-            }
-            cur = hi;
-        }
-        Ok(None)
+    /// Whether the files that a query batch reads after its scan can change the scan of a later
+    /// batch: NCBI's multithreaded scan of a nucleotide database whose iteration range ends
+    /// inside a volume after the first, whose chunks' budgets the largest file measured sets
+    /// (`mt_check_past_range_end`). The readers note a batch's reads (`note_header_reads`,
+    /// `note_lookup_reads`) only then.
+    pub(crate) fn notes_batch_reads(&self) -> bool {
+        self.mt_threads > 0
+            && self.seqtype == SeqType::Nucleotide
+            && self.filter.as_deref().is_some_and(|filter| {
+                let (begin, end) = filter.range();
+                begin < end && self.volume_past_range_end(end).is_some()
+            })
     }
 
-    /// The largest file that NCBI's atlas has measured when the scan cuts its first chunk of
-    /// volume `at`, for a scan that starts at the OID `begin`: the alias files and index files
-    /// opened with the database, and the sequence files of the volumes the scan has read so far.
-    fn largest_file_before_chunks(&self, begin: u32, at: usize) -> Result<u64, SeqDbError> {
-        let mut largest = match &self.search_path {
-            Some(path) => alias::largest_resolution_file(&self.db_name, self.seqtype, path),
-            None => 0,
-        };
-        for volume in &self.volumes {
-            let index = super::volume::with_extension(volume.base(), self.seqtype, "in");
-            if let Ok(meta) = std::fs::metadata(index) {
-                largest = largest.max(meta.len());
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
+    /// Notes in the atlas the header file of the volume of each sequence of `ordinals` whose
+    /// header NCBI reads (its first read opens the file): the subjects of a batch's Seq-aligns.
+    pub(crate) fn note_header_reads(&self, ordinals: impl IntoIterator<Item = u32>) {
+        let mut last = None;
+        for ordinal in ordinals {
+            if ordinal >= self.num_oids() {
+                continue;
+            }
+            let at = self
+                .volume_starts
+                .partition_point(|&start| start <= ordinal)
+                - 1;
+            if last != Some(at) {
+                self.atlas
+                    .size(with_extension(self.volumes[at].base(), self.seqtype, "hr"));
+                last = Some(at);
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-406
+    /// Notes in the atlas the files that the data loader's lookups of the Seq-align ids `ids` read
+    /// (`lookup::SeqidLookup::note_sized_files`): the loads of a query batch's reports.
+    pub(crate) fn note_lookup_reads<'i>(
+        &self,
+        ids: impl IntoIterator<Item = &'i crate::seqid::ParsedSeqId>,
+    ) -> Result<(), SeqDbError> {
+        let lookup = self.seqid_lookup()?;
+        for id in ids {
+            lookup.note_sized_files(id, &self.atlas);
+        }
+        Ok(())
+    }
+
+    /// Takes the files that the readers of another database of the run (the repeat database of
+    /// `-filtering_db`, `note_single_thread_search`) have measured, noted in `other`: NCBI's
+    /// atlas is the process's.
+    pub(crate) fn absorb_atlas(&self, other: &Atlas) {
+        self.atlas.absorb(other);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:374-399
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:358-385
+    // NCBI's search of the repeats runs without threads (`CLocalBlast` of a new `CSeqDB` that
+    // shares the process's atlas): its scan reads each OID that the list and the iteration range
+    // keep, so the sequence file of each volume with one, after the set-up's read of OID 0 where
+    // the statistics read it; its Seq-aligns read the headers of the subjects of its hits.
+    /// Notes in `atlas` the files that this database's reader has measured, and those that
+    /// NCBI's search of it without threads measures, whose Seq-aligns are on the sequences
+    /// `subjects`.
+    pub(crate) fn note_single_thread_search(
+        &self,
+        subjects: impl IntoIterator<Item = u32>,
+        atlas: &Atlas,
+    ) {
+        if self.first_oid_length.is_some() {
+            if let Some(volume) = self.volumes.iter().find(|volume| volume.num_oids() > 0) {
+                self.atlas
+                    .size(with_extension(volume.base(), self.seqtype, "sq"));
+            }
+        }
+        let (begin, end) = self
+            .filter
+            .as_deref()
+            .map_or((0, self.num_oids()), |filter| filter.range());
+        for (at, volume) in self.volumes.iter().enumerate() {
+            let (start, stop) = (self.volume_starts[at], self.volume_starts[at + 1]);
+            let mut next = start.max(begin);
+            if next >= stop.min(end) {
+                continue;
+            }
+            if self.check_or_find_oid(&mut next).unwrap_or(false) && next < stop.min(end) {
+                self.atlas
+                    .size(with_extension(volume.base(), self.seqtype, "sq"));
+            }
+        }
+        self.note_header_reads(subjects);
+        atlas.absorb(&self.atlas);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
+    /// Notes in the atlas the files that NCBI measures before its scan cuts the first chunk of
+    /// the volume `at`, in a scan that starts at the OID `begin`: the sequence file of OID 0's
+    /// volume where the statistics read OID 0 (each batch's `BLAST_GapAlignSetUp`, before its
+    /// scan), and the sequence file of each volume with OIDs that the scan read before (its
+    /// first read opens it); then gives the largest file measured.
+    fn largest_file_before_chunks(&self, begin: u32, at: usize) -> u64 {
+        if self.first_oid_length.is_some() {
+            if let Some(volume) = self.volumes.iter().find(|volume| volume.num_oids() > 0) {
+                self.atlas
+                    .size(with_extension(volume.base(), self.seqtype, "sq"));
             }
         }
         let first = self.volume_starts.partition_point(|&start| start <= begin) - 1;
         for volume in &self.volumes[first..at] {
             if volume.num_oids() > 0 {
-                largest = largest.max(volume.sequence_file_len()?);
+                self.atlas
+                    .size(with_extension(volume.base(), self.seqtype, "sq"));
             }
         }
-        Ok(largest)
+        self.atlas.largest()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+    /// Whether a read past the end `end` of the iteration range that NCBI's chunks can make in the
+    /// volume `at` crashes. A chunk starts before `end` and takes an OID while the bases it took
+    /// leave room for it, so it reads an OID `j` past `end` only where the lengths of the OIDs
+    /// from `end` to `j - 1` fit `budget` (the largest budget of the volume's chunks); a negative
+    /// length ends every chunk that reads it. The OID at `end` was read and checked before
+    /// (`SeqDb::mt_check_trailing_excluded`).
+    fn crash_within_reach(&self, at: usize, end: u32, budget: u64) -> Result<bool, SeqDbError> {
+        let volume = &self.volumes[at];
+        let start = self.volume_starts[at];
+        let budget = i64::try_from(budget).unwrap_or(i64::MAX);
+        let mut oid = end - start;
+        let mut taken = 0i64;
+        while oid < volume.num_oids() {
+            let len = match volume.x_scan_length_i32(oid, start + oid) {
+                Ok(len) => len,
+                Err(_) => return Ok(true),
+            };
+            if len < 0 {
+                return Ok(false);
+            }
+            taken += i64::from(len);
+            if taken > budget {
+                return Ok(false);
+            }
+            oid += 1;
+        }
+        Ok(false)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
@@ -159,10 +264,13 @@ impl SeqDb {
     /// The errors of NCBI's reads past the end `end` of the iteration range `begin..end` in a
     /// volume after the first (`last_chunk_reach`), when the scan has read the OIDs up to
     /// `end` without meeting a negative length (the caller's check of the OIDs before it).
-    /// NCBI's reads there are `last_chunk_reach`'s; of the OIDs after `end`, the first that
-    /// stops the scan decides: a negative length ends it with nothing left to fail, a read that
-    /// crashes fails the search when the chunks reach it. A volume whose OIDs past `end` all read
-    /// cleanly takes no walk. `Ok` in every other case.
+    /// NCBI's reads there are `last_chunk_reach`'s, with the budgets of the largest file that
+    /// NCBI's atlas has measured when each chunk is cut (`super::atlas::Atlas`: before the
+    /// volume's first chunk, then with the volume's sequence file, which the first read
+    /// measures); of the OIDs after `end`, the first that stops the scan decides: a negative
+    /// length ends it with nothing left to fail, a read that crashes fails the search when the
+    /// chunks reach it. A volume whose OIDs past `end` that a chunk can reach all read cleanly
+    /// takes no walk (`crash_within_reach`). `Ok` in every other case.
     pub(super) fn mt_check_past_range_end(&self, begin: u32, end: u32) -> Result<(), SeqDbError> {
         if self.mt_threads == 0 || self.seqtype != SeqType::Nucleotide || begin >= end {
             return Ok(());
@@ -172,19 +280,17 @@ impl SeqDb {
         };
         let volume = &self.volumes[at];
         let start = self.volume_starts[at];
-        if end + 1 - start >= volume.num_oids() {
+        let first_file = self.largest_file_before_chunks(begin, at);
+        self.atlas
+            .size(with_extension(volume.base(), self.seqtype, "sq"));
+        let later_file = self.atlas.largest();
+        if !self.crash_within_reach(at, end, mt_chunk_budget(self.mt_threads, later_file))? {
             return Ok(());
         }
-        // The walk needs the lengths of the OIDs from the volume's first chunk on: only a crash
-        // past the range's end can change the outcome.
-        let Some(ScanProblem::Crash(_)) = self.first_scan_problem_from(at, end + 1 - start)? else {
-            return Ok(());
-        };
-        let first_file = self.largest_file_before_chunks(begin, at)?;
         let walk = ChunkWalk {
             threads: self.mt_threads,
             first_file,
-            later_file: first_file.max(volume.sequence_file_len()?),
+            later_file,
             start: begin.max(start) - start,
             num_oids: volume.num_oids(),
             volume_start: start,

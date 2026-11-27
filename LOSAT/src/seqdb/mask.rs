@@ -618,6 +618,14 @@ impl SeqDb {
             return Ok(table);
         }
         let table = MaskAlgorithms::build(&self.volumes)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3325-3375
+        // The build opens every volume's columns (`x_OpenAllColumns`): a search reads the table
+        // only with `-db_soft_mask` or `-db_hard_mask`, at its set-up.
+        for volume in &self.volumes {
+            for file in super::column::checked_files(volume.base(), self.seqtype) {
+                self.atlas.size(file);
+            }
+        }
         Ok(self.mask_algorithms.get_or_init(|| table))
     }
 

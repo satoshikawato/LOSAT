@@ -61,6 +61,8 @@ pub mod taxdb;
 
 /// Result of reading a [`SequenceBlock`].
 pub type SeqBlockResult = Result<SequenceBlock, SeqDbError>;
+mod atlas;
+pub(crate) use atlas::Atlas;
 mod mt_scan;
 pub(crate) use mt_scan::mt_chunk_budget;
 pub mod volume;
@@ -1345,9 +1347,9 @@ pub struct SeqDb {
     /// The threads of that scan (`m_NumThreads`; 0 where the search does not set it), which size
     /// the chunks of `x_FillSeqBuffer` (`SeqDb::mt_check_past_range_end`).
     mt_threads: usize,
-    /// The `-db` value the database was opened with, which the files NCBI's atlas measured while
-    /// it resolved the name are looked up from (`alias::largest_resolution_file`).
-    db_name: Vec<u8>,
+    /// The files NCBI's atlas has measured in the run so far (`atlas::Atlas`): the largest sizes
+    /// the chunks of the multithreaded scan (`SeqDb::mt_check_past_range_end`).
+    atlas: atlas::Atlas,
     /// Whether a reader read the title of a reported sequence that holds a byte outside
     /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's cache of
     /// header records modelled (`header_cache`).
@@ -1505,9 +1507,12 @@ impl SeqDb {
         seqtype: SeqType,
         path: &SearchPath,
     ) -> Result<Self, SeqDbError> {
-        let mut tree = alias::resolve_in(name, seqtype, path)?;
+        let (mut tree, checked) = alias::resolve_in_checked(name, seqtype, path)?;
         let gi_masks = tree.gi_masks.take();
         let mut db = Self::open_tree(tree, name, seqtype)?;
+        for file in checked {
+            db.atlas.size(path_of_bytes(&file).into_owned());
+        }
         db.search_path = Some(path.clone());
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:81-91
         // (`m_UseGiMask` from the alias file's mask list): a database whose alias file names GI
@@ -1988,6 +1993,13 @@ impl SeqDb {
             max_length,
             min_length: BLAST_SEQSRC_MINLENGTH,
         };
+        // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:93-104
+        // Each volume opens its index file (`CSeqDBIdxFile`, a `CSeqDBRawFile`): the atlas
+        // measures it.
+        let atlas = atlas::Atlas::default();
+        for volume in &volumes {
+            atlas.size(volume::with_extension(volume.base(), seqtype, "in"));
+        }
         let mut db = Self {
             seqtype,
             volumes,
@@ -2031,7 +2043,7 @@ impl SeqDb {
             scope_utf8_held: AtomicBool::new(false),
             mt_stop_at_negative: false,
             mt_threads: 0,
-            db_name: name.to_vec(),
+            atlas,
             replaced_titles: AtomicBool::new(false),
             header_cache: Default::default(),
         };
@@ -2172,6 +2184,7 @@ impl SeqDb {
             user,
             user_rule,
             &|| self.lmdb_entries(),
+            &self.atlas,
         )
     }
 
@@ -2899,6 +2912,12 @@ impl SeqDb {
             }
             let mut cur = start_oid.max(vol_start) - vol_start;
             let stop = end_oid.min(vol_end) - vol_start;
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
+            // The scan's first read of an OID of the volume opens its sequence file, whose error
+            // (a missing file) ends the search.
+            if cur < stop {
+                volume.open_sequence_file()?;
+            }
             while cur < stop {
                 let hi = stop.min(cur.saturating_add(CHUNK));
                 let found = match self.seqtype {
@@ -3038,7 +3057,7 @@ impl SeqDb {
     ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
         if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+            return Ok(volume.empty_stopped_block(range.first_ordinal, first_oid));
         }
         let block = read(volume, first_oid)?;
         self.mt_check_after_last_block(range, first_oid, block)

@@ -105,7 +105,7 @@
 //! header of every distinct sequence that a batch reported (`database::DatabaseTitles`, at most
 //! the database's sequences and at most the queries times the hit list size).
 
-use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::utils::threading::SearchPool;
 
@@ -195,10 +195,7 @@ pub(super) fn check(
     let [format] = outputs.formats.as_slice() else {
         return Err(Off::Outputs);
     };
-    if outputs.hits.is_some()
-        || outputs.observer.is_some()
-        || matches!(format.sink, OutputSink::File(_))
-    {
+    if outputs.hits.is_some() || outputs.observer.is_some() || format.sink.is_file() {
         return Err(Off::Outputs);
     }
     let format = report::output_format(format.outfmt);

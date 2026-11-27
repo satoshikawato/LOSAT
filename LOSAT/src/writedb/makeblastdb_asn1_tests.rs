@@ -494,7 +494,8 @@ fn object_manager_address_and_crash_cases_are_refused() {
 /// NCBI's `ListFiles` nor the others that a failed build of NCBI's leaves (the LMDB writers'
 /// `.nos`, `.not`, `.ntf` and `.nto`, the GI-mask files and the alias file of a single volume
 /// with GI masks; `WriteDb::every_file`). The build of the first object alone shows that each
-/// of them is written.
+/// of them is written but `.nos`, which a database of GIs alone does not have (the refused row
+/// `d3c6a_x42_two_objects_second_empty` has it).
 #[test]
 fn a_refused_object_after_a_written_sequence_leaves_no_file() {
     use crate::objmgr::annot_index::Refusal;
@@ -551,8 +552,8 @@ fn a_refused_object_after_a_written_sequence_leaves_no_file() {
     let (rc, stderr, files) = build("one.asn");
     assert_eq!(rc, 0, "{stderr}");
     for name in [
-        "db.nal", "db.nos", "db.not", "db.ntf", "db.nto", "gm.gmd", "gm.gmi", "gm.gmo", "gm.gnd",
-        "gm.gni", "gm.gno",
+        "db.nal", "db.not", "db.ntf", "db.nto", "gm.gmd", "gm.gmi", "gm.gmo", "gm.gnd", "gm.gni",
+        "gm.gno",
     ] {
         assert!(files.iter().any(|file| file == name), "{name}: {files:?}");
     }

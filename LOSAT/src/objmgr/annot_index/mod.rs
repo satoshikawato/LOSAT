@@ -464,7 +464,9 @@ impl Indexer<'_> {
             .iter()
             .map(|annot| annot.get("data").map(V::choice))
             .collect();
-        let mut tables: Vec<Option<table::TableInfo<'_>>> =
+        // A table's information is boxed: one slot of each annotation is a pointer, not the
+        // size of a `TableInfo` (hundreds of bytes per annotation of a feature-rich entry).
+        let mut tables: Vec<Option<Box<table::TableInfo<'_>>>> =
             std::iter::repeat_with(|| None).take(annots.len()).collect();
         let mut ids: Vec<Vec<Handle>> = vec![Vec::new(); tse.objects()];
         for &made in &tse.construction {
@@ -477,7 +479,9 @@ impl Indexer<'_> {
                         .collect();
                 }
                 entry::Made::Annot(index) => match data[index] {
-                    Some(("seq-table", table)) => tables[index] = Some(self.table_info(table)?),
+                    Some(("seq-table", table)) => {
+                        tables[index] = Some(Box::new(self.table_info(table)?));
+                    }
                     Some(("ftable", feats)) => {
                         for feat in feats.items() {
                             feat.deref()?;
@@ -511,7 +515,7 @@ impl Indexer<'_> {
                     }
                 }
                 Some(("locs", locs)) => self.index_locs(*annot, *locs)?,
-                Some(("seq-table", _)) => self.index_table(table.as_ref().expect("phase C"))?,
+                Some(("seq-table", _)) => self.index_table(table.as_deref().expect("phase C"))?,
                 // `ids` (and an annotation without data) are not indexed.
                 _ => {}
             }

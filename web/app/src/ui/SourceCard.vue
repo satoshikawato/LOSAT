@@ -64,8 +64,8 @@ const followsNot = computed(
   () => props.source.check?.state === 'ok' && combined.value !== undefined && cannotFollow(combined.value, props.source),
 );
 /**
- * The reader's error that ends the query's records (`SourceCheck`'s `readerError`, the command line's text): a run ends with
- * it, as the command line does, so the card warns and the run is not refused (line WQA's D10, 2026-11-19).
+ * The reader's error that ends the query's records (`SourceCheck`'s `readerError`, the command line's text): a run that reads
+ * that far fails with it, as the command line does, so the card warns and the run is not refused (line WQA's D10, 2026-11-19).
  */
 const readerError = computed(() =>
   props.source.check?.state === 'ok' && !followsNot.value ? props.source.check.readerError : undefined,
@@ -90,17 +90,20 @@ const lineOf = (message: string | undefined) => {
   return found === null ? undefined : Number(found[1]);
 };
 /**
- * The warning of a reader's error, with what to do (review L2 and M-a, 2026-11-20): the run fails with it, and a failed run
- * keeps no results, whatever records come before the error. The message is the run's: in a Combined input the line it names
- * counts the inputs before this one, and with records excluded it counts the records included (`SearchDraft`'s check), so
- * the card adds this input's own line where the two differ (review L-b, 2026-11-20).
+ * The warning of a reader's error, with what to do (review L2 and M-a, 2026-11-20): a run that reads that far fails with it,
+ * and keeps only the outputs that the command line writes before it (the reports of the query batches before the error's,
+ * line WQA's sweep, D15). It says neither that the run ends with this error nor that it gives no results (line WQA's D28,
+ * 2026-11-27): an error that comes before it (a query ID repeated under -parse_deflines in an earlier batch) ends the run
+ * first, and an error in a later batch comes after the hits of the batches before. The message is the run's:
+ * in a Combined input the line it names counts the inputs before this one, and with records excluded it counts the records
+ * included (`SearchDraft`'s check), so the card adds this input's own line where the two differ (review L-b, 2026-11-20).
  */
 const readerErrorText = (message: string) => {
   const own = lineOf(props.source.base?.readerError?.message);
   const run = lineOf(message);
   const where = own !== undefined && run !== undefined && own !== run ? ` (line ${own} of ${sourceName(props.source)})` : '';
   return [
-    `A run of this input ends with this error, as the command line does, and gives no results: ${message} Correct that line${where} to search this input.`,
+    `A run fails at this error if it reads that far, as the command line does, and keeps only the outputs written before it: ${message} Correct that line${where} to search this input.`,
     ...(sourcesAfter.value ? ['The run does not read the inputs after this one.'] : []),
   ].join(' ');
 };

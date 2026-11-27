@@ -353,8 +353,12 @@ impl<'a> ReadAlign<'a> {
             ))
             .into()
         };
-        let lengths_not_accurate =
-            |line| thrown(line, "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!".into());
+        let lengths_not_accurate = |line| {
+            thrown(
+                line,
+                "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!".into(),
+            )
+        };
         let segs = self.std_segs();
         let mut lens: Vec<u32> = Vec::with_capacity(segs.len());
         let mut starts: Vec<i64> = Vec::new();

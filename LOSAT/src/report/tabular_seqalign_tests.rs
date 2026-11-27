@@ -173,7 +173,10 @@ fn a_blastx_std_seg_reads_its_query_translated_in_its_frame() {
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
-    assert_eq!((row.q_start, row.q_end, row.s_start, row.s_end), (1, 9, 1, 3));
+    assert_eq!(
+        (row.q_start, row.q_end, row.s_start, row.s_end),
+        (1, 9, 1, 3)
+    );
     // The query's frame of its start; a protein row's frame 0.
     assert_eq!((row.q_frame, row.s_frame), (1, 0));
     assert_eq!(row.length, 3);
@@ -251,7 +254,9 @@ fn a_tblastx_std_seg_is_a_dense_seg_of_codons_on_both_rows() {
     match read[0].dense_seg(true) {
         Err(ReadStop::Stop(Stop::Exception(exception))) => {
             assert_eq!(exception.site().line, 985);
-            assert!(exception.get_msg().ends_with(b"Length of segment 0 is not divisible by 3."));
+            assert!(exception
+                .get_msg()
+                .ends_with(b"Length of segment 0 is not divisible by 3."));
         }
         other => panic!("{other:?}"),
     }
@@ -271,7 +276,10 @@ fn a_translated_row_whose_genetic_code_ncbi_lacks_throws_before_its_letters() {
     let scores = row_scores(&read[0], &spec).unwrap();
     let plan = row_plan(&read[0], scores, &ctx).unwrap();
     assert!(plan.translation_stop(&ctx, 0).unwrap().is_none());
-    let exception = plan.translation_stop(&ctx, 1).unwrap().expect("GetTransTable's exception");
+    let exception = plan
+        .translation_stop(&ctx, 1)
+        .unwrap()
+        .expect("GetTransTable's exception");
     assert_eq!(exception.get_msg(), b"Unable to find genetic code number 0");
     // With code 1 the row reads.
     let codes = GeneticCodes::new(1, 1);
@@ -293,6 +301,9 @@ fn a_translated_row_past_its_sequence_leaves_a_segment_without_whole_codons() {
     ctx.query_length = 7;
     let scores = row_scores(&read[0], &spec).unwrap();
     let plan = row_plan(&read[0], scores, &ctx).unwrap();
-    let exception = plan.translation_stop(&ctx, 0).unwrap().expect("TranslateNAToAA's exception");
+    let exception = plan
+        .translation_stop(&ctx, 0)
+        .unwrap()
+        .expect("TranslateNAToAA's exception");
     assert_eq!(exception.site().line, 898);
 }

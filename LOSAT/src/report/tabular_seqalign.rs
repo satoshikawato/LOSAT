@@ -148,9 +148,9 @@ pub(crate) struct RowPlan {
     ds: Option<PairDenseg>,
     /// Whether the row ends at the query block's `catch` (tabular.cpp:782-799, `bioseqs_found`
     /// false): a Std-seg whose query range throws (`GetSeqRange`, BLASTX's HSPs of length 0).
-    /// The row shows the Seq-align's query id (`SetQueryId` of `GetSeq_id(0)`), its scores, the
-    /// query's length, the subject's fields, `qcovhsp` `N/A` and `x_ResetFields`' 0 for the
-    /// rest.
+    /// The row shows the Seq-align's query id (`SetQueryId` of the id of its row 0,
+    /// `GetSeq_id`), its scores, the query's length, the subject's fields, `qcovhsp` `N/A` and
+    /// `x_ResetFields`' 0 for the rest.
     pub(crate) leaves: bool,
 }
 
@@ -313,7 +313,9 @@ fn translation_exception(
     } else if ctx.codes.tables[row].is_none() {
         Ok(unknown_genetic_code_exception(ctx.codes.numbers[row]))
     } else {
-        Err(ReadStop::Unsupported("an alignment row whose letters do not read"))
+        Err(ReadStop::Unsupported(
+            "an alignment row whose letters do not read",
+        ))
     }
 }
 
@@ -350,7 +352,7 @@ impl Sequences for LengthsOnly<'_> {
 /// `start % 3 + 1` on the plus strand, `-((length - start - 1) % 3 + 1)` on the minus strand,
 /// 0 on any other (a protein's).
 fn frame(start: i64, strand: Strand, length: i64) -> i32 {
-    // `(int)GetBioseqLength()`: the `TSeqPos` length cut to an `int`.
+    // `GetBioseqLength` cast to an `int`: the `TSeqPos` length cut to 32 signed bits.
     let length = i64::from(length as u32 as i32);
     match strand {
         Strand::Plus => (start % 3 + 1) as i32,

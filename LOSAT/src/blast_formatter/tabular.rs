@@ -198,8 +198,8 @@ fn covered(program: EProgram) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:237
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/tblastx_options.cpp:73
-/// `m_IsUngappedSearch` (`!opts.GetGappedMode()`): the last `GappedMode` call of the options,
-/// else the factory's: TBLASTX's handle is ungapped, every other one gapped.
+/// `m_IsUngappedSearch` (the options' gapped mode negated): the last `GappedMode` call of the
+/// options, else the factory's: TBLASTX's handle is ungapped, every other one gapped.
 fn ungapped_search(options: &BuiltOptions) -> bool {
     options
         .setters
@@ -221,11 +221,15 @@ fn ungapped_search(options: &BuiltOptions) -> bool {
 /// clears it).
 fn genetic_codes(options: &BuiltOptions) -> GeneticCodes {
     let last = |query: bool| {
-        options.setters.iter().rev().find_map(|setter| match setter {
-            Setter::QueryGeneticCode(code) if query => Some(*code),
-            Setter::DbGeneticCode(code) if !query => Some(*code),
-            _ => None,
-        })
+        options
+            .setters
+            .iter()
+            .rev()
+            .find_map(|setter| match setter {
+                Setter::QueryGeneticCode(code) if query => Some(*code),
+                Setter::DbGeneticCode(code) if !query => Some(*code),
+                _ => None,
+            })
     };
     let translated_subjects = matches!(
         options.program,
@@ -1298,19 +1302,17 @@ pub(super) fn print_object(
     }
 
     // outfmt 7's `# Subject:` line of each query where the formatter has no database name.
-    let subject_headers = if commented
-        && inputs.database.is_none()
-        && std::env::var_os("BL2SEQ_LEGACY").is_some()
-    {
-        Some(subject_header_texts(
-            inputs,
-            &scope,
-            &subject_bioseqs,
-            plans.len(),
-        )?)
-    } else {
-        None
-    };
+    let subject_headers =
+        if commented && inputs.database.is_none() && std::env::var_os("BL2SEQ_LEGACY").is_some() {
+            Some(subject_header_texts(
+                inputs,
+                &scope,
+                &subject_bioseqs,
+                plans.len(),
+            )?)
+        } else {
+            None
+        };
 
     print_prolog(sink)?;
     if prefetches && !prefetched {
@@ -1378,9 +1380,9 @@ pub(super) fn print_object(
                     .subject(names.as_ref(), kept.nucleotide, qcovs, qcovus)
             });
             // A row that ends at the query block's `catch` (`RowPlan::leaves`) shows the
-            // Seq-align's query id as it is (`SetQueryId` of `GetSeq_id(0)`), no subject strand
-            // (`m_SubjectStrand` empty: `N/A`), and the subject's length only where the subject
-            // block read it.
+            // Seq-align's query id as it is (`SetQueryId` of the id of its row 0, `GetSeq_id`), no
+            // subject strand (`m_SubjectStrand` empty: `N/A`), and the subject's length only where
+            // the subject block read it.
             let caught;
             let shown_query = if planned.leaves {
                 subject.nucleotide = false;
@@ -1472,7 +1474,11 @@ fn located_queries<'r>(
         let id = match loc.choice() {
             ("whole", id) => id.seq_id(),
             ("int", int) => int.field("id").seq_id(),
-            _ => return Err(refused("a query location other than a whole sequence or an interval")),
+            _ => {
+                return Err(refused(
+                    "a query location other than a whole sequence or an interval",
+                ))
+            }
         };
         if !matches!(lookup.seqid_to_oid(id), Ok(Some(_))) {
             return Err(refused(LOCATED_ELSEWHERE));
@@ -1571,7 +1577,9 @@ fn subject_header_texts(
             index = 0;
         }
         let Some(id) = subject.best_id() else {
-            return Err(refused("a subject Bioseq without an id that FindBestChoice ranks"));
+            return Err(refused(
+                "a subject Bioseq without an id that FindBestChoice ranks",
+            ));
         };
         let shown = match scope.queries_holding(id).as_slice() {
             [at] => scope.queries[*at].bioseq().expect("a query Bioseq"),
@@ -1750,7 +1758,13 @@ impl<'p> PrePass<'p, '_, '_> {
             .index_of(self.inputs, self.scope, id)
             .map_err(RowEnd::Refusal)?;
         let query = &self.scope.queries[q_idx];
-        let ctx = row_context(self.spec, self.blastn, self.codes, query, subjects.facts[s_idx]);
+        let ctx = row_context(
+            self.spec,
+            self.blastn,
+            self.codes,
+            query,
+            subjects.facts[s_idx],
+        );
         let at_row = |error| {
             RowEnd::Ncbi(NcbiStop {
                 error,
@@ -1767,7 +1781,9 @@ impl<'p> PrePass<'p, '_, '_> {
         }
         let subject = match subjects.sources[s_idx] {
             SubjectSource::Database { .. } => None,
-            SubjectSource::Bioseq(at) => Some((1, at, self.scope.subjects[at], "a -subject Bioseq")),
+            SubjectSource::Bioseq(at) => {
+                Some((1, at, self.scope.subjects[at], "a -subject Bioseq"))
+            }
             SubjectSource::Query(at) => Some((
                 2,
                 at,
@@ -1788,7 +1804,9 @@ impl<'p> PrePass<'p, '_, '_> {
                             self.checked.insert((kind, at));
                         }
                         Err(LetterEnd::Exception(exception)) => {
-                            return Err(at_row(crate::cli::NativeError::exception(&exception).into()))
+                            return Err(at_row(
+                                crate::cli::NativeError::exception(&exception).into(),
+                            ))
                         }
                         Err(LetterEnd::Refusal(error)) => return Err(RowEnd::Refusal(error)),
                     }
@@ -1797,7 +1815,9 @@ impl<'p> PrePass<'p, '_, '_> {
             match plan.translation_stop(&ctx, row) {
                 Ok(None) => {}
                 Ok(Some(exception)) => {
-                    return Err(at_row(crate::cli::NativeError::exception(&exception).into()))
+                    return Err(at_row(
+                        crate::cli::NativeError::exception(&exception).into(),
+                    ))
                 }
                 Err(stop) => return Err(end_of(stop).into()),
             }

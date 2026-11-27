@@ -3613,19 +3613,6 @@ fn reported_header(
         _ => {}
     }
     match header {
-        // No NCBI counterpart: LOSAT's refusal. makeprofiledb writes no definition line without a
-        // Seq-id, and NCBI's reports of a profile database with one were not probed (line RG
-        // D1c-1c-b, survey 4.3): RPS-BLAST and RPS-tBLASTn refuse such a profile as before.
-        Ok(crate::seqdb::SequenceHeader::Parsed(set))
-            if matches!(program, "RPSBLAST" | "RPSTBLASTN")
-                && set.deflines.iter().any(|defline| defline.ids.is_empty()) =>
-        {
-            Err(parsed_refusal(
-                db.oid(ordinal),
-                "has a definition line without a Seq-id",
-                program,
-            ))
-        }
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))

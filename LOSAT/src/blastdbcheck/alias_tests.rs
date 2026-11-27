@@ -34,10 +34,16 @@ fn the_rest_after_the_other_end_of_line_runs_into_the_next_line() {
 /// still reports the genuine NSEQ mismatch.
 #[test]
 fn widened_alias_checks_avoid_ncbi_overflow_false_errors() {
+    use crate::ncbi_app::files::standard_output_file;
+    use crate::report::run_files::{OpenFiles, RunFiles};
+
     let run_check = |values: Values| -> (u32, String) {
         let mut buf = Vec::new();
-        let mut log = Log::new(&mut buf, DETAILS);
-        let faults = check_values(&mut log, b"  p: ", &values).ok().unwrap();
+        let faults = {
+            let files = OpenFiles::new(&RunFiles::Disk);
+            let mut log = Log::new(standard_output_file(&mut buf, &files), DETAILS);
+            check_values(&mut log, b"  p: ", &values).ok().unwrap()
+        };
         (faults, String::from_utf8(buf).unwrap())
     };
     // Row a_ov1: (65535 + 1) * (65535 + 1) != 0 in i128, nseq == -1 -> 0 faults.

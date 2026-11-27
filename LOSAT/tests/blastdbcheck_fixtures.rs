@@ -1625,8 +1625,16 @@ fn nonasc_cross_program_parity() {
     poke(d_past.join("n4.nin"), 108, "10000000");
     // Alias files whose only filter is an OID range (OIDs 0..2 and 0..1): NCBI's iteration range
     // ends at OID 3 (2), and its loop reads that OID too before it compares it with the end.
-    fs::write(d_past.join("n4r.nal"), b"TITLE r\nDBLIST n4\nFIRST_OID 1\nLAST_OID 3\n").unwrap();
-    fs::write(d_past.join("n4r2.nal"), b"TITLE r2\nDBLIST n4\nFIRST_OID 1\nLAST_OID 2\n").unwrap();
+    fs::write(
+        d_past.join("n4r.nal"),
+        b"TITLE r\nDBLIST n4\nFIRST_OID 1\nLAST_OID 3\n",
+    )
+    .unwrap();
+    fs::write(
+        d_past.join("n4r2.nal"),
+        b"TITLE r2\nDBLIST n4\nFIRST_OID 1\nLAST_OID 2\n",
+    )
+    .unwrap();
     let mut past_refusal: Option<Vec<u8>> = None;
     for (name, args) in [
         (

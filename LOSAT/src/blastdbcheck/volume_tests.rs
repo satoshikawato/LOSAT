@@ -72,7 +72,9 @@ fn widened_ends_near_int_min_jumps_past_volume() {
     use crate::blastdbcheck::log::{Log, MINUTIAE};
     use crate::blastdbcheck::TOOL;
     use crate::blastinput::ncbi_environment::DiagTarget;
+    use crate::ncbi_app::files::standard_output_file;
     use crate::ncbi_app::Diag;
+    use crate::report::run_files::{OpenFiles, RunFiles};
     use crate::seqdb::{SearchPath, SeqDb, SeqType};
 
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blastdb_aliastool/in");
@@ -98,7 +100,8 @@ fn widened_ends_near_int_min_jumps_past_volume() {
         let mut seen = Seen::default();
         let target = DiagTarget::Stderr;
         let faults = {
-            let mut log = Log::new(&mut out, MINUTIAE);
+            let files = OpenFiles::new(&RunFiles::Disk);
+            let mut log = Log::new(standard_output_file(&mut out, &files), MINUTIAE);
             let mut diag = Diag::new(&target, &mut err, &TOOL);
             match tests.run(&mut log, &db, b"p5", &mut seen, &mut diag) {
                 Ok(faults) => faults,

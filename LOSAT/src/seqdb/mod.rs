@@ -2966,7 +2966,8 @@ impl SeqDb {
         let inside_volume =
             end < self.num_oids() && self.volume_starts.binary_search(&end).is_err();
         let scan_end = if inside_volume { end + 1 } else { end };
-        self.x_has_negative_in_oid_range(from_oid, scan_end).map(|_| ())
+        self.x_has_negative_in_oid_range(from_oid, scan_end)
+            .map(|_| ())
     }
 
     /// [`Self::mt_check_trailing_excluded`] after the block `range` that holds the last included

@@ -836,7 +836,12 @@ fn a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count() {
         ("blastp_ug", "blastp", "q.fa", &ungapped[..]),
         ("blastx", "blastx", "qn.fa", &[][..]),
         ("blastx_ug", "blastx", "qn.fa", &ungapped[..]),
-        ("psiblast", "psiblast", "q.fa", &["-num_iterations", "2"][..]),
+        (
+            "psiblast",
+            "psiblast",
+            "q.fa",
+            &["-num_iterations", "2"][..],
+        ),
     ] {
         let expected = fs::read(frozen.join(format!("{name}.dba0.out"))).unwrap();
         let expected_err = fs::read(frozen.join(format!("{name}.dba0.err"))).unwrap();

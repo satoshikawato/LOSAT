@@ -98,6 +98,27 @@ pub(crate) struct PssmRedo1<'a> {
     /// read (`blastp::blast_engine::database::ListedSubjects::note_fetched`), and refuses the
     /// search where one of them has a header that cannot be read.
     pub(crate) redone: &'a dyn Fn(&[BlastCompoHeap]) -> anyhow::Result<()>,
+    /// psiblast's `-use_sw_tback` (`Blast_RedoOneMatchSmithWaterman`, CBS 0 to 3); `None` for the
+    /// default X-drop redo.
+    pub(crate) sw: Option<PssmSwOptions<'a>>,
+}
+
+/// Options for psiblast's Smith-Waterman position-based redo (`-use_sw_tback`, CBS 0 to 3).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039,3100-3109,3602-3622
+pub(crate) struct PssmSwOptions<'a> {
+    /// Whether composition-based adjustment runs (`true` for CBS 1..3, `false` for CBS 0).
+    pub(crate) compo_adjust: bool,
+    /// Applies fetch-excluded marks of the finished query to the batch status.
+    pub(crate) on_query_done: &'a dyn Fn(
+        Option<usize>,
+        &[BlastCompoHeap],
+        &mut crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus,
+    ),
+    /// Builds the error/refusal when the batch's last redone match failed.
+    pub(crate) on_batch_failed: &'a dyn Fn(&[BlastCompoHeap]) -> anyhow::Error,
+    /// Builds the refusal when a match's SW redo does not terminate in NCBI.
+    pub(crate) on_endless: &'a dyn Fn(&[BlastCompoHeap], usize) -> anyhow::Error,
 }
 
 /// psiblast's `-sum_stats true` in the redo (`do_link_hsps`): the redone alignments' cutoff and
@@ -119,10 +140,23 @@ pub(crate) struct RedoLink {
 
 impl RedoLink {
     /// The parameters of the redo of the search whose traceback cutoff is `cutoff_score_min`
-    /// (one context) and whose query context is `context`.
+    /// (one context) and whose query context is `context`, scaled by `SCALING_FACTOR`.
+    #[cfg(test)]
     pub(crate) fn new(cutoff_score_min: i32, context: LinkContext) -> Self {
+        Self::with_scale(cutoff_score_min, context, SCALING_FACTOR)
+    }
+
+    /// The parameters of the redo scaled by `scaling_factor` (`SCALING_FACTOR` for CBS 1..3,
+    /// `1.0` for CBS 0 with `-use_sw_tback`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2461,3100-3109
+    pub(crate) fn with_scale(
+        cutoff_score_min: i32,
+        context: LinkContext,
+        scaling_factor: f64,
+    ) -> Self {
         Self {
-            cutoff_s: (cutoff_score_min as f64 * SCALING_FACTOR) as i32,
+            cutoff_s: (cutoff_score_min as f64 * scaling_factor) as i32,
             params: EvenGapLinkParams::traceback(),
             context,
         }
@@ -264,6 +298,35 @@ impl<'a> RedoRun<'a> {
         matrix: QueryPssm,
         scratch: PssmGapScratch,
     ) -> Self {
+        Self::new_with_scale(
+            query,
+            query_nomask,
+            karlin,
+            log_k,
+            gap_costs,
+            (x_drop_final_bits, x_drop_final),
+            matrix,
+            scratch,
+            SCALING_FACTOR,
+        )
+    }
+
+    /// `new` with an explicit `scaling_factor` (`SCALING_FACTOR` for CBS 1..3, `1.0` for CBS 0
+    /// with `-use_sw_tback`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2133,3100-3109
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_scale(
+        query: &'a [u8],
+        query_nomask: &'a [u8],
+        karlin: KarlinParams,
+        log_k: f64,
+        gap_costs: (i32, i32),
+        (x_drop_final_bits, x_drop_final): (f64, i32),
+        matrix: QueryPssm,
+        scratch: PssmGapScratch,
+        scaling_factor: f64,
+    ) -> Self {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1682-1695
         let query_u_as_c: Vec<u8> = query
             .iter()
@@ -284,8 +347,8 @@ impl<'a> RedoRun<'a> {
             query_true_amino_acids: read_aa_composition(query).num_true_amino_acids,
             karlin,
             log_k,
-            gap_open: blast_nint(gap_costs.0 as f64 * SCALING_FACTOR),
-            gap_extend: blast_nint(gap_costs.1 as f64 * SCALING_FACTOR),
+            gap_open: blast_nint(gap_costs.0 as f64 * scaling_factor),
+            gap_extend: blast_nint(gap_costs.1 as f64 * scaling_factor),
             x_dropoff: crate::core::x_drop::redo_x_dropoff(x_drop_final_bits, lambda, x_drop_final),
             near_identical_cutoff: (NEAR_IDENTICAL_BITS_PER_POSITION * std::f64::consts::LN_2)
                 / lambda,
@@ -407,6 +470,9 @@ impl PssmRedo1<'_> {
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
         compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Vec<Option<BlastpHitList>>> {
+        if let Some(sw) = &self.sw {
+            return self.run_smith_waterman(sw, preliminary_hit_lists, compact_hit_lists);
+        }
         let mut run = self.redo_run();
         let mut heaps: Vec<BlastCompoHeap> = preliminary_hit_lists
             .iter()
@@ -469,6 +535,110 @@ impl PssmRedo1<'_> {
         Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
     }
 
+    /// psiblast's Smith-Waterman position-based redo loop (`-use_sw_tback`, CBS 0 to 3).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3093-3110,3525-3789
+    #[cold]
+    #[inline(never)]
+    fn run_smith_waterman(
+        &self,
+        sw: &PssmSwOptions<'_>,
+        preliminary_hit_lists: &mut [Option<BlastpHitList>],
+        compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    ) -> Result<Vec<Option<BlastpHitList>>> {
+        let scaling_factor = if sw.compo_adjust { SCALING_FACTOR } else { 1.0 };
+        let mut run = self.redo_run_with_scale(scaling_factor);
+        let mut sw_scratch = smith_waterman::RpsSwScratch::new();
+        let mut sw_status =
+            crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus::default();
+        let mut heaps: Vec<BlastCompoHeap> = preliminary_hit_lists
+            .iter()
+            .map(|_| BlastCompoHeap::new(self.hitlist_size, self.inclusion_ethresh))
+            .collect();
+        for q_idx in 0..preliminary_hit_lists.len() {
+            let matches: Vec<(u32, f64, Vec<BlastpPreliminaryHsp>)> =
+                if let Some(hit_list) = compact_hit_lists[q_idx].take() {
+                    let count = hit_list.hsplist_count;
+                    hit_list
+                        .hsplist_array
+                        .into_iter()
+                        .take(count)
+                        .map(|list| {
+                            let hsps = list.hsps.iter().map(|hsp| hsp.hsp).collect();
+                            (list.oid, list.best_evalue, hsps)
+                        })
+                        .collect()
+                } else if let Some(hit_list) = preliminary_hit_lists[q_idx].take() {
+                    let count = hit_list.hsplist_count;
+                    hit_list
+                        .hsplist_array
+                        .into_iter()
+                        .take(count)
+                        .map(|list| {
+                            let hsps = list
+                                .hsps
+                                .iter()
+                                .map(super::traceback0::preliminary_hsp)
+                                .collect();
+                            (list.oid, list.best_evalue, hsps)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            let mut status_position = None;
+            for (match_position, (oid, best_evalue, hsps)) in matches.into_iter().enumerate() {
+                if hsps.is_empty() {
+                    continue;
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3532
+                if early_termination(best_evalue, &heaps) {
+                    continue;
+                }
+                let subject_read = self.subjects.read(oid)?;
+                let redone = RedoMatch {
+                    info: self.info,
+                    stats: self.stats,
+                    expect_value: self.expect_value,
+                    query_length: self.context.aa_len as i32,
+                    rps_roles: false,
+                    matrix: self.matrix,
+                    link: self.link,
+                }
+                .redo_match_smith_waterman_psiblast(
+                    &mut run,
+                    &mut sw_scratch,
+                    &mut heaps[q_idx],
+                    oid,
+                    &hsps,
+                    subject_read.residues(),
+                    sw.compo_adjust,
+                );
+                let Some(matched) =
+                    sw_status.redone(redone, || (sw.on_endless)(&heaps, match_position))?
+                else {
+                    status_position = Some(match_position);
+                    continue;
+                };
+                status_position = Some(match_position);
+                let Some((hsp_list, best_score, best_evalue)) = matched else {
+                    continue;
+                };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3705-3720
+                let heap = &mut heaps[q_idx];
+                if heap.would_insert(best_evalue, best_score, oid) {
+                    heap.insert(hsp_list, best_evalue, best_score, oid);
+                }
+            }
+            (sw.on_query_done)(status_position, &heaps, &mut sw_status);
+        }
+        if sw_status.failed() {
+            return Err((sw.on_batch_failed)(&heaps));
+        }
+        (self.redone)(&heaps)?;
+        Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
+    }
+
     /// The scaled values of the search (`s_RescaleSearch` on `kbp_gap` and the gap costs, the
     /// copy's K from `_PSIUpdateLambdaK`, `s_GetAlignParams`) and the query's data.
     ///
@@ -478,12 +648,16 @@ impl PssmRedo1<'_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2308-2331 (`s_GetQueryInfo`:
     /// `Blast_ReadAaComposition` and `s_CreateWordArray` of the query)
     fn redo_run(&self) -> RedoRun<'_> {
+        self.redo_run_with_scale(SCALING_FACTOR)
+    }
+
+    fn redo_run_with_scale(&self, scaling_factor: f64) -> RedoRun<'_> {
         let ctx = self.context;
         let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
         let query_nomask_full = ctx.aa_seq_nomask.as_deref().unwrap_or(&ctx.aa_seq);
         let query_nomask = &query_nomask_full[1..query_nomask_full.len() - 1];
-        let lambda = self.karlin.lambda / SCALING_FACTOR;
-        RedoRun::new(
+        let lambda = self.karlin.lambda / scaling_factor;
+        RedoRun::new_with_scale(
             query,
             query_nomask,
             KarlinParams {
@@ -496,6 +670,7 @@ impl PssmRedo1<'_> {
             (self.x_drop_final_bits, self.x_drop_final),
             self.pssm.clone(),
             PssmGapScratch::new(),
+            scaling_factor,
         )
     }
 

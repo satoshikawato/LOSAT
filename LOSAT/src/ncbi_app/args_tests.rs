@@ -836,10 +836,8 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     assert_eq!(refusal("blastn", "remote"), Some(Refusal::Read(None)));
     assert_eq!(refusal("blastn", "db"), None);
     assert_eq!(refusal("nosuchprogram", "remote"), None);
-    assert_eq!(
-        refusal("psiblast", "use_sw_tback"),
-        Some(Refusal::Run("the Smith-Waterman traceback"))
-    );
+    // psiblast's `-use_sw_tback` runs (line PS-SW).
+    assert_eq!(refusal("psiblast", "use_sw_tback"), None);
     // tblastn's `-ungapped` runs (line NP item O4c).
     assert_eq!(refusal("tblastn", "ungapped"), None);
     // makeblastdb's `-gi_mask` and `-gi_mask_name` run (line NP item M4c-1): it refuses none.

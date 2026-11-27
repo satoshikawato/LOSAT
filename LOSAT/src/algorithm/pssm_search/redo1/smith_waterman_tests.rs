@@ -610,3 +610,187 @@ fn the_evalue_of_a_score_is_karlin_altschuls() {
     );
     assert_eq!(evalue_from_score(0, lambda, log_k, 1.0), log_k.glibc_exp());
 }
+
+// psiblast `-comp_based_stats 0 -use_sw_tback`: scale factor 1.0, unadjusted PSSM rows kept,
+// SEG skipped, `comp_adjustment_method == 0`.
+#[test]
+fn psiblast_cbs0_uses_unadjusted_pssm_and_skips_seg() {
+    let consensus = encode(PROFILE);
+    let info = info_of(&consensus);
+    let subject = low_complexity_between();
+    let n = consensus.len() as i32;
+    let rows: Vec<[i32; crate::core::blast_util::BLASTAA_SIZE]> = consensus
+        .iter()
+        .map(|&q| {
+            let mut row = [0; crate::core::blast_util::BLASTAA_SIZE];
+            for (s, cell) in row.iter_mut().enumerate() {
+                *cell = crate::utils::matrix::standard_score(ScoringMatrix::Blosum62, q, s as u8);
+            }
+            row
+        })
+        .collect();
+    let k = info.gapped_k;
+    let mut run = RedoRun::new_with_scale(
+        &consensus,
+        &consensus,
+        KarlinParams {
+            lambda: 0.267,
+            k,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        },
+        k.glibc_ln(),
+        (11, 1),
+        (25.0, 0),
+        QueryPssm { rows: rows.clone() },
+        PssmGapScratch::new(),
+        1.0,
+    );
+    let matching = RedoMatch {
+        info: &info,
+        stats: EvalueStats::new(None, 20_000),
+        expect_value: 1e-3,
+        query_length: n,
+        rps_roles: false,
+        matrix: ScoringMatrix::Blosum62,
+        link: None,
+    };
+    let hsps = [
+        hsp((0, n), (10, 10 + n), 300),
+        hsp((0, n), (n + 24, 2 * n + 24), 250),
+    ];
+    let expected_self_score: i32 = consensus
+        .iter()
+        .map(|&q| crate::utils::matrix::standard_score(ScoringMatrix::Blosum62, q, q))
+        .sum();
+    let (list, best_score, _) = matching
+        .redo_match_smith_waterman_psiblast(
+            &mut run,
+            &mut RpsSwScratch::new(),
+            &mut BlastCompoHeap::new(500, 0.002),
+            7,
+            &hsps,
+            &subject,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(list.hsps.len(), 2);
+    assert_eq!(run.matrix.rows, rows);
+    assert!(list.hsps.iter().all(|h| h.comp_adjustment_method == 0));
+    assert_eq!(best_score, expected_self_score);
+    assert_eq!(best_score, list.hsps[0].raw_score);
+}
+
+// psiblast `-sum_stats true -use_sw_tback`: uses `CutoffScore` significance and `link_redone`
+// at both CBS 1 (scale 32) and CBS 0 (scale 1).
+#[test]
+fn psiblast_sum_stats_links_sw_alignments() {
+    let consensus = encode(PROFILE);
+    let info = info_of(&consensus);
+    let subject = two_copies();
+    let n = consensus.len() as i32;
+    let hsps = [
+        hsp((0, n), (10, 10 + n), 300),
+        hsp((0, n), (n + 24, 2 * n + 24), 250),
+    ];
+    for (compo_adjust, scale) in [(true, SCALING_FACTOR), (false, 1.0)] {
+        let rows: Vec<[i32; crate::core::blast_util::BLASTAA_SIZE]> = consensus
+            .iter()
+            .map(|&q| {
+                let mut row = [0; crate::core::blast_util::BLASTAA_SIZE];
+                for (s, cell) in row.iter_mut().enumerate() {
+                    *cell =
+                        crate::utils::matrix::standard_score(ScoringMatrix::Blosum62, q, s as u8);
+                }
+                row
+            })
+            .collect();
+        let k = info.gapped_k;
+        let mut run = RedoRun::new_with_scale(
+            &consensus,
+            &consensus,
+            KarlinParams {
+                lambda: 0.267 / scale,
+                k,
+                h: 0.14,
+                alpha: 1.9,
+                beta: -30.0,
+            },
+            k.glibc_ln(),
+            (11, 1),
+            (25.0, 0),
+            QueryPssm { rows },
+            PssmGapScratch::new(),
+            scale,
+        );
+        let link = super::super::RedoLink::with_scale(
+            40,
+            crate::core::link_hsps::LinkContext {
+                lambda: 0.267,
+                log_k: k.glibc_ln(),
+                query_length: n,
+                length_adjustment: 0,
+                eff_searchsp: 20_000,
+            },
+            scale,
+        );
+        let matching = RedoMatch {
+            info: &info,
+            stats: EvalueStats::new(None, 20_000),
+            expect_value: 10.0,
+            query_length: n,
+            rps_roles: false,
+            matrix: ScoringMatrix::Blosum62,
+            link: Some(link),
+        };
+        let (list, _, _) = matching
+            .redo_match_smith_waterman_psiblast(
+                &mut run,
+                &mut RpsSwScratch::new(),
+                &mut BlastCompoHeap::new(500, 0.002),
+                7,
+                &hsps,
+                &subject,
+                compo_adjust,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(list.hsps.len(), 2);
+        assert!(list.hsps[0].e_value <= 10.0);
+    }
+}
+
+// psiblast propagates `SwRedoFailed` (not `Ok(None)`) and `SwRedoEndless` so the batch status
+// tracks NCBI's `status_code_tld`.
+#[test]
+fn psiblast_propagates_failed_and_endless_errors() {
+    let run_case = |profile: &str, subject: &str| {
+        let consensus = encode(profile);
+        let info = info_of(&consensus);
+        let two = [hsp((0, 2), (0, 2), 11), hsp((0, 2), (0, 2), 11)];
+        let matching = RedoMatch {
+            info: &info,
+            stats: EvalueStats::new(None, 1),
+            expect_value: 10.0,
+            query_length: consensus.len() as i32,
+            rps_roles: false,
+            matrix: ScoringMatrix::Blosum62,
+            link: None,
+        };
+        matching.redo_match_smith_waterman_psiblast(
+            &mut run_of(&consensus),
+            &mut RpsSwScratch::new(),
+            &mut BlastCompoHeap::new(500, 0.002),
+            0,
+            &two,
+            &encode(subject),
+            true,
+        )
+    };
+    let endless = run_case("WCWC", "WCWC").unwrap_err();
+    assert!(endless.is::<SwRedoEndless>(), "{endless:?}");
+    let failed = run_case("AWCH", "KWCH").unwrap_err();
+    assert!(failed.is::<SwRedoFailed>(), "{failed:?}");
+}

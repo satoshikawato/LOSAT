@@ -292,6 +292,10 @@ pub(crate) struct XRedoParSearch<'a, P> {
     /// status of their query batch (`XSwBatch`); empty without a database or a negative seqid list
     /// with ids.
     pub sw_excluded: &'a [FetchExcludedMatch],
+    /// NCBI's application name (`"blastp"` or `"psiblast"`) for Smith-Waterman batch errors.
+    pub program: &'static str,
+    /// Whether `-sum_stats true` (`do_link_hsps`) is enabled for Smith-Waterman endless errors.
+    pub do_link_hsps: bool,
 }
 
 /// One match: its query and the position of its list in the query's preliminary hit list.
@@ -1404,6 +1408,10 @@ struct XSwBatch<'a> {
     excluded: &'a [FetchExcludedMatch],
     /// The notes of the subjects that the search's fetches read.
     notes: &'a FetchNotes<'a>,
+    /// NCBI's application name (`"blastp"` or `"psiblast"`).
+    program: &'static str,
+    /// Whether `-sum_stats true` (`do_link_hsps`) is enabled.
+    do_link_hsps: bool,
     /// The query of the last match replayed, if any.
     query: Option<usize>,
     /// The place of that query's last match whose redo set the status, if any.
@@ -1413,10 +1421,17 @@ struct XSwBatch<'a> {
 }
 
 impl<'a> XSwBatch<'a> {
-    fn new(excluded: &'a [FetchExcludedMatch], notes: &'a FetchNotes<'a>) -> Self {
+    fn new(
+        excluded: &'a [FetchExcludedMatch],
+        notes: &'a FetchNotes<'a>,
+        program: &'static str,
+        do_link_hsps: bool,
+    ) -> Self {
         Self {
             excluded,
             notes,
+            program,
+            do_link_hsps,
             query: None,
             status_position: None,
             status: SwBatchStatus::default(),
@@ -1468,6 +1483,7 @@ impl<'a> XSwBatch<'a> {
             if next.is_none_or(|next| !batch.contains(&next)) {
                 if self.status.failed() {
                     return Err(sw_batch_failed_after(
+                        self.program,
                         self.notes,
                         batch.clone(),
                         heaps,
@@ -1496,9 +1512,19 @@ impl<'a> XSwBatch<'a> {
     ) -> Result<Option<BlastpPostprocessResult>> {
         self.status_position = Some(matched.position);
         let notes = self.notes;
+        let program = self.program;
+        let do_link_hsps = self.do_link_hsps;
         let batch = query_batches[matched.q_idx].clone();
         self.status.redone(result, || {
-            sw_endless_after(notes, batch.clone(), heaps, matched.q_idx, matched.position)
+            sw_endless_after(
+                program,
+                do_link_hsps,
+                notes,
+                batch.clone(),
+                heaps,
+                matched.q_idx,
+                matched.position,
+            )
         })
     }
 }
@@ -1617,6 +1643,8 @@ fn x_redo_windows<const SW: bool>(
     mut expand: Option<&mut XExpandAhead<'_>>,
     sw_excluded: &[FetchExcludedMatch],
     notes: &FetchNotes<'_>,
+    program: &'static str,
+    do_link_hsps: bool,
     compute: &mut dyn FnMut(
         &[Option<BlastpHitList>],
         &[BlastCompoHeap],
@@ -1650,7 +1678,7 @@ fn x_redo_windows<const SW: bool>(
     // to the one that drops them took at most `caps[q]` new jobs at risk of q.
     let budget = limits.jobs.max(limits.at_risk_jobs);
     let mut caps = vec![limits.at_risk_jobs; lists.len()];
-    let mut sw_batch = XSwBatch::new(sw_excluded, notes);
+    let mut sw_batch = XSwBatch::new(sw_excluded, notes, program, do_link_hsps);
     // With `SW`: what the last replay left to the next window.
     let mut carry: Option<XCarry> = None;
     // With a carry and no match of the stream left, the window holds the carry only.
@@ -1864,6 +1892,8 @@ where
         expand,
         search.sw_excluded,
         notes,
+        search.program,
+        search.do_link_hsps,
         &mut |lists, heaps, window, carried| {
             let (results, lpt_ran) =
                 x_compute_window::<P, SW>(search, lists, heaps, window, carried, &shared, lpt);

@@ -1,0 +1,287 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 1,128 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase ...  825     0.0  
+YP_009220615.1 putative protein kinase [White spot syndrome virus]    18.1    1.4  
+
+
+> YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase 
+[White spot syndrome virus]
+Length=398
+
+ Score = 825 bits (2130),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 398/398 (100%), Positives = 398/398 (100%), Gaps = 0/398 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+            AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD
+Sbjct  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+
+Query  241  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  300
+            RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV
+Sbjct  241  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  300
+
+Query  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF  360
+            FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF
+Sbjct  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF  360
+
+Query  361  LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+            LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE
+Sbjct  361  LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+
+
+> YP_009220615.1 putative protein kinase [White spot syndrome virus]
+Length=730
+
+ Score = 18.1 bits (35),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 7/16 (44%), Positives = 11/16 (69%), Gaps = 0/16 (0%)
+
+Query  207  LEGGDRCGKSTQAKLL  222
+            +EGGD+  K T A ++
+Sbjct  1    MEGGDQRTKLTPATVM  16
+
+
+ Score = 17.7 bits (34),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 7/10 (70%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+
+Query  93   ILIDEGQFFT  102
+            I IDE QF T
+Sbjct  110  ITIDENQFAT  119
+
+
+ Score = 16.9 bits (32),  Expect = 3.1, Method: Compositional matrix adjust.
+ Identities = 15/54 (28%), Positives = 23/54 (43%), Gaps = 7/54 (13%)
+
+Query  277  SKIKQLLDDGIHVV-----MDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDL  325
+            SK K+ + D I  +     M     + + F L   V+ V     S +GL  PD+
+Sbjct  532  SKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIV--TRLSQQGLVNPDI  583
+
+
+ Score = 16.9 bits (32),  Expect = 3.5, Method: Compositional matrix adjust.
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+
+Query  257  IELDDHAAHLLFSANR  272
+            I+  + A+  L+S NR
+Sbjct  272  IDAKEKASKFLWSNNR  287
+
+
+ Score = 16.9 bits (32),  Expect = 3.5, Method: Compositional matrix adjust.
+ Identities = 10/27 (37%), Positives = 14/27 (52%), Gaps = 3/27 (11%)
+
+Query  148  ASKCMICKIDTKEAP---FTVRFGNDN  171
+            ASK +     TK+ P   + V FG+ N
+Sbjct  278  ASKFLWSNNRTKQPPSSWWPVGFGSKN  304
+
+
+ Score = 16.5 bits (31),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 19/75 (25%), Positives = 32/75 (43%), Gaps = 11/75 (15%)
+
+Query  63   VTHAGEVIEGCTTVSSIKELISVL----PEVV-DVILIDEGQFFTDL-VLVNRLADKGKR  116
+             T  GEV   C    S +  I V     PE    V++I   + + ++ V V  + + GK 
+Sbjct  356  TTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKV  415
+
+Query  117  IVIAALDGTSDQQMF  131
+            I        +D++M+
+Sbjct  416  IKF-----MTDKEMY  425
+
+
+ Score = 16.5 bits (31),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 6/39 (15%), Positives = 18/39 (46%), Gaps = 0/39 (0%)
+
+Query  146  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMY  184
+            ++ ++C   +   +  P       +  + V+ +G +E+Y
+Sbjct  361  EVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELY  399
+
+
+ Score = 16.2 bits (30),  Expect = 5.9, Method: Compositional matrix adjust.
+ Identities = 5/15 (33%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+
+Query  281  QLLDDGIHVVMDRYY  295
+            +++D G+ V   +YY
+Sbjct  598  KMIDFGLIVPCKKYY  612
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 378720
+Results from round 2
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase ...  841     0.0  
+
+Sequences not found previously or not previously below threshold:
+
+YP_009220615.1 putative protein kinase [White spot syndrome virus]    17.7    2.0  
+
+
+> YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase 
+[White spot syndrome virus]
+Length=398
+
+ Score = 841 bits (2174),  Expect = 0.0, Method: Composition-based stats.
+ Identities = 398/398 (100%), Positives = 398/398 (100%), Gaps = 0/398 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+            AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD
+Sbjct  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+
+Query  241  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  300
+            RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV
+Sbjct  241  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  300
+
+Query  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF  360
+            FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF
+Sbjct  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF  360
+
+Query  361  LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+            LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE
+Sbjct  361  LDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+
+
+> YP_009220615.1 putative protein kinase [White spot syndrome virus]
+Length=730
+
+ Score = 17.7 bits (34),  Expect = 2.0, Method: Composition-based stats.
+ Identities = 7/16 (44%), Positives = 11/16 (69%), Gaps = 0/16 (0%)
+
+Query  207  LEGGDRCGKSTQAKLL  222
+            +EGGD+  K T A ++
+Sbjct  1    MEGGDQRTKLTPATVM  16
+
+
+ Score = 17.3 bits (33),  Expect = 2.2, Method: Composition-based stats.
+ Identities = 7/10 (70%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+
+Query  93   ILIDEGQFFT  102
+            I IDE QF T
+Sbjct  110  ITIDENQFAT  119
+
+
+ Score = 16.5 bits (31),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 15/54 (28%), Positives = 23/54 (43%), Gaps = 7/54 (13%)
+
+Query  277  SKIKQLLDDGIHVV-----MDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDL  325
+            SK K+ + D I  +     M     + + F L   V+ V     S +GL  PD+
+Sbjct  532  SKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIV--TRLSQQGLVNPDI  583
+
+
+ Score = 15.7 bits (29),  Expect = 6.6, Method: Composition-based stats.
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+
+Query  257  IELDDHAAHLLFSANR  272
+            I+  + A+  L+S NR
+Sbjct  272  IDAKEKASKFLWSNNR  287
+
+
+ Score = 15.7 bits (29),  Expect = 7.7, Method: Composition-based stats.
+ Identities = 10/27 (37%), Positives = 14/27 (52%), Gaps = 3/27 (11%)
+
+Query  148  ASKCMICKIDTKEAP---FTVRFGNDN  171
+            ASK +     TK+ P   + V FG+ N
+Sbjct  278  ASKFLWSNNRTKQPPSSWWPVGFGSKN  304
+
+
+ Score = 15.4 bits (28),  Expect = 8.9, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  173  NNVICVGGAEMY  184
+            + V+ +G +E+Y
+Sbjct  388  SQVVMIGPSELY  399
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.147    0.476    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0450    0.140     1.90     42.6     43.6 
+
+Effective search space used: 378720
+
+Search has CONVERGED!
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 1,128
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

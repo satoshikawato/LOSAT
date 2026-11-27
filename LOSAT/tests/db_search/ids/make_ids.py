@@ -122,7 +122,19 @@ and `gb|FFF00094.1|`, whose handle comes after it), `ntagc_t5.*` from `nordtagc.
 `gnl|BL_ORD_ID|x050`, `gb|FFF00090.1|` after it) with the taxids of `nordtagc.taxid_map` (99990, and 150 for
 `gb|FFF00090.1|`: the slot of 99990 in a volume's taxonomy cache), and their protein copies `ptagx_t5.*` from
 `pordtagx.faa` and `ptagc_t5.*` from `pordtagc.faa` (`pordtagc.taxid_map`); every other sequence with taxid 99990.
-`--pfworder-only` builds only these. Line DBID
+For the loads that a failed lookup leaves to NCBI's data source's cache of 10 (query `pordslot_q.faa`):
+`pslot11_t5.*` from `pordslot11.faa` (`gb|FFF00090.1|` taxid 150, the best hit, then `gb|FFF00011.1|` to
+`gb|FFF00001.1|` taxid 99990, then the failing `gnl|BL_ORD_ID|x050`, the worst hit), `pslot12_t5.*` and `pslot10_t5.*`
+the same with 12 and 10 loads before the failure (`pordslot12.faa`, `pordslot10.faa`), `pslotc_t5.*` the control with
+`gb|FFF00050.1|` in place of the failing id (`pordslotc.faa`), and `pslotr_t5.*` and `pslotm_t5.*` (`pordslotr.faa`,
+`pordslotm.faa`, the taxids of `pordslot11.taxid_map`) with `gb|FFF00011.1|` and `gb|FFF00001.1|` the best hit, for
+the order in which the cache takes them; `ptie_t5.*` and `ptie150_t5.*` from `pordtie.faa` (`gb|FFF00010.1|`,
+`gb|FFF00050.1|` of the failing tag's packed number, the failing `gnl|BL_ORD_ID|x050`, `gb|FFF00090.1|` taxid 150),
+`gb|FFF00050.1|` with taxid 99990 (`pordtie.taxid_map`) or 150 (`pordtie150.taxid_map`); and the aliases
+`pvab_t5.pal` (`pva_t5` from `pordva.faa`: a load before the failing tag and the tag, `pvb_t5` from `pordvb.faa`: a
+load after it) and `pvcd_t5.pal` (`pvc_t5`, `pvd_t5` from `pordvc.faa`, `pordvd.faa`: the tag and a load after it, a
+load before it), taxid 99990. `nordtag_rc.fna` is the reverse complement of `nordtag_q.fna` (every BLASTN alignment
+on the query's minus strand). `--pfworder-only` builds only these. Line DBID
 weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM): `wkb_e3_v5.*` from `wkb_e3.faa`
 (`gb|FFF00043.1|`, `gb|ZZZ00001.1|`, then `gb|FFF00043|`, which the lookup finds as the first) and `wkb_p1_v5.*` from
 `wkb_p1.faa` (the same with `gb|FFF00043|` a weak hit above -inclusion_ethresh and `gb|WWW00001.1|` before it), for the
@@ -317,7 +329,17 @@ def build_pfworder(args: argparse.Namespace) -> None:
     for name, fasta, dbtype, taxids in (("ntagx_t5", "nordtagx.fna", "nucl", None),
                                         ("ntagc_t5", "nordtagc.fna", "nucl", "nordtagc.taxid_map"),
                                         ("ptagx_t5", "pordtagx.faa", "prot", None),
-                                        ("ptagc_t5", "pordtagc.faa", "prot", "pordtagc.taxid_map")):
+                                        ("ptagc_t5", "pordtagc.faa", "prot", "pordtagc.taxid_map"),
+                                        ("pslot11_t5", "pordslot11.faa", "prot", "pordslot11.taxid_map"),
+                                        ("pslot12_t5", "pordslot12.faa", "prot", "pordslot12.taxid_map"),
+                                        ("pslot10_t5", "pordslot10.faa", "prot", "pordslot10.taxid_map"),
+                                        ("pslotc_t5", "pordslotc.faa", "prot", "pordslotc.taxid_map"),
+                                        ("pslotr_t5", "pordslotr.faa", "prot", "pordslot11.taxid_map"),
+                                        ("pslotm_t5", "pordslotm.faa", "prot", "pordslot11.taxid_map"),
+                                        ("ptie_t5", "pordtie.faa", "prot", "pordtie.taxid_map"),
+                                        ("ptie150_t5", "pordtie.faa", "prot", "pordtie150.taxid_map"),
+                                        ("pva_t5", "pordva.faa", "prot", None), ("pvb_t5", "pordvb.faa", "prot", None),
+                                        ("pvc_t5", "pordvc.faa", "prot", None), ("pvd_t5", "pordvd.faa", "prot", None)):
         if taxids is None:
             taxid_args, title = ["-taxid", "99990"], "taxid 99990"
         else:
@@ -327,6 +349,10 @@ def build_pfworder(args: argparse.Namespace) -> None:
              "-blastdb_version", "5", *taxid_args, "-title", f"{name} (parsed Seq-ids, {title})",
              "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
+    for alias, names in (("pvab_t5", "pva_t5 pvb_t5"), ("pvcd_t5", "pvc_t5 pvd_t5")):
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line NP, item O4b2-10\n#\nTITLE {alias} (two databases, parsed Seq-ids, taxid 99990)\n"
+            f"DBLIST {names}\n")
 
 
 def build_weakbatch(args: argparse.Namespace) -> None:

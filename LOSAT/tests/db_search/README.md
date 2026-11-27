@@ -977,6 +977,28 @@ NCBI's bytes where the load of a packed id before the failure wrote it first (`i
 subjects are refused for other reasons (LOSAT's PSIBLAST has no outfmt 16; `lcl|555` is held by two sequences) and have
 no row here.
 
+The loads that a failed prefetch made (line NP item O4b2-10, round 2; query `ids/pordslot_q.faa`, the same
+`BLASTDB`): NCBI's data source holds the locks of a prefetch's loads until its data loader returns them to the scope,
+and a lookup that throws ends that, so the loads made before it go to the data source's cache of 10 (its map releases
+the largest key first, so the 10 smallest keys stay) and not to the scope, and a report's read of a dropped one loads it
+again and looks its slot up again. `make_ids.py --pfworder-only` writes `ids/pslot11_t5` (`ids/pordslot11.faa`,
+`ids/pordslot11.taxid_map`: `gb|FFF00090.1|` taxid 150, the best hit, then `gb|FFF00011.1|` to `gb|FFF00001.1|` taxid
+99990, then the failing `gnl|BL_ORD_ID|x050`, the worst hit): NCBI drops `gb|FFF00011.1|` and its report's read of it
+writes the offset error again after the 150 load; `ids/pslot12_t5` and `ids/pslot10_t5` the same with 12 and 10 loads
+before the failure (two dropped, none), `ids/pslotc_t5` the control with `gb|FFF00050.1|` in place of the failing id
+(every load held by the scope), and `ids/pslotr_t5` and `ids/pslotm_t5` with `gb|FFF00011.1|` or `gb|FFF00001.1|` the
+best hit (one offset error and two: the largest key is the dropped one). `ids/ptie_t5` and `ids/ptie150_t5`
+(`ids/pordtie.faa`: `gb|FFF00010.1|`, `gb|FFF00050.1|` of the failing tag's packed number, the tag, `gb|FFF00090.1|`
+taxid 150; `gb|FFF00050.1|` with taxid 99990 or 150) hold a load that NCBI's map may put before the failure or after it:
+LOSAT takes it made and not made, and writes NCBI's bytes where both give the same texts, as here (refused before); for
+the same reason `db.o4b2_9.bp.r2.mix.off.16` is an `ncbi` row now. The aliases `ids/pvab_t5.pal` and `ids/pvcd_t5.pal`
+put the loads before and after the tag in two volumes (`pordva.faa` to `pordvd.faa`). `ids/nordtag_rc.fna`, the reverse
+complement of `ids/nordtag_q.fna`, gives BLASTN Seq-aligns on the minus strand, whose lengths NCBI reads only after
+every lookup of the batch succeeded (rows `db.o4b2_10.bn.rc.*` on `ntag_t5`, `ntagx_t5` and `ntagc_t5`, with and without
+`BATCH_SIZE=1`), and `db.o4b2_10.psi.it{2,3}.*` run two and three rounds of psiblast on `ptagx_t5` and `ptagc_t5`.
+NCBI wrote the same bytes of every row in four heap layouts. The 200 ids of NCBI's map count every Seq-align id of the
+batch, also one that a query resolves (a query's own id, line RG-KB item 12; unit tests only).
+
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
 `ids/njoin_a`, `ids/njoin_b`, `ids/njoin_c` (version 5; r1 in all three, r3 with two definition lines and two

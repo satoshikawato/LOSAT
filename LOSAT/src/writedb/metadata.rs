@@ -755,9 +755,9 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         let line = crate::ncbi_exception::post_text(header.as_bytes(), message.as_bytes());
         let line = String::from_utf8(line).expect("the parts are UTF-8");
         let line = if words {
-            crate::wording::losat_text(line)
+            crate::wording::losat_text(&line).into_owned()
         } else {
-            line.into()
+            line
         };
         let _ = err.write_all(format!("{line}\n").as_bytes());
     }

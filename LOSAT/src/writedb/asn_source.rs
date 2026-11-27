@@ -1271,7 +1271,12 @@ pub(crate) fn fix_asn_delta(bioseq: &mut AsnBioseq) -> Result<(), WriteDbError> 
     let mut total_letters = 0usize;
     for item in &items {
         let add = match item {
-            AsnDeltaItem::NullElement => return Err(null_element_refusal("Delta-ext")),
+            AsnDeltaItem::NullElement => {
+                return Err(WriteDbError::Unsupported(
+                    "a NULL element in Delta-ext (NCBI makeblastdb dereferences a NULL pointer there)"
+                        .to_string(),
+                ));
+            }
             AsnDeltaItem::LocNull => 1usize,
             AsnDeltaItem::LocOther => {
                 return Err(ncbi_err(

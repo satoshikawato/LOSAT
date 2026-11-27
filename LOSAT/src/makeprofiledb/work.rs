@@ -159,9 +159,12 @@ impl From<WriteDbError> for RunError {
             }
             WriteDbError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
             WriteDbError::Database(message) => RunError::SeqDb(message.into_bytes()),
+            // `Native` is the end of makeblastdb's object manager on its ASN.1 input, which
+            // makeprofiledb does not read.
             WriteDbError::OutOfMemory
             | WriteDbError::InvalidArgument(_)
-            | WriteDbError::LengthError(_) => RunError::Unknown,
+            | WriteDbError::LengthError(_)
+            | WriteDbError::Native(_) => RunError::Unknown,
             WriteDbError::OrdinalIdWithoutIds => RunError::Refused(
                 "a query whose first definition line has no Seq-id, with -index false (NCBI's \
                  makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"

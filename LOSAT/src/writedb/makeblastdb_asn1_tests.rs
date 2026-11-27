@@ -456,7 +456,7 @@ fn object_manager_address_and_crash_cases_are_refused() {
             String::from_utf8_lossy(&stderr),
             format!(
                 "losat makeblastdb: {} is not supported by LOSAT's makeblastdb\n",
-                refusal.text(super::asn_source::ASN_OBJECT)
+                refusal.text(crate::writedb::asn_source::ASN_OBJECT)
             ),
             "case {name}: stderr"
         );

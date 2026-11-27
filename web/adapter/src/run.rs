@@ -615,14 +615,18 @@ struct SearchRunFiles {
 ///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
 ///   `registered` so a missing file does not make its parent folders present.
 ///
-/// With `-import_search_strategy NAME` and a `-logfile` that names a file, the registered strategy
-/// file (kind 3) adds what it makes the run read (`losat::web_adapter::strategy_reads`, line RG-F
-/// item F2f): its database's and its repeat filter database's lookup files to `read`, the counts
-/// of its window masker taxid to `registered` where the host registered them.
+/// With `-import_search_strategy NAME` (line RG-F item F2f), `read` holds only the inputs that the
+/// import keeps of the argv (`losat::web_adapter::strategy_run_reads`: not BLASTN's
+/// `-filtering_db`, `-in_pssm` or `-in_msa`, nor the list files and taxids without `-db`), and
+/// with a `-logfile` that names a file the registered strategy file (kind 3) adds what it makes
+/// the run read (`losat::web_adapter::strategy_reads`): its database's and its repeat filter
+/// database's lookup files to `read`, the counts of its window masker taxid to `registered` where
+/// the host registered them. `registered` keeps the argv's files that the host holds, which the
+/// run's directory holds whether or not the run reads them.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
-        preparse, scan_program_argv, search_database_read_files, strategy_reads, Preparsed,
-        RegistryFiles as _, StrategyReads,
+        preparse, scan_program_argv, search_database_read_files, strategy_reads,
+        strategy_run_reads, Preparsed, RegistryFiles as _, SearchDatabases, StrategyReads,
     };
     use std::path::Path;
 
@@ -668,6 +672,17 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let mut strategy: Option<String> = None;
     let mut override_subject = false;
     let is_blastn = program == Program::Blastn;
+    scan_program_argv(program_name, arguments, |name, value| match (name, value) {
+        ("import_search_strategy", Some(value)) => strategy = Some(value.to_string()),
+        ("db" | "subject", Some(_)) => override_subject = true,
+        _ => {}
+    });
+    // A run that imports a strategy reads of the argv only what the import keeps
+    // (`strategy_run_reads`). A registered file that it does not read (BLASTN's window masker
+    // counts) is still a file of the run's directory (`registered`).
+    let reads_input = |name: &str| {
+        strategy.is_none() || strategy_run_reads(program.name(), name, override_subject)
+    };
     scan_program_argv(program_name, arguments, |name, value| {
         if name == "no_taxid_expansion" && value.is_none() {
             no_taxid_expansion = true;
@@ -676,27 +691,26 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         let Some(value) = value else {
             return;
         };
-        if matches!(name, "db" | "subject") {
-            override_subject = true;
-        }
+        let read = reads_input(name);
         match name {
-            "import_search_strategy" => strategy = Some(value.to_string()),
             "query" | "subject" => push_input(&mut registered, value),
-            "in_pssm" | "in_msa" => push_input(&mut read_always, value),
+            "in_pssm" | "in_msa" if read => push_input(&mut read_always, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => dbs.push(value.to_string()),
-            "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "filtering_db" if is_blastn && read => filtering_dbs.push(value.to_string()),
             "outfmt" => outfmt = Some(value.to_string()),
-            "taxids" | "negative_taxids" => has_taxids = true,
-            "taxidlist" | "negative_taxidlist" => {
+            "taxids" | "negative_taxids" if read => has_taxids = true,
+            "taxidlist" | "negative_taxidlist" if read => {
                 has_taxids = true;
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
             }
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" => {
+            | "negative_seqidlist"
+                if read =>
+            {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
@@ -724,7 +738,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     }
     let reads: Option<StrategyReads> = strategy
         .and_then(|name| crate::files::strategy(Path::new(&name)))
-        .and_then(|bytes| strategy_reads(arguments, &bytes, override_subject));
+        .and_then(|bytes| strategy_reads(program.name(), arguments, &bytes, override_subject));
     if let Some(taxid) = reads.as_ref().and_then(|reads| reads.window_masker_taxid) {
         push_taxid(&mut registered, &taxid.to_string());
     }
@@ -738,9 +752,11 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         program.api(),
         arguments,
         registry,
-        &db_refs,
-        &filtering_db_refs,
-        reads.as_ref(),
+        SearchDatabases {
+            dbs: &db_refs,
+            filtering_dbs: &filtering_db_refs,
+            strategy: reads.as_ref(),
+        },
         outfmt.as_deref().unwrap_or("0"),
         has_taxids && !no_taxid_expansion,
     ));

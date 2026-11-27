@@ -396,3 +396,67 @@ fn a_logfile_naming_what_the_strategy_reads_is_refused() {
         files::release(handle).unwrap();
     }
 }
+
+/// A run that imports a strategy reads of its argv only what the import keeps (line RG-F item
+/// F2f, fix round 1: `losat::web_adapter::strategy_run_reads`, as on the command line): a
+/// `-logfile` naming a lookup file of BLASTN's `-filtering_db` is no file of the run there. psiblast, whose command line does not import strategies (its
+/// parser refuses the option), reads no strategy: a `-logfile` naming a file of the strategy's
+/// database gets psiblast's own refusal of the option, not the refusal of a file of the run.
+#[test]
+fn a_logfile_naming_what_a_strategy_run_ignores_is_not_refused() {
+    let root = "../../LOSAT/tests/db_search/";
+    let register = |name: &str, file: &str| {
+        let text = std::fs::read_to_string(format!("{}/ss/{file}", fixtures())).unwrap();
+        let text = text.replace("\"tests/db_search/", &format!("\"{root}"));
+        register_strategy(name, text.as_bytes())
+    };
+    let handles = [
+        register("f2f_ign_rpt.ss", "bn_rpt.ss"),
+        register("f2f_ign_bp.ss", "blastp.db.ss"),
+    ];
+    let filtering_db = format!("{root}arch_snucl");
+    let nin = format!("{root}arch_snucl.nin");
+    let argv = [
+        "blastn",
+        "-import_search_strategy",
+        "f2f_ign_rpt.ss",
+        "-filtering_db",
+        &filtering_db,
+        "-logfile",
+        &nin,
+    ];
+    crate::run::validate(&argv).unwrap();
+    // The same `-filtering_db` without a strategy is read: its lookup file is refused.
+    let error = crate::run::validate(&[
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-filtering_db",
+        &filtering_db,
+        "-logfile",
+        &nin,
+    ])
+    .unwrap_err();
+    assert!(
+        error.contains("that is a file of the run's directory"),
+        "{error}"
+    );
+    let pin = format!("{root}arch_sprot.pin");
+    let psiblast = [
+        "psiblast",
+        "-import_search_strategy",
+        "f2f_ign_bp.ss",
+        "-logfile",
+        &pin,
+    ];
+    let error = crate::run::validate(&psiblast).unwrap_err();
+    assert!(
+        !error.contains("that is a file of the run's directory"),
+        "psiblast: {error}"
+    );
+    for handle in handles {
+        files::release(handle).unwrap();
+    }
+}

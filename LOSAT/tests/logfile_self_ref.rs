@@ -1120,6 +1120,113 @@ fn a_logfile_naming_what_an_imported_strategy_reads_is_refused() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Line RG-F item F2f, fix round 1: a run that imports a strategy reads of its command line only
+/// what the import keeps (`import::kept_input`, NCBI's `SetOptionsForSavedStrategy`): not the list
+/// files without `-db` or `-subject`, BLASTN's `-filtering_db`, `-window_masker_db` and
+/// `-window_masker_taxid`, `-index_name` without `-use_index true` (`MbIndexRequest::of`), nor
+/// TBLASTN's `-in_pssm`.
+/// NCBI BLAST+ 2.17.0 posts that they cannot be overridden and runs (exit 0, probe of
+/// 2026-11-27); a `-logfile` naming their files is no input of the run, so LOSAT runs as it does
+/// with a log of its own, and the named file gets what that log gets.
+#[test]
+fn a_logfile_naming_what_a_strategy_run_ignores_is_not_refused() {
+    let dir = fresh_dir("strategy-ignored");
+    strategy_inputs(
+        &dir,
+        &["blastp.db.ss", "bn_rpt.ss", "blastn.db.ss", "tblastn.db.ss"],
+        &[
+            "arch_sprot",
+            "arch_snucl",
+            "rpt_d4",
+            "wm_s60k",
+            "arch_tbn_snucl",
+        ],
+    );
+    fs::write(dir.join("L.txt"), b"x\n").unwrap();
+    fs::write(dir.join("P.pssm"), b"not a pssm\n").unwrap();
+    fs::create_dir_all(dir.join("9606")).unwrap();
+    fs::write(dir.join("9606/wmasker.obinary"), b"counts\n").unwrap();
+    let ignored: &[(&str, &str, &str, &[&str], &str)] = &[
+        (
+            "seqidlist",
+            "blastp",
+            "blastp.db.ss",
+            &["-seqidlist", "L.txt"],
+            "L.txt",
+        ),
+        (
+            "window_masker_db",
+            "blastn",
+            "bn_rpt.ss",
+            &["-window_masker_db", "wm.obinary"],
+            "wm.obinary",
+        ),
+        (
+            "filtering_db",
+            "blastn",
+            "bn_rpt.ss",
+            &["-filtering_db", "tests/db_search/arch_snucl"],
+            "tests/db_search/arch_snucl.nin",
+        ),
+        (
+            "window_masker_taxid",
+            "blastn",
+            "bn_rpt.ss",
+            &["-window_masker_taxid", "9606"],
+            "9606/wmasker.obinary",
+        ),
+        (
+            "index_name",
+            "blastn",
+            "blastn.db.ss",
+            &["-index_name", "idx"],
+            "idx.00.idx",
+        ),
+        (
+            "in_pssm",
+            "tblastn",
+            "tblastn.db.ss",
+            &["-in_pssm", "P.pssm"],
+            "P.pssm",
+        ),
+    ];
+    for &(label, program, strategy, more, log_name) in ignored {
+        let run = |log: &str| {
+            let mut args = vec![program, "-import_search_strategy", strategy];
+            args.extend_from_slice(more);
+            args.extend(["-outfmt", "6", "-logfile", log]);
+            run_in(&dir, &args, &[])
+        };
+        let own_log = format!("{label}.log");
+        let control = run(&own_log);
+        assert_eq!(
+            control.status.code(),
+            Some(0),
+            "{label}: {}",
+            String::from_utf8_lossy(&control.stderr)
+        );
+        assert!(!control.stdout.is_empty(), "{label}: rows");
+        let named = dir.join(log_name);
+        let before = fs::read(&named).unwrap_or_default();
+        let out = run(log_name);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{label}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.stdout, control.stdout, "{label}: stdout");
+        assert_eq!(out.stderr, control.stderr, "{label}: stderr");
+        let log = fs::read(dir.join(&own_log)).unwrap();
+        assert_eq!(
+            fs::read(&named).unwrap(),
+            [before, log].concat(),
+            "{label}: {log_name}"
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Line RG-F item F2f: the library API's inputs that its argv cannot name count as the command
 /// line's do: the database of `Inputs::database` (the command line's `-db`) and what the strategy
 /// of `Inputs::strategy` (`-import_search_strategy`) makes the run read (its import's names). A

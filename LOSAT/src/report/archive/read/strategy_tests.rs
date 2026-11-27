@@ -541,31 +541,31 @@ fn the_xml_reference_follows_the_options_and_the_pairwise_one_the_application() 
 #[test]
 fn a_strategy_names_what_its_run_reads() {
     use super::import::{strategy_reads, StrategyReads};
+    use crate::seqdb::SeqType;
     let read = |file: &str, override_subject: bool| {
         let bytes = std::fs::read(fixtures("strategy/import/ss").join(file)).unwrap();
-        strategy_reads(std::io::Cursor::new(bytes), override_subject)
+        strategy_reads("blastp", std::io::Cursor::new(bytes), override_subject)
     };
-    let database = |name: &str, protein: bool, blastn: bool| StrategyReads {
-        database: Some(format!("tests/db_search/{name}")),
-        subject_is_protein: protein,
-        blastn_task: blastn,
-        ..StrategyReads::default()
+    let reads = |database: Option<&str>, database_type| StrategyReads {
+        database: database.map(|name| format!("tests/db_search/{name}")),
+        database_type,
+        blastn_task: false,
+        filtering_db: None,
+        window_masker_taxid: None,
+        mb_index: None,
     };
     assert_eq!(
         read("blastp.db.ss", false),
-        Some(database("arch_sprot", true, false))
+        Some(reads(Some("arch_sprot"), SeqType::Protein))
     );
     assert_eq!(
         read("tblastx.db.ss", false),
-        Some(database("arch_tbx_snucl", false, false))
+        Some(reads(Some("arch_tbx_snucl"), SeqType::Nucleotide))
     );
     // `-db` or `-subject` of the command line: the strategy's database is not read.
     assert_eq!(
         read("blastp.db.ss", true),
-        Some(StrategyReads {
-            subject_is_protein: true,
-            ..StrategyReads::default()
-        })
+        Some(reads(None, SeqType::Protein))
     );
     let repeat = read("bn_rpt.ss", false).unwrap();
     assert_eq!(
@@ -588,10 +588,23 @@ fn a_strategy_names_what_its_run_reads() {
     assert_eq!(read("blastp.sub.ss", false).unwrap().database, None);
     // What does not read as a strategy names nothing.
     assert_eq!(
-        strategy_reads(std::io::Cursor::new(b"Blast4-request ::= {}\n"), false),
+        strategy_reads(
+            "blastp",
+            std::io::Cursor::new(b"Blast4-request ::= {}\n"),
+            false
+        ),
         None
     );
-    assert_eq!(strategy_reads(std::io::Cursor::new(b""), false), None);
+    assert_eq!(
+        strategy_reads("blastp", std::io::Cursor::new(b""), false),
+        None
+    );
+    // A program whose command line does not import strategies (`imports_strategies`) reads none.
+    let strategy = std::fs::read(fixtures("strategy/import/ss").join("blastp.db.ss")).unwrap();
+    assert_eq!(
+        strategy_reads("psiblast", std::io::Cursor::new(strategy), false),
+        None
+    );
     // The import keeps the same names for the run, also where blastx runs a TBLASTX strategy
     // (whose database is nucleotide).
     for (running, file) in [

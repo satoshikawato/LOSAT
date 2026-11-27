@@ -102,14 +102,15 @@ impl Imported {
 /// application opens before it reads the strategy. The names are the strategy's whether the
 /// import then takes them or refuses the strategy: the file of `-logfile` is open by then, and the
 /// posts of a failed import go into it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StrategyReads {
     /// The strategy's database (`s_ImportDatabase`), when the command line names neither `-db`
     /// nor `-subject`: the running program's `-db`.
     pub database: Option<String>,
-    /// Whether the subject of the strategy's program is protein (`Blast_SubjectIsProtein`), the
-    /// type that its database is opened as.
-    pub subject_is_protein: bool,
+    /// The type that the database is opened as: that of the subjects of the strategy's program
+    /// (`EProgram::subject_is_nucleotide`), not of the running one's (blastx running a TBLASTX
+    /// strategy opens a nucleotide database).
+    pub database_type: crate::seqdb::SeqType,
     /// Whether the strategy's program is BLASTN's (blastn, megablast, dc-megablast: a task that
     /// BLASTN runs, whose database may be searched with its MegaBLAST index).
     pub blastn_task: bool,
@@ -120,19 +121,16 @@ pub struct StrategyReads {
     pub window_masker_taxid: Option<i32>,
     /// The MegaBLAST index that the strategy forces (`ForceMbIndex` with `MbIndexName`), which
     /// BLASTN opens as the database of that name (a new-style index) or the old-style index
-    /// files of the name.
+    /// files of the name, unless the command line names its own ([`MbIndexRequest`]).
     pub mb_index: Option<String>,
 }
 
 impl StrategyReads {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-579
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-756
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:50-51
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-89
     /// The names of the strategy whose options are `options` and whose subject is the database
     /// `database` (`None`: its subjects are Bioseqs, or the command line overrides them): the
     /// setters read as the import reads them (`Collected::take`: the last repeat filter setter
-    /// and the forced index), the subject's type that of the options' program type.
+    /// and the forced index), the database's type that of the options' program type.
     pub(crate) fn of(database: Option<&str>, options: &ImportedOptions) -> Self {
         let mut collected = Collected::default();
         let mut window_masker_taxid = None;
@@ -147,16 +145,11 @@ impl StrategyReads {
         let program = options.options.program;
         Self {
             database: database.map(str::to_string),
-            subject_is_protein: matches!(
-                program,
-                EProgram::Blastp
-                    | EProgram::Blastx
-                    | EProgram::RpsBlast
-                    | EProgram::RpsTblastn
-                    | EProgram::PsiBlast
-                    | EProgram::DeltaBlast
-                    | EProgram::PhiBlastp
-            ),
+            database_type: if program.subject_is_nucleotide() {
+                crate::seqdb::SeqType::Nucleotide
+            } else {
+                crate::seqdb::SeqType::Protein
+            },
             blastn_task: matches!(
                 program,
                 EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
@@ -170,17 +163,23 @@ impl StrategyReads {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
-/// The names that the strategy read from `input` makes the run open ([`StrategyReads`]), read as
-/// the import reads the strategy (`extract_request`, the request, its options) but without the
-/// import's queries, subjects and posts, and with `override_subject` where the command line gives
-/// `-db` or `-subject` (`CBlastDatabaseArgs::HasBeenSet`). NCBI's application opens the file of
-/// `-logfile` before its `Run` reads the strategy, so LOSAT reads the names before the file is
-/// opened. `None` where the input does not read as a strategy whose options are built: the import
-/// then fails with its own error, which this reading neither writes nor changes.
+/// The names that the strategy read from `input` makes the run of `program` (NCBI's name of the
+/// running application) open ([`StrategyReads`]), read as the import reads the strategy
+/// (`extract_request`, the request, its options) but without the import's queries, subjects and
+/// posts, and with `override_subject` where the command line gives `-db` or `-subject`
+/// (`CBlastDatabaseArgs::HasBeenSet`). NCBI's application opens the file of `-logfile` before its
+/// `Run` reads the strategy, so LOSAT reads the names before the file is opened. `None` for a
+/// program whose command line does not import strategies ([`imports_strategies`]) and where the
+/// input does not read as a strategy whose options are built: the import then fails with its own
+/// error, which this reading neither writes nor changes.
 pub(crate) fn strategy_reads<R: IoRead + Seek>(
+    program: &str,
     input: R,
     override_subject: bool,
 ) -> Option<StrategyReads> {
+    if !imports_strategies(program) {
+        return None;
+    }
     let request = Request::from_strategy(extract_request(input, "").ok()?).ok()?;
     let options = import_request(&request).ok()?;
     let database = match (&request.subject, override_subject) {
@@ -1402,8 +1401,15 @@ pub(crate) struct KeptDatabase {
 }
 
 impl KeptDatabase {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2178-2186
+    /// `CBlastDatabaseArgs::HasBeenSet`: whether a command line that gives `-db` (`db_given`) or
+    /// `-subject` (`subject_given`) keeps its database arguments for an imported strategy.
+    pub(crate) fn has_been_set(db_given: bool, subject_given: bool) -> bool {
+        db_given || subject_given
+    }
+
     /// The database arguments of a command line, `None` when it gives neither `-db` nor
-    /// `-subject`.
+    /// `-subject` ([`Self::has_been_set`]).
     pub(crate) fn given(
         db: Option<std::ffi::OsString>,
         subject: Option<std::path::PathBuf>,
@@ -1412,7 +1418,7 @@ impl KeptDatabase {
         db_mask: crate::blastinput::db_mask::DbMaskArgs,
         dbsize: Option<i64>,
     ) -> Option<Self> {
-        (db.is_some() || subject.is_some()).then_some(Self {
+        Self::has_been_set(db.is_some(), subject.is_some()).then_some(Self {
             db,
             subject,
             subject_loc,
@@ -1459,6 +1465,42 @@ impl MbIndexRequest {
             },
             (None, None) => Self::NoName,
         }
+    }
+
+    /// The MegaBLAST index that the run searches with, by its name and whether it is old style:
+    /// the one that the command line names, else the one that the strategy forces (`strategy`,
+    /// `ForceMbIndex` with `MbIndexName`: a new-style index by its name, whose loader goes on to
+    /// the old-style index files of the name). `Err` with NCBI's error where the command line asks
+    /// for an index and names none.
+    pub(crate) fn run_index(self, strategy: Option<String>) -> Result<Option<(Vec<u8>, bool)>> {
+        match self {
+            Self::NoName => Err(crate::blastinput::app::options_error(
+                "Can not deduce database index name",
+            )),
+            Self::Index { name, old_style } => Ok(Some((name, old_style))),
+            Self::None => Ok(strategy.map(|name| (name.into_bytes(), false))),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2178-2186
+/// Whether a run that imports a strategy reads the input that its command line's option `name`
+/// names (a file, a database or a taxid filter), where the command line keeps its database
+/// arguments or not (`database_given`, [`KeptDatabase::has_been_set`]): the arguments of [`Kept`],
+/// which are the classes that `SetOptionsForSavedStrategy` extracts again. They are the query
+/// (`CStdCmdLineArgs`) and, with `-db` or `-subject`, the database arguments with their filters
+/// (`CBlastDatabaseArgs`). It extracts no other class: the filtering options (`-filtering_db`,
+/// `-window_masker_db`, `-window_masker_taxid`) and the PSSM inputs (`-in_pssm`, `-in_msa`) are not
+/// read, and NCBI posts that they cannot be overridden and runs on. The command line's MegaBLAST
+/// index follows [`MbIndexRequest::of`] and [`MbIndexRequest::run_index`].
+pub(crate) fn kept_input(name: &str, database_given: bool) -> bool {
+    match name {
+        "import_search_strategy" | "query" => true,
+        "db" | "subject" | "gilist" | "negative_gilist" | "seqidlist" | "negative_seqidlist"
+        | "taxids" | "negative_taxids" | "taxidlist" | "negative_taxidlist" | "ipglist"
+        | "negative_ipglist" => database_given,
+        _ => false,
     }
 }
 
@@ -1785,18 +1827,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
     // the strategy's (a new-style index by its name). The index is searched by blastn's loader
     // of a database (`blast_engine::mb_index`), which LOSAT runs for blastn's searches of a
     // database only.
-    let index = match mb_index {
-        MbIndexRequest::NoName => {
-            return Err(crate::blastinput::app::options_error(
-                "Can not deduce database index name",
-            ))
-        }
-        MbIndexRequest::Index { name, old_style } => Some((name, old_style)),
-        MbIndexRequest::None => collected
-            .index
-            .take()
-            .map(|name| (name.into_bytes(), false)),
-    };
+    let index = mb_index.run_index(collected.index.take())?;
     if index.is_some() && (T::PROGRAM != Program::Blastn || out.fields().db.is_none()) {
         return Err(unported(
             "a search strategy with a MegaBLAST database index (ForceMbIndex) outside a BLASTN search of a database",

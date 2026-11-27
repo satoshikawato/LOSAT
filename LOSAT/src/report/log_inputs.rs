@@ -22,7 +22,9 @@ use crate::blastinput::ncbi_environment::{
 };
 use crate::dbindex::format::{volume_name as mb_index_volume_name, SuperHeader};
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
-use crate::report::archive::read::import::{imports_strategies, strategy_reads, StrategyReads};
+use crate::report::archive::read::import::{
+    imports_strategies, kept_input, strategy_reads, KeptDatabase, MbIndexRequest, StrategyReads,
+};
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
@@ -381,8 +383,9 @@ fn collect_masker_inputs<S: AsRef<OsStr>>(program: &str, words: &[S], inputs: &m
 /// `psiblast`, `rpsblast`, `rpstblastn`) and all remaining tools (`blastdbcmd`,
 /// `blastdb_aliastool`, `blastdbcheck`, `convert2blastmask`, `makeprofiledb`, and any future
 /// programs whose input files use `Kind::InputFile` or `-archive`), with the library call's inputs
-/// `supplied` read as the command line's words for them, and the names that the strategy of
-/// `-import_search_strategy` makes the run read (`strategy_names`).
+/// `supplied` read as the command line's words for them. A run that imports a strategy
+/// ([`StrategyRun`]) reads of the command line only what the import keeps, and also what the
+/// strategy makes it read (`strategy_names`, the library call's `Supplied::strategy`).
 fn collect_general_inputs<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
@@ -391,10 +394,10 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     inputs: &mut RunInputs,
 ) {
     let is_blastn = program == "blastn";
+    let strategy_run = StrategyRun::of(program, words, supplied);
     let mut reads_formatter_rc = false;
     let mut blastn_dbs: Vec<OsString> = Vec::new();
-    let mut strategy: Option<OsString> = None;
-    let mut override_subject = false;
+    let mut kept_dbs: Vec<OsString> = Vec::new();
     let mut visit = |name: &'static str, kind: Kind, value: Option<&OsStr>| {
         if name == "html" {
             reads_formatter_rc = true;
@@ -414,10 +417,18 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             }
             return;
         }
-        match name {
-            "import_search_strategy" => strategy = Some(value.to_os_string()),
-            "db" | "subject" => override_subject = true,
-            _ => {}
+        if let Some(run) = &strategy_run {
+            if !kept_input(name, run.database_given) {
+                return;
+            }
+            if name == "db" {
+                // Opened as the type of the strategy's database (`strategy_database`).
+                push_db_list(&mut kept_dbs, value);
+                if is_blastn {
+                    push_db_list(&mut blastn_dbs, value);
+                }
+                return;
+            }
         }
         if kind == Kind::InputFile {
             push_non_stdin_file(&mut inputs.files, value);
@@ -462,17 +473,36 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     if let Some((option, path)) = supplied.query_file {
         visit(option, Kind::InputFile, Some(path.as_os_str()));
     }
-    if is_blastn && inputs.mb_indexes.is_empty() {
+    let mut run_index = None;
+    if let Some(run) = strategy_run {
+        let reads = supplied.strategy.cloned().or_else(|| {
+            run.path
+                .and_then(|path| strategy_names(program, &path, run.database_given))
+        });
+        for db in &kept_dbs {
+            match &reads {
+                Some(reads) => inputs.add_typed_db(db, reads.database_type, is_blastn),
+                None => inputs.add_db(db),
+            }
+        }
+        if let Some(reads) = &reads {
+            inputs.add_strategy(reads, start);
+        }
+        let forced = reads.and_then(|reads| reads.mb_index);
+        run_index = run.mb_index.run_index(forced).ok().flatten();
+    }
+    // BLASTN's `-db` counts its old-style index files unless `-index_name` names the index (an
+    // imported strategy's run: unless its index is the old-style one of `-index_name`).
+    if is_blastn
+        && inputs.mb_indexes.is_empty()
+        && !run_index.as_ref().is_some_and(|&(_, old_style)| old_style)
+    {
         for db in blastn_dbs {
             inputs.add_mb_index(&db);
         }
     }
-    if let Some(reads) = supplied.strategy {
-        inputs.add_strategy(reads, start);
-    }
-    if let Some(reads) = strategy.and_then(|path| strategy_names(program, &path, override_subject))
-    {
-        inputs.add_strategy(&reads, start);
+    if let Some((name, old_style)) = run_index {
+        inputs.add_run_index(&name, old_style);
     }
     if reads_formatter_rc {
         push_file(&mut inputs.files, PathBuf::from(".ncbirc"));
@@ -485,17 +515,83 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     }
 }
 
+/// The command line's arguments of a run that imports a strategy: the strategy of
+/// `-import_search_strategy` (or the library call's `Supplied::strategy`) of a program whose
+/// command line imports strategies (`import::imports_strategies`, which `strategy_reads` checks),
+/// whether or not the strategy reads. The import keeps of the command line only the inputs of
+/// `import::kept_input` and the MegaBLAST index of `MbIndexRequest::of` (`import::Kept`).
+struct StrategyRun {
+    /// The file of `-import_search_strategy` (`None` for the library call's strategy).
+    path: Option<OsString>,
+    /// `KeptDatabase::has_been_set`: the command line gives `-db` (or the library call
+    /// `Inputs::database`) or `-subject`.
+    database_given: bool,
+    /// BLASTN's `CMbIndexArgs` of the command line (`MbIndexRequest::None` for the other
+    /// programs).
+    mb_index: MbIndexRequest,
+}
+
+impl StrategyRun {
+    /// The strategy run of `program` with `words` and the library call's inputs `supplied`, `None`
+    /// for a run that imports no strategy.
+    fn of<S: AsRef<OsStr>>(program: &str, words: &[S], supplied: Supplied<'_>) -> Option<Self> {
+        let mut path = None;
+        let mut db = supplied.database.map(OsStr::to_os_string);
+        let mut subject_given = false;
+        let mut use_index = None;
+        let mut task = None;
+        let mut index_name = None;
+        scan_argv_kinds(program, words, |name, _, value| {
+            let Some(value) = value else {
+                return;
+            };
+            match name {
+                "import_search_strategy" => path = Some(value.to_os_string()),
+                "db" => db = Some(value.to_os_string()),
+                "subject" => subject_given = true,
+                "use_index" => use_index = value.to_str().and_then(crate::ncbi_str::string_to_bool),
+                "task" => task = Some(value.to_os_string()),
+                "index_name" => index_name = Some(value.to_os_string()),
+                _ => {}
+            }
+        });
+        let imports =
+            (path.is_some() && imports_strategies(program)) || supplied.strategy.is_some();
+        if !imports {
+            return None;
+        }
+        let mb_index = if program == "blastn" {
+            MbIndexRequest::of(
+                use_index,
+                task.as_deref()
+                    .and_then(OsStr::to_str)
+                    .unwrap_or("megablast"),
+                subject_given,
+                index_name.as_deref(),
+                db.as_deref(),
+            )
+        } else {
+            MbIndexRequest::None
+        };
+        Some(Self {
+            path: path.filter(|_| supplied.strategy.is_none()),
+            database_given: KeptDatabase::has_been_set(db.is_some(), subject_given),
+            mb_index,
+        })
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
 /// What the strategy file `path` of `program`'s `-import_search_strategy` makes the run read
-/// (`import::strategy_reads`; `override_subject`: the command line gives `-db` or `-subject`),
-/// read before the file of `-logfile` is opened, as NCBI's application opens it before its run
-/// reads the strategy. Only a program whose command line imports strategies reads it, and only a
-/// regular file, which a second reading finds as the import does: the standard input (`-`), a
-/// pipe or a device is read once, by the import, and adds nothing here. A file that does not read
-/// as a strategy adds nothing either (the import reports it).
+/// (`import::strategy_reads`, `None` for a program whose command line does not import strategies;
+/// `override_subject`: the command line gives `-db` or `-subject`), read before the file of
+/// `-logfile` is opened, as NCBI's application opens it before its run reads the strategy. Only a
+/// regular file is read, which a second reading finds as the import does: the standard input
+/// (`-`), a pipe or a device is read once, by the import, and adds nothing here. A file that does
+/// not read as a strategy adds nothing either (the import reports it).
 fn strategy_names(program: &str, path: &OsStr, override_subject: bool) -> Option<StrategyReads> {
-    if !imports_strategies(program) || path.is_empty() || path == "-" {
+    if path.is_empty() || path == "-" {
         return None;
     }
     let path = Path::new(path);
@@ -503,7 +599,7 @@ fn strategy_names(program: &str, path: &OsStr, override_subject: bool) -> Option
         return None;
     }
     let file = std::fs::File::open(path).ok()?;
-    strategy_reads(std::io::BufReader::new(file), override_subject)
+    strategy_reads(program, std::io::BufReader::new(file), override_subject)
 }
 
 /// Whether any path in `candidates` refers to the same file (or missing target) as any input in
@@ -674,9 +770,9 @@ impl RunInputs {
         push_db_list(&mut self.mb_indexes, value);
     }
 
-    fn add_typed_db(&mut self, name: &str, seqtype: SeqType, mb_volumes: bool) {
+    fn add_typed_db(&mut self, name: &OsStr, seqtype: SeqType, mb_volumes: bool) {
         let entry = TypedDatabase {
-            name: OsString::from(name),
+            name: name.to_os_string(),
             seqtype,
             mb_volumes,
         };
@@ -707,28 +803,31 @@ impl RunInputs {
     }
 
     /// The names that an imported strategy makes the run read (`reads`): its database as the type
-    /// of its program's subjects, the repeat filter's database, the window masker's counts of its
-    /// taxid, and its MegaBLAST index, as both the database of that name (a new-style index) and
-    /// the old-style index files of the name.
+    /// of its program's subjects, the repeat filter's database and the window masker's counts of
+    /// its taxid. Its MegaBLAST index is the run's unless the command line names one
+    /// (`add_run_index`).
     fn add_strategy(&mut self, reads: &StrategyReads, start: &ApplicationStart) {
         if let Some(database) = &reads.database {
-            let seqtype = if reads.subject_is_protein {
-                SeqType::Protein
-            } else {
-                SeqType::Nucleotide
-            };
-            self.add_typed_db(database, seqtype, reads.blastn_task);
+            self.add_typed_db(OsStr::new(database), reads.database_type, reads.blastn_task);
         }
         if let Some(database) = &reads.filtering_db {
-            self.add_typed_db(database, SeqType::Nucleotide, reads.blastn_task);
+            self.add_typed_db(OsStr::new(database), SeqType::Nucleotide, reads.blastn_task);
         }
         if let Some(taxid) = reads.window_masker_taxid {
             self.add_window_masker_taxid(taxid, start);
         }
-        if let Some(index) = &reads.mb_index {
-            self.add_typed_db(index, SeqType::Nucleotide, true);
-            self.add_mb_index(OsStr::new(index));
+    }
+
+    /// The MegaBLAST index `name` that a run importing a strategy searches with
+    /// (`MbIndexRequest::run_index`): the old-style index files of the name, and for a new-style
+    /// index (`old_style` false) also the database of the name, whose volumes' index files the
+    /// loader reads before it goes on to the old-style files.
+    fn add_run_index(&mut self, name: &[u8], old_style: bool) {
+        let name = crate::utils::os_bytes::os_string_from_bytes(name.to_vec());
+        if !old_style {
+            self.add_typed_db(&name, SeqType::Nucleotide, true);
         }
+        self.add_mb_index(&name);
     }
 
     fn set_dbtype(&mut self, value: &OsStr) {

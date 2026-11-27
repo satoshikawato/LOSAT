@@ -86,21 +86,30 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::windowmasker::read_files(words)
 }
 
-/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
-/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
-/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
-/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
-/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b), and
-/// those of the databases that an imported strategy names (`strategy`: its database, opened as
-/// the type of its program's subjects, and the repeat filter's; line RG-F item F2f).
-#[allow(clippy::too_many_arguments)]
+/// The databases of a search whose files [`search_database_read_files`] names.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchDatabases<'a> {
+    /// The argv's `-db` values.
+    pub dbs: &'a [&'a str],
+    /// BLASTN's `-filtering_db` values.
+    pub filtering_dbs: &'a [&'a str],
+    /// What an imported strategy makes the run read (`strategy_reads`): its database and the
+    /// repeat filter's, and the type that the run opens the databases as (that of the strategy
+    /// program's subjects, also for `dbs`).
+    pub strategy: Option<&'a StrategyReads>,
+}
+
+/// File names that `seqdb` checks or opens for the databases `databases` of a search
+/// ([`SearchDatabases`]), plus the taxonomy lookup files (`seqdb::taxdb::lookup_files_for_use`)
+/// when `outfmt` consults `taxdb` (`algorithm::common::database::outfmt_taxdb_use`) and
+/// `taxonomy4blast.sqlite3` when `expands_taxids` is true and a taxonomy file exists on the
+/// search path (line WQA D19b). The databases of an imported strategy are opened as the type of
+/// its program's subjects (line RG-F item F2f).
 pub fn search_database_read_files(
     program: crate::api::Program,
     arguments: &[&str],
     registry: &dyn RegistryFiles,
-    dbs: &[&str],
-    filtering_dbs: &[&str],
-    strategy: Option<&StrategyReads>,
+    databases: SearchDatabases<'_>,
     outfmt: &str,
     expands_taxids: bool,
 ) -> Vec<Vec<u8>> {
@@ -116,13 +125,12 @@ pub fn search_database_read_files(
         crate::api::Program::Tblastx => RequestKind::Tblastx,
         crate::api::Program::Psiblast => RequestKind::Psiblast,
     };
-    let strategy_db = strategy.and_then(|reads| {
-        let seqtype = match reads.subject_is_protein {
-            true => crate::seqdb::SeqType::Protein,
-            false => crate::seqdb::SeqType::Nucleotide,
-        };
-        reads.database.as_deref().map(|db| (db, seqtype))
-    });
+    let SearchDatabases {
+        dbs,
+        filtering_dbs,
+        strategy,
+    } = databases;
+    let strategy_db = strategy.and_then(|reads| reads.database.as_deref());
     let strategy_filtering_db = strategy.and_then(|reads| reads.filtering_db.as_deref());
     let has_db = !dbs.is_empty() || strategy_db.is_some();
     let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
@@ -142,13 +150,20 @@ pub fn search_database_read_files(
     .settings()
     .ok()
     .and_then(|settings| settings.blastdb);
-    let seqtype = match program {
-        crate::api::Program::Blastp
-        | crate::api::Program::Blastx
-        | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
-        crate::api::Program::Blastn
-        | crate::api::Program::Tblastn
-        | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
+    let seqtype = match (strategy, program) {
+        (Some(reads), _) => reads.database_type,
+        (
+            None,
+            crate::api::Program::Blastp
+            | crate::api::Program::Blastx
+            | crate::api::Program::Psiblast,
+        ) => crate::seqdb::SeqType::Protein,
+        (
+            None,
+            crate::api::Program::Blastn
+            | crate::api::Program::Tblastn
+            | crate::api::Program::Tblastx,
+        ) => crate::seqdb::SeqType::Nucleotide,
     };
     let mut out = Vec::new();
     let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
@@ -162,8 +177,8 @@ pub fn search_database_read_files(
     for db in dbs {
         push_db(&mut out, db, seqtype);
     }
-    if let Some((db, db_type)) = strategy_db {
-        push_db(&mut out, db, db_type);
+    if let Some(db) = strategy_db {
+        push_db(&mut out, db, seqtype);
     }
     let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
     out.extend(crate::seqdb::taxdb::lookup_files_for_use(
@@ -186,15 +201,18 @@ pub fn search_database_read_files(
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
-/// What the strategy file `bytes` of a search's `-import_search_strategy` makes the run read
-/// (`report::archive::read::import::strategy_reads`, the command line's reading before it opens
-/// `-logfile`), where the argv gives `-db` or `-subject` (`override_subject`) or not: its
-/// database, the repeat filter's database, the window masker's taxid and its MegaBLAST index.
-/// `None` where the `-logfile` of `arguments` (the words after the program's name) names no file
-/// (`special_log_target`: none, `-`, empty, `/dev/null`), so that a run without one reads nothing
-/// more, as on the command line (`report::log_inputs::check_disk_logfile`), and for bytes that do
-/// not read as a strategy (the run's import reports them).
+/// What the strategy file `bytes` of the `-import_search_strategy` of a search of `program`
+/// (NCBI's name) makes the run read (`report::archive::read::import::strategy_reads`, the command
+/// line's reading before it opens `-logfile`), where the argv gives `-db` or `-subject`
+/// (`override_subject`) or not: its database, the repeat filter's database, the window masker's
+/// taxid and its MegaBLAST index. `None` for a program whose command line does not import
+/// strategies (`import::imports_strategies`), where the `-logfile` of `arguments` (the words after
+/// the program's name) names no file (`special_log_target`: none, `-`, empty, `/dev/null`), so
+/// that a run without one reads nothing more, as on the command line
+/// (`report::log_inputs::check_disk_logfile`), and for bytes that do not read as a strategy (the
+/// run's import reports them).
 pub fn strategy_reads(
+    program: &str,
     arguments: &[&str],
     bytes: &[u8],
     override_subject: bool,
@@ -203,9 +221,22 @@ pub fn strategy_reads(
         return None;
     }
     crate::report::archive::read::import::strategy_reads(
+        program,
         std::io::Cursor::new(bytes),
         override_subject,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// Whether a search of `program` (NCBI's name) whose argv gives `-import_search_strategy` reads
+/// the input that its option `name` names, where the argv gives `-db` or `-subject`
+/// (`database_given`) or not: `report::archive::read::import::kept_input`, the arguments that the
+/// import keeps of the command line, for a program whose command line imports strategies
+/// (`import::imports_strategies`); every input where it does not (its parser refuses the
+/// option).
+pub fn strategy_run_reads(program: &str, name: &str, database_given: bool) -> bool {
+    use crate::report::archive::read::import::{imports_strategies, kept_input};
+    !imports_strategies(program) || kept_input(name, database_given)
 }
 
 pub use crate::report::archive::read::import::StrategyReads;

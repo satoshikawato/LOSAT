@@ -108,6 +108,27 @@ impl EProgram {
                 | EProgram::PhiBlastn
         )
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-90
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-755
+    /// `Blast_SubjectIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`):
+    /// the nucleotide searches and the translated subjects; the others search protein (or
+    /// profile) databases.
+    pub fn subject_is_nucleotide(self) -> bool {
+        matches!(
+            self,
+            EProgram::Blastn
+                | EProgram::Megablast
+                | EProgram::DiscMegablast
+                | EProgram::VecScreen
+                | EProgram::Mapper
+                | EProgram::Tblastn
+                | EProgram::PsiTblastn
+                | EProgram::Tblastx
+                | EProgram::PhiBlastn
+        )
+    }
 }
 
 /// A `Blast4-parameter` as the reader gives it: the name (a VisibleString: the reader keeps bytes

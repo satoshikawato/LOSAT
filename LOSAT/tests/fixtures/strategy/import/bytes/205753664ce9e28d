@@ -1,0 +1,6 @@
+Warning: [tblastx] Overriding database/subject in saved strategy
+Warning: [tblastx] Overriding query in saved strategy
+Warning: [tblastx] seg cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz

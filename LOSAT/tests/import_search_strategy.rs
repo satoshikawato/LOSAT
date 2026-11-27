@@ -254,6 +254,87 @@ fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Line RG-F item F2f: where a program runs another program's strategy, LOSAT's refusal of a row
+/// that NCBI BLAST+ 2.17.0 stops at with its null pointer exception (`sacc` of a subject whose
+/// title NCBI makes a `Subject_` id from: `report::tabular::check_failed_lookups`) names the
+/// running application, as NCBI's warnings before it do (`[blastn]`: NCBI's standard error up to
+/// its exception, frozen in `bytes/`). The pairs reach the callers of three engines: TBLASTX's
+/// under blastn and blastx, BLASTN's and BLASTX's under tblastx. NCBI writes the row's first field
+/// (`nq1\t`) and exits 255; LOSAT refuses the row before writing any of it and exits 1.
+#[test]
+fn a_refusal_of_another_programs_strategy_names_the_running_application() {
+    let pairs = [
+        (
+            "blastn",
+            "tblastx.db.ss",
+            "lone.fna",
+            "c4e6b2aa79f91175",
+            "BLASTN",
+        ),
+        (
+            "blastx",
+            "tblastx.db.ss",
+            "lone.fna",
+            "856c01cfcde931db",
+            "BLASTX",
+        ),
+        (
+            "tblastx",
+            "blastn.db.ss",
+            "lone.fna",
+            "205753664ce9e28d",
+            "TBLASTX",
+        ),
+        (
+            "tblastx",
+            "blastx.db.ss",
+            "lone.faa",
+            "205753664ce9e28d",
+            "TBLASTX",
+        ),
+    ];
+    let mut failed = Vec::new();
+    for (program, strategy, subject, warnings, app) in pairs {
+        let case = Case {
+            name: format!("{program} running {strategy}"),
+            program: program.to_string(),
+            args: [
+                "-import_search_strategy",
+                &format!("{{ss}}/{strategy}"),
+                "-query",
+                "tests/db_search/t7/nq.fna",
+                "-subject",
+                &format!("tests/db_search/t7/{subject}"),
+                "-outfmt",
+                "6 qseqid sacc sscinames",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+            rc: 1,
+            out: "-".to_string(),
+            err: warnings.to_string(),
+        };
+        let output = run(&case, None);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let want = String::from_utf8(frozen(&case.err)).expect("UTF-8 warnings");
+        let refusal = stderr.strip_prefix(want.as_str());
+        let named = refusal.is_some_and(|line| {
+            line.starts_with("Error: subject record 1 (Subject_9) has a title")
+                && line.ends_with(&format!("which is not supported by LOSAT's {app}\n"))
+                && line.matches('\n').count() == 1
+        });
+        if output.status.code() != Some(case.rc) || !output.stdout.is_empty() || !named {
+            failed.push(format!(
+                "{}: exit {:?}, stdout {} bytes, stderr {stderr:?}",
+                case.name,
+                output.status.code(),
+                output.stdout.len()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 struct TempDir(PathBuf);
 
 impl TempDir {

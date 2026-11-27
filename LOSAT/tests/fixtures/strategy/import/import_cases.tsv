@@ -2,8 +2,9 @@
 # space, {ss} the folder ss/), exit status, and the files of bytes/ that hold NCBI BLAST+ 2.17.0's
 # -num_threads 1 standard output and standard error (- empty). Probe ids of line RG item F2
 # (remaining-gaps-20261112/F/f2/tools/freeze_import.py; the rows of fix round 3, freeze_b3.py: the SAM
-# documents without the CL tag of their @PG line; the C.*.f6sci rows of line RG-F item F2f, NCBI's
-# warning prefix of the running application, probe of 2026-11-27).
+# documents without the CL tag of their @PG line; the C.*.f6sci rows of line RG-F item F2f: the
+# taxonomy warning of another program's strategy, whose prefix names the running application, probe
+# of 2026-11-27).
 name	program	args	rc	out	err
 I.blastn.db.alone	blastn	-import_search_strategy {ss}/blastn.db.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
 I.blastn.db.q2	blastn	-import_search_strategy {ss}/blastn.db.ss -query tests/fixtures/strategy/import/in/q2_n.fna	0	d3756404cf373675	5fb617f6dbc5f542

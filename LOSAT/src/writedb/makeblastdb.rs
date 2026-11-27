@@ -1615,7 +1615,11 @@ pub(crate) fn run_with_env(
         stderr: err,
     };
     match log {
-        Some(mut log) => {
+        Some(log) => {
+            let mut log = LogLines {
+                file: log,
+                line: Vec::new(),
+            };
             let result = build_database_with_log(
                 args,
                 env,
@@ -1629,6 +1633,7 @@ pub(crate) fn run_with_env(
                 None,
                 &mut end_messages,
             );
+            let _ = log.flush();
             finish(result, &end_messages, &mut diag)
         }
         None => {
@@ -1651,6 +1656,37 @@ pub(crate) fn run_with_env(
             );
             finish(result, &end_messages, &mut diag)
         }
+    }
+}
+
+/// The file of `-logfile` as NCBI's log stream writes it: each line, ended by its `NcbiEndl`, in
+/// one write (line RG KD-11b2: the pieces of a line are not written one by one); the bytes of a
+/// line not ended yet at the end.
+struct LogLines {
+    file: std::fs::File,
+    /// The bytes of the line being written.
+    line: Vec<u8>,
+}
+
+impl Write for LogLines {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut rest = buf;
+        while let Some(at) = rest.iter().position(|&byte| byte == b'\n') {
+            self.line.extend_from_slice(&rest[..=at]);
+            rest = &rest[at + 1..];
+            let line = std::mem::take(&mut self.line);
+            self.file.write_all(&line)?;
+        }
+        self.line.extend_from_slice(rest);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.line.is_empty() {
+            let line = std::mem::take(&mut self.line);
+            self.file.write_all(&line)?;
+        }
+        self.file.flush()
     }
 }
 

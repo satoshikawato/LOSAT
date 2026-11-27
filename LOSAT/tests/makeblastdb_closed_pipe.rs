@@ -207,9 +207,9 @@ fn a_logfile_that_is_the_closed_pipe_makes_no_file() {
 // file streams lose what their buffers hold: the volume's files are empty (line RG item T8b,
 // `remaining-gaps-20261112/T/t8b/part3`, nucleotide and protein, versions 4 and 5). LOSAT ends
 // there with exit status 0 and drops those bytes too (`writedb::ofstream::end_at_closed_pipe`).
-// NCBI's ended process also leaves LMDB's lock files, which LOSAT does not make
-// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). With one sequence the volume is not made
-// before that line, and neither program leaves a file.
+// NCBI's ended process also leaves LMDB's lock files, which no destructor removes, and so does
+// LOSAT's run (line RG item T8c). With one sequence the volume is not made before that line, and
+// neither program leaves a file.
 #[test]
 fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
     use std::io::{BufRead, Write};
@@ -285,6 +285,23 @@ fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
                 0,
                 "{name}: {file}"
             );
+        }
+        // NCBI's files (`slow_max5`, `slow_max5p`): the volume's, LMDB's data files and their
+        // lock files of 8192 bytes.
+        let t = &volume[0][5..6];
+        let mut left: Vec<String> = std::fs::read_dir(&p)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let mut want: Vec<String> = volume.iter().map(|file| file.to_string()).collect();
+        for lmdb in ["db", "db-lock", "tf", "tf-lock"] {
+            want.push(format!("d.{t}{lmdb}"));
+        }
+        assert_eq!(left, want, "{name}");
+        for lock in ["db-lock", "tf-lock"] {
+            let file = p.join(format!("d.{t}{lock}"));
+            assert_eq!(std::fs::metadata(file).unwrap().len(), 8192, "{name}");
         }
     }
 }

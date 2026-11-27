@@ -422,14 +422,3 @@ fn the_disk_file_on_a_full_device_fails_at_the_flush() {
     stream.close();
     assert!(stream.fail());
 }
-
-#[test]
-fn discard_unflushed_drops_held_bytes_without_writing_them() {
-    let (mut stream, bytes) = scripted(false, false);
-    stream.write(b"flushed\n");
-    stream.flush();
-    stream.write(b"buffered_only\n");
-    stream.discard_unflushed();
-    drop(stream);
-    assert_eq!(*bytes.borrow(), b"flushed\n");
-}

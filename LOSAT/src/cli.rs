@@ -992,7 +992,9 @@ fn posted(text: &[u8]) -> bool {
 }
 
 /// Makes the command line's run write an error's text before its error archive
-/// (`post_native_error`); called by `main_entry` only.
+/// (`post_native_error`), and marks the process as the command line's (`is_command_line_run`);
+/// called by `main_entry` only (for the programs after the options are read, and for
+/// makeprofiledb, whose database files end at a closed pipe as the command line's process).
 pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }

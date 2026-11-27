@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.37 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.38 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -91,7 +91,10 @@
   is NCBI's, the later writes dropped and the run going on to its exit status; rpsbproc's closed
   pipe, of its report, its standard error, its version and its help, in exception 10; makeblastdb's
   volume files at a closed pipe of its log as NCBI's, exception 10; line RG item T8b;
-  Owner-delegated, the same standing instruction)
+  Owner-delegated, the same standing instruction);
+  1.38 2026-11-27 (exception 10: makeprofiledb's database files at a closed pipe as NCBI's, and
+  LMDB's lock files left where NCBI's ended process leaves them, makeblastdb's too; line RG item
+  T8c; Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -311,7 +314,7 @@ BLAST+.
    line NP item M5a; version 1.31, 2026-11-24, makeblastdb's log, the Owner's choice, line
    RG item KD; version 1.32, 2026-11-25, makembindex, Owner-delegated, line RG item KD; version 1.35, 2026-11-26,
    makeprofiledb, Owner-delegated, line RG item KD; version 1.37, 2026-11-27, rpsbproc, Owner-delegated, line RG
-   item T8b). A write of NCBI's blastdbcmd 2.17.0,
+   item T8b; version 1.38, 2026-11-27, the files makeprofiledb leaves, Owner-delegated, line RG item T8c). A write of NCBI's blastdbcmd 2.17.0,
    dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
@@ -371,8 +374,9 @@ BLAST+.
    files for a few short sequences, nucleotide and protein, versions 4 and 5; for a volume cut by
    `-max_file_sz` the same 32,976 header bytes and sequence file). Before, LOSAT's volume files
    held what its writer had passed on (every sequence but the last). NCBI's ended process also
-   leaves LMDB's lock files (`.ndb-lock`, `.ntf-lock`), which LOSAT's writer removes as it does
-   after an error (PD-LOSAT-DATABASE-SEARCH). A build that LOSAT
+   leaves LMDB's lock files (`.ndb-lock`, `.ntf-lock`), which no destructor removes; since version
+   1.38 (line RG item T8c) LOSAT's run leaves them too (`writedb::mdb::Env`), where before its
+   writer removed them as it does after an error (PD-LOSAT-DATABASE-SEARCH). A build that LOSAT
    refuses at its end (mask data whose order NCBI takes from memory addresses) removes its files
    when the closed pipe meets the first line of `EndBuild`, so that LOSAT leaves no database it
    refuses. With `-logfile` naming a file nothing goes to the standard output, and the build runs
@@ -425,9 +429,25 @@ BLAST+.
    (`writedb_convert.cpp:464-466`) on a closed standard-output pipe (even with `-logfile`), NCBI
    2.17.0 is ended by SIGPIPE inside `AddSequence` without closing the writer, flushing buffered
    `-logfile` bytes, or running `~CMakeProfileDBApp`, and LOSAT stops there with exit status 0,
-   no message, and unflushed `-logfile` bytes discarded (`OfStream::discard_unflushed`). Non-pipe
+   no message, and the `-logfile` file's buffered bytes lost as NCBI's are. Non-pipe
    write failures (`/dev/full`) and `-logfile` naming a regular file complete with exit status 0
    in both.
+   Since version 1.38 (line RG item T8c; NCBI makeprofiledb 2.17.0, 2026-11-27, cases of
+   `-dbtype rps` and `delta`, one volume and three, each run 3 times with the same result) the
+   files left where makeprofiledb ends at a closed pipe hold NCBI's bytes. NCBI's ended process
+   runs no destructor, and its file streams (`std::ofstream`, an 8,191-byte buffer) lose what
+   they hold: `.rps` and `.freq` hold their header, the rows of each profile added and the offset
+   of each but the last (`makeprofiledb.cpp:755-768,1029-1060,1170-1181`), and nothing when the
+   end comes before the volume's first profile is published (the header still held); `.aux` and
+   the volume's `.phr` and `.psq` hold what their buffers passed on when a write did not fit, not
+   what they still held; `.loo` and `.pin` are empty; LMDB's data and lock files of the volume being built stay; the complete volumes before
+   it stay as they are, `.pog` included (no `~CMakeProfileDBApp`). LOSAT writes the RPS files
+   through NCBI's stream, NCBI's writes in NCBI's order (`makeprofiledb::rps_files::RpsVolume`,
+   `writedb::ofstream::OfStream`), and each closed-pipe end of makeprofiledb
+   (`makeprofiledb::work::RunError::closed_pipe`) drops what the database's file buffers hold and
+   leaves LMDB's lock files (`writedb::ofstream::end_at_closed_pipe`). Before, LOSAT's RPS files
+   wrote everything they had at their end (all of `.aux`, the last offset, the header of a volume
+   with no profile), its volume files their held bytes, and its writer removed LMDB's lock files.
    Since version 1.37 the same holds for `losat rpsbproc` (line RG item T8b; NCBI's rpsbproc
    0.5.1, both builds, on ws, 2026-11-27). NCBI writes its report through an `ostream` with no
    exception mask (`RpsbProc/src/rpsbproc_main.cpp:727-917`), each line ending with `endl`, and
@@ -452,11 +472,12 @@ BLAST+.
    `blastdbcmd/metadata.rs` (`writedb::metadata::write_metadata`, `writedb::cout`),
    `taxonomy.rs`, `list.rs` and `mod.rs`; `writedb::build_db::endl` (`WriteDbError::ClosedPipe`)
    and `writedb::makeblastdb::CoutLog` for makeblastdb's log (`writedb::ofstream::end_at_closed_pipe`
-   for its volume files); `makembindex::work::run`
+   for its volume files, `writedb::mdb::Env` for LMDB's lock files); `makembindex::work::run`
    (`Failure::ClosedPipe`), `dbindex::factory::make_index` (`Stop::ClosedPipe`) and
    `dbindex::format::SuperHeader::save` for makembindex; `makeprofiledb::work::run`
    (`RunError::ClosedPipe`, `post_diag`, `ncbi_app::Diag::is_cerr`, `writedb::cout::cout`,
-   `writedb::ofstream::Stream::discard_unflushed`,
+   `writedb::ofstream::end_at_closed_pipe` (`RunError::closed_pipe`),
+   `makeprofiledb::rps_files::RpsVolume`,
    `writedb::writer::WriteDb::add_sequence_with_cout`,
    `writedb::writer::WriteDb::close_with_cout`, `post_writer`) for makeprofiledb;
    `rpsbproc::Report`, `rpsbproc::write_stderr_bytes` and `rpsbproc::closed_end` for rpsbproc.
@@ -485,10 +506,10 @@ BLAST+.
    `delta_buffered_exclusion_before_error_on_closed_stdout_pipe`,
    `cerr_tie_matches_ncbi_combined_stream_order`,
    `delta_cerr_tie_stops_at_ncbi_point_on_closed_stdout_pipe`,
-   `delta_regular_logfile_has_no_cerr_tie_and_matches_ncbi`), `makeprofiledb/work_tests.rs`
+   `delta_regular_logfile_has_no_cerr_tie_and_matches_ncbi`,
+   `a_closed_pipe_leaves_ncbis_bytes_where_the_run_ends`), `makeprofiledb/work_tests.rs`
    (`cout_log_buffers_exclusion_lines_until_flush_or_overflow`,
-   `post_diag_flushes_cout_only_for_cerr_and_respects_empty_and_suppressed_posts`) and
-   `writedb/ofstream_fixture_tests.rs` (`discard_unflushed_drops_held_bytes_without_writing_them`),
+   `post_diag_flushes_cout_only_for_cerr_and_respects_empty_and_suppressed_posts`),
    `tests/rpsbproc_fixtures.rs` (`rpsbproc_gives_ncbis_bytes_on_failed_and_closed_streams`, the
    `device` rows of `tests/fixtures/rpsbproc/CASES.tsv`, and
    `rpsbproc_drops_an_argument_error_it_cannot_write`). Release-notes sentence: When the reader of `losat

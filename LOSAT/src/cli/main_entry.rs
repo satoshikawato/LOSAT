@@ -141,6 +141,10 @@ fn run_main_entry() -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1920-1923
     // `losat makeprofiledb` too.
     if let Some(start) = started("makeprofiledb") {
+        // The command line's process (`cli::is_command_line_run`): a write of makeprofiledb's
+        // that meets a closed pipe ends it where SIGPIPE ends NCBI's, its database files losing
+        // what their buffers hold (`writedb::ofstream::end_at_closed_pipe`, line RG item T8c).
+        crate::cli::post_errors_in_run();
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707

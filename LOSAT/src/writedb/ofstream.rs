@@ -353,7 +353,7 @@ impl<F: RawFile> Drop for FileBuf<F> {
     /// ([`end_at_closed_pipe`]) the bytes it holds are dropped first, as NCBI's process, ended by
     /// SIGPIPE, runs no destructor that would write them.
     fn drop(&mut self) {
-        if ENDED_AT_CLOSED_PIPE.load(std::sync::atomic::Ordering::Relaxed) {
+        if ended_at_closed_pipe() {
             self.held.clear();
         }
         self.close();
@@ -367,16 +367,25 @@ static ENDED_AT_CLOSED_PIPE: std::sync::atomic::AtomicBool =
 
 /// The end of the command line's run at a write that met a closed pipe, where SIGPIPE ends
 /// NCBI's process (makeblastdb's log, `super::build_db::endl`; the writer's `cout` line,
-/// `super::writer::WriteDb::add_sequence_with_cout`): LOSAT's run goes on only to its end with
-/// exit status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10), and the file buffers dropped
-/// after this point drop the bytes they hold, as NCBI's file streams lose theirs (NCBI
-/// makeblastdb 2.17.0, a reader closed before "Adding sequences from FASTA": the volume's files
-/// hold the blocks its buffers wrote, empty for a small input; line RG item T8b). A library run
-/// is no process that the signal ends: its streams close as they do.
+/// `super::writer::WriteDb::add_sequence_with_cout`; each of makeprofiledb's, its
+/// `RunError::closed_pipe`): LOSAT's run goes on only to its end with exit status 0
+/// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10), and the file buffers dropped after this
+/// point drop the bytes they hold, as NCBI's file streams lose theirs (NCBI makeblastdb 2.17.0,
+/// a reader closed before "Adding sequences from FASTA": the volume's files hold the blocks its
+/// buffers wrote, empty for a small input; line RG item T8b; NCBI makeprofiledb 2.17.0: the
+/// volume's files and the RPS files, line RG item T8c). A library run is no process that the
+/// signal ends: its streams close as they do.
 pub(crate) fn end_at_closed_pipe() {
     if crate::cli::is_command_line_run() {
         ENDED_AT_CLOSED_PIPE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+/// Whether the command line's run has ended at a closed pipe ([`end_at_closed_pipe`]): what is
+/// dropped after it stands for a destructor that NCBI's process, ended by SIGPIPE, never runs
+/// (a file buffer's held bytes, `FileBuf`; LMDB's lock files, `super::mdb::Env`).
+pub(crate) fn ended_at_closed_pipe() -> bool {
+    ENDED_AT_CLOSED_PIPE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// An output-only stream (`std::ostream`) over the buffer `B`: its state and its output functions
@@ -554,16 +563,6 @@ impl<F: RawFile> Stream<F> {
     pub(crate) fn close(&mut self) {
         if !self.buf.close() {
             self.setstate(IoState::FAIL);
-        }
-    }
-
-    /// Drops buffered bytes and closes the file descriptor without syncing, modelling a process
-    /// ended by SIGPIPE before `~ofstream()` runs (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception
-    /// 10).
-    pub(crate) fn discard_unflushed(&mut self) {
-        self.buf.held.clear();
-        if let Some(file) = self.buf.file.take() {
-            let _ = file.close();
         }
     }
 }

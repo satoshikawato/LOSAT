@@ -1202,10 +1202,17 @@ impl Env {
 // The removal is `Remove` of a `CFile`: `CDirEntry::Remove` with `eRecursive`; its result is not
 // looked at. Where makeblastdb aborts instead of unwinding (a destructor that throws), it leaves
 // the lock files; LOSAT, which ends with an error there, removes them (PD-LOSAT-DATABASE-SEARCH).
+// Where SIGPIPE ends NCBI's process (a write to a closed pipe: makeblastdb's log, makeprofiledb's
+// lines), no destructor runs and the lock files stay; LOSAT's run, which ends there
+// (`crate::writedb::ofstream::end_at_closed_pipe`), leaves them too (NCBI makeprofiledb 2.17.0,
+// probes of 2026-11-27, line RG item T8c: `NAME.pdb-lock` and `NAME.ptf-lock` of the volume
+// being built).
 impl Drop for Env {
     fn drop(&mut self) {
         if let Some(lock) = &self.lock {
-            let _ = crate::writedb::dir_entry::remove(lock);
+            if !crate::writedb::ofstream::ended_at_closed_pipe() {
+                let _ = crate::writedb::dir_entry::remove(lock);
+            }
         }
     }
 }

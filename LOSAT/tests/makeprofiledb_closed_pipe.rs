@@ -20,6 +20,11 @@
 //! Non-pipe write failures (`/dev/full`) and `-logfile` naming a regular file finish with exit
 //! status 0 in both.
 //!
+//! What the files hold where the run ends is NCBI's too (probes of 2026-11-27 for line RG item
+//! T8c, `a_closed_pipe_leaves_ncbis_bytes_where_the_run_ends`): NCBI's ended process loses what
+//! its file streams hold, and LOSAT's file buffers drop it
+//! (`writedb::ofstream::end_at_closed_pipe`).
+//!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:490-493,1330-1333,1804-1816
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
 
@@ -781,4 +786,390 @@ fn delta_regular_logfile_has_no_cerr_tie_and_matches_ncbi() {
         fs::read(d31_dir.path().join("run.log")).unwrap(),
         b"in/d_obsr49.smp was excluded: due to too few independent observations\n"
     );
+}
+
+/// The post of `d_badchar_in.smp`'s title (a control character), which makeprofiledb writes at
+/// each read of the profile.
+const BADCHAR: &[u8] = b"Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title\n\
+                         Bad char [0x1] in string at line 15\n\
+                         \x01cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose\n";
+
+/// FNV-1a 64 of `bytes`.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// A run that ends at a closed standard output, and the files NCBI makeprofiledb 2.17.0 left
+/// there (line RG item T8c, `remaining-gaps-20261112/T/t8c/probe`, 2026-11-27: a reader gone
+/// before the start, each case run 3 times with the same result).
+struct Stop {
+    /// The case; its list is `in/l_<name>.lst` (the title of a complete volume).
+    name: &'static str,
+    /// The profiles of the list (`in/<name>.smp`), each the given number of times.
+    list: &'static [(&'static str, usize)],
+    words: &'static [&'static str],
+    /// Whether standard error holds `BADCHAR` (the post before the one that ended NCBI).
+    badchar: bool,
+    /// Each file left: name, size and FNV-1a 64. LMDB's data files (`.pdb`, `.ptf`, sized by the
+    /// host's pages) and a written `.pin` (the build's date) are compared by name only.
+    files: &'static [(&'static str, u64, u64)],
+}
+
+const EMPTY: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// LMDB's lock file as NCBI's ended process leaves it (8192 bytes, no transaction has used it).
+const LOCK: u64 = 0x36a8_ac0a_36ab_9e66;
+
+/// The point where each case ends: `ib=` = the writer's `cout` line for the profile
+/// `d2_n4_more2.smp` (`c2_n4.smp` in delta), written when the next profile is added or at the
+/// writer's `Close`; the tie = the post of `d_badchar_in.smp` at its read in the volume, which
+/// flushes `cout` holding an exclusion line.
+const STOPS: &[Stop] = &[
+    // `ib=` at the second profile: the first profile's rows on disk (its offset, 0, held).
+    Stop {
+        name: "r_n4_first",
+        list: &[("d2_n4_more2", 1), ("c1", 1)],
+        words: &["-dbtype", "rps"],
+        badchar: false,
+        files: &[
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 692, 0xd3cd_6aaa_8a64_9bcf),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 692, 0xc17b_32ea_2639_bd84),
+        ],
+    },
+    // `ib=` at the fourth profile: the rows of three, the offsets of two (the third's held), no
+    // `.aux` text and no volume bytes (held).
+    Stop {
+        name: "r_n4_third",
+        list: &[("c1", 1), ("c2", 1), ("d2_n4_more2", 1), ("c3", 1)],
+        words: &["-dbtype", "rps"],
+        badchar: false,
+        files: &[
+            ("db.00.phr", 0, EMPTY),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 0, EMPTY),
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 5404, 0x322e_92b2_7989_b3fe),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 5404, 0x5340_64f7_2616_94af),
+        ],
+    },
+    // The same with `-logfile`: the log's file stays empty.
+    Stop {
+        name: "r_n4_third",
+        list: &[("c1", 1), ("c2", 1), ("d2_n4_more2", 1), ("c3", 1)],
+        words: &["-dbtype", "rps", "-logfile", "f.log"],
+        badchar: false,
+        files: &[
+            ("db.00.phr", 0, EMPTY),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 0, EMPTY),
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 5404, 0x322e_92b2_7989_b3fe),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 5404, 0x5340_64f7_2616_94af),
+            ("f.log", 0, EMPTY),
+        ],
+    },
+    // `ib=` in the writer's `Close` after the last profile, before the RPS files close.
+    Stop {
+        name: "r_n4_last",
+        list: &[("c1", 1), ("c2", 1), ("c3", 1), ("d2_n4_more2", 1)],
+        words: &["-dbtype", "rps", "-blastdb_version", "4"],
+        badchar: false,
+        files: &[
+            ("db.00.phr", 0, EMPTY),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 0, EMPTY),
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 7756, 0xa76a_44b1_093a_b110),
+            ("db.loo", 0, EMPTY),
+            ("db.rps", 7756, 0xdcf9_405b_8710_9f09),
+        ],
+    },
+    // 601 profiles (`-index false`): `.aux` and the volume's files past their buffers (8191 B).
+    Stop {
+        name: "r_n4_aux",
+        list: &[("c1", 600), ("d2_n4_more2", 1), ("c2", 1)],
+        words: &["-dbtype", "rps", "-index", "false"],
+        badchar: false,
+        files: &[
+            ("db.00.phr", 386_778, 0x0f8b_61a9_2e84_6938),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 8211, 0x814a_04ad_1af6_b8c5),
+            ("db.aux", 8198, 0xdf78_abec_8c8e_052f),
+            ("db.freq", 1_548_692, 0x22a5_2389_e0ca_ebfc),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 1_548_692, 0x0bc7_7ada_d9dc_7adb),
+        ],
+    },
+    // `ib=` in the third volume: the first two complete (their `.pog` kept, no clean-up).
+    Stop {
+        name: "r_n4_vol2",
+        list: &[
+            ("c1", 1),
+            ("c2", 1),
+            ("c3", 1),
+            ("d2_n4_more2", 1),
+            ("c2", 1),
+        ],
+        words: &["-dbtype", "rps", "-max_smp_vol", "2"],
+        badchar: false,
+        files: &[
+            ("db.00.aux", 71, 0xb1e1_1215_4650_6fdf),
+            ("db.00.freq", 2592, 0x20e2_e13d_e51f_599f),
+            ("db.00.loo", 524_344, 0x921a_8f87_5782_302c),
+            ("db.00.pdb", 32768, 0),
+            ("db.00.phr", 642, 0xa75f_d20b_fa07_f754),
+            ("db.00.pin", 104, 0),
+            ("db.00.pog", 36, 0x4501_919c_e010_9275),
+            ("db.00.pos", 27, 0xdb9a_1f64_7a43_b26d),
+            ("db.00.pot", 20, 0x4192_1acc_144d_4237),
+            ("db.00.psq", 24, 0x70df_83e3_0d5c_67bf),
+            ("db.00.ptf", 16384, 0),
+            ("db.00.pto", 8, 0x89cd_3129_1d2a_efa4),
+            ("db.00.rps", 2592, 0x6dd6_ec7a_e800_e46f),
+            ("db.01.aux", 87, 0x2046_edd3_80be_ab85),
+            ("db.01.freq", 4500, 0x3c74_43bb_76e9_c47c),
+            ("db.01.loo", 524_344, 0x0d4c_c4e1_2af8_d719),
+            ("db.01.pdb", 32768, 0),
+            ("db.01.phr", 1877, 0xa0bc_e0f0_9f67_109c),
+            ("db.01.pin", 112, 0),
+            ("db.01.pog", 40, 0x756c_4ac6_c699_b128),
+            ("db.01.pos", 46, 0x0662_65eb_537e_12df),
+            ("db.01.pot", 32, 0x69c4_6984_6f4e_aa5c),
+            ("db.01.psq", 41, 0x3c42_26ba_404e_6fdf),
+            ("db.01.ptf", 16384, 0),
+            ("db.01.pto", 16, 0xb822_24f2_02a3_d9b4),
+            ("db.01.rps", 4500, 0x1b9c_bd43_15ff_1446),
+            ("db.02.aux", 0, EMPTY),
+            ("db.02.freq", 692, 0xd3cd_6aaa_8a64_9bcf),
+            ("db.02.loo", 0, EMPTY),
+            ("db.02.pdb", 8192, 0),
+            ("db.02.pdb-lock", 8192, LOCK),
+            ("db.02.ptf", 8192, 0),
+            ("db.02.ptf-lock", 8192, LOCK),
+            ("db.02.rps", 692, 0xc17b_32ea_2639_bd84),
+        ],
+    },
+    // The tie at the volume's first profile: the header of `.rps` and `.freq` held.
+    Stop {
+        name: "d_tie_first",
+        list: &[("d_badchar_in", 1), ("d_obsr49", 1)],
+        words: &["-dbtype", "delta", "-exclude_invalid", "false"],
+        badchar: true,
+        files: &[
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 0, EMPTY),
+            ("db.loo", 0, EMPTY),
+            ("db.rps", 0, EMPTY),
+        ],
+    },
+    // The tie at the fourth profile: three profiles' rows, two offsets.
+    Stop {
+        name: "d_tie_third",
+        list: &[
+            ("c1", 1),
+            ("c2", 1),
+            ("c3", 1),
+            ("d_badchar_in", 1),
+            ("d_obsr49", 1),
+        ],
+        words: &["-dbtype", "delta", "-exclude_invalid", "false"],
+        badchar: true,
+        files: &[
+            ("db.00.phr", 0, EMPTY),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 0, EMPTY),
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 7084, 0xb869_86b7_d452_345e),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 7084, 0x94b9_bcb8_48f2_9b68),
+        ],
+    },
+    // The tie in the third volume, the first two complete with their delta files.
+    Stop {
+        name: "d_tie_third",
+        list: &[
+            ("c1", 1),
+            ("c2", 1),
+            ("c3", 1),
+            ("d_badchar_in", 1),
+            ("d_obsr49", 1),
+        ],
+        words: &[
+            "-dbtype",
+            "delta",
+            "-exclude_invalid",
+            "false",
+            "-max_smp_vol",
+            "2",
+        ],
+        badchar: true,
+        files: &[
+            ("db.00.aux", 71, 0xb1e1_1215_4650_6fdf),
+            ("db.00.freq", 2592, 0x20e2_e13d_e51f_599f),
+            ("db.00.loo", 524_344, 0x921a_8f87_5782_302c),
+            ("db.00.obsr", 24, 0x4725_540c_7de7_456a),
+            ("db.00.pdb", 32768, 0),
+            ("db.00.phr", 642, 0xa75f_d20b_fa07_f754),
+            ("db.00.pin", 112, 0),
+            ("db.00.pog", 36, 0x4501_919c_e010_9275),
+            ("db.00.pos", 27, 0xdb9a_1f64_7a43_b26d),
+            ("db.00.pot", 20, 0x4192_1acc_144d_4237),
+            ("db.00.psq", 24, 0x70df_83e3_0d5c_67bf),
+            ("db.00.ptf", 16384, 0),
+            ("db.00.pto", 8, 0x89cd_3129_1d2a_efa4),
+            ("db.00.rps", 2592, 0x6dd6_ec7a_e800_e46f),
+            ("db.00.wcounts", 2592, 0x9e37_011c_2a3c_c013),
+            ("db.01.aux", 87, 0x2046_edd3_80be_ab85),
+            ("db.01.freq", 4500, 0x3c74_43bb_76e9_c47c),
+            ("db.01.loo", 524_344, 0x0d4c_c4e1_2af8_d719),
+            ("db.01.obsr", 36, 0x367f_abc8_bb22_8e96),
+            ("db.01.pdb", 32768, 0),
+            ("db.01.phr", 1877, 0xa0bc_e0f0_9f67_109c),
+            ("db.01.pin", 120, 0),
+            ("db.01.pog", 40, 0x756c_4ac6_c699_b128),
+            ("db.01.pos", 46, 0x0662_65eb_537e_12df),
+            ("db.01.pot", 32, 0x69c4_6984_6f4e_aa5c),
+            ("db.01.psq", 41, 0x3c42_26ba_404e_6fdf),
+            ("db.01.ptf", 16384, 0),
+            ("db.01.pto", 16, 0xb822_24f2_02a3_d9b4),
+            ("db.01.rps", 4500, 0x1b9c_bd43_15ff_1446),
+            ("db.01.wcounts", 4500, 0xdf2f_cdf1_8f48_2750),
+            ("db.02.aux", 0, EMPTY),
+            ("db.02.freq", 0, EMPTY),
+            ("db.02.loo", 0, EMPTY),
+            ("db.02.rps", 0, EMPTY),
+        ],
+    },
+    // Delta, `ib=` at the next profile.
+    Stop {
+        name: "d_n4_mid",
+        list: &[("d_obsr49", 1), ("c2_n4", 1), ("c1", 1), ("c3", 1)],
+        words: &["-dbtype", "delta", "-exclude_invalid", "false"],
+        badchar: false,
+        files: &[
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 2152, 0x392e_b140_0340_31f0),
+            ("db.loo", 0, EMPTY),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 2152, 0xcca0_4cc9_3340_9532),
+        ],
+    },
+    // Delta, `ib=` at the writer's `Close`: `.wcounts` and `.obsr` written before it.
+    Stop {
+        name: "d_n4_close",
+        list: &[("d_obsr49", 1), ("c1", 1), ("c2_n4", 1)],
+        words: &["-dbtype", "delta", "-exclude_invalid", "false"],
+        badchar: false,
+        files: &[
+            ("db.00.phr", 0, EMPTY),
+            ("db.00.pin", 0, EMPTY),
+            ("db.00.psq", 0, EMPTY),
+            ("db.aux", 0, EMPTY),
+            ("db.freq", 4724, 0x6266_e969_76f6_6acb),
+            ("db.loo", 0, EMPTY),
+            ("db.obsr", 36, 0x1080_8983_2b60_61a3),
+            ("db.pdb", 8192, 0),
+            ("db.pdb-lock", 8192, LOCK),
+            ("db.ptf", 8192, 0),
+            ("db.ptf-lock", 8192, LOCK),
+            ("db.rps", 4724, 0x82c2_4804_0c17_a739),
+            ("db.wcounts", 4724, 0xc2b2_8ad5_6e3c_a834),
+        ],
+    },
+];
+
+/// Each run that ends at a closed standard output leaves the files NCBI's process ended by
+/// SIGPIPE leaves, byte for byte: the RPS files hold the rows of the profiles added and every
+/// offset but the last one's, `.aux` and the volume's files what their buffers wrote, the
+/// complete volumes before as they are (line RG item T8c).
+#[test]
+fn a_closed_pipe_leaves_ncbis_bytes_where_the_run_ends() {
+    for (index, stop) in STOPS.iter().enumerate() {
+        let dir = unique_dir(&format!("losat_mp_pipe_stop_{index}"));
+        let names: Vec<&str> = stop
+            .list
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|name| *name != "c2_n4")
+            .collect();
+        let mut files: Vec<String> = names.iter().map(|name| format!("{name}.smp")).collect();
+        files.push("c2.smp".to_string());
+        let files: Vec<&str> = files.iter().map(String::as_str).collect();
+        copy_profiles(dir.path(), &files);
+        let c2 = fs::read_to_string(dir.path().join("in/c2.smp")).unwrap();
+        let needle = "seq-data ncbieaa \"KTPAIRLLDKAKIPYELH\"";
+        fs::write(
+            dir.path().join("in/c2_n4.smp"),
+            c2.replace(needle, "seq-data ncbi4na '4141414141414141414141'H"),
+        )
+        .unwrap();
+        let list = format!("in/l_{}.lst", stop.name);
+        let mut text = String::new();
+        for (name, count) in stop.list {
+            text.push_str(&format!("in/{name}.smp\n").repeat(*count));
+        }
+        fs::write(dir.path().join(&list), text).unwrap();
+        let mut words = vec!["-in", &list, "-out", "db"];
+        words.extend_from_slice(stop.words);
+        let out = run_makeprofiledb(dir.path(), &words, closed_pipe());
+        let case = format!("{} {:?}", stop.name, stop.words);
+        assert_eq!(out.status.code(), Some(0), "{case}");
+        let want_err: &[u8] = if stop.badchar { BADCHAR } else { b"" };
+        assert_eq!(
+            out.stderr,
+            want_err,
+            "{case}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "in")
+            .collect();
+        left.sort();
+        let want: Vec<&str> = stop.files.iter().map(|(name, _, _)| *name).collect();
+        assert_eq!(left, want, "{case}");
+        for &(name, size, hash) in stop.files {
+            let bytes = fs::read(dir.path().join(name)).unwrap();
+            let by_name = name.ends_with(".pdb")
+                || name.ends_with(".ptf")
+                || (name.ends_with(".pin") && size > 0);
+            if !by_name {
+                assert_eq!(
+                    (bytes.len() as u64, fnv1a64(&bytes)),
+                    (size, hash),
+                    "{case}: {name}"
+                );
+            }
+        }
+    }
 }

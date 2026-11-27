@@ -65,7 +65,5 @@ fn only_the_covered_programs_are_written() {
     ] {
         assert!(covered(program), "{program:?}");
     }
-    for program in [EProgram::PhiBlastn] {
-        assert!(!covered(program), "{program:?}");
-    }
+    assert!(!covered(EProgram::PhiBlastn));
 }

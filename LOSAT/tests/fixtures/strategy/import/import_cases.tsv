@@ -823,3 +823,6 @@ S4.blastp.window_neg40.dbhard_ov	blastp	-import_search_strategy {ss}/s3.blastp.w
 S4.blastp.window_neg40.dbhard_ov.nt4	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6 -num_threads 4	0	7336641bdf8bcd1f	05c29d792843c8f2
 S4.blastx.window_neg40.dbhard_ov	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6	0	929c2cfc85800124	a747df27a57adef1
 S4.blastx.window_neg40.dbhard_ov.nt4	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6 -num_threads 4	0	929c2cfc85800124	a747df27a57adef1
+S3.a.blastn_WindowMaskerTaxId_0.f11	blastn	-import_search_strategy {ss}/s3a.blastn_WindowMaskerTaxId_0.ss -outfmt 11	0	8b4eae644302513a	c7d9e175b47ef7bc
+S1.blastn.useidx_force_noname	blastn	-import_search_strategy {ss}/blastn.useidx_force_noname.ss	0	18d4dad5d024ef63	e2db628c75015f11
+S1.blastn.useidx_force_noname.f11	blastn	-import_search_strategy {ss}/blastn.useidx_force_noname.ss -outfmt 11	0	9081646df545c6ae	e2db628c75015f11

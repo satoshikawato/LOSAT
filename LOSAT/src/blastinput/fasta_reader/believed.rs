@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
-use crate::seqid::accguide::{identify_seq_id, parse_flags, GENERAL, LOCAL};
+use crate::seqid::accguide::{identify_seq_id, is_local_id, parse_flags};
 use crate::seqid::defline_set::{scope_keys, tabular_id, TabularId};
 use crate::seqid::id_scope::{name_keys, version_keys, SharedRecord};
 use crate::seqid::label;
@@ -95,13 +95,7 @@ impl BelievedIds {
         let gi = label::first_gi(&ids);
         let mut warning_id = Vec::new();
         label::content(&best, false, &mut warning_id);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1102-1106
-        let info = identify_seq_id(
-            &best,
-            parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
-            &mut |_| {},
-        );
-        let local = matches!(best, ParsedSeqId::Local(_)) || info == LOCAL || info == GENERAL;
+        let local = is_local_id(&best);
         Self {
             ids,
             best,

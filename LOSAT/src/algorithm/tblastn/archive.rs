@@ -31,7 +31,7 @@ use crate::report::archive::read::import;
 use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, BatchArchive, KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
@@ -245,7 +245,8 @@ struct TblastnAligns<'a> {
 impl<'a> AlignSource for TblastnAligns<'a> {
     fn write<E: crate::report::serial::encoder::Encoder>(
         &mut self,
-        out: &mut ArchiveOut<'_, E>,
+        enc: &mut E,
+        flush: &mut dyn FnMut(&mut E),
     ) -> Result<()> {
         let mut segments = Segments::default();
         let mut subjects: Vec<SubjectRecord<'a>> = Vec::new();
@@ -271,17 +272,15 @@ impl<'a> AlignSource for TblastnAligns<'a> {
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(self.ranges.queries.offset(q_idx))?,
             };
-            out.write_with(|enc, flush| {
-                write_seq_aligns(
-                    enc,
-                    &self.run,
-                    &query,
-                    &subjects,
-                    &hsps,
-                    &mut segments,
-                    |enc| flush(enc),
-                );
-            });
+            write_seq_aligns(
+                enc,
+                &self.run,
+                &query,
+                &subjects,
+                &hsps,
+                &mut segments,
+                |enc| flush(enc),
+            );
         }
         Ok(())
     }

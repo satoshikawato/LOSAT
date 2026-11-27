@@ -31,7 +31,7 @@ use super::Stop as RequestStop;
 use crate::blastinput::app::Program;
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
-use crate::report::archive::options::{Param, ParamValue};
+use crate::report::archive::options::{Param, ParamValue, RemoteOptions};
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::read::ReadError;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
@@ -663,8 +663,9 @@ pub(crate) struct ImportRun {
     /// The strategy's query range (`Start::query_range`), which the program's query options
     /// take in place of `-query_loc`'s.
     pub(crate) query_range: Option<crate::blastinput::seq_range::SequenceRange>,
-    /// The strategy's parameters as its setters record them, in the file's order: the
-    /// archive's options (`options::OptionInputs::imported`).
+    /// The remote options of the handle that the strategy's options build (the factory's handle
+    /// of its program, then what each setter records, in the file's order:
+    /// `options::RemoteOptions::built`): the archive's options (`options::OptionInputs::imported`).
     pub(crate) recorded: Vec<crate::report::archive::options::Param>,
     /// The databases and files that the strategy makes the run open (the library API's input set
     /// of `-logfile`'s refusal, `report::log_inputs`).
@@ -878,14 +879,7 @@ impl Start {
             searchsp_from_strategy: false,
             mb_index: None,
             query_range,
-            recorded: self
-                .imported
-                .options
-                .options
-                .setters
-                .iter()
-                .flat_map(recorded_params)
-                .collect(),
+            recorded: RemoteOptions::built(&self.imported.options.options).into_params(),
             reads: StrategyReads::of(self.database(), &self.imported.options),
         })
     }
@@ -1230,11 +1224,13 @@ fn seg_cut_text(cut: f64) -> String {
     }
 }
 
-/// The parameters a setter of the builder records in the options handle (`CBlastOptions`'s
-/// `Set*` calls `m_Remote->SetValue` with the field of the value it takes): the archive of an
-/// imported run lists them where NCBI's handle does. `StrandOption` (blastn's: the values 1 to 3,
-/// the others are refused) records its `strand-type`.
-fn recorded_params(setter: &Setter) -> Vec<Param> {
+/// The parameters a setter of the builder names (`CBlastOptions`'s `Set*` calls `m_Remote->SetValue`
+/// with the field of the value it takes): what the handle records of most setters
+/// (`options::RemoteOptions::apply` has those whose record differs: `SetFilterString`,
+/// `SetWindowMaskerTaxId` of 0, `SetUseIndex` without a name), and the option that LOSAT's refusals of
+/// a setter name (`option_text`). `StrandOption` (blastn's: the values 1 to 3, the others are
+/// refused) records its `strand-type`.
+pub(crate) fn recorded_params(setter: &Setter) -> Vec<Param> {
     use crate::report::archive::fields as f;
     use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
     let one = |field, value| vec![Param::new(field, value)];
@@ -1297,8 +1293,6 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::WindowSize(v) => one(f::WINDOW_SIZE, Integer(*v)),
         Setter::WordSize(v) => one(f::WORD_SIZE, Integer(*v)),
         Setter::WordThreshold(v) => one(f::WORD_THRESHOLD, Integer(*v)),
-        // The builder's `SetUseIndex` (index on, the name, forced) records the force flag true; the run's
-        // loader that uses no index sets it false again (`options::replayed_options`).
         Setter::UseIndex { index_name } => vec![
             Param::new(f::FORCE_MB_INDEX, Boolean(true)),
             Param::new(f::MB_INDEX_NAME, Str(index_name.as_bytes().to_vec())),

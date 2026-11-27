@@ -631,16 +631,10 @@ fn taxdb_setting(
     start: &CallStart,
     app: RequestKind,
 ) -> Option<crate::algorithm::common::database::TaxdbSetting> {
-    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-    let looks_up = outputs.formats.iter().any(|format| {
-        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            ReportFormat::from_number(choice.number)
-                .and_then(|report| {
-                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
-                })
-                .is_some_and(|spec| spec.looks_up_every_taxid())
-        })
-    });
+    let looks_up = crate::algorithm::common::database::outfmts_need_subject_taxdb(
+        outputs.formats.iter().map(|format| format.outfmt),
+        app,
+    );
     looks_up.then(|| crate::algorithm::common::database::TaxdbSetting::of(&start.settings()))
 }
 
@@ -872,6 +866,7 @@ fn psiblast_args(
         crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
             format.outfmt,
             format.side_out(args.out.as_deref()),
+            false,
             false,
         )?;
     }

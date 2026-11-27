@@ -3316,62 +3316,49 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
     kept
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:66-72
-#[inline]
-fn contained_in_hsp<T: PartialOrd>(a: T, b: T, c: T, d: T, e: T, f: T) -> bool {
-    a <= c && b >= c && d <= f && e >= f
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1487-1531
-fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool) -> bool {
-    // NCBI's `Int4` query offsets (`PrelimHit::prelim_qs`, which may lie outside the context).
-    let (q1, q2) = (hsp1.prelim_qs as isize, hsp2.prelim_qs as isize);
-    if !allow_gap && (hsp1.prelim_ss as isize - hsp2.prelim_ss as isize - q1 + q2) != 0 {
-        return false;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// BLASTN subject frame is always +1; subject offsets fit in NCBI's `Int4`.
+impl crate::core::blast_hits::ChunkMergeHsp for PrelimHit {
+    fn merge_context(&self) -> i32 {
+        self.context_idx as i32
     }
-
-    // BLASTN subject frame is always +1, so no frame mismatch handling needed here.
-
-    let (qe1, qe2) = (hsp1.prelim_qe as isize, hsp2.prelim_qe as isize);
-    if contained_in_hsp(
-        q1,
-        qe1,
-        q2,
-        hsp1.prelim_ss as isize,
-        hsp1.prelim_se as isize,
-        hsp2.prelim_ss as isize,
-    ) || contained_in_hsp(
-        q1,
-        qe1,
-        qe2,
-        hsp1.prelim_ss as isize,
-        hsp1.prelim_se as isize,
-        hsp2.prelim_se as isize,
-    ) {
-        let len1 = (qe1 - q1).max(0) as f64;
-        let len2 = (qe2 - q2).max(0) as f64;
-        let score_density = (hsp1.prelim_score as f64 + hsp2.prelim_score as f64) / (len1 + len2);
-
-        hsp1.prelim_qs = hsp1.prelim_qs.min(hsp2.prelim_qs);
-        hsp1.prelim_qe = hsp1.prelim_qe.max(hsp2.prelim_qe);
-        hsp1.prelim_ss = hsp1.prelim_ss.min(hsp2.prelim_ss);
-        hsp1.prelim_se = hsp1.prelim_se.max(hsp2.prelim_se);
-
-        if hsp2.prelim_score > hsp1.prelim_score {
-            hsp1.seed_qs = hsp2.seed_qs;
-            hsp1.seed_ss = hsp2.seed_ss;
-            hsp1.prelim_score = hsp2.prelim_score;
-        }
-
-        let new_len = (hsp1.prelim_qe - hsp1.prelim_qs).max(0) as f64;
-        let score_from_density = (score_density * new_len) as i32;
-        if score_from_density > hsp1.prelim_score {
-            hsp1.prelim_score = score_from_density;
-        }
-        return true;
+    fn merge_subject_frame(&self) -> i32 {
+        1
     }
-
-    false
+    fn merge_q_start(&self) -> i32 {
+        self.prelim_qs
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.prelim_qe
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.prelim_ss as i32
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.prelim_se as i32
+    }
+    fn merge_score(&self) -> i32 {
+        self.prelim_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.seed_qs
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.seed_ss as i32
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.prelim_qs = q_start;
+        self.prelim_qe = q_end;
+        self.prelim_ss = s_start as usize;
+        self.prelim_se = s_end as usize;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.seed_qs = q_gapped_start;
+        self.seed_ss = s_gapped_start as usize;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.prelim_score = score;
+    }
 }
 
 /// NCBI's preliminary subject-best-hit filter (`-subject_besthit`) over the combined HSP
@@ -3408,13 +3395,13 @@ fn merge_prelim_hit_lists(
     split: HspListSplit,
     chunk_overlap_size: usize,
     allow_gap: bool,
-) -> Vec<PrelimHit> {
+) -> std::result::Result<Vec<PrelimHit>, crate::core::blast_hits::ChunkMergeUndefined> {
     if incoming.is_empty() {
-        return incoming;
+        return Ok(incoming);
     }
     if combined.is_empty() {
         combined.append(&mut incoming);
-        return incoming;
+        return Ok(incoming);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2890-2945
@@ -3482,7 +3469,11 @@ fn merge_prelim_hit_lists(
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2991-2995
                 if (end - start).abs() < OVERLAP_DIAG_CLOSE as i64
-                    && merge_two_prelim_hits(&mut combined[index1], &incoming[index2], allow_gap)
+                    && crate::core::blast_hits::merge_two_chunk_hsps(
+                        &mut combined[index1],
+                        &incoming[index2],
+                        allow_gap,
+                    )?
                 {
                     deleted[index2] = true;
                 }
@@ -3498,7 +3489,7 @@ fn merge_prelim_hit_lists(
         });
     }
 
-    append_prelim_hit_list(combined, incoming)
+    Ok(append_prelim_hit_list(combined, incoming))
 }
 
 /// NCBI's `s_BlastHSPListsCombineByScore` when every HSP is kept (`hsp_num_max` is
@@ -4895,6 +4886,9 @@ struct BlastnReportInputs<'a> {
     /// What the XML2 and JSON reports of a database search do at each subject's `Hit`, by rank
     /// (`database::ReportedSubjects::loads`; every subject loaded for a subject set).
     database_loads: &'a crate::report::db_subject::HitLoads,
+    /// The query Bioseqs that NCBI's scope finds for the reported sequences of a database search
+    /// (`report::query_bioseq`), by the report's query and the ordinal id.
+    database_seen: crate::report::query_bioseq::SeenFrom<'a>,
     /// The sources from which NCBI makes the empty stored titles of the other reported sequences
     /// of a database search, by rank (`database::ReportedSubjects::sources`; empty without them
     /// and for a subject set).
@@ -5371,19 +5365,32 @@ fn check_tabular_lookups(
             subject_ids,
             report.database_parsed,
             report.database_loads,
+            crate::blastinput::app::Program::Blastn,
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                hit_list
-                    .hsplist_array
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    hit_list
+                        .hsplist_array
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| {
+                            let s_idx = hsp.s_idx as usize;
+                            let ordinal = database.and_then(|(ordinals, _)| ordinals.get(s_idx));
+                            report.database_seen.row(q_idx, ordinal.copied(), s_idx)
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -5398,6 +5405,7 @@ fn check_tabular_lookups(
                 Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
                     reader.oid_map().oid(ordinals[s_idx]),
                     report.database_loads.thrown(s_idx),
+                    report.database_parsed.get(s_idx).and_then(Option::as_deref),
                     failure,
                 ),
                 None => crate::report::tabular::failed_record_title(
@@ -5405,7 +5413,8 @@ fn check_tabular_lookups(
                     report.subjects.records()[s_idx].shown_id(),
                 ),
             },
-            "BLASTN",
+            crate::blastinput::app::Program::Blastn,
+            crate::blastinput::app::Program::Blastn.name(),
             report.tabular_taxdb_found,
         );
         output.refusal.check(checked)?;
@@ -5855,6 +5864,14 @@ fn post_process_hits_and_write(
         // The check reads the hits' segments only, not the rows' masks of `-html`'s spans.
         &|queries| rows_of(queries, None),
     )?;
+    report_write::refuse_described_records(
+        output_formats,
+        &mut outputs.formats,
+        report,
+        &hit_lists,
+        pairwise_hits.as_deref().map(Vec::as_slice),
+        &|queries| rows_of(queries, None),
+    )?;
     // The queries' result warnings that a structured first format does not write are each later
     // format's that writes them, to the caller's receiver of that format's
     // (`ReportOutputs::later_warnings`).
@@ -6097,7 +6114,16 @@ fn post_process_hits_and_write(
                     &mut writer,
                     format_warnings.as_mut(),
                 )?;
-            } else if let Some(spec) = output_format.tabular_spec() {
+            } else if let Some(spec) = output_format.tabular_spec().or_else(|| {
+                // A run whose reported sequences the scope finds as queries writes the default
+                // 6 and 7 with the shared writer too, which takes such a row's values from the
+                // query's Bioseq (`TabularSubjects::values_for`).
+                report.database_seen.any().then(|| {
+                    crate::report::tabular::TabularSpec::std(
+                        output_format == BlastnOutputFormat::TabularWithComments,
+                    )
+                })
+            }) {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
                 // (`algorithm::blastn::tabular`); never the default 6 and 7 below.
                 write_custom_tabular(
@@ -6256,6 +6282,7 @@ fn write_custom_tabular(
             lengths: &lengths,
             taxonomy: &taxonomy,
             loads: report.database_loads,
+            seen: report.database_seen,
         },
         _ => TabularSubjects::Records {
             ids: subject_ids,
@@ -8135,6 +8162,23 @@ impl<'a> SubjectSource<'a> {
             SubjectSource::Database(_) => None,
         }
     }
+
+    /// The database's ordinal-to-OID map (`SeqDb::oid_map`); `None` for a prepared `-subject` set.
+    fn oid_map(self) -> Option<crate::seqdb::OidMap<'a>> {
+        match self {
+            SubjectSource::Database(database) => Some(database.oid_map()),
+            SubjectSource::Prepared(_) => None,
+        }
+    }
+
+    /// The OID of subject ordinal `ordinal`: the database's OID for `-db`, or `ordinal` itself
+    /// for a prepared `-subject` set.
+    fn subject_oid(self, ordinal: u32) -> u32 {
+        match self {
+            SubjectSource::Database(database) => database.oid_map().oid(ordinal).get(),
+            SubjectSource::Prepared(_) => ordinal,
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-153
@@ -8489,6 +8533,9 @@ fn run_in_pool(
         _ => scopes,
     })
     .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
+    // The query Bioseqs that NCBI's scope finds for reported sequences (`report::query_bioseq`),
+    // noted at each batch's refusal of a sequence with the id of a query of its scope (below).
+    let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
     let intro = blastn_intro(&args);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
@@ -8529,6 +8576,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &ReportRanges {
                 queries: query_input,
@@ -8708,6 +8756,7 @@ fn run_in_pool(
                             source,
                             shown: &shown,
                             titles: &titles,
+                            seen: &query_bioseqs,
                         },
                         &report_ranges,
                         outputs,
@@ -8820,6 +8869,7 @@ fn run_in_pool(
                         source,
                         shown: &shown,
                         titles: &titles,
+                        seen: &query_bioseqs,
                     },
                     &report_ranges,
                     outputs,
@@ -9204,6 +9254,7 @@ fn run_in_pool(
                     source,
                     shown: &shown,
                     titles: &titles,
+                    seen: &query_bioseqs,
                 },
                 &report_ranges,
                 outputs,
@@ -9229,6 +9280,32 @@ fn run_in_pool(
         // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
         // so far, as for a refusal of a title (above).
         if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
+            let searched = batch_records.searched();
+            let record = |query: usize| {
+                // `batch_records.batch_queries()` drops `record.sequence` under `LOSAT_X_BNQPACK`,
+                // so read the query length from `lengths` (set before the search).
+                let record = searched.get(query.checked_sub(start)?)?;
+                Some(crate::report::query_bioseq::QueryRecordRef {
+                    believed: record.believed()?,
+                    title: &record.title,
+                    length: *lengths.get(query)?,
+                })
+            };
+            let run = crate::report::query_bioseq::SeenRun {
+                shows: output_formats
+                    .iter()
+                    .all(|format| format.shows_query_bioseqs())
+                    && !query_input.placements.ranged()
+                    && !database.loads_write_texts(),
+                // The batch's searched queries: the scope's span (`QueryScopes::span_of`).
+                known: start..if scopes.span_of(start).end == usize::MAX {
+                    usize::MAX
+                } else {
+                    start + searched.len()
+                },
+                record: &record,
+                protein: false,
+            };
             let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                 &titles,
                 batch_hit_lists
@@ -9244,6 +9321,9 @@ fn run_in_pool(
                     }),
                 database.oid_map(),
                 scopes,
+                database::parsed_shown(&output_formats),
+                &mut query_bioseqs,
+                &run,
                 "BLASTN",
             );
             if let Err(error) = refused {
@@ -9355,6 +9435,8 @@ fn run_in_pool(
                     pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
                         .is_some(),
+                    joins_copies: first_report
+                        .is_some_and(crate::blastinput::app::ReportFormat::joins_adjacent_copies),
                     gapped: !args.ungapped,
                     placements: &query_input.placements,
                 };
@@ -9626,6 +9708,7 @@ fn run_in_pool(
                         source,
                         shown: &shown,
                         titles: &titles,
+                        seen: &query_bioseqs,
                     },
                     &batch_ranges,
                     outputs,
@@ -9680,6 +9763,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &report_ranges,
             outputs,
@@ -9715,6 +9799,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &report_ranges,
             outputs,
@@ -9982,6 +10067,9 @@ struct ReportSubjects<'a> {
     source: SubjectSource<'a>,
     shown: &'a ShownSubjects,
     titles: &'a database::DatabaseTitles,
+    /// The query Bioseqs that NCBI's scope finds for reported sequences, by the run's searched
+    /// query (`report::query_bioseq`).
+    seen: &'a crate::report::query_bioseq::QueryBioseqs,
 }
 
 /// Writes the reports of `query_records` (the queries of the batches searched), with
@@ -10167,6 +10255,7 @@ fn write_reports_untimed(
                 results.batches,
                 written.queries,
                 !args.ungapped,
+                subjects.seen.numbered_from(written.queries),
                 x_pool,
             )?)
         }
@@ -10331,6 +10420,7 @@ fn write_reports_untimed(
         database_loads: reported
             .as_ref()
             .map_or(&every_loaded, |reported| &reported.loads),
+        database_seen: subjects.seen.numbered_from(written.queries),
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,
@@ -11683,6 +11773,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         subject_besthit,
         lcase_masking,
         db_mask,
+        db_oids: subjects.oid_map(),
         db_mask_error: &db_mask_error,
         mb_index: index_seeds.as_ref(),
         encoded_query_concat_nomask,
@@ -12009,6 +12100,7 @@ fn search_query_chunks(
             chunk,
             context_offsets,
             batching.split.overlap as u32 as i32,
+            |ordinal| subjects.subject_oid(ordinal),
         )?;
     }
     // A batch with a valid context whose chunks have none (for instance valid letters only in a
@@ -12040,6 +12132,7 @@ fn merge_query_chunk(
     chunk: &QueryChunk,
     context_offsets: &[i32],
     chunk_overlap_size: i32,
+    oid_of: impl Fn(u32) -> u32,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12092,7 +12185,8 @@ fn merge_query_chunk(
             &mut merged[part.query],
             split_points,
             chunk_overlap_size,
-        );
+            &oid_of,
+        )?;
     }
     for hit_list in merged.iter_mut().flatten() {
         for list in &mut hit_list.hsplist_array {
@@ -12114,10 +12208,11 @@ fn merge_prelim_hit_list(
     combined: &mut Option<HitList<PrelimHspList>>,
     split_offsets: [i32; 2],
     chunk_overlap_size: i32,
-) {
+    oid_of: impl Fn(u32) -> u32,
+) -> Result<()> {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
-        return;
+        return Ok(());
     };
     let mut new_hitlist = HitList::new(hitlist1.hsplist_max);
     // The subjects of a hit list are distinct, so the sort order is total.
@@ -12147,7 +12242,14 @@ fn merge_prelim_hit_list(
                     },
                     chunk_overlap_size as usize,
                     true,
-                );
+                )
+                .map_err(|_| {
+                    crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+                        oid_of(list2.oid),
+                        None,
+                        "BLASTN",
+                    )
+                })?;
             } else {
                 append_prelim_hit_list(&mut list2.hsps, list1.hsps);
             }
@@ -12158,6 +12260,7 @@ fn merge_prelim_hit_list(
         new_hitlist.update(list);
     }
     *combined = Some(new_hitlist);
+    Ok(())
 }
 
 #[cfg(test)]

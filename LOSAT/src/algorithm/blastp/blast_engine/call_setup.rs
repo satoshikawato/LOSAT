@@ -434,8 +434,8 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
-    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
-    // after IDENTITY's reset too; the same choice as `ordinary_traceback` in `run_call`). A PSSM
+    // The final X-drop reaches the unscaled `ALIGN_EX` only at mode 0: the ordinary traceback, or
+    // the Smith-Waterman redo at scale 1 (`sw_c0`), after IDENTITY's reset too. A PSSM
     // search converts its X-drops with the PSSM's Lambda and checks them there
     // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {
@@ -506,7 +506,7 @@ pub(super) fn call_lookup(
     // whole batches, each block a call of its own with its own lookup table (`PrelimOnly::Block`,
     // `x_prelim_block_plan`); `None`: one table for all queries. Planned only by the search of all
     // queries (`BlastpReports::x_plan_blocks`).
-    let x_blocks = if prelim.is_none() && reports.x_plan_blocks {
+    let x_blocks = if prelim.is_none() && reports.x_plan_blocks && args.phi.is_none() {
         x_prelim_block_plan(
             args,
             query_records,
@@ -528,6 +528,8 @@ pub(super) fn call_lookup(
         _ if args.rps_search.is_some() => rps_hooks::rps_contexts(args, query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
         _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(args, query_frames),
+        // psiblast `-phi_pattern`: the contexts, no word table (`phi_hooks::phi_lookup`).
+        _ if args.phi.is_some() => super::phi_hooks::phi_lookup(args, query_frames),
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks (`x_blocks`): each block
         // builds its own table; this call has the contexts of all queries (`x_blocks_contexts`).
         _ if x_blocks.is_some() => x_blocks_contexts(args, query_frames, blastp_parallel_pool),

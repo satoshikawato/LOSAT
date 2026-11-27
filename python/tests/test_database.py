@@ -349,6 +349,8 @@ def test_makembindex_writes_the_index_of_fasta_input(tmp_path, losat):
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):
     with pytest.raises(pylosat.SearchError, match="No alias or index file found"):
         pylosat.blastdbcmd("-db", str(tmp_path / "none"), "-info")
+    with pytest.raises(pylosat.SearchError, match="File is not accessible"):
+        pylosat.blast_formatter("-archive", str(tmp_path / "none.asn"))
     with pytest.raises(pylosat.ArgumentError):
         pylosat.makeblastdb("-dbtype", "neither")
 

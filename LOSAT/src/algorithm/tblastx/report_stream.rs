@@ -214,7 +214,7 @@ pub(super) fn check(
     // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
     // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
     // a `-db` sequence whose generated id is that of a query of its batch
-    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // (`anchored::refuse_pairwise_reports`) before that batch's first byte, after the batches
     // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
     // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
     // the stream off for a sequence with the id of a query of the run (`database_check`), whose
@@ -295,25 +295,8 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let pairwise = format.is_pairwise();
-    let shown = crate::algorithm::common::database::ParsedShown {
-        tabular: format.tabular_reads_subject(),
-        pairwise,
-        structured: format.is_structured_xml(),
-        joined: pairwise || format.tabular_joins_subjects(),
-        sam: matches!(format, report::TblastxOutputFormat::Sam(_)),
-        taxonomy: format.writes_taxonomy(),
-        words: format.printed_ids(),
-        stops_at_failed_lookup: format.is_tabular()
-            && crate::report::tabular::stops_at_lookup_failure(format.tabular_spec()),
-        stops_at_lineless: format.is_tabular()
-            && crate::report::tabular::stops_at_lineless_accession(format.tabular_spec()),
-        prefetched: format.prefetches_subjects()
-            && !crate::algorithm::common::database::prefetch_always_off(format.prefetch_format()),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
-            format.prefetch_format(),
-        ),
-    };
+    let shown =
+        crate::algorithm::tblastx::database::parsed_shown(&[format], format.prefetch_format());
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
     let prefetch = format.prefetches_subjects() && database.taxdb_found();
     if prefetch && database.cache_may_refuse() {

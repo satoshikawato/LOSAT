@@ -44,7 +44,115 @@ pub(crate) struct BlastpHsp {
     pub num: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3632
+/// 0-based query pattern occurrence index (`pat_info->index`) of a traced PHI-BLAST HSP.
+///
+/// Carried on `BlastpHsp` between `phi_traceback` and `PhiCall::split_occurrences` without
+/// growing `BlastpHsp` (168 B) by storing `index + 1` as a positive `i32` in
+/// `BlastpHsp::subject_frame` (`0` remains the unset sentinel used by protein HSPs, and
+/// `BlastpHsp::take_phi_occurrence` clears it back to `0` during splitting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PhiOccurrenceIndex(usize);
+
+impl PhiOccurrenceIndex {
+    /// Wraps a 0-based query pattern occurrence index (`Int4` range, matching `pat_info->index`).
+    #[inline]
+    pub(crate) fn new(index: usize) -> Self {
+        assert!(
+            index < i32::MAX as usize,
+            "PHI occurrence index {index} exceeds Int4 range"
+        );
+        Self(index)
+    }
+
+    /// Returns the 0-based query pattern occurrence index.
+    #[inline]
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
+// `BlastpHsp` stores 1-based inclusive starts and ends (`q_start - 1`, `q_end` are NCBI's 0-based
+// half-open `offset` and `end`), and keeps `length` equal to the merged query span.
+impl crate::core::blast_hits::ChunkMergeHsp for BlastpHsp {
+    fn merge_context(&self) -> i32 {
+        self.query_context
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.subject_frame
+    }
+    fn merge_q_start(&self) -> i32 {
+        (self.q_start - 1) as i32
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end as i32
+    }
+    fn merge_s_start(&self) -> i32 {
+        (self.s_start - 1) as i32
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end as i32
+    }
+    fn merge_score(&self) -> i32 {
+        self.raw_score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.gapped_q_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.gapped_s_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = (q_start + 1) as usize;
+        self.q_end = q_end as usize;
+        self.s_start = (s_start + 1) as usize;
+        self.s_end = s_end as usize;
+        self.length = (q_end - q_start) as usize;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.gapped_q_start = q_gapped_start;
+        self.gapped_s_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.raw_score = score;
+    }
+}
+
 impl BlastpHsp {
+    /// Attaches the HSP's PHI-BLAST pattern occurrence index (`pat_info->index`) between
+    /// `phi_traceback` and `PhiCall::split_occurrences`.
+    ///
+    /// Stored in `self.subject_frame` as `occurrence.index() + 1` (positive `i32`) so `BlastpHsp`
+    /// stays 168 bytes and occurrence indices past `u16::MAX` are never truncated. Safe between
+    /// `phi_traceback` and `split_occurrences` because:
+    /// - `finish_hit_lists` (`cull_traceback`, `best_hit_traceback`, `-max_hsps`,
+    ///   `-qcov_hsp_perc`, `-subject_besthit`, `prune_by_size`, sorts), `drop_unaligned`,
+    ///   `read_shown_residues`, `reads.titles`, `refuse_ids_of_queries`, `report_values`
+    ///   (`recount_shown_identities`), and `shift_hsp_to_records` never read `subject_frame`.
+    /// - `BlastpHsp::into_hit` does not copy `subject_frame`.
+    /// - `kappa`, `x_redo_par`, `query_split`, ordinary `traceback`, and the merge of a hard-masked
+    ///   sequence's chunks (`ChunkMergeHsp::merge_subject_frame` in `db_masked.rs`; psiblast takes
+    ///   no `-db_hard_mask`, and PHI-BLAST refuses a subject longer than `MAX_DBSEQ_LEN`) never run
+    ///   on PHI-BLAST lists, and [`Self::take_phi_occurrence`] resets `subject_frame` back to `0` in
+    ///   `split_occurrences` before any reporting runs.
+    #[inline]
+    pub(crate) fn with_phi_occurrence(mut self, occurrence: PhiOccurrenceIndex) -> Self {
+        self.subject_frame = (occurrence.0 + 1) as i32;
+        self
+    }
+
+    /// Extracts the PHI-BLAST pattern occurrence index attached by [`Self::with_phi_occurrence`]
+    /// and resets `self.subject_frame` back to `0`.
+    #[inline]
+    pub(crate) fn take_phi_occurrence(&mut self) -> Option<PhiOccurrenceIndex> {
+        let raw = std::mem::replace(&mut self.subject_frame, 0);
+        usize::try_from(raw)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+            .map(PhiOccurrenceIndex)
+    }
+
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478-478
     /// The gap columns: the alignment's columns that are neither identities nor mismatches, as
     /// the default report's mismatches are the columns of neither (`Hit::gap_letters`).

@@ -1,7 +1,9 @@
 //! NCBI's `cout` as a stream with a state: the stream (`super::ofstream::BasicStream`) over
 //! standard output's buffer, for the serializer of blastdbcmd's `-metadata`
-//! (`super::metadata`), whose failures NCBI reports, and for makeblastdb's log
-//! (`super::makeblastdb`), whose failures it does not.
+//! (`super::metadata`), whose failures NCBI reports, for makeblastdb's log
+//! (`super::makeblastdb`), whose failures it does not, and for blast_formatter's `-out -`
+//! (`crate::blast_formatter::archive`), whose standard-output write failures abort as NCBI's C++
+//! runtime does (line RG-F3 C6; `blast_formatter_standard_output_failure_aborts`).
 //!
 //! When the bytes of an insertion reach standard output is `crate::cli::NcbiBuffer`'s rule (read
 //! from the writes of NCBI's programs, line LIB-O O1b). What a failed write leaves is read from
@@ -43,13 +45,20 @@ pub(crate) type Cout<'a> = BasicStream<CoutBuf<'a>>;
 /// `cout` over `out`, the standard output of this process, whose buffer is `stream`'s
 /// (`NcbiStdio::cout()` for the process's own standard output).
 pub(crate) fn cout(out: &mut dyn Write, stream: NcbiStdio) -> Cout<'_> {
-    BasicStream::with_buf(CoutBuf {
-        out,
-        buffer: NcbiBuffer::new(stream),
-        held: Vec::new(),
-        closed_pipe: false,
-        buffer_made: false,
-    })
+    BasicStream::with_buf(CoutBuf::new(out, stream))
+}
+
+impl<'a> CoutBuf<'a> {
+    /// Standard output's buffer over `out`, as `stream`'s (`cout`).
+    pub(crate) fn new(out: &'a mut dyn Write, stream: NcbiStdio) -> Self {
+        CoutBuf {
+            out,
+            buffer: NcbiBuffer::new(stream),
+            held: Vec::new(),
+            closed_pipe: false,
+            buffer_made: false,
+        }
+    }
 }
 
 impl CoutBuf<'_> {

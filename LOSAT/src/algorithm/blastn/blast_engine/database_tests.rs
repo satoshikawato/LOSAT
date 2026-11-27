@@ -511,9 +511,9 @@ fn ungapped_query_loc_read_order_matches_writer_for_lifted_and_class_n_hsps() {
         .collect();
     let writer_scores: Vec<HspScores> = writer_rows.iter().map(HspScores::of).collect();
     assert_eq!(model_scores, writer_scores);
-    assert!(!writer_rows[0].query_left_of_record);
-    assert!(writer_rows[3].query_left_of_record);
-    assert!(writer_rows[4].query_left_of_record);
+    assert!(!writer_rows[0].query_left_of_record());
+    assert!(writer_rows[3].query_left_of_record());
+    assert!(writer_rows[4].query_left_of_record());
 
     for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
         for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
@@ -1035,6 +1035,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1093,6 +1094,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1134,6 +1136,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1151,6 +1154,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .err()

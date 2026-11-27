@@ -1,0 +1,129 @@
+# name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 blast_formatter (ws, env_blast, the conda build), 2026-11-20, ad-RG-F3-1 (line RG item F3), every row under unshare -rn: no row reaches NCBI's servers.
+# in/bn.asn: blastn -query in/q.fa -subject in/s.fa -outfmt 11 -out in/bn.asn (NCBI BLAST+ 2.17.0, same day); in/q.fa and in/s.fa by remaining-gaps-20261112/F/f3 (impl_b.md). conf/malformed.ini is that of tests/convert2blastmask. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
+# Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -xmlhelp (LOSAT's XML is NCBI's without -rid, which LOSAT refuses at the run; tests/ncbi_toolkit_help.rs, against NCBI's frozen XML src/ncbi_xmlhelp/blast_formatter.xml), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), a standard output that cannot be written (NCBI's runtime aborts: src/blast_formatter/archive_tests.rs and the test blast_formatter_standard_output_failure_aborts of tests/masker_fixtures.rs, from probes of agent C6, 2026-11-23), and of the output formats other than 8, 9 and 12 only NCBI's own checks (of13_no_out, of17_blastp_sam) and one refusal by name (refused_of6) for the rest.
+# Rows from of8_db on (line RG item F3 PR 1, agent C5 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was down), by remaining-gaps-20261112/F/f3/tools/fixC.py, every NCBI run under unshare -rn. Their archives were written by NCBI's own programs: in/db.asn, in/batch.asn (BATCH_SIZE=1), in/warn.asn (-max_target_seqs 1, BATCH_SIZE=1) and in/pd.asn (-parse_deflines) by blastn -query in/q2.fa -db in/db/s3 -outfmt 11 (in/db/s3: makeblastdb -blastdb_version 4 of in/s3.fa, which holds in/s.fa, a copy with a change every 40 letters and its second half; in/q2.fa holds in/q.fa and a part of in/s.fa); in/err.asn (blastn -task blastn -reward 1 -penalty -2 -gapopen 0 -gapextend 0: an error object); in/ps.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2; in/ps.faa = residues 251-290 of tests/fasta/psiblast/tk.faa); in/rps.asn and in/rtn.asn (rpsblast -query in/rps.faa = tests/fasta/psiblast/tk.faa, rpstblastn -query in/rtn.fna = the second record of tests/fasta/rps/nq4.fna, -db in/rps/rps_mini, the files of tests/db_search/rps/rps_mini that a protein database open reads); in/soft.asn (blastn -db_soft_mask 11 on a dustmasker-masked database made elsewhere; in/m/db is the same sequence without its mask) and in/nodb.asn (a database that is not here). Made from them by fixC.py: in/garbage.asn (in/db.asn and a line), in/cut2.asn (in/batch.asn cut in its second object), in/empty.asn, in/fatal.asn (in/warn.asn with its first message's severity 4). @OUT@ is a new directory of each run; the files a run leaves there follow its standard output in ncbi/<name>.out. refused/<name>.err is LOSAT's refusal by name; ncbi/<name>.* keeps NCBI's bytes (refused_fatal_message's trace names the local binary).
+# Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
+# Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
+noargs	
+h	-h
+help	-help
+help_full	-help-full
+help_archive	-archive in/bn.asn -help
+unknown	-foo
+unknown_evalue	-archive in/bn.asn -evalue 1
+unknown_db	-archive in/bn.asn -db in/db
+unknown_query	-archive in/bn.asn -query in/q.fa
+unknown_subject	-archive in/bn.asn -subject in/s.fa
+unknown_num_threads	-archive in/bn.asn -num_threads 2
+unknown_max_hsps	-archive in/bn.asn -max_hsps 1
+unknown_case	-Archive in/bn.asn
+dash_dash	--archive in/bn.asn
+positional	-archive in/bn.asn extra
+html_value	-archive in/bn.asn -html true
+show_gis_eq	-archive in/bn.asn -show_gis=1
+noval_archive	-archive
+noval_outfmt	-archive in/bn.asn -outfmt
+twice_archive	-archive in/bn.asn -archive in/bn.asn
+twice_outfmt	-archive in/bn.asn -outfmt 6 -outfmt 7
+nd_neg	-archive in/bn.asn -num_descriptions -1
+na_neg	-archive in/bn.asn -num_alignments -1
+nd_abc	-archive in/bn.asn -num_descriptions abc
+na_big	-archive in/bn.asn -num_alignments 2147483648
+ll0	-archive in/bn.asn -line_length 0
+sorthits5	-archive in/bn.asn -sorthits 5
+sorthits_neg	-archive in/bn.asn -sorthits -1
+sorthits_frac	-archive in/bn.asn -sorthits 1.5
+sorthsps5	-archive in/bn.asn -sorthsps 5
+mts0	-archive in/bn.asn -max_target_seqs 0
+mts_nd	-archive in/bn.asn -max_target_seqs 2 -num_descriptions 3
+mts_na	-archive in/bn.asn -max_target_seqs 2 -num_alignments 3
+nd_mts	-archive in/bn.asn -num_descriptions 3 -max_target_seqs 2
+rid_archive	-rid ABCDEFGH01R -archive in/bn.asn
+archive_rid	-archive in/bn.asn -rid ABCDEFGH01R
+rid_empty	-rid ''
+rid_empty_outfmt	-rid '' -outfmt abc
+archive_missing	-archive in/no_such_file -outfmt 6
+archive_missing_dir	-archive no_such_dir/x.asn
+archive_empty_name	-archive '' -outfmt 6
+archive_missing_out	-archive in/no_such_file -out no_such_dir/o.txt
+dryrun	-dryrun -archive in/bn.asn
+dryrun_rid	-dryrun -rid ABCDEFGH01R
+dryrun_noargs	-dryrun
+dryrun_missing	-dryrun -archive in/no_such_file
+conf_malformed	-conffile conf/malformed.ini -archive in/bn.asn
+logfile_noargs	-logfile /dev/null
+logfile_missing	-archive in/no_such_file -logfile /dev/null
+logfile_argerr	-archive in/bn.asn -foo -logfile /dev/null
+logfile_rid_empty	-rid '' -logfile /dev/null
+of8_db	-archive in/db.asn -outfmt 8
+of9_db	-archive in/db.asn -outfmt 9
+of12_db	-archive in/db.asn -outfmt 12
+of8_subject	-archive in/bn.asn -outfmt 8
+of9_subject	-archive in/bn.asn -outfmt 9
+of12_subject	-archive in/bn.asn -outfmt 12
+of8_batch	-archive in/batch.asn -outfmt 8
+of12_psiblast	-archive in/ps.asn -outfmt 12
+of8_rpsblast	-archive in/rps.asn -outfmt 8
+of8_rpstblastn	-archive in/rtn.asn -outfmt 8
+of9_rpsblast	-archive in/rps.asn -outfmt 9
+of12_rpsblast	-archive in/rps.asn -outfmt 12
+of9_rpstblastn	-archive in/rtn.asn -outfmt 9
+of12_rpstblastn	-archive in/rtn.asn -outfmt 12
+of8_psiblast	-archive in/ps.asn -outfmt 8
+of9_psiblast	-archive in/ps.asn -outfmt 9
+of8_error_object	-archive in/err.asn -outfmt 8
+of8_messages_mts2	-archive in/warn.asn -outfmt 8 -max_target_seqs 2
+of8_mts2	-archive in/db.asn -outfmt 8 -max_target_seqs 2
+of8_na0	-archive in/db.asn -outfmt 8 -num_alignments 0
+of8_pd_archive_only	-archive in/pd.asn -outfmt 8
+of8_pd_formatter_only	-archive in/db.asn -outfmt 8 -parse_deflines
+of8_trailing_garbage	-archive in/garbage.asn -outfmt 8
+of8_cut_in_object_2	-archive in/cut2.asn -outfmt 8
+of8_empty	-archive in/empty.asn -outfmt 8
+of8_missing	-archive in/no_such_file -outfmt 8
+of8_out_file	-archive in/db.asn -outfmt 8 -out @OUT@/o.txt
+of8_out_no_dir	-archive in/db.asn -outfmt 8 -out no_such_dir/o.txt
+of8_mask_algorithm	-archive in/soft.asn -outfmt 8
+of13_no_out	-archive in/db.asn -outfmt 13
+of17_blastp_sam	-archive in/ps.asn -outfmt 17
+refused_of6	-archive in/db.asn -outfmt 6
+refused_database	-archive in/nodb.asn -outfmt 8
+refused_fatal_message	-archive in/fatal.asn -outfmt 8
+of8_delta	-archive in/delta.asn -outfmt 8
+of12_delta	-archive in/delta.asn -outfmt 12
+of8_phi	-archive in/phi.asn -outfmt 8
+taxids_both_8	-archive in/tax_both.asn -outfmt 8
+taxids_both_tax_8	-archive in/tx5_both.asn -outfmt 8
+bl2seq_legacy_8	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 8
+bl2seq_legacy_12	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 12
+bad_title_1	-archive in/bad1.asn -outfmt 8
+bad_title_2	-archive in/bad2.asn -outfmt 8
+out_full_bn_8	-archive in/bn.asn -outfmt 8 -out /dev/full
+out_full_bn_9	-archive in/bn.asn -outfmt 9 -out /dev/full
+out_full_bn_12	-archive in/bn.asn -outfmt 12 -out /dev/full
+out_full_db_8	-archive in/db.asn -outfmt 8 -out /dev/full
+out_full_db_9	-archive in/db.asn -outfmt 9 -out /dev/full
+out_full_db_12	-archive in/db.asn -outfmt 12 -out /dev/full
+out_full_batch_8	-archive in/batch.asn -outfmt 8 -out /dev/full
+out_full_batch_9	-archive in/batch.asn -outfmt 9 -out /dev/full
+out_full_batch_12	-archive in/batch.asn -outfmt 12 -out /dev/full
+out_full_rtn_8	-archive in/rtn.asn -outfmt 8 -out /dev/full
+out_full_rtn_9	-archive in/rtn.asn -outfmt 9 -out /dev/full
+out_full_rtn_12	-archive in/rtn.asn -outfmt 12 -out /dev/full
+real_pinf_8	-archive in/real_pinf.asn -outfmt 8
+real_nan_8	-archive in/real_nan.asn -outfmt 8
+real_pinf_9	-archive in/real_pinf.asn -outfmt 9
+refused_real_12	-archive in/real_nan.asn -outfmt 12
+opt_bho09_8	-archive in/opt_bho09.asn -outfmt 8
+opt_bhse_neg_8	-archive in/opt_bhse_neg.asn -outfmt 8
+opt_cull_besthit_8	-archive in/opt_cull_besthit.asn -outfmt 8
+opt_cull_neg_8	-archive in/opt_cull_neg.asn -outfmt 8
+opt_maxhsps_neg_8	-archive in/opt_maxhsps_neg.asn -outfmt 8
+opt_pident150_8	-archive in/opt_pident150.asn -outfmt 8
+opt_qcov150_8	-archive in/opt_qcov150.asn -outfmt 8
+opt_word3_8	-archive in/opt_word3.asn -outfmt 8
+opt_word_neg_8	-archive in/opt_word_neg.asn -outfmt 8
+opt_hitlist0_8	-archive in/opt_hitlist0.asn -outfmt 8
+opt_evalue0_8	-archive in/opt_evalue0.asn -outfmt 8
+opt_cull_besthit_12	-archive in/opt_cull_besthit.asn -outfmt 12
+opt_hitlist0_9	-archive in/opt_hitlist0.asn -outfmt 9

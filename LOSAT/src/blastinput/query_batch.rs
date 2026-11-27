@@ -1383,6 +1383,23 @@ impl QueryScopes {
         &self.scopes[after.saturating_sub(1)]
     }
 
+    /// The searched queries of the scope of the searched query `query` (`of_query`): those of its
+    /// batch, from the batch's first to the next batch's first (the last batch's to no end), or
+    /// every query with `whole_run` or one scope of the run (`QueryScopeSpan::Run`). The owner of
+    /// the query Bioseqs that the scope finds walks them (`report::query_bioseq::QueryBioseqs`).
+    pub(crate) fn span_of(&self, query: usize) -> std::ops::Range<usize> {
+        if self.whole_run.is_some() {
+            return 0..usize::MAX;
+        }
+        let after = self.starts.partition_point(|&start| start <= query);
+        let start = after
+            .checked_sub(1)
+            .and_then(|batch| self.starts.get(batch))
+            .copied()
+            .unwrap_or(0);
+        start..self.starts.get(after).copied().unwrap_or(usize::MAX)
+    }
+
     /// The scopes of the searched queries from `first`, as one call that searches them numbers
     /// them (`of_query` of its index).
     pub(crate) fn numbered_from(&self, first: usize) -> QueryScopesFrom<'_> {
@@ -1409,6 +1426,11 @@ impl<'a> QueryScopesFrom<'a> {
     /// The run's scopes, whose queries are the run's (`QueryScopes::xml_failing_query`).
     pub(crate) fn run(&self) -> &'a QueryScopes {
         self.scopes
+    }
+
+    /// The run's searched query of the call's first query.
+    pub(crate) fn first(&self) -> usize {
+        self.first
     }
 
     /// `QueryScopes::xml_show` of the call's query `query`, its label numbered as the call numbers
@@ -1683,12 +1705,19 @@ pub(crate) fn read_query_batches(
 /// run at its batch too (`blast_engine.rs` `search`). The query splitter of the batch's search
 /// (`CPsiBlast::Run`, after the constructor's check) stops the first batch where it cannot convert
 /// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` (`app::check_query_split_environment`).
+///
+/// With `-phi_pattern` and one round (`phi_local`) NCBI searches each batch with `CLocalBlast`, not
+/// `CPsiBlast`: a batch of a query without letters and the next is PHI-BLAST's search of the
+/// batch (`phi_hooks::PhiBatch`), and a batch of queries without letters only stops the run with
+/// blastp's error of its set-up (`read_query_batches`: `Sequence contains no data`, exit 3).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:211-258
 pub(crate) fn read_psiblast_query_batches(
     input_records: &[FastaRecord],
     searched: &[FastaRecord],
     input: &crate::blastinput::seq_range::QueryInput,
     reading: QueryReading,
     query_scopes: Option<QueryScopes>,
+    phi_local: bool,
 ) -> QueryBatches {
     read_batches(
         input_records,
@@ -1697,6 +1726,11 @@ pub(crate) fn read_psiblast_query_batches(
         reading,
         1,
         &|batch| {
+            if phi_local {
+                return crate::blastinput::app::check_query_split_environment(false, true)
+                    .err()
+                    .or_else(|| no_data_batch_error(batch));
+            }
             psiblast_batch_error(batch).or_else(|| {
                 crate::blastinput::app::check_query_split_environment(false, true).err()
             })

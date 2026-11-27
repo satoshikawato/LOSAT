@@ -247,7 +247,7 @@ impl ArchiveBatch<'_> {
             results,
             crate::algorithm::blastx::empty_rows::SubjectLoc::of_run(database.is_some()),
         );
-        let reported;
+        let mut reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {
                 (Some(database), Some(pairwise)) => {
@@ -256,8 +256,10 @@ impl ArchiveBatch<'_> {
                         search_subjects,
                         results,
                         options.gapped,
-                        ReportedAsks::default(),
-                        &mut *diagnostics,
+                        // The archive reads no title besides the Seq-aligns' (no prefetch;
+                        // RPSTBLASTN still stays `Reports`).
+                        ReportedAsks::of_archive(options),
+                        (&mut *diagnostics, Some(handle)),
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(
@@ -290,6 +292,7 @@ impl ArchiveBatch<'_> {
                             results,
                             options.gapped,
                             scopes.numbered_from(queries_before),
+                            &crate::report::query_bioseq::SeenRun::REFUSED,
                         )?;
                     }
                     (

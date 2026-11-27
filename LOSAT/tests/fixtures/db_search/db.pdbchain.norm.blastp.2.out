@@ -1,0 +1,80 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pdbnorm
+           6 sequences; 1,320 total letters
+
+
+
+Query= pdq query of the duplicated record
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+1AB8_È Unknown                                                        464     2e-173
+1AB9_A Chain A                                                        462     9e-173
+1ab6_A Unknown                                                        462     1e-172
+1ABB_A Chain A                                                        462     1e-172
+1AB7_A Unknown                                                        462     1e-172
+1ABA_A Chain A                                                        462     1e-172
+
+
+
+Query_1  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+1AB9_A   1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWWYECMPHEKRKEWAFLNAWH  60
+1ABB_A   1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+1ABA_A   1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRWEWAFLNAWH  60
+
+Query_1  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+1AB9_A   61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+1ABB_A   61   WLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+1ABA_A   61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+
+Query_1  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+1AB9_A   121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+1ABB_A   121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+1ABA_A   121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+
+Query_1  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+1AB9_A   181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+1ABB_A   181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+1ABA_A   181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+
+
+Lambda      K        H        a         alpha
+   0.327    0.139    0.522    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 207576
+
+
+  Database: pdbnorm
+    Posted date:  Nov 24, 2026  5:35 AM
+  Number of letters in database: 1,320
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

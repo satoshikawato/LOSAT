@@ -661,7 +661,7 @@ BLAST+.
   `Stable-Components-Version`, `Production-Version`, `Built-As`, rpsbproc's toolkit component)
   are not written; the keys NCBI writes whenever there is a package stay, empty (line RG
   DECISIONS E3-1). The library API and the Web engine refuse the versions, `-version` too, but
-  in blastdbcmd, dustmasker, segmasker and convert2blastmask, whose library runs print them as
+  in blastdbcmd, dustmasker, segmasker, convert2blastmask and blast_formatter, whose library runs print them as
   their `-version` (E3-2), and, since version 1.21, makeblastdb, whose library run prints them
   to its output (line RG DECISIONS E1w2-6). A failed write of a program's
   version, help or argument error (`-version > /dev/full`) is dropped, as NCBI's `cout` drops it

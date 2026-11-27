@@ -1523,6 +1523,7 @@ pub(crate) fn postprocess_preliminary_hits(
 // Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
 // redo's function keeps its own body.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     preliminary_hits: &[BlastpPreliminaryHsp],
     query_workspace: &BlastpKappaQueryWorkspace,
@@ -1530,6 +1531,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     query_nomask: &[u8],
     subject: &[u8],
     matrix: ScoringMatrix,
+    unadjusted: Option<&AdjustedProteinMatrix>,
     karlin_params: &KarlinParams,
     gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
@@ -1568,6 +1570,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
                 &BLASTP_REDO_ALIGN_CALLBACKS,
                 composition_workspace,
                 matrix_state,
+                unadjusted,
                 expect_value,
                 resume,
                 &mut |_query_index, evalue, score| would_insert(evalue, score),

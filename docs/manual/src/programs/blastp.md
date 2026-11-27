@@ -47,7 +47,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-word_size` | 3 (2 for `blastp-short`, 5 for `blastp-fast`) | Length of the word that starts an alignment |
 | `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3. A `u` or `U` after a mode other than 0 (`2u`) also combines each e-value with a P-value of the two sequences' compositions (unified P-values) |
-| `-use_sw_tback` | off | Align the final results again with Smith-Waterman (with `-comp_based_stats` 1 to 3) |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-ungapped` | off | Search without gapped extension: report the ungapped alignments (with `-comp_based_stats 0`) |
 | `-seg` | `no` | Low-complexity filter |
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
@@ -89,7 +89,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`), and with `-ungapped` at the first query batch that is searched (see [What LOSAT refuses](../refusals.md)).
+- `-use_sw_tback` with `-ungapped`, at the first query batch that is searched. With `-use_sw_tback`, also a query batch on which NCBI BLAST+ crashes, and a query and subject whose alignment it never finishes (see [Rare and pathological inputs](../refusals-edge-cases.md#blastp)).
 - With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
 - With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).

@@ -2,7 +2,6 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    preliminary::PreliminaryHsp,
     query_setup::{prepare_queries, PreparedQueryBatch},
 };
 use crate::algorithm::blastn::query_split::{
@@ -496,31 +495,6 @@ fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
         .position(|&c| c == absolute)
         .map(|c| chunk.prepared.contexts[c].length as i32)
         .unwrap_or(0)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531
-// The divisor is never 0 here, unlike in TBLASTX's merge across subject chunks
-// (`ChunkMergeUndefined`): only the one-hit word finder's ungapped HSPs can have a length of 0 or
-// less, and an ungapped search is never split (`split_queries`, split_query_cxx.cpp:60-61), so
-// the HSPs of a split query are gapped ones, each of positive length.
-pub(crate) fn merge_two(a: &mut PreliminaryHsp, b: &PreliminaryHsp) -> bool {
-    let inside = |q, s| a.q_start <= q && a.q_end >= q && a.s_start <= s && a.s_end >= s;
-    if !inside(b.q_start, b.s_start) && !inside(b.q_end, b.s_end) {
-        return false;
-    }
-    let density =
-        (a.score + b.score) as f64 / ((a.q_end - a.q_start) + (b.q_end - b.q_start)) as f64;
-    a.q_start = a.q_start.min(b.q_start);
-    a.q_end = a.q_end.max(b.q_end);
-    a.s_start = a.s_start.min(b.s_start);
-    a.s_end = a.s_end.max(b.s_end);
-    if b.score > a.score {
-        a.q_gapped_start = b.q_gapped_start;
-        a.s_gapped_start = b.s_gapped_start;
-        a.score = b.score;
-    }
-    a.score = a.score.max((density * (a.q_end - a.q_start) as f64) as i32);
-    true
 }
 
 #[cfg(test)]

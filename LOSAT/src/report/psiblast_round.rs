@@ -19,7 +19,7 @@ use super::{
     write_description_row_start, write_description_table, write_no_hits_found, write_prolog,
     write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
     BlastpPairwiseReport, HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit,
-    PairwiseView,
+    PairwiseView, RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::ReportWrite;
@@ -28,6 +28,10 @@ use crate::report::query_warnings::{ReportHook, ReportPlace};
 use crate::report::x_pairwise_par::{QueryGroup, QuerySections};
 use std::io::{self, Write};
 use std::sync::Arc;
+
+// PHI-BLAST's round (`-phi_pattern`): its report through this module's writer and sections.
+#[path = "phi_round.rs"]
+pub(crate) mod phi_round;
 
 /// The report's writer: the caller's stream behind a type that no default report writes through.
 struct RoundWriter<'w>(&'w mut dyn ReportWrite);
@@ -334,6 +338,46 @@ impl<'a> RoundSections<'a> {
         }
         Ok(())
     }
+    /// The alignments of the subject `s_idx` in a PHI-BLAST round (`phi_round`): all its HSPs,
+    /// their rows with the query feature of `decoration` (`phi_round::PatternRow`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2142-2189
+    fn phi_subject<W: crate::report::ostream::ReportWrite, D: RowDecoration>(
+        &self,
+        writer: &mut W,
+        probe: Option<&mut FormatProbe<'_>>,
+        group: &QueryGroup<'_>,
+        s_idx: u32,
+        decoration: &D,
+    ) -> io::Result<()> {
+        // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the rows have no spans, and
+        // `phi_round` places the subject's load posts itself.
+        write_blastp_subject_part(
+            writer,
+            probe,
+            self.config,
+            self.database.is_some(),
+            self.parsed_subjects,
+            self.subject_sources,
+            self.loads,
+            group,
+            s_idx,
+            0..group.subject_hits[&s_idx].len(),
+            HtmlRowMasks::new(None, 0),
+            &mut |_, _| Ok(()),
+            decoration,
+        )
+    }
+
+    /// The footer of a query whose context is not valid (no letters): no Karlin block and a search
+    /// space of 0.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+    fn invalid_foot<W: crate::report::ostream::ReportWrite>(writer: &mut W) -> io::Result<()> {
+        // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+        crate::report::ostream::ncbi_endl(writer)?;
+        writeln!(writer)?;
+        writeln!(writer)?;
+        writeln!(writer, "Effective search space used: 0")
+    }
 }
 
 impl QuerySections for RoundSections<'_> {
@@ -389,11 +433,7 @@ impl QuerySections for RoundSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
-                crate::report::ostream::ncbi_endl(writer)?;
-                writeln!(writer)?;
-                writeln!(writer)?;
-                writeln!(writer, "Effective search space used: 0")?;
+                Self::invalid_foot(writer)?;
             } else {
                 write_blastp_query_footer_spacing(
                     writer,
@@ -451,6 +491,7 @@ impl QuerySections for RoundSections<'_> {
             part,
             HtmlRowMasks::new(None, 0),
             place,
+            &super::PlainRows,
         )
     }
 
@@ -484,9 +525,12 @@ impl QuerySections for RoundSections<'_> {
             return Ok(());
         }
         super::write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
-            super::blastp_section_hsps(self.report.num_alignments, group, |s_idx| {
-                sequences.subject_is_query(q_idx, s_idx)
-            })
+            super::blastp_section_hsps(
+                self.report.num_alignments,
+                group,
+                self.parsed_subjects,
+                |s_idx| sequences.subject_is_query(q_idx, s_idx),
+            )
         })
     }
 

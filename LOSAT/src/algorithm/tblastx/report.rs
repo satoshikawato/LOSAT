@@ -1085,7 +1085,7 @@ impl<'a> PairwiseRows<'a> {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
-            query_left_of_record: false,
+            edge: crate::report::pairwise::PairwiseEdge::Normal,
         }
     }
 }
@@ -1362,6 +1362,21 @@ impl TblastxOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Tblastx;
+        match self {
+            Self::Seqalign(_) | Self::Archive => true,
+            Self::Tabular | Self::TabularWithComments => tabular_shows(None, program),
+            Self::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
@@ -1377,6 +1392,30 @@ impl TblastxOutputFormat {
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
+    }
+
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
+            Self::Unsupported => None,
+        }
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which

@@ -226,6 +226,23 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Blastn;
+        match self {
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                tabular_shows(None, program)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
     /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
@@ -1181,7 +1198,10 @@ pub(crate) fn write_hsp_rows<W: Write>(
         // earlier rows have been written.
         if let Some((placements, ungapped)) = left_of_record {
             if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
-                return Err(super::left_of_query::alnmap_empty_query_row(false).into_io_error());
+                return Err(
+                    crate::report::serial::seqalign::aln_vec_row_gaps_only(0, false)
+                        .into_io_error(),
+                );
             }
         }
         let query_id = query_ids

@@ -1075,8 +1075,8 @@ impl TseFeatureIndex {
     /// The posts of NCBI's segmented-set master at the first title that reads features, when
     /// the entry has no Bioseq for one of its `whole` segments: `CMasterSeqSegments` resolves each
     /// segment's length in the TSE by its matching Seq-ids, and at the first it cannot find there
-    /// it falls back to an exact lookup without a scope, which throws; the post of the exception
-    /// that catches it gives two lines, in LOSAT's words (`crate::wording::losat_bytes`).
+    /// it falls back to an exact lookup without a scope, which throws; the exception's post and
+    /// the post of the code that catches it give two lines.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:803-817,822-843
     /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:319-332,343-369
@@ -1091,21 +1091,19 @@ impl TseFeatureIndex {
         let Some(&r) = wholes.iter().find(|&&r| self.bio_of(r).is_none()) else {
             return posts;
         };
-        const CLASS: &[u8] = b"(CSeqMapException::eNullPointer) ";
+        // In LOSAT's words: the exception's class and code that NCBI writes before the message
+        // in both lines are left out (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12).
         let mut message = b"Cannot resolve ".to_vec();
         label::fasta(self.interner.id(r), &mut message);
         message.extend_from_slice(b": null scope pointer");
-        for line in [
-            [b"Error: ", CLASS, b"[makeblastdb] ", &message].concat(),
+        posts.push([b"Error: [makeblastdb] ".as_slice(), &message].concat());
+        posts.push(
             [
-                b"Error: [makeblastdb] Segment set cannot be initialized: ",
-                CLASS,
+                b"Error: [makeblastdb] Segment set cannot be initialized: ".as_slice(),
                 &message,
             ]
             .concat(),
-        ] {
-            posts.push(crate::wording::losat_bytes(&line).into_owned());
-        }
+        );
         posts
     }
 

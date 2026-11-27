@@ -1199,18 +1199,22 @@ fn queries_of_different_seq_ids_keep_no_xml_lists() {
 /// refused (line RG-KB item 7b).
 #[test]
 fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
-    use super::{refused_batch_error, BatchSetUp, QueryScopeSpan, QueryScopes, ScopeRefusal};
+    use super::{
+        refused_batch_error, BatchSetUp, QueryMasks, QueryScopeSpan, QueryScopes, ScopeRefusal,
+    };
     use crate::blastinput::seq_range::{record_interval, RecordInterval, SequenceRange};
     use crate::wording::ENGINE_ERROR;
 
-    let run = |program: &'static str,
-               range: Option<SequenceRange>,
-               minus: bool,
-               batches: &[&[u8]]|
+    let run_masked = |program: &'static str,
+                      range: Option<SequenceRange>,
+                      minus: bool,
+                      masks: QueryMasks,
+                      batches: &[&[u8]]|
      -> anyhow::Error {
         let mut scopes = QueryScopes::new(QueryScopeSpan::Run, program)
             .with_query_range(range)
-            .with_minus_strand(minus);
+            .with_minus_strand(minus)
+            .with_query_masks(masks);
         let mut first = 0;
         for fasta in batches {
             let records = parsed_records(fasta);
@@ -1229,6 +1233,10 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
         }
         panic!("no refusal")
     };
+    let run = |program: &'static str,
+               range: Option<SequenceRange>,
+               minus: bool,
+               batches: &[&[u8]]| run_masked(program, range, minus, QueryMasks::None, batches);
 
     let expect_native = |err: anyhow::Error, expected: &str| {
         let native = err
@@ -1320,13 +1328,18 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
         ),
     );
 
-    // `BLASTN`: all-`PastFirst` emits `CSeqVector_CI`; mixed `Own` + `PastFirst` stays refused.
+    // `BLASTN` without filtering of the letters (`-dust no`): each record's own message, and a
+    // record of its own beside a repeat past its earlier record keeps a valid context (NCBI then
+    // searches the batch with a warning: the refusal after the set-up of the record of its own).
     let err = refused_batch_error(
         run(
             "BLASTN",
             None,
             false,
-            &[b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n"],
+            &[
+                b">q1\nACGTAC\n>q2\nACGTACGT\n",
+                b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+            ],
         ),
         false,
         |_| panic!("no set-up"),
@@ -1334,14 +1347,69 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     .unwrap_err();
     expect_native(
         err,
-        &format!("{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 6 \n"),
+        &format!(
+            "{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 6 \
+             Warning: CSeqVector_CI: cannot locate segment at 8 \n"
+        ),
     );
+    let mixed: [&[u8]; 2] = [b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n>q2\nACGTACGTAC\n"];
+    let err = refused_batch_error(run("BLASTN", None, false, &mixed), false, |own| {
+        assert_eq!(own, [false, true]);
+        BatchSetUp::Unknown
+    })
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+    // With DUST (NCBI BLAST+ 2.17.0, probe 1 of line RG-KB item 7b): the masks of the batch fail
+    // at its first record past its earlier record's end, for every searched record of the batch,
+    // also beside a record of its own and one without letters.
     let err = refused_batch_error(
-        run(
+        run_masked(
             "BLASTN",
             None,
             false,
-            &[b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n>q2\nACGTACGTAC\n"],
+            QueryMasks::Dust,
+            &[
+                b">q1\nACGTAC\n>q2\nACGTACGT\n",
+                b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    let twice = format!(
+        "{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 6 \
+         Warning: CSeqVector_CI: cannot locate segment at 6 \n"
+    );
+    expect_native(err, &twice);
+    let err = refused_batch_error(
+        run_masked("BLASTN", None, false, QueryMasks::Dust, &mixed),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(err, &twice);
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Dust,
+            &[b">q1\nACGTAC\n", b">q3\n\n>q1\nACGTACGTAC\n"],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(err, &twice);
+    // Repeat or WindowMasker filtering without DUST, whose reads LOSAT does not follow: refused.
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Other,
+            &[b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n"],
         ),
         false,
         |_| panic!("no set-up"),

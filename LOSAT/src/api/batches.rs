@@ -326,20 +326,33 @@ fn run_scopes(
     inputs: Inputs<'_>,
     command: &Commands,
 ) -> Option<crate::blastinput::query_batch::QueryScopes> {
-    use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+    use crate::blastinput::query_batch::{QueryMasks, QueryScopeSpan, QueryScopes};
     if !search.parse_deflines() || inputs.database || inputs.query_file.is_some() {
         return None;
     }
+    use crate::algorithm::blastn::args::QueryStrand;
+    let minus = |strand: &str| QueryStrand::parse(strand).ok() == Some(QueryStrand::Minus);
     let minus_strand = match command {
-        Commands::Blastn(a) => a.strand.eq_ignore_ascii_case("minus"),
-        Commands::Blastx(a) => a.strand.eq_ignore_ascii_case("minus"),
-        Commands::Tblastx(a) => a.strand.eq_ignore_ascii_case("minus"),
+        Commands::Blastn(a) => minus(&a.strand),
+        Commands::Blastx(a) => minus(&a.strand),
+        Commands::Tblastx(a) => minus(&a.strand),
         _ => false,
+    };
+    // BLASTN's filtering of the letters as its call reads `-dust` (`BlastnArgs::resolve_dust`; a
+    // value that it refuses ends the call before the batch is set up).
+    let query_masks = match command {
+        Commands::Blastn(a) => {
+            let mut args = a.clone();
+            let _ = args.resolve_dust();
+            args.query_masks()
+        }
+        _ => QueryMasks::None,
     };
     Some(
         QueryScopes::new(QueryScopeSpan::Run, program_name(search))
             .with_query_range(query_range_of(command))
-            .with_minus_strand(minus_strand),
+            .with_minus_strand(minus_strand)
+            .with_query_masks(query_masks),
     )
 }
 

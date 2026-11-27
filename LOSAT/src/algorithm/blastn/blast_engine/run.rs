@@ -8456,8 +8456,9 @@ fn batches_follow(
     input_start < records || (reading.reads_past_records() && !reading_ended)
 }
 
-/// Under `-parse_deflines`, builds the batch/run query scope tracker with `-query_loc` and
-/// `-strand minus` so `SetupQueries_OMF` failures match NCBI (`QueryScopes`).
+/// Under `-parse_deflines`, the scopes of the run's query batches (`QueryScopes`), with what
+/// NCBI's set-up of a refused batch reads (`-query_loc`, `-strand minus`, the filtering of the
+/// letters: `ScopeRefusal`).
 fn blastn_query_scopes(
     args: &BlastnArgs,
     queries: &x_query_stream::Queries<'_>,
@@ -8485,6 +8486,7 @@ fn blastn_query_scopes(
             .with_refusal(args.scope_refusal.clone())
             .with_query_range(query_range)
             .with_minus_strand(minus_strand)
+            .with_query_masks(args.query_masks())
     })
 }
 

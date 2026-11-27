@@ -2583,6 +2583,19 @@ pre.range-text {
   white-space: pre-line;
 }
 
+/* The page's messages carry words that the user chose or that the engine wrote, and some are one word as
+   long as the line (a file's name, the usage text's line of 72 `=`): they break at the card's edge instead
+   of widening the page (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28). One rule for the line under Run
+   LOSAT and for the notes of the form, the inputs and the results. */
+.search-summary-line,
+.error,
+.validation,
+.warning,
+.notice,
+.results-message {
+  overflow-wrap: anywhere;
+}
+
 /* Forced colours (Windows' high contrast) replace the page's colours and drop its shadows: the
    selected mode, tab, row and Range looked like the others (WA2-AX-14). There they take the
    system's Highlight, the colour of a selection: as a fill (the mode and the tabs, which look B

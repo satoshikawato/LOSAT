@@ -2361,6 +2361,17 @@ fn test_call_table_words_leave_out_split_batches() {
     );
     // A split batch alone: the call's table holds no word.
     assert_eq!(words(&gapped, &split[2..3], false), Some(vec![]));
+    // The batches whose words the table holds.
+    let split_words = CallTableWords::of(&gapped, &split, &lengths, false).unwrap();
+    let held: Vec<bool> = split
+        .iter()
+        .map(|batch| split_words.holds_batch(&batch.searched))
+        .collect();
+    assert_eq!(held, [true, true, false, true]);
+    let unsplit_words = CallTableWords::of(&ungapped, &split, &lengths, false).unwrap();
+    assert!(split
+        .iter()
+        .all(|batch| unsplit_words.holds_batch(&batch.searched)));
 }
 
 // Protein records of `lengths` letters (a deterministic generator), some with runs that SEG
@@ -3021,6 +3032,63 @@ fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
                 x_word_blocks(&low_aa, &records, &input, batch_size, &whole, pool),
                 Some((whole.to_vec(), Vec::new()))
             );
+            Ok(())
+        })
+        .expect("pool");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+// EXPERIMENT (LOSAT_X_BPQBLOCK): a batch that NCBI splits adds no word to a block's table
+// (`CallTableWords`): the blocks' words are those of the other batches, on one thread and on
+// three; an ungapped search splits no batch and counts them all.
+#[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
+fn test_x_word_blocks_leave_out_the_words_of_a_split_batch() {
+    use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
+    let lengths = [900usize, 20000, 700, 1100];
+    let records = x_block_test_records(&lengths);
+    let input = seq_range::QueryInput::whole(&records);
+    let mut args = make_blastp_args();
+    args.task = "blastp-fast".to_string();
+    args.comp_based_stats = std::ffi::OsString::from("0");
+    let gapped = args.resolve().expect("resolved blastp-fast args");
+    args.ungapped = true;
+    let ungapped = args.resolve().expect("ungapped blastp-fast args");
+    // Batches of one query each: the second (20,000 letters) is split.
+    let batch_size = 1;
+    let whole = [0..4];
+    let counter = CompressedWordCount::new(
+        gapped.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * gapped.threshold),
+    )
+    .expect("a compressed word size");
+    let words: Vec<u64> = records
+        .iter()
+        .map(|record| {
+            let encoded = encode_protein_sequence(record.seq());
+            counter
+                .batch_words(&mut std::iter::once(
+                    &encoded.aa_seq[1..encoded.aa_seq.len() - 1],
+                ))
+                .expect("within the banks")
+        })
+        .collect();
+    assert!(words[1] > 0);
+    for threads in [1, 3] {
+        crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+            let total = |args: &ResolvedBlastpArgs| {
+                let (blocks, block_words) =
+                    x_word_blocks(args, &records, &input, batch_size, &whole, pool)
+                        .expect("blocks");
+                assert_eq!(blocks, whole.to_vec());
+                block_words.iter().sum::<u64>()
+            };
+            assert_eq!(total(&gapped), words[0] + words[2] + words[3]);
+            assert_eq!(total(&ungapped), words.iter().sum::<u64>());
             Ok(())
         })
         .expect("pool");

@@ -1711,6 +1711,16 @@ impl CallTableWords {
             Some(queries) => TableWords::Of(queries),
         }
     }
+
+    /// Whether the table holds the words of the batch whose searched queries are `searched` (a
+    /// batch of `of`'s batches): every batch but one that NCBI splits.
+    fn holds_batch(&self, searched: &std::ops::Range<usize>) -> bool {
+        self.0.as_ref().is_none_or(|tables| {
+            tables
+                .binary_search_by_key(&searched.start, |table| table.start)
+                .is_ok()
+        })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
@@ -7853,7 +7863,8 @@ fn x_block_search_refuses_nothing(
 //   which tests the batch exactly.
 // - the blocks closed also on their words (`x_query_blocks`). NCBI builds the table of one batch,
 //   searches the batch and frees the table before the next batch (above), so its largest table is
-//   that of the batch with the most words: a backbone cell has slots for four offsets whatever the
+//   that of the batch with the most words (of those it does not split, which have no table:
+//   `CallTableWords`): a backbone cell has slots for four offsets whatever the
 //   threshold (24 bytes with its count), and the words past them go to overflow cells of four (24
 //   bytes). A block's table (`x_clut_direct.rs`: an entry of 4 bytes per word and per backbone cell)
 //   is kept to the slots of that table: at most four words per backbone cell plus the words of the
@@ -7896,6 +7907,12 @@ fn x_word_blocks(
         args.word_size,
         crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
     )?;
+    let query_batches = query_input.batches(batch_size);
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    // A batch that NCBI splits has no table, and no block's table holds its words
+    // (`CallTableWords`): its words count only for the banks' test of its chunks' tables (a
+    // chunk's table has no more words than its batch's offsets add).
+    let tabled = CallTableWords::of(args, &query_batches, &lengths, false).ok()?;
     // The words of all letters of the queries: the lookup query
     // (`encode_protein_query_frame_with_seg`) has the same letters, and its lookup segments
     // (`build_lookup_segments_for_context`) leave out those that SEG or `-lcase_masking` mask, so
@@ -7910,16 +7927,19 @@ fn x_word_blocks(
         let mut letters = encoded
             .iter()
             .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
-        counter.batch_words(&mut letters)
+        let words = counter.batch_words(&mut letters)?;
+        Some(if tabled.holds_batch(searched) {
+            words
+        } else {
+            0
+        })
     };
-    let query_batches = query_input.batches(batch_size);
     let batch_words: Vec<u64> = x_each_batch_on(&query_batches, pool, &words)
         .into_iter()
         .collect::<Option<_>>()?;
     let most = (COMPRESSED_HITS_PER_BACKBONE_CELL as u64)
         .saturating_mul(counter.backbone_cells())
         .saturating_add(batch_words.iter().copied().max().unwrap_or(0));
-    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     let blocks = super::x_query_blocks::x_query_blocks(
         &query_batches,
         &lengths,
@@ -7982,7 +8002,8 @@ const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
 // T(s) of its word to the table (`XWideWordCount`: about 35 per letter for BLOSUM62's words of 3 at
 // threshold 11, over a thousand for its words of 4), NCBI builds and frees the table of one batch at
 // a time, and its largest table takes its backbone (cells of AA_HITS_PER_CELL offsets) and the
-// overflow of the batch with the most words. A block's table is kept to that: at most
+// overflow of the batch with the most words (of those it does not split, which have no table:
+// `CallTableWords`). A block's table is kept to that: at most
 // AA_HITS_PER_CELL words per backbone cell plus the words of the batch with the most, or
 // `X_AA_BLOCK_WORDS_FLOOR` where that is more, so that a block of `LOSAT_X_BPQBLOCK` letters whose
 // table takes at most 16 MiB of offsets ends on its letters (BLOSUM62's words of 2 and 3 at their
@@ -8000,10 +8021,16 @@ fn x_aa_word_blocks(
 ) -> Option<Vec<std::ops::Range<usize>>> {
     let counter = x_aa_word_counter(args)?;
     let query_batches = query_input.batches(batch_size);
-    let batch_words = x_each_batch_on(&query_batches, pool, &|searched| {
-        x_aa_batch_words(&counter, &queries[searched.clone()])
-    });
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    // A batch that NCBI splits adds no word to a block's table (`CallTableWords`).
+    let tabled = CallTableWords::of(args, &query_batches, &lengths, false).ok()?;
+    let batch_words = x_each_batch_on(&query_batches, pool, &|searched| {
+        if tabled.holds_batch(searched) {
+            x_aa_batch_words(&counter, &queries[searched.clone()])
+        } else {
+            0
+        }
+    });
     super::x_query_blocks::x_query_blocks(
         &query_batches,
         &lengths,
@@ -8096,12 +8123,18 @@ fn x_aa_one_block_splits(
     let Some(counter) = x_aa_word_counter(args) else {
         return false;
     };
+    // A batch that NCBI splits adds no word to the table (`CallTableWords`).
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    let Ok(tabled) = CallTableWords::of(args, query_batches, &lengths, false) else {
+        return false;
+    };
     let batch_words: Vec<u64> = query_batches
         .iter()
-        .map(|batch| {
-            queries
-                .get(batch.searched.clone())
-                .map_or(0, |queries| x_aa_batch_words(&counter, queries))
+        .map(|batch| match queries.get(batch.searched.clone()) {
+            Some(queries) if tabled.holds_batch(&batch.searched) => {
+                x_aa_batch_words(&counter, queries)
+            }
+            _ => 0,
         })
         .collect();
     batch_words.iter().sum::<u64>() > x_aa_most_words(&counter, &batch_words)

@@ -176,12 +176,12 @@ impl<'a> Tse<'a> {
     /// phase C.
     // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:300-307
     fn add_member_bioseq(&mut self, bioseq: V<'a>, construction: &mut Vec<Made>) -> bool {
-        let ids: Vec<V<'a>> = bioseq.field("id").items().collect();
-        if ids.iter().any(|id| id.is_null()) {
+        let ids = bioseq.field("id");
+        if ids.items().any(|id| id.is_null()) {
             construction.push(Made::Null);
             return true;
         }
-        let ids = ids.into_iter().map(V::seq_id).collect();
+        let ids = ids.items().map(V::seq_id).collect();
         let annots = bioseq.get("annot").into_iter().flat_map(V::items);
         self.add_bioseq(ids, annots, construction)
     }
@@ -235,7 +235,7 @@ impl<'a> Tse<'a> {
     pub(super) fn attach(
         &self,
         ids: &[Vec<Handle>],
-        handles: &LiveHandles,
+        handles: &LiveHandles<'_>,
         ids_known: bool,
     ) -> Result<(), Stop> {
         let mut set_ids = HashSet::new();
@@ -287,7 +287,7 @@ impl<'a> Tse<'a> {
 
     /// `CBioseq_Info::IdString()` of the Bioseq attached at `index`: its handles' `AsString()`.
     // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:1221-1230
-    fn id_string(&self, ids: &[Vec<Handle>], handles: &LiveHandles, index: usize) -> String {
+    fn id_string(&self, ids: &[Vec<Handle>], handles: &LiveHandles<'_>, index: usize) -> String {
         self.bioseq_ids(index)
             .iter()
             .zip(&ids[index])

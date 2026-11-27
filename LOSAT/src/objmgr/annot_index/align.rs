@@ -216,7 +216,7 @@ fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
 // `std::length_error` with the text "vector::_M_default_append", which `CATCH_ALL` reports (probe
 // `a20`).
 fn std_seg(
-    handles: &mut LiveHandles,
+    handles: &mut LiveHandles<'_>,
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {
@@ -331,7 +331,7 @@ fn loc_ci_ranges<'a>(
 // changes no output of the index (`annot_index::index_align`: an alignment's row only posts when
 // all its ranges are empty, which no strand changes), so it is read as `unknown`.
 fn packed_seg(
-    handles: &mut LiveHandles,
+    handles: &mut LiveHandles<'_>,
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {
@@ -394,7 +394,7 @@ fn packed_seg(
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:727-778
 // The resize to 2 rows also cuts rows that a Seq-align before it in the same `disc` made.
 fn spliced_seg(
-    handles: &mut LiveHandles,
+    handles: &mut LiveHandles<'_>,
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {

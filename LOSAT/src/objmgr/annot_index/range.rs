@@ -271,7 +271,7 @@ fn next_lookup() -> u64 {
 // other `giim` handles of the number are alive; `om/` cases `s_i72_giim_same`, `s_i73_giim_db_diff`)
 impl Handle {
     /// `CSeq_id_Handle::GetHandle` of `id`, a `giim` Seq-id found in `giim`.
-    pub(super) fn of(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
+    pub(super) fn of(id: &ParsedSeqId, handles: &mut LiveHandles<'_>) -> Handle {
         match mask_handle_key(id) {
             Ok(Some(key)) => Handle::Key {
                 key,
@@ -292,12 +292,12 @@ impl Handle {
 
     /// `CSeq_id_Handle::GetHandle` of a handle that lives as long as the run (a Bioseq's Seq-id,
     /// `CBioseq_Info::m_Id`; a Seq-table column's default, `CSeqTableLocColumns::m_DefaultIdHandle`):
-    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`: the info
+    /// the first such lookup of a keyed handle makes its info (`LiveHandles::run_ids`: the info
     /// of an accession is shared with every other number of its prefix, digit count and version).
-    pub(super) fn of_run(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
+    pub(super) fn of_run<'a>(id: &'a ParsedSeqId, handles: &mut LiveHandles<'a>) -> Handle {
         let handle = Handle::of(id, handles);
-        if let (Handle::Key { .. }, Ok(Some(info))) = (&handle, mask_info_key(id)) {
-            handles.made_from.entry(info).or_insert_with(|| id.clone());
+        if let Handle::Key { .. } = handle {
+            handles.run_ids.push(id);
         }
         handles.mapped(&handle);
         handles.end_object();
@@ -305,7 +305,7 @@ impl Handle {
     }
 
     /// The lookup of `id` by a `CSeq_loc_CI` (its handle lives until `LiveHandles::end_iterator`).
-    pub(super) fn look_up_in_iterator(id: &ParsedSeqId, handles: &mut LiveHandles) {
+    pub(super) fn look_up_in_iterator(id: &ParsedSeqId, handles: &mut LiveHandles<'_>) {
         if let ParsedSeqId::Giim(value) = id {
             handles.find_or_create(value, Holder::Iterator);
         }
@@ -340,8 +340,8 @@ impl Handle {
 // as the scope)
 /// The Seq-id handles of NCBI's object manager during the query entry's step (`index_entry`): the
 /// `giim` tree (`seqid::mask_handle::GiimTree`, cited at `Handle`) with what holds each of its live
-/// handles, and the Seq-id that made the info of each handle that lives as long as the run
-/// (`made_from`). A lookup in the `giim` tree gets the first live handle of its number whose
+/// handles, and the Seq-ids of the keyed handles that live as long as the run, in their order
+/// (`run_ids`; the first with an info made it). A lookup in the `giim` tree gets the first live handle of its number whose
 /// Seq-id is not `Equals` to it, else a new handle; a handle leaves the tree when the last thing
 /// holding it goes. What holds a handle, as NCBI's object manager keeps it:
 /// - the run: the query entry's Seq-ids (`CBioseq_Info::m_Id`, made in phase C), a Seq-table
@@ -360,15 +360,16 @@ impl Handle {
 /// `-subject` run hold no `giim` Seq-id: LOSAT refuses a record with one
 /// (`blastinput::fasta_reader::believed::refused_id`), as it refuses a PSSM query with one.
 #[derive(Debug, Default)]
-pub(super) struct LiveHandles {
+pub(super) struct LiveHandles<'a> {
     tree: GiimTree,
     /// What holds each live `giim` handle: its number and holders, by its info.
     holds: HashMap<usize, (i32, Holds)>,
-    /// The Seq-id that made each info of the keyed handles of the run (by `mask_info_key`: the
-    /// info of a packing Textseq-id is shared by the accessions of one prefix, digit count and
-    /// version), the first of the run to have it (the phase C handles: no other handle is made
-    /// before the attach).
-    made_from: HashMap<Vec<u8>, ParsedSeqId>,
+    /// The Seq-ids of the keyed handles of the run, in the order of their lookups (the phase C
+    /// handles: no other handle is made before the attach). The first with an info (by
+    /// `mask_info_key`: the info of a packing Textseq-id is shared by the accessions of one prefix,
+    /// digit count and version) made it; only a message of the attach asks which
+    /// (`as_string`), so no map of the infos is kept for every entry.
+    run_ids: Vec<&'a ParsedSeqId>,
 }
 
 /// What holds a live `giim` handle.
@@ -402,10 +403,10 @@ pub(super) enum Holder {
     Iterator,
 }
 
-impl LiveHandles {
+impl<'a> LiveHandles<'a> {
     /// The handles after a query Bioseq with the Seq-ids `query_ids` joined (phase C).
     #[cfg(test)]
-    pub(super) fn new(query_ids: &[ParsedSeqId]) -> LiveHandles {
+    pub(super) fn new(query_ids: &'a [ParsedSeqId]) -> LiveHandles<'a> {
         let mut handles = LiveHandles::default();
         for id in query_ids {
             Handle::of_run(id, &mut handles);
@@ -499,8 +500,9 @@ impl LiveHandles {
         let seq_id = match handle {
             Handle::Key { .. } => match mask_info_key(id) {
                 Ok(Some(info)) => self
-                    .made_from
-                    .get(&info)
+                    .run_ids
+                    .iter()
+                    .find(|first| mask_info_key(first).is_ok_and(|key| key.as_ref() == Some(&info)))
                     .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
                 _ => id.clone(),
             },
@@ -535,10 +537,10 @@ pub(super) struct HandleRangeMap {
 
 /// `SAddState`: the Seq-id of the range added before, and the mode; with the `giim` tree of the
 /// lookups.
-struct AddState<'g> {
+struct AddState<'g, 'h> {
     prev: Option<usize>,
     mode: Mode,
-    handles: &'g mut LiveHandles,
+    handles: &'g mut LiveHandles<'h>,
 }
 
 impl HandleRangeMap {
@@ -546,7 +548,7 @@ impl HandleRangeMap {
     pub(super) fn of_location(
         loc: V<'_>,
         mode: Mode,
-        handles: &mut LiveHandles,
+        handles: &mut LiveHandles<'_>,
     ) -> Result<HandleRangeMap, Stop> {
         let mut map = HandleRangeMap::default();
         map.add_location(
@@ -572,7 +574,7 @@ impl HandleRangeMap {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:246-281
     // The query is a raw Bioseq: its TSE has no master segments (`m_MasterSeq` null).
-    fn add(&mut self, handle: Handle, range: Range, strand: Strand, state: &mut AddState<'_>) {
+    fn add(&mut self, handle: Handle, range: Range, strand: Strand, state: &mut AddState<'_, '_>) {
         let at = self.index_of(handle);
         if state.mode == Mode::None {
             if let Some(prev) = state.prev.filter(|&prev| prev != at) {
@@ -597,7 +599,7 @@ impl HandleRangeMap {
         id: &ParsedSeqId,
         range: Range,
         strand: Strand,
-        handles: &mut LiveHandles,
+        handles: &mut LiveHandles<'_>,
     ) {
         let handle = Handle::of(id, handles);
         self.add_handle(handle, range, strand, handles);
@@ -609,7 +611,7 @@ impl HandleRangeMap {
         handle: Handle,
         range: Range,
         strand: Strand,
-        handles: &mut LiveHandles,
+        handles: &mut LiveHandles<'_>,
     ) {
         self.add(
             handle,
@@ -626,7 +628,7 @@ impl HandleRangeMap {
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205
     // An element stated as `NULL` of a `mix`, an `equiv` or a `packed-int` is dereferenced where
     // it is reached (`RefElement::deref`; probe D3c-3b `probe7` `loc_mix`, `loc_mix2`).
-    fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) -> Result<(), Stop> {
+    fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_, '_>) -> Result<(), Stop> {
         // The `mix` and `equiv` locations being walked (to any depth the reader read): the
         // location's parts, the next one, and whether it is an `equiv`.
         let mut sets: Vec<(V<'v>, usize, bool)> = Vec::new();
@@ -690,13 +692,13 @@ impl HandleRangeMap {
         }
     }
 
-    fn add_interval(&mut self, interval: V<'_>, state: &mut AddState<'_>) {
+    fn add_interval(&mut self, interval: V<'_>, state: &mut AddState<'_, '_>) {
         let (id, range, strand) = interval_parts(interval);
         let handle = Handle::of(id, state.handles);
         self.add(handle, range, strand, state);
     }
 
-    fn add_point(&mut self, point: V<'_>, state: &mut AddState<'_>) {
+    fn add_point(&mut self, point: V<'_>, state: &mut AddState<'_, '_>) {
         let (id, range, strand) = point_parts(point);
         let handle = Handle::of(id, state.handles);
         self.add(handle, range, strand, state);

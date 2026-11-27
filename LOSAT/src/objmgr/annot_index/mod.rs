@@ -281,7 +281,7 @@ pub(super) struct Indexer<'p> {
     muted: bool,
     caches: table::Caches,
     /// NCBI's Seq-id handles of the step (`range::LiveHandles`).
-    handles: LiveHandles,
+    handles: LiveHandles<'p>,
 }
 
 /// How the object manager's step ends the run after its messages (`Indexed::end`).
@@ -437,7 +437,7 @@ pub(crate) fn index_annots(
     index_entry(program, &SeqEntry::Seq(Box::new(query)), true, &|_| None)
 }
 
-impl Indexer<'_> {
+impl<'p> Indexer<'p> {
     /// A post of the object manager (`ERR_POST_X`, `ERR_POST`; `id` empty without an error code),
     /// in the stream's state.
     fn post(&mut self, severity: Severity, id: &str, text: &[u8]) {
@@ -458,7 +458,7 @@ impl Indexer<'_> {
     // (phase I, `x_InitAnnotKeys`)
     // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:98-111 (a feature's type, read
     // when phase C lists it)
-    fn run(&mut self, tse: &entry::Tse<'_>, ids_known: bool) -> Result<(), Stop> {
+    fn run(&mut self, tse: &entry::Tse<'p>, ids_known: bool) -> Result<(), Stop> {
         let annots = &tse.annots;
         let data: Vec<Option<(&'static str, V<'_>)>> = annots
             .iter()
@@ -535,14 +535,16 @@ impl Indexer<'_> {
             Mode::None
         };
         // Both maps are made (`GetMaps`, the dereferences of their parts) before either is mapped.
-        let mut maps = Vec::with_capacity(2);
-        for loc in [feat.get("location"), feat.get("product")]
-            .into_iter()
-            .flatten()
+        let mut maps: [Option<HandleRangeMap>; 2] = [None, None];
+        for (map, loc) in maps
+            .iter_mut()
+            .zip([feat.get("location"), feat.get("product")])
         {
-            maps.push(HandleRangeMap::of_location(loc, mode, &mut self.handles)?);
+            if let Some(loc) = loc {
+                *map = Some(HandleRangeMap::of_location(loc, mode, &mut self.handles)?);
+            }
         }
-        for map in &maps {
+        for map in maps.iter().flatten() {
             self.map_location(map, Event::Feature, feat)?;
         }
         feature_ids(feat)?;

@@ -105,7 +105,7 @@ fn map(text: &str, mode: Mode) -> HandleRangeMap {
     map_in(text, mode, &mut LiveHandles::default())
 }
 
-fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
+fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles<'_>) -> HandleRangeMap {
     let value = location(text);
     HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, handles)
         .expect("no element stated as NULL")

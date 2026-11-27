@@ -299,7 +299,7 @@ impl<'a> LocColumns<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:457-521
-    fn parse_defaults(&mut self, handles: &mut LiveHandles) -> Result<(), Stop> {
+    fn parse_defaults(&mut self, handles: &mut LiveHandles<'a>) -> Result<(), Stop> {
         if !self.is_set {
             return Ok(());
         }
@@ -379,7 +379,7 @@ fn is_good_feat_table(table: V<'_>) -> bool {
         .is_none_or(|subtype| (1..106).contains(&subtype.int()))
 }
 
-impl Indexer<'_> {
+impl<'p> Indexer<'p> {
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:784-947
     // The maps of the columns by id and by name and the setters of the feature fields make no
     // message (the setters' constructors only keep the name: `CSeqTableSetExt` and the others
@@ -388,7 +388,7 @@ impl Indexer<'_> {
     /// The making of a `CSeqTableInfo` from `table` (`x_InitFeatTable`,
     /// seq_annot_info.cpp:474-500): the checks of the columns, with their messages, then LOSAT's
     /// bound of the rows that NCBI makes an object for.
-    pub(super) fn table_info<'a>(&mut self, table: V<'a>) -> Result<TableInfo<'a>, Stop> {
+    pub(super) fn table_info(&mut self, table: V<'p>) -> Result<TableInfo<'p>, Stop> {
         let is_feat = is_good_feat_table(table);
         let mut info = TableInfo {
             is_feat,

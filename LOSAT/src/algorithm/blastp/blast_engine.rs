@@ -11296,13 +11296,7 @@ fn prefetch_call<'a>(
         shown_subjects,
         x_rows_pool,
     };
-    let rows_of_lists =
-        |lists: &[Option<BlastpHitList>], first: usize| row_inputs.build(lists, first);
-    let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
-        let end = window.end.min(hit_lists.len());
-        let first = window.start.min(end);
-        rows_of_lists(&hit_lists[first..end], first)
-    };
+    let rows_of = |window: std::ops::Range<usize>| row_inputs.rows(&hit_lists, window);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1585
     // NCBI makes and prints the alignments of one query's result set at a time: the reports
     // make the rows of a window of queries and drop them before the next window's
@@ -11699,11 +11693,7 @@ fn report_call(
     };
     let rows_of_lists =
         |lists: &[Option<BlastpHitList>], first: usize| row_inputs.build(lists, first);
-    let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
-        let end = window.end.min(hit_lists.len());
-        let first = window.start.min(end);
-        rows_of_lists(&hit_lists[first..end], first)
-    };
+    let rows_of = |window: std::ops::Range<usize>| row_inputs.rows(&hit_lists, window);
     let phi_reports = report_write::PhiPairwise::of(
         phi_call.as_ref(),
         &rows_of_lists,
@@ -12223,7 +12213,9 @@ fn shift_and_split_hit_lists(
     }
 }
 
-/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists.
+/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists: the
+/// one producer of the rows of a call's phases (`prefetch_call`'s refusals and up-front rows,
+/// `report_call`'s reports), each of which builds it from the call's state.
 struct RowBuildInputs<'a> {
     engine_counts: &'a super::seqalign::EngineCounts,
     ranges: &'a BlastpRanges<'a>,
@@ -12236,6 +12228,17 @@ struct RowBuildInputs<'a> {
 }
 
 impl RowBuildInputs<'_> {
+    /// The rows of the queries `window` of `hit_lists` (`build`), the window cut to the lists.
+    fn rows(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        window: std::ops::Range<usize>,
+    ) -> Result<Vec<PairwiseHit>> {
+        let end = window.end.min(hit_lists.len());
+        let first = window.start.min(end);
+        self.build(&hit_lists[first..end], first)
+    }
+
     /// Renders pairwise alignment rows (`PairwiseHit`) for `lists` starting at query `first`,
     /// shifting coordinates back to searched letters for alignment rendering and back to record
     /// coordinates afterwards.

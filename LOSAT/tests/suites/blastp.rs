@@ -66,6 +66,8 @@ mod blastp_subject_runs;
 mod blastp_sw_tback;
 #[path = "../blastp_ungap_sent.rs"]
 mod blastp_ungap_sent;
+#[path = "../psiblast_phi_long.rs"]
+mod psiblast_phi_long;
 #[path = "../psiblast_pssm_files.rs"]
 mod psiblast_pssm_files;
 #[path = "../psiblast_pssm_read_order.rs"]

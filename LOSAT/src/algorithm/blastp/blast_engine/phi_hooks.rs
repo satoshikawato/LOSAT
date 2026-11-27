@@ -506,7 +506,7 @@ pub(super) fn phi_start<'p>(
 /// 0), and `-evalue` as the preliminary e-value.
 #[cold]
 #[inline(never)]
-fn phi_link(args: &ResolvedBlastpArgs, search: &PhiSearch<'_>, first_length: usize) -> PhiLink {
+fn phi_link(args: &ResolvedBlastpArgs, search: &PhiSearch, first_length: usize) -> PhiLink {
     PhiLink {
         params: crate::core::link_hsps::EvenGapLinkParams::preliminary(stats::word_cutoff(
             args.gap_trigger_bits,
@@ -533,7 +533,7 @@ fn phi_link(args: &ResolvedBlastpArgs, search: &PhiSearch<'_>, first_length: usi
 /// subjects of the kept lists and selects the kept HSPs by their position in it
 /// (`PhiPrelimOrdinal`, `select_kept_prelim`).
 fn subject_prelim(
-    search: &PhiSearch<'_>,
+    search: &PhiSearch,
     subject: &[u8],
     length: usize,
     scratch: &mut PssmGapScratch,
@@ -561,7 +561,7 @@ fn subject_prelim(
 #[cold]
 #[inline(never)]
 fn long_subject_prelim(
-    search: &PhiSearch<'_>,
+    search: &PhiSearch,
     subject: &[u8],
     length: usize,
     scratch: &mut PssmGapScratch,

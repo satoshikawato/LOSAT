@@ -520,14 +520,14 @@ fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySeq
 }
 
 /// The arithmetic of the blocks is `NA4_TO_NA2` for all sixteen NCBI4na bases: `ambiguity_bits`
-/// is 0 exactly where the table has a code, and `ncbi4na_code` is that code.
+/// is 0 exactly where the table has a code, and `ncbi2na_code_of_base` is that code.
 #[test]
 fn ncbi4na_codes_are_the_table() {
     for base in 0..16u8 {
         let code = NA4_TO_NA2[usize::from(base)];
         assert_eq!(ambiguity_bits(base) == 0, code & 0x80 == 0, "{base}");
         if code & 0x80 == 0 {
-            assert_eq!(ncbi4na_code(base), code, "{base}");
+            assert_eq!(ncbi2na_code_of_base(base), code, "{base}");
         }
     }
 }
@@ -544,6 +544,8 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
             "{ncbi4na:02x?} of {base_length} bases"
         );
     };
+    // An empty record (no byte read).
+    check(&[], 0);
     // Every byte at every place of the first two blocks (and the byte after them) among
     // unambiguous bytes, with base counts that end before the first block is full, at the end of
     // a block, after it, inside the last byte, and at the byte changed (its second base then the

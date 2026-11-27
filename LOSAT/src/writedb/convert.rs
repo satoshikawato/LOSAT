@@ -5,7 +5,7 @@
 //! stored in place of an ambiguous one).
 
 use super::bioseq::SeqData;
-use super::fasta_source::pack::iupacna_to_ncbi4na;
+use super::fasta_source::pack::{iupacna_to_ncbi4na, pair_byte};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::utils::random_gen::NcbiRandom;
 
@@ -171,12 +171,12 @@ const fn ambiguity_bits(base: u8) -> u8 {
     base.wrapping_sub(1) & (base | 0x10)
 }
 
-/// `NA4_TO_NA2` of a base for which [`ambiguity_bits`] is 0, without a table: 1, 2, 4, 8 give 0,
-/// 1, 2, 3 (half the base less an eighth of it, in whole numbers).
+/// The NCBI2na code (`NA4_TO_NA2`) of an NCBI4na base for which [`ambiguity_bits`] is 0, without
+/// a table: 1, 2, 4, 8 give 0, 1, 2, 3 (half the base less an eighth of it, in whole numbers).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:434-441
 #[inline(always)]
-const fn ncbi4na_code(base: u8) -> u8 {
+const fn ncbi2na_code_of_base(base: u8) -> u8 {
     (base >> 1) - (base >> 3)
 }
 
@@ -240,10 +240,11 @@ fn or_half(seq: &mut [u8], i: usize, half: u8) {
 /// `WriteDB_Ncbi4naToBinary`'s loop over the input bytes `read` ([`NCBI4NA_BLOCK`] or more), a
 /// block of [`NCBI4NA_BLOCK`] bytes at a time (LOSAT's speed). Every block takes the same steps:
 /// the half of each of its bytes whose two bases are `A`, `C`, `G` or `T` by arithmetic
-/// ([`ncbi4na_code`]), 0 for its other bytes, and the block's output bytes written from these
-/// halves without a branch a byte; then each byte with another base, in order, through
-/// [`ncbi4na_ambiguous_half`], whose half is ORed in. NCBI's loop calls `check` for
-/// exactly those bytes and in that order, so the ambiguity data and the random bases are NCBI's.
+/// ([`ncbi2na_code_of_base`]), 0 for its other bytes, and the block's output bytes written from
+/// these halves ([`pair_byte`]) without a branch a byte; then each byte with another base, in
+/// order, through [`ncbi4na_ambiguous_half`], whose half is ORed in. NCBI's loop calls `check`
+/// for exactly those bytes and in that order, so the ambiguity data and the random bases are
+/// NCBI's.
 /// The bytes after the last block run the loop's body ([`ncbi4na_byte_to_binary`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-518
@@ -264,14 +265,13 @@ fn ncbi4na_blocks_to_binary(
             let bits = ambiguity_bits(inp >> 4) | ambiguity_bits(inp & 0xF);
             *flag = bits;
             any |= bits;
-            let codes = (ncbi4na_code(inp >> 4) << 2) | ncbi4na_code(inp & 0xF);
+            let codes = (ncbi2na_code_of_base(inp >> 4) << 2) | ncbi2na_code_of_base(inp & 0xF);
             *half = if bits == 0 { codes } else { 0 };
         }
         // The half of the even byte in the high four bits, that of the odd byte below it.
         let out = &mut seq[start / 2..(start + NCBI4NA_BLOCK) / 2];
-        for (byte, two) in out.iter_mut().zip(halves.as_chunks::<2>().0) {
-            let pair = u16::from_le_bytes(*two);
-            *byte = ((pair << 4) | (pair >> 8)) as u8;
+        for (byte, &two) in out.iter_mut().zip(halves.as_chunks::<2>().0) {
+            *byte = pair_byte(two);
         }
         if any != 0 {
             for (offset, (&flag, &inp)) in ambiguous.iter().zip(block).enumerate() {

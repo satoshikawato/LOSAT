@@ -407,16 +407,17 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     dst
 }
 
-/// The number of letters of an NCBI2na literal that [`Ncbi4naBuilder::push_ncbi2na_letters`]
-/// converts at a time (LOSAT's speed).
+/// The number of letters of an NCBI2na literal that [`Ncbi4naBuilder::push_literal`] converts
+/// at a time by comparisons (LOSAT's speed).
 const NCBI2NA_LETTER_BLOCK: usize = 64;
 
-/// The NCBI4na code of a letter whose best coding is NCBI2na ([`is_ncbi2na_best`]: `A`, `C`,
-/// `G`, `T`, `U` in either case): 1, 2, 4, 8, 8, the code of `NCBI4NA_CODES` and the NCBI8na
-/// code that `C2naTo8na` gives the letter's NCBI2na code. Written without a table and without a
-/// branch, so that a loop over letters computes the codes of many at once. Clearing bit 5 folds
-/// lower case to upper case without mapping any non-letter onto `A`-`Z`, and clearing bit 0 pairs
-/// `T` (`0x54`) with `U` (`0x55`). Any other byte gives 0 (it is not an NCBI2na literal's).
+/// The NCBI4na code of a letter for which [`is_ncbi2na_best`] holds: 1, 2, 4, 8, 8 for `A`, `C`,
+/// `G`, `T`, `U`, the code of `NCBI4NA_CODES` and the NCBI8na code that `C2naTo8na` gives the
+/// letter's NCBI2na code; 0 for any other byte (none is in an NCBI2na literal). No table and no
+/// branch, so that a loop over letters computes the codes of many at once. It folds case and
+/// pairs `T` with `U` as [`is_ncbi2na_best`] does, so it holds for every letter that the NCBI2na
+/// coding of `pack_iupacna` admits; the reader stores upper case, and the fold costs one AND a
+/// letter in the loop's vector code.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:79-351
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:950-1034
@@ -435,7 +436,7 @@ const fn ncbi4na_code_of_ncbi2na_letter(residue: u8) -> u8 {
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
 #[inline(always)]
-fn pair_byte(two: [u8; 2]) -> u8 {
+pub(crate) fn pair_byte(two: [u8; 2]) -> u8 {
     let pair = u16::from_le_bytes(two);
     ((pair << 4) | (pair >> 8)) as u8
 }
@@ -491,11 +492,39 @@ impl Ncbi4naBuilder {
         }
     }
 
-    /// The NCBI8na codes of IUPACna residues of a literal.
-    pub(crate) fn push_iupacna(&mut self, mut src: &[u8]) {
+    /// The NCBI8na codes of the letters of a literal of a delta, `ncbi2na` when `pack_iupacna`
+    /// gave it the NCBI2na coding: `s_FixBioseqDeltas` converts each literal from its coding
+    /// (`C2naTo8na`, `C4naTo8na`), and both give every letter its code of `NCBI4NA_CODES`, two to
+    /// a byte, the first in the high half. An NCBI2na literal holds only letters for which
+    /// [`is_ncbi2na_best`] holds, so its blocks of [`NCBI2NA_LETTER_BLOCK`] letters get their codes
+    /// by comparisons ([`ncbi4na_code_of_ncbi2na_letter`]), without a table and without a branch a
+    /// letter (LOSAT's speed); its other letters, and every letter of another literal, get theirs
+    /// from the table. Inlined into its one caller, so that a literal shorter than a block runs the
+    /// table's loop without a call (one test of the coding more).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
+    #[inline(always)]
+    pub(crate) fn push_literal(&mut self, mut src: &[u8], ncbi2na: bool) {
+        debug_assert!(!ncbi2na || src.iter().all(|&letter| is_ncbi2na_best(letter)));
         if let (true, [first, rest @ ..]) = (self.odd, src) {
             self.push_code(NCBI4NA_CODES[*first as usize]);
             src = rest;
+        }
+        if ncbi2na {
+            while let Some((block, rest)) = src.split_first_chunk::<NCBI2NA_LETTER_BLOCK>() {
+                let mut codes = [0u8; NCBI2NA_LETTER_BLOCK];
+                for (code, &letter) in codes.iter_mut().zip(block) {
+                    *code = ncbi4na_code_of_ncbi2na_letter(letter);
+                }
+                let mut bytes = [0u8; NCBI2NA_LETTER_BLOCK / 2];
+                for (byte, &two) in bytes.iter_mut().zip(codes.as_chunks::<2>().0) {
+                    *byte = pair_byte(two);
+                }
+                self.bytes.extend_from_slice(&bytes);
+                src = rest;
+            }
         }
         let mut chunks = src.chunks_exact(2);
         self.bytes.extend(
@@ -505,37 +534,6 @@ impl Ncbi4naBuilder {
         if let [last] = chunks.remainder() {
             self.push_code(NCBI4NA_CODES[*last as usize]);
         }
-    }
-
-    /// The NCBI8na codes of the letters of an NCBI2na literal: `pack_iupacna` gives that coding
-    /// only to letters whose best coding is NCBI2na (`A`, `C`, `G`, `T`, `U`), whose codes
-    /// `s_FixBioseqDeltas` gets from the literal's NCBI2na data (`C2naTo8na`: 1, 2, 4, 8). They
-    /// are the codes that [`Self::push_iupacna`] gives these letters, here by comparisons
-    /// ([`ncbi4na_code_of_ncbi2na_letter`]), a block of [`NCBI2NA_LETTER_BLOCK`] letters at a time
-    /// without a table and without a branch a letter (LOSAT's speed); the letters after the last
-    /// block go to [`Self::push_iupacna`].
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-349
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
-    pub(crate) fn push_ncbi2na_letters(&mut self, mut src: &[u8]) {
-        debug_assert!(src.iter().all(|&letter| is_ncbi2na_best(letter)));
-        if let (true, [first, rest @ ..]) = (self.odd, src) {
-            self.push_code(NCBI4NA_CODES[*first as usize]);
-            src = rest;
-        }
-        let (blocks, rest) = src.as_chunks::<NCBI2NA_LETTER_BLOCK>();
-        for block in blocks {
-            let mut codes = [0u8; NCBI2NA_LETTER_BLOCK];
-            for (code, &letter) in codes.iter_mut().zip(block) {
-                *code = ncbi4na_code_of_ncbi2na_letter(letter);
-            }
-            let mut bytes = [0u8; NCBI2NA_LETTER_BLOCK / 2];
-            for (byte, &two) in bytes.iter_mut().zip(codes.as_chunks::<2>().0) {
-                *byte = pair_byte(two);
-            }
-            self.bytes.extend_from_slice(&bytes);
-        }
-        self.push_iupacna(rest);
     }
 
     /// Appends up to `letters` bases from packed NCBI2na bytes (`CSeqConvert::Convert` from

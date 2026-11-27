@@ -732,9 +732,10 @@ fn record_past_32_bits() {
 }
 
 /// The NCBI4na bytes of a delta whose literals are of both codings (`pack_iupacna`: NCBI2na for a
-/// run of `A`, `C`, `G`, `T`, `U` long enough to be a segment of its own, made by
-/// `push_ncbi2na_letters`; NCBI4na for runs with other letters, by `push_iupacna`) and whose gaps
-/// put the literals at even and odd places: those of the table for the letters, each gap as `N`.
+/// run of `A`, `C`, `G`, `T`, `U` long enough to be a segment of its own, its blocks by
+/// comparisons; NCBI4na for runs with other letters, by the table; `Ncbi4naBuilder::push_literal`)
+/// and whose gaps put the literals at even and odd places: those of the table for the letters,
+/// each gap as `N`.
 #[test]
 fn delta_literals_of_both_codings_are_the_table() {
     let mut state = 0x2545_f491_4f6c_dd1d_u64;

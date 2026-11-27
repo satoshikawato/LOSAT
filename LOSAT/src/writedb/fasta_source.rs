@@ -318,28 +318,35 @@ fn fix_bioseq_deltas(
             // Below 2^32, so a `usize` on every target.
             let letters = (size % (1 << 32)) as usize;
             let mut seq4na = pack::Ncbi4naBuilder::with_letters(letters)?;
+            // The letters still to push (`letters` less those pushed), counted down by each piece.
+            let mut room = letters;
             for piece in pieces {
-                let room = letters - seq4na.letters();
                 if room == 0 {
                     break;
                 }
-                match piece {
-                    DeltaSeq::LocNull => seq4na.push_run(0x0f, 1),
-                    DeltaSeq::Gap { length } => seq4na.push_run(0x0f, (length as usize).min(room)),
+                room -= match piece {
+                    DeltaSeq::LocNull => {
+                        seq4na.push_run(0x0f, 1);
+                        1
+                    }
+                    DeltaSeq::Gap { length } => {
+                        let run = (length as usize).min(room);
+                        seq4na.push_run(0x0f, run);
+                        run
+                    }
                     DeltaSeq::Literal(segment) => {
                         let start = segment.start as usize;
                         let run = (segment.length as usize).min(room);
-                        let letters = &residues[start..start + run];
                         // NCBI converts each literal from its coding (`C2naTo8na`, `C4naTo8na`).
-                        match segment.coding {
-                            pack::Coding::Ncbi2na => seq4na.push_ncbi2na_letters(letters),
-                            pack::Coding::Ncbi4na | pack::Coding::Ncbieaa => {
-                                seq4na.push_iupacna(letters)
-                            }
-                        }
+                        seq4na.push_literal(
+                            &residues[start..start + run],
+                            segment.coding == pack::Coding::Ncbi2na,
+                        );
+                        run
                     }
-                }
+                };
             }
+            debug_assert_eq!(seq4na.letters(), letters - room);
             let seq4na = seq4na.into_bytes();
             let fix = (letters as u64 != length).then_some(DeltaFix::Length(letters as u64));
             (length, Some(SeqData::Ncbi4na(seq4na)), fix)

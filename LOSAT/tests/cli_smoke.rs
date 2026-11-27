@@ -908,6 +908,81 @@ fn a_failed_standard_output_after_a_failed_standard_error_ends_as_ncbi() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1931
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
+// The alignments of outfmt 0 and 3 on a standard output that fails at the flush at their end (a
+// file at its size limit, 600 bytes, SIGXFSZ ignored), after a warning (`-max_target_seqs 1`):
+// `out2`'s destructor posts 802.4. With standard error on `/dev/full`, `cerr` failed at the warning
+// and its post flushes no tie: the post is dropped and the next insertion ends the run at
+// `CATCH_ALL`, exit status 6; with a standard error that takes the warning, the post's tie throws
+// (`std::terminate`, SIGABRT). NCBI BLAST+ 2.17.0 blastn on these inputs, limits 101 to 1,201 bytes
+// (outfmt 0) and 101 to 901 (outfmt 3), line RG item T8b fix round 1 (review S1,
+// `T/t8b/tools/s1_sweep.py`).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_alignments_last_flush_after_a_failed_standard_error_ends_as_ncbi() {
+    use std::os::unix::process::ExitStatusExt;
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/blast_formatter/in");
+    let full = || {
+        fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .expect("open /dev/full")
+    };
+    for outfmt in ["0", "3"] {
+        for bad_stderr in [true, false] {
+            let out = temp_path(&format!("alignments_flush_{outfmt}"), "out");
+            let err = temp_path(&format!("alignments_flush_{outfmt}"), "err");
+            let plain = clean_losat_command();
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg(r#"trap '' XFSZ; exec prlimit --fsize=600 -- "$@""#)
+                .arg("sh")
+                .arg(plain.get_program())
+                .args([
+                    "blastn",
+                    "-outfmt",
+                    outfmt,
+                    "-max_target_seqs",
+                    "1",
+                    "-query",
+                ])
+                .arg(dir.join("q.fa"))
+                .arg("-subject")
+                .arg(dir.join("s.fa"))
+                .stdin(std::process::Stdio::null())
+                .stdout(fs::File::create(&out).expect("create the standard output file"));
+            for (variable, value) in plain.get_envs() {
+                match value {
+                    Some(value) => command.env(variable, value),
+                    None => command.env_remove(variable),
+                };
+            }
+            if bad_stderr {
+                command.stderr(full());
+            } else {
+                command.stderr(fs::File::create(&err).expect("create the standard error file"));
+            }
+            let status = command.status().expect("run blastn");
+            let written = fs::metadata(&out).map(|meta| meta.len());
+            let _ = fs::remove_file(&out);
+            let _ = fs::remove_file(&err);
+            let got = (status.code(), status.signal());
+            let want = if bad_stderr {
+                (Some(6), None)
+            } else {
+                (None, Some(6))
+            };
+            assert_eq!(
+                got, want,
+                "outfmt {outfmt}, standard error failed {bad_stderr}"
+            );
+            assert_eq!(written.ok(), Some(600), "outfmt {outfmt}");
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
 #[test]
 fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {

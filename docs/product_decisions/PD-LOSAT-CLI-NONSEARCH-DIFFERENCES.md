@@ -176,7 +176,10 @@ BLAST+.
    NCBI's run ends when that format's write to its standard output fails, where NCBI is ended by
    SIGPIPE (141, no text): outfmt 0 to 4 and 18 with `BLAST failed to write output`, exit code 6
    (outfmt 0 to 4 abort, exit status 134, where the flush at the end of the alignments fails:
-   its 802.4 post's `cerr` flushes the failed `cout`); outfmt 5, 8, 9, 11, 12, 15 and 16 (whose
+   its 802.4 post's `cerr` flushes the failed `cout`, when `cerr` itself has not failed; after a
+   standard error that could not be written, the post flushes nothing, is not written, and the
+   next write to the failed `cout` ends the run with exit code 6, as in NCBI 2.17.0's outfmt 0
+   and 3 on a size-limited standard output, line RG item T8b fix 1); outfmt 5, 8, 9, 11, 12, 15 and 16 (whose
    failures post, and each post's `cerr` flushes the failed `cout`) and outfmt 6, 7 and 10 with
    libstdc++'s `terminate` text and an abort (exit status 134); SAM (17) with exit code 0. A pipe
    that only the writes after the formatter reach (`~CBlastFormat`'s flush and the exit's) is not
@@ -440,8 +443,13 @@ BLAST+.
    LOSAT ends at that write with exit status 0 and no message: the texts NCBI wrote before it are
    written, and nothing after (a reader closed before the start gets nothing, the banner is on
    standard error; no `-o` file is made when standard error is the closed pipe). With `-q` the
-   banner is still written. The version, `-help` and `-xmlhelp` texts end with exit status 0 on a
-   closed pipe or a full disk, an argument error with exit status 1, as in the other programs.
+   banner is still written. A post to the `-logfile` file (`-logfile /dev/stdout` or a named
+   pipe) whose reader has closed it ends NCBI by SIGPIPE at that post as well, and LOSAT ends
+   there with exit status 0 and no message (the post's write is NCBI's, which ignores its result
+   on any other failure: a full disk runs on); the search programs' `-logfile` is unchanged
+   (line RG item T8b fix 1, NCBI's rpsbproc 0.5.1 on ws, 2026-11-27). The version, `-help` and
+   `-xmlhelp` texts end with exit status 0 on a closed pipe or a full disk, an argument error
+   with exit status 1, as in the other programs.
    Functions: `ncbi_app::files::OutputFile` (one stream of `-out` for each program, the searches'
    `report::ostream::ReportStream` without an exception mask; `ends_like_sigpipe`), `ncbi_app::Diag`
    (the tie before a text), `report::run_files::OpenFiles::finish_streams` (the end of the

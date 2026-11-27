@@ -120,7 +120,8 @@ struct Run<'r, 'o> {
 /// formatted object), then NCBI's stream of it, the search programs' report stream
 /// (`ReportStream::formatter_output`: the command line's standard output or the file, which each
 /// object's formatter sets to throw while it lives, `begin_object`, `end_object`), or the
-/// caller's writer of a library run's or LOSAT Web's standard output (`CallerReport`).
+/// caller's writer of a library run's or LOSAT Web's standard output, the tools' caller stream
+/// that throws (`files::formatter_standard_output`).
 struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
@@ -139,8 +140,12 @@ struct Output<'o> {
 enum OutStream<'o> {
     /// NCBI's stream: the command line's standard output, or a file.
     Report(ReportStream),
-    /// The caller's writer of a library run's or LOSAT Web's standard output.
-    Caller(CallerReport<'o>),
+    /// The caller's writer of a library run's or LOSAT Web's standard output
+    /// (`files::formatter_standard_output`: each insertion written at once, a flush of NCBI's
+    /// flushes the writer; a failed write fails every later one, and a failure while a formatter
+    /// lives ends the run with "BLAST failed to write output", exit status 6, `CATCH_ALL`'s: the
+    /// caller's writers are tied by nothing, so no `std::terminate`).
+    Caller(files::OutputFile<'o>),
 }
 
 /// The posts of the stream (`ReportStream::formatter_output`), kept until the run writes them
@@ -174,83 +179,6 @@ impl Write for Posts {
     }
 }
 
-/// The caller's writer of a library run's or LOSAT Web's standard output (no stream of NCBI's to
-/// model, as the tools' `ncbi_app::files::CallerOutput` and the search programs' library writers):
-/// each insertion is written at once and a flush of NCBI's flushes the writer. A failed write
-/// fails every later one, and a failure while a formatter lives ends the run with "BLAST failed
-/// to write output", exit status 6 (`CATCH_ALL`'s; the caller's writers are tied by nothing, so
-/// no `std::terminate`).
-struct CallerReport<'o> {
-    out: &'o mut dyn Write,
-    bad: bool,
-}
-
-impl CallerReport<'_> {
-    fn checked(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
-        if outcome.is_err() {
-            self.bad = true;
-            return Err(caller_failure());
-        }
-        Ok(())
-    }
-}
-
-impl Write for CallerReport<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.write_all(buf)?;
-        Ok(buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        if self.bad {
-            return Err(caller_failure());
-        }
-        let outcome = self.out.write_all(buf);
-        self.checked(outcome)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl ReportWrite for CallerReport<'_> {
-    fn ncbi_flush(&mut self) -> std::io::Result<()> {
-        if self.bad {
-            return Err(caller_failure());
-        }
-        let outcome = self.out.flush();
-        self.checked(outcome)
-    }
-}
-
-/// The failed write of the caller's writer (`CallerReport`).
-#[derive(Debug)]
-struct CallerFailure;
-
-impl std::fmt::Display for CallerFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("BLAST failed to write output")
-    }
-}
-
-impl std::error::Error for CallerFailure {}
-
-fn caller_failure() -> std::io::Error {
-    std::io::Error::other(CallerFailure)
-}
-
-/// Whether `error` is the caller's failed write (`CallerReport`) or an error after it.
-fn is_caller_failure(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        cause.is::<CallerFailure>()
-            || cause
-                .downcast_ref::<std::io::Error>()
-                .and_then(|error| error.get_ref())
-                .is_some_and(|inner| inner.is::<CallerFailure>())
-    })
-}
-
 /// Whether `error` is the report stream's failed write of an object that it took whole
 /// (`is_undecided_report_write_failure`): NCBI's pieces of the object decide NCBI's end.
 fn is_undecided(error: &anyhow::Error) -> bool {
@@ -277,7 +205,7 @@ impl<'o> Output<'o> {
         let posts = Box::new(self.posts.clone());
         let stream = match file {
             OutputDevice::Stdout(out) if !self.files.command_line() => {
-                OutStream::Caller(CallerReport { out, bad: false })
+                OutStream::Caller(files::formatter_standard_output(out, self.files))
             }
             OutputDevice::Stdout(_) => {
                 OutStream::Report(ReportStream::formatter_output(None, posts, !tied))
@@ -341,8 +269,8 @@ impl<'o> Output<'o> {
         if let Some(stream) = self.report(diag) {
             stream.begin_formatter(site)?;
         } else if let Some(OutStream::Caller(caller)) = &self.stream {
-            if caller.bad {
-                return Err(caller_failure().into());
+            if caller.bad().unwrap_or(true) {
+                return Err(files::caller_failure().into());
             }
         }
         Ok(())
@@ -362,12 +290,12 @@ impl<'o> Output<'o> {
             Some(mut stream) => stream.finish(result),
             None => {
                 if let Some(OutStream::Caller(caller)) = &mut self.stream {
-                    if !caller.bad {
-                        let _ = caller.out.flush();
-                    }
+                    // The destructor's flush with the mask restored: a failure sets `badbit`
+                    // alone, which the next formatter's constructor throws on.
+                    let _ = ReportWrite::ncbi_flush(caller);
                 }
                 result.map_err(|error| {
-                    if is_caller_failure(&error) {
+                    if files::is_caller_failure(&error) {
                         NativeError::write_failure().into()
                     } else {
                         error

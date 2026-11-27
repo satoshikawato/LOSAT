@@ -181,6 +181,7 @@ fn caller(out: &mut dyn Write) -> OutputFile<'_> {
         bad: false,
         closed: false,
         cut_aware: false,
+        throws: false,
     })
 }
 

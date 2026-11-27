@@ -40,6 +40,9 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
   `remaining-gaps-20261112/T/t8b/tools/freeze_rp.py` (a run as the test runs it; standard output on `/dev/full`, a
   pipe closed before the start, standard error so, standard error on `/dev/full`, standard error into the pipe of
   standard output). `rc` holds the exit status, or minus the signal that ended NCBI's process (`-13`: SIGPIPE).
+  The `device` rows `closed.*.logstdout*` and `errclosed.missing.logstderr` (a post to `-logfile /dev/stdout` or
+  `/dev/stderr` on a pipe whose reader has closed it; fix round 1 of line RG item T8b, 2026-11-27) are of the same
+  binary, by the same script, on the same machine.
 
 ## CASES.tsv
 

@@ -339,11 +339,19 @@ pub(crate) enum OutputFile<'a> {
 /// from that write and every later one. When `cut_aware` is set (`ToolLog::Stdout` in a
 /// `Receiver` run, where `-logfile /dev/stdout` shares `out`), NCBI's insertion cuts and flushes
 /// are forwarded to the shared `NcbiBuffer`-backed stdout stream rather than coalesced.
+///
+/// `throws`: the stream throws on `badbit` (`exceptions(badbit)`), blast_formatter's
+/// (`formatter_standard_output`, the formatter's mask that it never resets between its objects):
+/// a failed write, a closed pipe too (NCBI's blast_formatter ignores SIGPIPE), returns
+/// `CallerFailure` from that write and every later one, which ends the run with "BLAST failed to
+/// write output", exit status 6 (`CATCH_ALL`'s; the caller's writer is tied by nothing, so no
+/// `std::terminate`); LOSAT's own flushes hold, as on NCBI's report stream (`Write::flush`).
 pub(crate) struct CallerOutput<'a> {
     out: &'a mut dyn Write,
     bad: bool,
     closed: bool,
     cut_aware: bool,
+    throws: bool,
 }
 
 impl CallerOutput<'_> {
@@ -351,6 +359,9 @@ impl CallerOutput<'_> {
     fn result(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
         if let Err(error) = outcome {
             self.bad = true;
+            if self.throws {
+                return Err(caller_failure());
+            }
             if ends_like_sigpipe(&error) {
                 self.closed = true;
                 return Err(error);
@@ -359,12 +370,21 @@ impl CallerOutput<'_> {
         Ok(())
     }
 
+    /// A write or a flush of the stream after a failed write: nothing, or the stream's exception.
+    fn after_failure(&self) -> std::io::Result<()> {
+        if self.throws {
+            Err(caller_failure())
+        } else {
+            Ok(())
+        }
+    }
+
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         if self.closed {
             return Err(std::io::ErrorKind::BrokenPipe.into());
         }
         if self.bad {
-            return Ok(());
+            return self.after_failure();
         }
         let outcome = self.out.write_all(buf);
         self.result(outcome)
@@ -375,11 +395,40 @@ impl CallerOutput<'_> {
             return Err(std::io::ErrorKind::BrokenPipe.into());
         }
         if self.bad {
-            return Ok(());
+            return self.after_failure();
         }
         let outcome = self.out.flush();
         self.result(outcome)
     }
+}
+
+/// The failed write of a caller's writer that throws (`CallerOutput`'s `throws`).
+#[derive(Debug)]
+pub(crate) struct CallerFailure;
+
+impl std::fmt::Display for CallerFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BLAST failed to write output")
+    }
+}
+
+impl std::error::Error for CallerFailure {}
+
+/// The error of a write of a caller's writer that throws, after it failed (`CallerFailure`).
+pub(crate) fn caller_failure() -> std::io::Error {
+    std::io::Error::other(CallerFailure)
+}
+
+/// Whether `error` is the failed write of a caller's writer that throws (`CallerFailure`) or an
+/// error after it.
+pub(crate) fn is_caller_failure(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.is::<CallerFailure>()
+            || cause
+                .downcast_ref::<std::io::Error>()
+                .and_then(|error| error.get_ref())
+                .is_some_and(|inner| inner.is::<CallerFailure>())
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
@@ -500,13 +549,14 @@ impl Write for OutputFile<'_> {
         }
     }
 
-    /// LOSAT's flushes hold on NCBI's stream and on a cut-aware shared stdout (`ToolLog::Stdout`):
-    /// NCBI's are `ReportWrite::ncbi_flush`, and NCBI's writes come before a text on standard
-    /// error (`ncbi_app::Diag`) and at the run's end (`OpenFiles::finish_streams`).
+    /// LOSAT's flushes hold on NCBI's stream, on a cut-aware shared stdout (`ToolLog::Stdout`) and
+    /// on a caller's writer that throws (blast_formatter's): NCBI's are `ReportWrite::ncbi_flush`,
+    /// and NCBI's writes come before a text on standard error (`ncbi_app::Diag`) and at the run's
+    /// end (`OpenFiles::finish_streams`).
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             OutputFile::Stream(_) | OutputFile::Refused(_) => Ok(()),
-            OutputFile::Caller(caller) if caller.cut_aware => Ok(()),
+            OutputFile::Caller(caller) if caller.cut_aware || caller.throws => Ok(()),
             OutputFile::Caller(caller) => caller.flush(),
         }
     }
@@ -603,8 +653,27 @@ pub(crate) fn standard_output_file<'a>(
             bad: false,
             closed: false,
             cut_aware: files.tool_log_stdout(),
+            throws: false,
         })
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+/// The caller's writer `stdout` of a library run's or LOSAT Web's standard output as
+/// blast_formatter's `-out` stream (`blast_formatter::archive::Output`): `CallerOutput` that
+/// throws, as each archive object's formatter sets the stream to (the command line's is
+/// `ReportStream::formatter_output`).
+pub(crate) fn formatter_standard_output<'a>(
+    stdout: &'a mut dyn Write,
+    files: &OpenFiles,
+) -> OutputFile<'a> {
+    OutputFile::Caller(CallerOutput {
+        out: stdout,
+        bad: false,
+        closed: false,
+        cut_aware: files.tool_log_stdout(),
+        throws: true,
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752

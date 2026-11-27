@@ -1654,9 +1654,9 @@ fn registered_run_files_uses_one_reader_regardless_of_parse() {
 }
 
 /// `-logfile out/x.asn -export_search_strategy out/x.asn` without folder `out` (line WQA D19 round
-/// R1): `-logfile` stays on stderr (`Unopened`), so `-export_search_strategy out/x.asn` is not
-/// refused as the file of `-logfile` and writes the strategy file on stream 8; with folder `out`
-/// present, `-logfile` opens `out/x.asn` and the strategy is refused.
+/// R1, line RG item F1w-r2): the command line opens neither, so `-logfile` stays on stderr
+/// (`Unopened`) and `-export_search_strategy out/x.asn` is NCBI's error, at once, with no file; with
+/// folder `out` present, `-logfile` opens `out/x.asn` and the strategy is refused as its file.
 #[test]
 fn strategy_target_sees_runs_files_for_logfile() {
     let words = [
@@ -1674,18 +1674,15 @@ fn strategy_target_sees_runs_files_for_logfile() {
         "-export_search_strategy",
         "out/x.asn",
     ];
-    validate(&words).unwrap();
-    let (res, streams) = run_of(&words);
-    res.unwrap();
-    let diag = stream_text(&streams, STREAM_DIAGNOSTICS);
+    let message = validate(&words).unwrap_err();
     assert_eq!(
-        diag,
-        "Warning: [tblastx] Examining 5 or more matches is recommended\n"
+        message,
+        "Command line argument error: Argument \"export_search_strategy\". File is not \
+         accessible:  `out/x.asn'\n"
     );
-    let files = run_files(&streams).expect("strategy file on stream 8");
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0].0, "out/x.asn");
-    assert!(files[0].1.contains("Blast4-request"), "{}", files[0].1);
+    let (res, streams) = run_of(&words);
+    assert_eq!(res.unwrap_err(), message);
+    assert!(run_files(&streams).is_none_or(|files| files.is_empty()));
 
     // With folder `out` present via a registered `-conffile out/d19_r1_strat.ini`, `-logfile
     // out/x.asn` opens a file, so `-export_search_strategy out/x.asn` is refused.
@@ -1715,6 +1712,32 @@ fn strategy_target_sees_runs_files_for_logfile() {
          line's strategy file replaces or mixes with its own) is not supported in the browser; \
          give a file name of the run's own"
     );
+    // The registered `-conffile` is a file of the run, which the command line's strategy file
+    // empties after the start read it: LOSAT Web's refusal, as of `-logfile` (line RG item
+    // F1w-r2); a new name in its folder is the strategy file.
+    let mut conf_strategy = with_folder;
+    conf_strategy[14] = "out/d19_r1_strat.ini";
+    validate(&conf_strategy).unwrap();
+    let (res, streams) = run_of(&conf_strategy);
+    assert_eq!(
+        res.unwrap_err(),
+        "-export_search_strategy out/d19_r1_strat.ini (a file of the run's directory: LOSAT Web \
+         reads the run's files and writes none of them) is not supported in the browser; give a \
+         file name of the run's own"
+    );
+    assert!(run_files(&streams)
+        .is_none_or(|files| files.iter().all(|(name, _)| name != "out/d19_r1_strat.ini")));
+    let mut beside = with_folder;
+    beside[12] = "run.log";
+    validate(&beside).unwrap();
+    let (res, streams) = run_of(&beside);
+    res.unwrap();
+    let names: Vec<String> = run_files(&streams)
+        .unwrap()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, ["out/x.asn", "run.log"]);
 }
 
 /// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after

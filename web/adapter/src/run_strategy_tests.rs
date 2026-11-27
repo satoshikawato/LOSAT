@@ -154,13 +154,14 @@ fn row_argv<'a>(
 /// Each row's file is a file of the run under the name as typed, with NCBI's bytes, whatever
 /// other searches the run makes (`blastp.sub.nd`: outfmt 0's hit list of 3 and outfmt 6's of 500
 /// are two searches, and the file is the argv's, outfmt 0's), next to the file of `-logfile`, and
-/// the outputs are those of the run without the option. The start's JSON names the file
-/// (`strategy_file`).
+/// the outputs are those of the run without the option, also in the folder of the query
+/// (`outfmt11/s.asn` next to `-query outfmt11/...`: a folder of the run's files, line RG item
+/// F1w-r2). The start's JSON names the file (`strategy_file`).
 #[test]
 fn the_strategy_file_is_a_file_of_the_run_with_the_command_lines_bytes() {
     for row in &ROWS {
         let (name, _, query, subject, _) = *row;
-        for file in ["s.asn", "out/s.asn", "/tmp/s.asn"] {
+        for file in ["s.asn", "outfmt11/s.asn", "outfmt11/../s.asn", "/tmp/s.asn"] {
             let words = row_argv(row, file);
             validate(&words).unwrap();
             assert!(
@@ -224,16 +225,30 @@ fn a_run_that_fails_after_the_file_is_made_keeps_the_command_lines_file() {
     }
 }
 
-/// The names that the command line cannot open are NCBI's error, at once (no file); `-` and the
-/// standard output are the command line's refusals at NCBI's first request, and the outputs hold
-/// nothing; the null device gives no file and the run goes on; the standard error and the file of
-/// another option of the run are LOSAT Web's refusals at the same point. A run with an empty query
-/// ends before that request: NCBI's run, with no file for `-`.
+/// The names that the command line cannot open are NCBI's error, at once (no file): also, read
+/// against the run's files as `-logfile` is (line RG item F1w-r2), a name in a folder that they do
+/// not have (`out/s.asn`, `a/b/../s.asn`) or in a file of them, and a folder of them (the query's
+/// `outfmt11`; `src` of the run's directory, this test's working directory); `-` and the standard
+/// output are the command line's refusals at NCBI's first request, and the outputs hold nothing;
+/// the null device gives no file and the run goes on; the standard error, the file of another
+/// option of the run and another file of the run's directory (`Cargo.toml` of this test's) are
+/// LOSAT Web's refusals at the same point. A run with an empty query ends before that request:
+/// NCBI's run, with no file for `-`.
 #[test]
 fn the_names_the_run_has_no_file_for() {
     let row = &ROWS[0];
     let (_, _, query, subject, _) = *row;
-    for name in ["/etc/s.asn", ".", "out/", ""] {
+    for name in [
+        "/etc/s.asn",
+        ".",
+        "out/",
+        "",
+        "out/s.asn",
+        "a/b/../s.asn",
+        "outfmt11",
+        "outfmt11/arch_bp_q.faa/s.asn",
+        "src",
+    ] {
         let words = row_argv(row, name);
         let message = validate(&words).unwrap_err();
         assert_eq!(
@@ -256,6 +271,7 @@ fn the_names_the_run_has_no_file_for() {
         ("/dev/stdout", "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's BLASTP: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"),
         ("/dev/stderr", "-export_search_strategy /dev/stderr (a device or a file of the system, where the run has no file) is not supported in the browser; give a file name of the run's own"),
         ("outfmt11/arch_bp_q.faa", "-export_search_strategy outfmt11/arch_bp_q.faa (the file of -query too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"),
+        ("Cargo.toml", "-export_search_strategy Cargo.toml (a file of the run's directory: LOSAT Web reads the run's files and writes none of them) is not supported in the browser; give a file name of the run's own"),
     ] {
         let words = row_argv(row, name);
         validate(&words).unwrap();

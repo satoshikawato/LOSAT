@@ -482,16 +482,24 @@ fn the_standard_error_file_writes_to_the_standard_error() {
 }
 
 /// The names of `-export_search_strategy` of a receiver (LOSAT Web, line RG's F1w), read as the
-/// command line on Linux opens them for writing, the name as typed (`strategy_name`), on the host
-/// and as the user of the `-logfile` model: a file of the run where the user makes files, NCBI's
-/// error where the command line cannot open the name (a directory, a name ending in `/`, a name in
-/// a directory of root's, a component of 256 bytes), the standard output's refusal, no file for the
-/// null device and the standard input, and LOSAT Web's refusal of the standard error, of the
-/// devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
+/// command line on Linux opens them for writing, the name as typed (`RunFiles::strategy_target`),
+/// on the host and as the user of the `-logfile` model, against the run's files (line RG item
+/// F1w-r2: the view of `-logfile` and a tool's output, line WQA D19; here registered names, and
+/// this test's working directory, the crate's, for `src` and `Cargo.toml`): a file of the run where
+/// the user makes files, also in a folder of the run's files; NCBI's error where the command line
+/// cannot open the name (a folder that the run's files do not have or that is a file of them, a
+/// folder of them, a name ending in `/`, a name in a directory of root's, a component of 256
+/// bytes); LOSAT Web's refusal of a file of the run's files; the standard output's refusal, no
+/// file for the null device and the standard input, and LOSAT Web's refusal of the standard error,
+/// of the devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
 #[test]
 fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
     use StrategyTarget as T;
-    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    // Registered names stand for the folders and files of the command line's directory (as in
+    // `a_receiver_reads_a_log_name_as_the_command_line_on_linux`).
+    let files = RunFiles::Receiver(Arc::new(Kept::with_registered(&[
+        "out/keep", "a/b/keep", "in/q.fa",
+    ])));
     let target = |name: &str| files.strategy_target(OsStr::new(name), &[]);
     let long_component = "a".repeat(256);
     let component_255 = "a".repeat(255);
@@ -502,18 +510,34 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         (" s.asn", T::File),
         ("../s.asn", T::File),
         ("a/b/../s.asn", T::File),
+        ("a/s.asn", T::File),
+        ("in/s.asn", T::File),
+        ("in/../s.asn", T::File),
+        ("src/s.asn", T::File),
         ("/tmp/s.asn", T::File),
         ("/dev/shm/s.asn", T::File),
         ("/var/lock/s.asn", T::File),
         ("/home/me/s.asn", T::File),
         ("/proc/self/cwd/s.asn", T::File),
+        ("/proc/self/cwd/out/s.asn", T::File),
         ("/proc/thread-self/cwd/s.asn", T::File),
         (component_255.as_str(), T::File),
         ("", T::Inaccessible),
         (".", T::Inaccessible),
         ("..", T::Inaccessible),
+        ("out", T::Inaccessible),
         ("out/", T::Inaccessible),
         ("out/.", T::Inaccessible),
+        ("in", T::Inaccessible),
+        ("a/b", T::Inaccessible),
+        ("src", T::Inaccessible),
+        ("nodir/s.asn", T::Inaccessible),
+        ("nodir/../s.asn", T::Inaccessible),
+        ("a/c/../s.asn", T::Inaccessible),
+        ("in/q.fa/s.asn", T::Inaccessible),
+        ("in/q.fa/", T::Inaccessible),
+        ("Cargo.toml/s.asn", T::Inaccessible),
+        ("/proc/self/cwd/nodir/s.asn", T::Inaccessible),
         ("/tmp", T::Inaccessible),
         ("/tmp/", T::Inaccessible),
         ("/s.asn", T::Inaccessible),
@@ -530,6 +554,12 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/proc/self/cwd", T::Inaccessible),
         ("/sys/s.asn", T::Inaccessible),
         (long_component.as_str(), T::Inaccessible),
+        ("in/q.fa", T::Existing),
+        ("./in/q.fa", T::Existing),
+        ("a/../in/q.fa", T::Existing),
+        ("/proc/self/cwd/in/q.fa", T::Existing),
+        ("out/keep", T::Existing),
+        ("Cargo.toml", T::Existing),
         ("/dev/stdout", T::StandardOutput),
         ("/dev/fd/1", T::StandardOutput),
         ("/proc/self/fd/1", T::StandardOutput),
@@ -551,6 +581,144 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/dev/mqueue/q", T::System),
     ] {
         assert_eq!(target(name), read, "{name:?}");
+    }
+    // Without those folders, as in a new directory that holds only the run's other files, the
+    // command line cannot open a name in them (NCBI's `File is not accessible`).
+    let bare = RunFiles::Receiver(Arc::new(Kept::default()));
+    for name in [
+        "out/s.asn",
+        "a/b/../s.asn",
+        "in/s.asn",
+        "/proc/self/cwd/out/s.asn",
+    ] {
+        assert_eq!(
+            bare.strategy_target(OsStr::new(name), &[]),
+            T::Inaccessible,
+            "{name:?}"
+        );
+    }
+}
+
+/// A strategy name against the run's files outside the working directory and the files that the
+/// search reads (line RG item F1w-r2, as `outside_cwd_registered_files_are_seen_by_log_and_output_names`
+/// and `read_files_refuse_matching_writes_without_creating_folders` read `-logfile` and `-out`): a
+/// registered file outside the working directory is a file of the run (LOSAT Web's refusal, or the
+/// refusal that names its option) and its folder is there; a file that the search reads, present or
+/// missing, is LOSAT Web's refusal, without making its folder present.
+#[test]
+fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
+    use StrategyTarget as T;
+    let files = RunFiles::Receiver(Arc::new(Kept {
+        registered: vec![b"/data/q.fa".to_vec(), b"../up.fa".to_vec()],
+        read: vec![b"tfp.pal".to_vec(), b"missing_sub/x.fa".to_vec()],
+        ..Kept::default()
+    }));
+    let query = [RunFileName {
+        option: "query",
+        name: OsStr::new("/data/q.fa"),
+    }];
+    for (name, others, read) in [
+        ("/data/q.fa", &[][..], T::Existing),
+        ("/data/q.fa", &query[..], T::OtherFile("query")),
+        ("/data/./q.fa", &query[..], T::OtherFile("query")),
+        ("/data", &[], T::Inaccessible),
+        ("/data/", &[], T::Inaccessible),
+        ("/data/s.asn", &[], T::Inaccessible),
+        ("/data/q.fa/s.asn", &[], T::Inaccessible),
+        ("../up.fa", &[], T::Existing),
+        ("../s.asn", &[], T::File),
+        ("tfp.pal", &[], T::Existing),
+        ("./tfp.pal", &[], T::Existing),
+        ("tfp.pin", &[], T::File),
+        ("missing_sub/x.fa", &[], T::Inaccessible),
+        ("missing_sub/s.asn", &[], T::Inaccessible),
+    ] {
+        assert_eq!(
+            files.strategy_target(OsStr::new(name), others),
+            read,
+            "{name:?}"
+        );
+    }
+}
+
+/// One view of the run's files for every name that the run writes (line RG item F1w-r2): for a
+/// name that NCBI's reading of `-logfile` takes as it is typed (no leading space, no final `/`, none
+/// of NCBI's special names), the strategy file, the `-logfile` file and a tool's output are each a
+/// new file of the run, no file (NCBI's error, the messages on the standard error, a tool's open
+/// that fails), or LOSAT Web's refusal of a file of the run, in the same run's files.
+#[test]
+fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Read {
+        File,
+        Unopened,
+        Refused,
+    }
+    let kept = Arc::new(Kept {
+        registered: ["out/keep", "a/b/keep", "in/q.fa", "/data/q.fa", "../up.fa"]
+            .iter()
+            .map(|name| name.as_bytes().to_vec())
+            .collect(),
+        read: vec![b"tfp.pal".to_vec()],
+        out_read: vec![b"tfp.pal".to_vec()],
+        ..Kept::default()
+    });
+    let run_files = RunFiles::Receiver(kept);
+    let open_files = OpenFiles::new(&run_files);
+    for name in [
+        "s.asn",
+        "./s.asn",
+        "out/s.asn",
+        "a/b/../s.asn",
+        "a/../s.asn",
+        "in/s.asn",
+        "src/s.asn",
+        "../s.asn",
+        "/proc/self/cwd/out/s.asn",
+        "/tmp/s.asn",
+        "nodir/s.asn",
+        "nodir/../s.asn",
+        "a/c/../s.asn",
+        "in/q.fa/s.asn",
+        "Cargo.toml/s.asn",
+        "/proc/self/cwd/nodir/s.asn",
+        "out",
+        "in",
+        "a/b",
+        "src",
+        "/data",
+        "/data/s.asn",
+        "/etc/s.asn",
+        "in/q.fa",
+        "./in/q.fa",
+        "a/../in/q.fa",
+        "/proc/self/cwd/in/q.fa",
+        "out/keep",
+        "Cargo.toml",
+        "/data/q.fa",
+        "../up.fa",
+        "tfp.pal",
+        "./tfp.pal",
+    ] {
+        let strategy = match run_files.strategy_target(OsStr::new(name), &[]) {
+            StrategyTarget::File => Read::File,
+            StrategyTarget::Inaccessible => Read::Unopened,
+            StrategyTarget::Existing => Read::Refused,
+            other => panic!("{name:?}: strategy {other:?}"),
+        };
+        let log = match run_files.log_target(Some(OsStr::new(name))) {
+            Ok((DiagTarget::Memory(_), Some(_))) => Read::File,
+            Ok((DiagTarget::Stderr, None)) => Read::Unopened,
+            Err(_) => Read::Refused,
+            Ok(_) => panic!("{name:?}: log target"),
+        };
+        let output = match open_files.create(name) {
+            Ok(Created::File(_)) => Read::File,
+            Err(Unopened) => Read::Unopened,
+            Ok(Created::Refused(_)) => Read::Refused,
+            Ok(Created::Stdout) => panic!("{name:?}: output Stdout"),
+        };
+        assert_eq!((strategy, log), (output, output), "{name:?}");
     }
 }
 

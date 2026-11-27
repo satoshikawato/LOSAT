@@ -590,7 +590,9 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
         )
     };
     let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-    let made = export(open("out/s.asn").unwrap());
+    // A name in a folder of the run's directory (`src`, of this test's working directory, the
+    // crate's) is a file under the name as typed.
+    let made = export(open("src/s.asn").unwrap());
     assert!(!made.refused());
     assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
     // The run's end hands the file over, while a clone of the export is still held; the drop
@@ -599,7 +601,7 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     end_run(Some(&made), Ok(())).unwrap();
     assert_eq!(
         received.files(),
-        [(b"out/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+        [(b"src/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
     );
     drop((made, kept));
     assert_eq!(received.files().len(), 1);
@@ -763,10 +765,11 @@ fn the_panic_hook_does_not_wait_for_a_lock_its_own_thread_holds() {
     assert_eq!(HOOK_LOCKS.get(), 0);
 }
 
-/// `RunFiles::strategy_target` checks `-logfile` against the run's real files (line WQA D19 round
-/// R1): when `out` does not exist, `-logfile out/x.asn` stays on stderr (`Unopened`), so
-/// `-export_search_strategy out/x.asn` is not refused as the file of `-logfile`; when `out` exists
-/// in the run's files, `-logfile out/x.asn` opens that file and the strategy is refused.
+/// `RunFiles::strategy_target` reads `-logfile` and the strategy name against the run's real files
+/// (line WQA D19 round R1, line RG item F1w-r2): when `out` does not exist, `-logfile out/x.asn`
+/// stays on stderr (`Unopened`) and `-export_search_strategy out/x.asn` is NCBI's error, as the
+/// command line opens neither; when `out` exists in the run's files, `-logfile out/x.asn` opens that
+/// file and the strategy is refused as the file of `-logfile`.
 #[test]
 fn strategy_target_reads_logfile_against_runs_files() {
     struct WithRegistered(Vec<Vec<u8>>);
@@ -783,14 +786,14 @@ fn strategy_target_reads_logfile_against_runs_files() {
         name: std::ffi::OsStr::new("out/x.asn"),
     }];
     let without_out = RunFiles::Receiver(Arc::new(WithRegistered(Vec::new())));
-    let file =
-        create_strategy_file_in(&without_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
-    assert!(
-        file.refusal.is_none(),
-        "without folder `out`, -logfile out/x.asn is unopened so strategy is a file: {:?}",
-        file.refusal
+    let error = create_strategy_file_in(&without_out, Path::new("out/x.asn"), "TBLASTX", &others)
+        .unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native.exit, 1);
+    assert_eq!(
+        native.message,
+        b"Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `out/x.asn'\n"
     );
-    assert!(matches!(file.target, StrategyTarget::Received(_)));
 
     let with_out = RunFiles::Receiver(Arc::new(WithRegistered(vec![b"out/keep".to_vec()])));
     let refused =
@@ -803,4 +806,22 @@ fn strategy_target_reads_logfile_against_runs_files() {
              the browser; give a file name of the run's own"
         )
     );
+    // Any other file of the run's files is LOSAT Web's refusal, at NCBI's first request; a folder
+    // of them is NCBI's error.
+    let existing =
+        create_strategy_file_in(&with_out, Path::new("out/keep"), "TBLASTX", &others).unwrap();
+    assert_eq!(
+        existing.refusal.as_deref(),
+        Some(
+            "-export_search_strategy out/keep (a file of the run's directory: LOSAT Web reads the \
+             run's files and writes none of them) is not supported in the browser; give a file \
+             name of the run's own"
+        )
+    );
+    assert!(matches!(existing.target, StrategyTarget::None));
+    let folder = create_strategy_file_in(&with_out, Path::new("out"), "TBLASTX", &others);
+    assert!(folder
+        .unwrap_err()
+        .downcast_ref::<crate::cli::NativeError>()
+        .is_some());
 }

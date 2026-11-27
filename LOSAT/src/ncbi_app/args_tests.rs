@@ -32,7 +32,6 @@ fn tool(program: &'static str) -> Tool {
         components: &[],
         help_full: None,
         short_description: None,
-        write_failure: None,
         dry_run: None,
     }
 }

@@ -57,7 +57,7 @@ use sites::{MotifError, MotifState};
 const E_OK: i32 = 0;
 const E_DATA_LOAD_ERROR: i32 = 2;
 const E_INPUT_FILE_OPEN_ERROR: i32 = 3;
-pub(crate) const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
+const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
 const E_INPUT_DATA_ERROR: i32 = 5;
 
 /// `CRpsbProcApp::COORDSBASE`: the printed coordinates count from 1.
@@ -98,149 +98,107 @@ fn format_g(value: f64) -> String {
     crate::report::pairwise::cpp_default_double(value)
 }
 
-/// The writer of the report (`m_ostream`): standard output or the `-o` file, with the run's
-/// diagnostics (`diag`). LOSAT writes the report in blocks; before each line it writes to
-/// standard error or the diagnostics, the report's file holds what NCBI's stream has written by
-/// then (`cli::NcbiBuffer`): every line, which NCBI ends with `endl`, and of the line being written
-/// what the stream's buffer did not keep. `cerr` is tied to `cout`, so before a write to `cerr`
-/// a report on standard output is written whole. The streams then interleave as NCBI's do, also
-/// in one file (`-o F -logfile F`, `-logfile /dev/stdout`, `2>&1`): NCBI rpsbproc 0.5.1 with an
-/// exception in the middle of the `SESSION` line keeps that part in its stream, writes the
-/// report of the exception at the end of the `-logfile` file and then the rest at the stream's
-/// offset, over the start of the report (line RG E1c review 1, `m_subj_same`). The buffers are
-/// those of NCBI's builds of rpsbproc, which are Linux builds (glibc, GCC 13's libstdc++): LOSAT
-/// keeps their counts on every platform (NCBI's rpsbproc on macOS or Windows is not measured).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:366-369
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:484-490
+/// The writer of the report (`m_ostream`): NCBI's stream of standard output (`cout`) or of the
+/// `-o` file (its `ofstream`), the tools' stream (`report::ostream::ReportStream::tool_file`,
+/// `tool_standard_output`: NCBI's buffer of the stream, `cli::NcbiBuffer`, and its state), with
+/// the run's diagnostics (`diag`). Each `write` is one insertion of NCBI's (a string or a number;
+/// `put`, a `char`); a line ends with `endl`, its line feed put and the stream flushed, where
+/// NCBI's buffer writes what it holds. `cerr` is tied to `cout`: before a text on standard error
+/// the report on standard output writes what NCBI's buffer holds, a report in the `-o` file makes
+/// NCBI's writes so far (`write_stderr_bytes`); before a post to the file of `-logfile`, NCBI's
+/// writes so far are made (`report::ostream::sync_report`). The streams then interleave as
+/// NCBI's do, also in one file (`-o F -logfile F`, `-logfile /dev/stdout`, `2>&1`): NCBI
+/// rpsbproc 0.5.1 with an exception in the middle of the `SESSION` line keeps that part in its
+/// stream, writes the report of the exception at the end of the `-logfile` file and then the rest
+/// at the stream's offset, over the start of the report (line RG E1c review 1, `m_subj_same`). The
+/// buffers are those of NCBI's builds of rpsbproc, which are Linux builds (glibc, GCC 13's
+/// libstdc++): LOSAT keeps their counts on every platform (NCBI's rpsbproc on macOS or Windows is
+/// not measured).
 ///
-/// A failed write stops LOSAT (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9): NCBI's
-/// `ostream` sets its bad bit and the run goes on to exit 0 (a closed pipe ends it by SIGPIPE).
+/// NCBI's rpsbproc sets no exception mask on its stream and never reads its state
+/// (rpsbproc_main.cpp:727-917): a failed write (a full device, a file at its size limit) sets the
+/// stream's bad bit, the later insertions are dropped, the progress lines go on and the run ends
+/// with its own exit status, as LOSAT's stream does (NCBI rpsbproc 0.5.1, both builds, line RG
+/// item T8b, `T/t8b/out`). A write that meets a pipe whose reader has closed ends NCBI's process by
+/// SIGPIPE outside Windows; LOSAT's stream returns that error from NCBI's write that meets it, and
+/// the run ends there at once with exit status 0 and no text (`closed_end`;
+/// PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
 struct Report {
-    out: Box<dyn Write>,
-    /// The report's bytes not yet written to `out`.
-    pending: Vec<u8>,
-    /// NCBI's buffer of the stream, which keeps the last bytes of `pending`
-    /// (`cli::NcbiBuffer::held`): what of a line that is being written has reached the file.
-    buffer: crate::cli::NcbiBuffer,
+    stream: crate::report::ostream::ReportStream,
     quiet: bool,
-    /// The first write error; nothing is written after it.
-    failed: Option<std::io::Error>,
     diag: Diagnostics,
 }
 
-/// The size of the blocks in which LOSAT writes the report.
-const REPORT_BLOCK: usize = 1 << 16;
-
 impl Report {
-    /// A report written to `out` through NCBI's `stream`.
-    fn new(
-        out: Box<dyn Write>,
-        stream: crate::cli::NcbiStdio,
-        quiet: bool,
-        diag: Diagnostics,
-    ) -> Self {
+    /// The report written to `stream`, the command line's (tied to `cerr`).
+    fn new(stream: crate::report::ostream::ReportStream, quiet: bool, diag: Diagnostics) -> Self {
+        stream.tie_to_process();
         Report {
-            out,
-            pending: Vec::with_capacity(REPORT_BLOCK),
-            buffer: crate::cli::NcbiBuffer::new(stream),
+            stream,
             quiet,
-            failed: None,
             diag,
         }
     }
 
-    /// An insertion of a string or a number (`sputn`).
+    /// An insertion of a string or a number (`sputn`); bytes that end with a line feed are the
+    /// insertion before it and `endl`. LOSAT writes the report in the pieces of NCBI's
+    /// insertions where a piece can reach a buffer's limit: the strings of the archive and the
+    /// data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION` line cut by an exception after a
+    /// database name of 1,100, 5,000 and 9,000 bytes, with `-o F -logfile F` and with `-logfile
+    /// /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.
     fn write(&mut self, bytes: &[u8]) {
-        if self.failed.is_some() {
-            return;
-        }
-        self.pending.extend_from_slice(bytes);
-        self.buffer.sputn(bytes.len(), &self.pending);
-        // An insertion that ends a line is `endl`, which flushes the stream. LOSAT writes the
-        // report in the pieces of NCBI's insertions where a piece can reach a buffer's limit: the
-        // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION`
-        // line cut by an exception after a database name of 1,100, 5,000 and 9,000 bytes, with
-        // `-o F -logfile F` and with `-logfile /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.
-        if bytes.last() == Some(&b'\n') {
-            self.buffer.flush();
-        }
-        self.write_blocks();
-    }
-
-    /// An insertion of a `char` (a stream insertion of `DELIMIT`: `put`), where a line can be cut
-    /// by an exception (the `SESSION` line; in the other lines it holds what `write` would).
-    fn put(&mut self, byte: u8) {
-        if self.failed.is_some() {
-            return;
-        }
-        self.pending.push(byte);
-        self.buffer.sputc(&self.pending);
-        self.write_blocks();
-    }
-
-    /// Writes the report's full blocks that NCBI's stream has written.
-    fn write_blocks(&mut self) {
-        if self.pending.len() - self.buffer.held() >= REPORT_BLOCK {
-            self.write_out(self.pending.len() - self.buffer.held());
-        }
-    }
-
-    /// Writes the first `n` bytes of `pending` to the file.
-    fn write_out(&mut self, n: usize) {
-        if self.failed.is_none() && n > 0 {
-            if let Err(error) = self
-                .out
-                .write_all(&self.pending[..n])
-                .and_then(|()| self.out.flush())
-            {
-                self.failed = Some(error);
+        match bytes.split_last() {
+            Some((b'\n', text)) => {
+                self.insert(text);
+                self.endl();
             }
-        }
-        self.pending.drain(..n);
-    }
-
-    /// The file holds what NCBI's stream has written by now.
-    fn sync(&mut self) {
-        self.write_out(self.pending.len() - self.buffer.held());
-    }
-
-    /// Before a write to `cerr`, which is tied to `cout`: a report on standard output is written
-    /// whole (its stream flushed), one in the `-o` file as far as NCBI's stream has written it.
-    fn before_cerr(&mut self) {
-        match self.buffer.stream() {
-            crate::cli::NcbiStdio::Cout { .. } => self.flush(),
-            crate::cli::NcbiStdio::File => self.sync(),
+            _ => self.insert(bytes),
         }
     }
 
-    /// Before a post of the diagnostics: as before a write to `cerr` when they go there, else
-    /// as far as NCBI's stream has written the report (the `-logfile` file is not tied to it).
-    fn before_post(&mut self) {
-        if self.diag.is_cerr() {
-            self.before_cerr();
-        } else {
-            self.sync();
+    /// One insertion of `bytes` (none when empty), without a flush: also the report's header
+    /// (`m_init_msg.str()`, inserted whole before the `DATA` line, rpsbproc_main.cpp:732).
+    fn insert(&mut self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            ended(std::io::Write::write_all(&mut self.stream, bytes));
         }
+    }
+
+    /// An insertion of a `char` (`put`: `DELIMIT` and the other characters NCBI inserts).
+    fn put(&mut self, byte: u8) {
+        ended(self.stream.put(byte));
+    }
+
+    /// `endl`: the line feed put, then the stream flushed.
+    fn endl(&mut self) {
+        self.put(b'\n');
+        ended(crate::report::ostream::ReportWrite::ncbi_flush(
+            &mut self.stream,
+        ));
     }
 
     fn line(&mut self, parts: &[&[u8]]) {
         for part in parts {
-            self.write(part);
+            self.insert(part);
         }
-        self.write(b"\n");
+        self.endl();
     }
 
-    /// Writes the whole report (NCBI's stream flushed, as at the end of the program).
-    fn flush(&mut self) {
-        self.write_out(self.pending.len());
-        self.buffer.flush();
-    }
-
-    /// A progress line on standard error (`cerr`; not with `-q`, nor after a failed write).
+    /// A progress line on standard error (`cerr`; not with `-q`).
     fn progress(&mut self, text: &str) {
         if !self.quiet {
-            self.before_cerr();
-            if self.failed.is_none() {
-                cerr_line(text);
-            }
+            cerr_line(text);
+        }
+    }
+
+    /// Before a post of the diagnostics to the file of `-logfile`, which is not tied to the
+    /// report: NCBI's writes of the report so far are made (a post on `cerr` makes them in
+    /// `write_stderr_bytes`).
+    fn before_post(&mut self) {
+        if !self.diag.is_cerr() {
+            ended(crate::report::ostream::sync_report());
         }
     }
 
@@ -250,11 +208,10 @@ impl Report {
         self.diag.post(text);
     }
 
-    /// Whether a write failed: the run stops (`run` reports it). What NCBI's stream has written
-    /// by now is written first.
-    fn stopped(&mut self) -> bool {
-        self.sync();
-        self.failed.is_some()
+    /// The end of the stream after the run: the `-o` file's buffer written as the file closes,
+    /// standard output's at the exit.
+    fn finish(&mut self) {
+        ended(self.stream.finish_tool());
     }
 }
 
@@ -266,6 +223,28 @@ impl PostSink for Report {
         self.before_post();
         self.diag.post_bytes(&post.line(None));
     }
+}
+
+/// Ends the run where an operation of the report's stream met a pipe whose reader has closed
+/// (`closed_end`); a failed write of another kind left the stream bad, and the run goes on.
+fn ended(result: std::io::Result<()>) {
+    if let Err(error) = result {
+        if crate::report::ostream::ends_like_sigpipe(&error) {
+            closed_end();
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (cited at
+// `report::ostream::ends_like_sigpipe`: NCBI keeps SIGPIPE's default action)
+/// The end of the run at NCBI's write that meets a pipe whose reader has closed (the report's,
+/// or one to standard error), where NCBI's process is ended by SIGPIPE (exit status 141 from the
+/// shell, no text): LOSAT's runtime ignores the signal, and LOSAT ends there at once with exit
+/// status 0 and no text; nothing more is read, written or reported, and what NCBI's buffers
+/// still hold is not written, as in NCBI's ended process (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10).
+fn closed_end() -> ! {
+    std::process::exit(E_OK)
 }
 
 /// A line that rpsbproc writes to `cerr` (`text` streamed to `cerr`, then `endl`): standard error,
@@ -313,7 +292,7 @@ impl Diagnostics {
     }
 
     /// Writes `bytes` where the diagnostics go; on standard error as `write_stderr_bytes`
-    /// writes (a closed one ends LOSAT, exception 9).
+    /// writes (after `cerr`'s tie; a closed pipe ends the run, `closed_end`).
     fn post_bytes(&mut self, bytes: &[u8]) {
         self.0.write_text(bytes, &mut Cerr);
     }
@@ -333,34 +312,44 @@ impl Write for Cerr {
     }
 }
 
-/// Writes `text` to standard error. A failed write (a reader that has closed its pipe) ends
-/// LOSAT at once with exit status 4 and no message, where NCBI's rpsbproc dies of SIGPIPE
-/// (exit status 141 from the shell; PS16a review oracle M1): PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-/// exception 9. The report is flushed before every line that rpsbproc writes to standard error
-/// (`Report::progress`, `Report::stopped`), so it holds no bytes then.
+/// Whether a write to `cerr` failed (its bad bit): a bad `cerr` takes no later text, and its tie
+/// no longer makes standard output write first.
+static CERR_BAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Writes `text` to standard error (`write_stderr_bytes`).
 pub(crate) fn write_stderr(text: &str) {
     write_stderr_bytes(text.as_bytes());
 }
 
-/// `write_stderr` of bytes (a message that quotes data bytes as NCBI writes them).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at
+// `report::ostream::Cerr`: `cerr` is tied to `cout`)
+/// `bytes` on rpsbproc's `cerr` (a line it writes there, or a post of the diagnostics on
+/// standard error): the report's stream first makes NCBI's writes (`cout` writes what NCBI's
+/// buffer holds, the `-o` file the writes made so far: `report::ostream::tie_standard_output`).
+/// A failed write makes `cerr` bad and the run goes on (NCBI rpsbproc 0.5.1 with standard error
+/// on `/dev/full`, line RG item T8b); a write, or the tie's write, that meets a pipe whose reader
+/// has closed ends the run there (`closed_end`).
 pub(crate) fn write_stderr_bytes(bytes: &[u8]) {
+    use std::sync::atomic::Ordering;
+    if bytes.is_empty() || CERR_BAD.load(Ordering::Relaxed) {
+        return;
+    }
+    ended(crate::report::ostream::tie_standard_output());
     let mut stderr = std::io::stderr().lock();
-    if stderr.write_all(bytes).is_err() {
-        std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
+    if let Err(error) = stderr.write_all(bytes) {
+        if crate::report::ostream::ends_like_sigpipe(&error) {
+            closed_end();
+        }
+        CERR_BAD.store(true, Ordering::Relaxed);
     }
 }
 
-/// Writes `text` (help or version) to standard output; a failed write ends LOSAT as a failed
-/// write of the report does (exception 9).
-pub(crate) fn write_stdout(text: &str) {
-    let mut stdout = crate::cli::standard_output();
-    if let Err(error) = stdout
-        .write_all(text.as_bytes())
-        .and_then(|()| stdout.flush())
-    {
-        write_stderr(&format!("rpsbproc failed to write output: {error}\n"));
-        std::process::exit(E_OUTPUT_FILE_OPEN_ERROR);
-    }
+/// LOSAT's refusal `line` on standard error, after `cerr`'s tie (`write_stderr_bytes`): the run
+/// ends with exit status 1 whatever the writes do, so that a refusal never reads as a run that
+/// ended well.
+pub(crate) fn write_refusal(line: &[u8]) {
+    let _ = crate::report::ostream::tie_standard_output();
+    let _ = std::io::stderr().lock().write_all(line);
 }
 
 /// `NCBI_USE_ERRCODE_X` of ncbiapp.cpp (`Corelib_App`), the error code of the application's
@@ -650,7 +639,8 @@ struct Ready {
     input: BufReader<Box<dyn Read>>,
     /// The first byte of the input that is not white space, read by `Init`.
     first: u8,
-    out: Box<dyn Write>,
+    /// The `-o` file; `None`: standard output.
+    out: Option<std::fs::File>,
     data: CddData,
     /// Whether the input is XML (`first` is `<`): `Run` reads BlastOutput documents.
     xml: bool,
@@ -753,12 +743,14 @@ fn init(
         }
     };
     header.extend_from_slice(b"\n#Output data file:");
-    let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:484-498
+    // (`m_ostream` is `cout` until the `-o` file opens.)
+    let mut out: Option<std::fs::File> = None;
     if let Some(outfile) = &args.outfile {
         let name = crate::utils::os_bytes::os_str_bytes(outfile);
         match std::fs::File::create(outfile) {
             Ok(file) => {
-                out = Box::new(file);
+                out = Some(file);
                 header.push(b'\t');
                 header.extend_from_slice(&name);
             }
@@ -889,12 +881,11 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         return Outcome::refused(reason);
     }
     // `Ready` has the `-o` file when the run names one (`init` failed otherwise).
-    let stream = if args.outfile.is_some() {
-        crate::cli::NcbiStdio::File
-    } else {
-        crate::cli::NcbiStdio::cout()
+    let stream = match out {
+        Some(file) => crate::report::ostream::ReportStream::tool_file(Box::new(file), "rpsbproc"),
+        None => crate::report::ostream::ReportStream::tool_standard_output("rpsbproc"),
     };
-    let mut report = Report::new(out, stream, args.quiet, diag);
+    let mut report = Report::new(stream, args.quiet, diag);
     let outcome = if xml {
         run_xml_sessions(
             &mut report,
@@ -917,14 +908,9 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
             seq_id_rank_variable,
         )
     };
-    // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9 (version 1.10): the first failed write of
-    // the report stops LOSAT with this message and exit 4, rpsbproc's code of the output file
-    // (`e_OutputFileOpenError`); NCBI prints nothing for it.
-    report.flush();
-    if let Some(error) = report.failed {
-        write_stderr(&format!("rpsbproc failed to write output: {error}\n"));
-        return Outcome::Exit(E_OUTPUT_FILE_OPEN_ERROR);
-    }
+    // The `-o` file's buffer is written as the file closes (after the run's texts, also before a
+    // refusal's).
+    report.finish();
     outcome
 }
 
@@ -957,14 +943,11 @@ fn run_sessions<R: Read>(
     // The report is where the stream's posts go (`PostSink for Report`): the stream writes them
     // while it reads an object, rpsbproc between the objects.
     let report: &mut Report = stream.posts();
-    report.write(header);
+    report.insert(header);
     report.line(&[b"DATA"]);
     let mut session = 0usize;
     let mut queries_done = 0usize;
     loop {
-        if stream.posts().stopped() {
-            return Outcome::Exit(E_OK);
-        }
         let archive = stream.next_archive();
         let report: &mut Report = stream.posts();
         let archive = match archive {
@@ -1069,9 +1052,6 @@ fn run_sessions<R: Read>(
         }
         report.write(b"\n");
         let Queries::BioseqSet(entries) = &search.queries else {
-            if report.stopped() {
-                return Outcome::Exit(E_OK);
-            }
             report.post("Wrong type of request data: CBlast4_queries::e_Bioseq_set expected");
             return Outcome::Exit(E_INPUT_DATA_ERROR);
         };
@@ -1082,9 +1062,6 @@ fn run_sessions<R: Read>(
         }
         match &archive.results.alignments {
             None => {
-                if report.stopped() {
-                    return Outcome::Exit(E_OK);
-                }
                 report.post(
                     "Wrong type of results data: CBlast4_get_search_results_reply::e_alignments expected",
                 );
@@ -1109,9 +1086,6 @@ fn run_sessions<R: Read>(
                         return print_failure(report, error);
                     }
                     queries_done += 1;
-                    if report.stopped() {
-                        return Outcome::Exit(E_OK);
-                    }
                 }
             }
         }
@@ -1146,14 +1120,11 @@ fn run_xml_sessions<R: Read>(
     evcut: f64,
 ) -> Outcome {
     let mut motif_state = MotifState::default();
-    report.write(header);
+    report.insert(header);
     report.line(&[b"DATA"]);
     let mut session = 0usize;
     let mut queries_done = 0usize;
     loop {
-        if report.stopped() {
-            return Outcome::Exit(E_OK);
-        }
         let document = match stream.next_document(evcut, data) {
             Ok(Some(document)) => document,
             Ok(None) => break,
@@ -1200,9 +1171,6 @@ fn run_xml_sessions<R: Read>(
                 return print_failure(report, error);
             }
             queries_done += 1;
-            if report.stopped() {
-                return Outcome::Exit(E_OK);
-            }
         }
         report.line(&[b"ENDSESSION\t", session_text.as_bytes()]);
         report.progress(&format!("RPSBlast session {session} done..."));
@@ -1219,34 +1187,21 @@ fn run_xml_sessions<R: Read>(
 fn print_failure(report: &mut Report, error: PrintError) -> Outcome {
     match error {
         PrintError::Exception(what) => std_exception(report, &what),
-        PrintError::Unsupported(message) => {
-            if report.stopped() {
-                return Outcome::Exit(E_OK);
-            }
-            Outcome::refused(message)
-        }
+        PrintError::Unsupported(message) => Outcome::refused(message),
     }
 }
 
 /// How the run ends at an exception of a session (`ProcessError`): NCBI's report of a
 /// `CException` or of a `std::exception` that leaves `Run`, or LOSAT's refusal (after what the
-/// report has written; nothing more after a failed write).
+/// report has written).
 fn process_failure(report: &mut Report, error: ProcessError) -> Outcome {
     match error {
         ProcessError::Exception(exception) => {
             report.before_post();
-            if report.failed.is_some() {
-                return Outcome::Exit(E_OK);
-            }
             Outcome::Exit(report_exception(&mut report.diag, &exception, false))
         }
         ProcessError::Std(what) => std_exception(report, what.as_bytes()),
-        ProcessError::Unsupported(message) => {
-            if report.stopped() {
-                return Outcome::Exit(E_OK);
-            }
-            Outcome::refused(message)
-        }
+        ProcessError::Unsupported(message) => Outcome::refused(message),
     }
 }
 
@@ -1255,9 +1210,6 @@ fn process_failure(report: &mut Report, error: ProcessError) -> Outcome {
 /// bytes, exit 3, the report ends where the exception was thrown).
 fn std_exception(report: &mut Report, what: &[u8]) -> Outcome {
     report.before_post();
-    if report.failed.is_some() {
-        return Outcome::Exit(E_OK);
-    }
     let mut message = b"Application's execution failed: ".to_vec();
     message.extend_from_slice(what);
     report
@@ -1322,17 +1274,9 @@ fn print_dom_query(
         )?;
     }
     report.line(&[b"ENDQUERY"]);
-    if report.quiet {
-        return Ok(());
+    if !report.quiet {
+        write_stderr_bytes(&[&b"End processing Query "[..], &query.title, b"\n"].concat());
     }
-    report.before_cerr();
-    if report.failed.is_some() {
-        return Ok(());
-    }
-    let mut stderr = std::io::stderr().lock();
-    let _ = stderr.write_all(b"End processing Query ");
-    let _ = stderr.write_all(&query.title);
-    let _ = stderr.write_all(b"\n");
     Ok(())
 }
 

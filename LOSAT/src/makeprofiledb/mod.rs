@@ -36,7 +36,6 @@ static TOOL: Tool = Tool {
     components: &[],
     help_full: None,
     short_description: None,
-    write_failure: None,
     dry_run: Some(work::dry_run),
 };
 

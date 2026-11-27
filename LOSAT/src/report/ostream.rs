@@ -1387,6 +1387,11 @@ impl ReportStream {
         lock(&self.0).closed
     }
 
+    /// One `put` of `byte` (`NcbiBuffer::sputc`: an inserted `char`, rpsbproc's).
+    pub(crate) fn put(&mut self, byte: u8) -> std::io::Result<()> {
+        lock(&self.0).put(&[byte])
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1124-1131 (the arguments, with the
     // `-out` stream, are destroyed after `Run` and its reports)
     /// The end of a tool's stream after the run and its texts: the `-out` file's buffer is written

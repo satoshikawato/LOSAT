@@ -29,7 +29,6 @@ macro_rules! tool {
             components: &[],
             help_full: None,
             short_description: None,
-            write_failure: None,
             dry_run: None,
         }
     };
@@ -92,14 +91,12 @@ static MAKEBLASTDB: Tool = Tool {
 
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
 // rpsbproc's `Init` gives its usage context a short description, which `-h` writes, and a long one,
-// which `-help` writes (RpsbProc 0.5.1, frozen). A failed write ends it with exit status 4
-// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+// which `-help` writes (RpsbProc 0.5.1, frozen).
 static RPSBPROC: Tool = Tool {
     short_description: Some(
         "   Process output from offline rpsblast to annotate sequence with conserved\n   domain \
          information\n",
     ),
-    write_failure: Some(crate::rpsbproc::E_OUTPUT_FILE_OPEN_ERROR),
     ..tool!("rpsbproc", "rpsbproc", include_str!("../rpsbproc/help.txt"))
 };
 

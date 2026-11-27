@@ -34,9 +34,15 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
     `smart00421` alone.
   - `xml_missing_input`: `-i` names a missing file and the standard input is XML (oracle request M4 of the review).
 
+- The rows `full_o_*`, `logstdout_mat` (`linux`) and the `device` rows (line RG item T8b, 2026-11-27): NCBI's rpsbproc
+  0.5.1, both binaries (same bytes), on ws under `unshare -rn`, by
+  `remaining-gaps-20261112/T/t8b/tools/freeze_rp.py` (a run as the test runs it; standard output on `/dev/full`, a
+  pipe closed before the start, standard error so, standard error on `/dev/full`, standard error into the pipe of
+  standard output). `rc` holds the exit status, or minus the signal that ended NCBI's process (`-13`: SIGPIPE).
+
 ## CASES.tsv
 
-`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `refuse`: LOSAT refuses, exit 1, with
+`case`, `use` (`compare`: LOSAT must give the same stdout, stderr and exit code; `linux`: the same, on Linux only; `device`: the same on Linux with a stream on a device that fails, the mode the case's first word (`full`, `closed`, `errclosed`, `errfull`, `merged`; `tests/rpsbproc_fixtures.rs`, `rpsbproc_gives_ncbis_bytes_on_failed_and_closed_streams`), where NCBI's process is ended by SIGPIPE (`rc` `-13`) and LOSAT's exits with 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10); `refuse`: LOSAT refuses, exit 1, with
 the bytes of `refused/<case>.{out,err,rc}`: the refusals of PS16b, PS16c and PS16d below; `widened` and `tied`: LOSAT's
 bytes of `widened/` and `tied/`, below), `stdin` (`-` = empty), `setup`
 (`data-without:<file>`: a directory `data_missing/` holding the data files except that one; `data-with:<dir>`: a

@@ -420,3 +420,27 @@ x.h_ntphfmin1.rep	compare	-	data-with:nt	-i arch/x_h_n_phfmin1.xml -d nt -t both
 i_ncbirc_garbage	compare	-	ncbirc:garbage.ini	-i arch/one.asn -d data
 i_ncbirc_sec_dry	compare	-	ncbirc:sec.ini	-i arch/one.asn -d data -dryrun
 i_ncbirc_quote_log	compare	-	ncbirc:quote.ini	-i arch/one.asn -d data -logfile log.txt
+full_o_three	linux	-	-	-i arch/three.asn -d data -t doms -o /dev/full
+full_o_three_q	linux	-	-	-i arch/three.asn -d data -t doms -o /dev/full -q
+full_o_three_full	linux	-	-	-i arch/three.asn -d data -m full -f -o /dev/full
+logstdout_mat	linux	-	-	-i arch/bad/matrix_integer.asn -d data -logfile /dev/stdout
+full.three	device	-	-	-i arch/three.asn -d data -t doms
+full.three.q	device	-	-	-i arch/three.asn -d data -t doms -q
+full.three.full	device	-	-	-i arch/three.asn -d data -m full -f
+full.help	device	-	-	-help
+full.xmlhelp	device	-	-	-xmlhelp
+full.version	device	-	-	-version
+closed.three	device	-	-	-i arch/three.asn -d data -t doms
+closed.three.o_stdout	device	-	-	-i arch/three.asn -d data -t doms -o /dev/stdout
+closed.three.logfile	device	-	-	-i arch/three.asn -d data -t doms -logfile log.txt
+closed.mat	device	-	-	-i arch/bad/matrix_integer.asn -d data
+closed.help	device	-	-	-help
+closed.version	device	-	-	-version
+errclosed.three	device	-	-	-i arch/three.asn -d data -t doms -o out.txt
+errclosed.three.q	device	-	-	-i arch/three.asn -d data -t doms -o out.txt -q
+errfull.three	device	-	-	-i arch/three.asn -d data -t doms -o out.txt
+errfull.mat	device	-	-	-i arch/bad/matrix_integer.asn -d data -o out.txt
+merged.three	device	-	-	-i arch/three.asn -d data -t doms
+merged.three.full	device	-	-	-i arch/three.asn -d data -m full -f
+merged.three.o_stdout	device	-	-	-i arch/three.asn -d data -t doms -o /dev/stdout
+merged.mat_longdb	device	-	-	-i arch/bad/matrix_integer_longdb.asn -d data

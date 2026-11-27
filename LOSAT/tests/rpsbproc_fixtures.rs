@@ -3,8 +3,10 @@
 //! `tests/fixtures/rpsbproc/CASES.tsv` (README.md there: the archives are NCBI rpsblast and
 //! rpstblastn 2.17.0 `-outfmt 11` and `-outfmt 5` of E. coli K-12 MG1655 proteins and genome pieces
 //! against CDD v3.22, the data files are CDD v3.22 cut to the rows the archives reach). A `compare` case gives NCBI's standard output, standard
-//! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`); a
-//! `refuse` case is refused by LOSAT (exit 1, the
+//! error and exit status (and the `-o` file `out.txt` and the `-logfile` file `log.txt`), a `linux`
+//! case so on Linux, a `device` case so on Linux with a stream on a device that fails (a closed
+//! pipe ends LOSAT with exit status 0 where SIGPIPE ends NCBI); a `refuse` case is refused by LOSAT
+//! (exit 1, the
 //! last line of standard error `Error: ... is not supported by LOSAT's rpsbproc...`, standard
 //! output cut at a line end) with the bytes of `refused/` (LOSAT's own; README.md); a `widened`
 //! case gives the bytes of `widened/`, LOSAT's own where NCBI's `int` coordinate arithmetic
@@ -239,6 +241,12 @@ fn keep_the_sessions(ncbi: &[u8], mut words: Vec<u8>) -> Vec<u8> {
 /// bytes through `losat::wording`, AGENTS.md rule 8; LOSAT's own files are left as they are; the
 /// SESSION lines keep the version of NCBI's input).
 fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
+    assert_same_streams(dir, case, out, err);
+    assert_eq!(status, frozen_status(dir, case), "{case}: exit status");
+}
+
+/// The stdout and stderr part of `assert_same`.
+fn assert_same_streams(dir: &Path, case: &str, out: &[u8], err: &[u8]) {
     let expected = |suffix: &str| {
         let bytes = fs::read(dir.join(format!("{case}.{suffix}"))).unwrap();
         keep_the_sessions(
@@ -257,12 +265,15 @@ fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
             String::from_utf8_lossy(&want)
         );
     }
-    let rc: i32 = String::from_utf8(expected("rc"))
+}
+
+/// The exit status of `<dir>/<case>.rc`.
+fn frozen_status(dir: &Path, case: &str) -> i32 {
+    fs::read_to_string(dir.join(format!("{case}.rc")))
         .unwrap()
         .trim()
         .parse()
-        .unwrap();
-    assert_eq!(status, rc, "{case}: exit status");
+        .unwrap()
 }
 
 /// NCBI's frozen file in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
@@ -696,12 +707,13 @@ fn widened_rows_are_their_nearby_rows_moved_back() {
 
 // The rows of `use` `linux`: `-logfile /dev/stdout` writes the diagnostics into the pipe of the
 // standard output, where the report's part of a line that NCBI's `cout` keeps in glibc's buffer
-// (of `st_blksize`, 4096 for a pipe on Linux) comes after them (`rpsbproc::NcbiStream::Cout`).
-// NCBI's builds are Linux builds; the other platforms' buffers are not NCBI's.
+// (of `st_blksize`, 4096 for a pipe on Linux) comes after them (`cli::NcbiBuffer`); `-o /dev/full`
+// fails every write of the report, which NCBI's stream drops as the run goes on (line RG item
+// T8b). NCBI's builds are Linux builds; the other platforms' buffers are not NCBI's.
 #[cfg(target_os = "linux")]
 #[test]
 fn rpsbproc_gives_ncbis_bytes_through_a_pipe_on_linux() {
-    assert_eq!(compare_rows("linux", "linux", "oracle"), 1);
+    assert_eq!(compare_rows("linux", "linux", "oracle"), 5);
 }
 
 // The refusals end LOSAT with exit 1 and the refusal as the last line of standard error, and
@@ -929,51 +941,126 @@ fn rpsbproc_refuses_reader_variables() {
     );
 }
 
-// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 9: a failed write of the report stops LOSAT with
-// its message and exit 4 (NCBI's rpsbproc drops the writes and exits 0), with no progress line
-// after the failure.
+// The rows of `use` `device` (line RG item T8b, Linux): a stream on a device that fails, the mode
+// the case's first word: `full` (standard output on `/dev/full`), `closed` (standard output a pipe
+// whose reader closed it before the start), `errclosed` (standard error so), `errfull` (standard
+// error on `/dev/full`), `merged` (standard error into the pipe of standard output). NCBI's
+// rpsbproc 0.5.1 never reads its streams' state: a failed write drops the later writes of that
+// stream and the run goes on to its exit status. A write that meets a closed pipe ends NCBI's
+// process by SIGPIPE (its frozen `rc` is `-13`, the signal): LOSAT has written what NCBI wrote
+// before it and ends there with exit status 0 and no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+// exception 10). The `-o` file `out.txt` and the `-logfile` file `log.txt` are compared as in
+// `compare_rows` (a run that ends before `Init` opens them leaves none).
 #[cfg(target_os = "linux")]
 #[test]
-fn rpsbproc_stops_at_a_failed_write() {
-    let run_dir = RunDir::new("full");
+fn rpsbproc_gives_ncbis_bytes_on_failed_and_closed_streams() {
+    use std::io::Read;
+    let run_dir = RunDir::new("device");
     let dir = &run_dir.0;
-    let (out, err, status) = rpsbproc(
-        dir,
-        &[
-            "-i",
-            "arch/three.asn",
-            "-d",
-            "data",
-            "-t",
-            "doms",
-            "-o",
-            "/dev/full",
-        ],
-        None,
-    );
-    let err = String::from_utf8(err).unwrap();
-    assert!(out.is_empty());
-    assert_eq!(status, 4, "{err}");
-    assert!(
-        err.ends_with("For more information please refer to the README file\nrpsbproc failed to write output: No space left on device (os error 28)\n"),
-        "{err}"
-    );
-    // A standard error whose reader has closed (NCBI: SIGPIPE): exit 4, no panic, also for a
-    // refusal and for an error of the command line.
-    for words in [
-        &["-i", "arch/three.asn", "-d", "data", "-t", "doms"][..],
-        &["-i", "arch/three.asn", "-d", "data", "-t", "feats"],
-        &["-i", "arch/three.asn", "-x"],
-    ] {
-        let (reader, writer) = std::io::pipe().unwrap();
-        drop(reader);
-        let output = command(dir)
-            .args(words)
-            .stdin(Stdio::null())
-            .stderr(Stdio::from(writer))
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(4), "{words:?}");
-        assert!(output.stdout.is_empty(), "{words:?}");
+    let oracle = fixtures().join("oracle");
+    let full = || {
+        Stdio::from(
+            fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+    };
+    let mut compared = 0;
+    for [case, usage, stdin, setup, arguments] in cases() {
+        if usage != "device" {
+            continue;
+        }
+        assert_eq!((stdin.as_str(), setup.as_str()), ("-", "-"), "{case}");
+        set_up(dir, &setup);
+        let words: Vec<&str> = arguments.split(' ').collect();
+        let mut command = command(dir);
+        command.args(&words).stdin(Stdio::null());
+        let (out, err, status) = match case.split('.').next().unwrap() {
+            "full" => {
+                let output = command.stdout(full()).output().unwrap();
+                (Vec::new(), output.stderr, output.status)
+            }
+            "errfull" => {
+                let output = command.stderr(full()).output().unwrap();
+                (output.stdout, Vec::new(), output.status)
+            }
+            mode @ ("closed" | "errclosed") => {
+                let (reader, writer) = std::io::pipe().unwrap();
+                drop(reader);
+                if mode == "closed" {
+                    command.stdout(writer);
+                } else {
+                    command.stderr(writer);
+                }
+                let output = command.output().unwrap();
+                (output.stdout, output.stderr, output.status)
+            }
+            "merged" => {
+                let (mut reader, writer) = std::io::pipe().unwrap();
+                command.stdout(writer.try_clone().unwrap()).stderr(writer);
+                let mut child = command.spawn().unwrap();
+                // The command holds the pipe's writing ends: without them the read ends with the
+                // run.
+                drop(command);
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes).unwrap();
+                (bytes, Vec::new(), child.wait().unwrap())
+            }
+            mode => panic!("{case}: no mode {mode}"),
+        };
+        assert_same_streams(&oracle, &case, &out, &err);
+        let expected = match frozen_status(&oracle, &case) {
+            -13 => 0,
+            frozen => frozen,
+        };
+        assert_eq!(status.code(), Some(expected), "{case}: exit status");
+        for (suffix, made) in [("outfile", "out.txt"), ("log", "log.txt")] {
+            let expected = oracle.join(format!("{case}.{suffix}"));
+            let got = fs::read(dir.join(made)).ok();
+            assert_eq!(
+                got,
+                fs::read(&expected)
+                    .ok()
+                    .map(|bytes| keep_the_sessions(&bytes, file_in_losat_words(&bytes))),
+                "{case}: the file {made} (expected {})",
+                expected.display()
+            );
+        }
+        compared += 1;
     }
+    assert_eq!(compared, 20);
+}
+
+// An error of the command line on a standard error whose reader has closed it: NCBI's rpsbproc
+// 0.5.1 is ended by SIGPIPE at the text; LOSAT drops the text and ends with the error's status, 1,
+// as every program does (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10, version 1.19); a full
+// standard error drops it too (NCBI: exit status 1, line RG item T8b, `rp.argerr.errfull`).
+#[cfg(target_os = "linux")]
+#[test]
+fn rpsbproc_drops_an_argument_error_it_cannot_write() {
+    let run_dir = RunDir::new("argerr");
+    let dir = &run_dir.0;
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let output = command(dir)
+        .args(["-i", "arch/three.asn", "-x"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::from(writer))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let full = fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .unwrap();
+    let output = command(dir)
+        .args(["-i", "arch/three.asn", "-x"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::from(full))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
 }

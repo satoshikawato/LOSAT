@@ -44,7 +44,6 @@ static TOOL: Tool = Tool {
     components: COMPONENTS,
     help_full: None,
     short_description: None,
-    write_failure: None,
     dry_run: None,
 };
 

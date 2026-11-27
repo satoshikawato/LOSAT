@@ -388,9 +388,8 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
 }
 
 // NCBI writes the version to `cout` and never checks it: a full disk drops it, exit status 0
-// (probes `vf_devfull`, `vx_devfull`, `ver_devfull`). rpsbproc's failed write of its version is
-// LOSAT's exception 9 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES): exit status 4 with its message.
-// `/dev/full` is Linux's.
+// (probes `vf_devfull`, `vx_devfull`, `ver_devfull`; rpsbproc 0.5.1 too, line RG item T8b,
+// `rp.txt-version.full`). `/dev/full` is Linux's.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_full_disk_drops_the_version_as_ncbi_does() {
@@ -402,22 +401,12 @@ fn a_full_disk_drops_the_version_as_ncbi_does() {
                 .open("/dev/full")
                 .unwrap();
             let output = run_to(&dir, program, &[word], Stdio::from(full));
-            if program == "rpsbproc" {
-                assert_eq!(output.status.code(), Some(4), "{program} {word}");
-                assert!(
-                    output
-                        .stderr
-                        .starts_with(b"rpsbproc failed to write output: "),
-                    "{program} {word}"
-                );
-            } else {
-                assert_eq!(output.status.code(), Some(0), "{program} {word}");
-                assert!(
-                    output.stderr.is_empty(),
-                    "{program} {word}: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
+            assert_eq!(output.status.code(), Some(0), "{program} {word}");
+            assert!(
+                output.stderr.is_empty(),
+                "{program} {word}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
     let _ = fs::remove_dir_all(&dir);

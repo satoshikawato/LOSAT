@@ -224,11 +224,7 @@ fn run_main_entry() -> Result<()> {
     // versions are read before the program's arguments and before the configuration load,
     // `cli::ncbi_version_request`).
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
-        if argv_is_rpsbproc {
-            crate::rpsbproc::write_stdout(&text);
-        } else {
-            write_dropping_errors(&mut crate::cli::standard_output(), &text);
-        }
+        write_dropping_errors(&mut crate::cli::standard_output(), &text);
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
@@ -587,11 +583,6 @@ fn import_strategy(
     crate::report::archive::read::import::apply(command, None, &mut std::io::stderr()).map_err(end)
 }
 
-/// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s
-/// `m_app_status`, or the application layer's for an exception; exit status 0 returns), or
-/// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
-/// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
-/// bytes).
 /// The `-outfmt` value of a search program's command line; `None` for the other programs.
 fn search_outfmt(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
@@ -607,6 +598,10 @@ fn search_outfmt(command: &Commands) -> Option<&std::ffi::OsStr> {
     }
 }
 
+/// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s
+/// `m_app_status`, or the application layer's for an exception; exit status 0 returns), or
+/// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
+/// `rpsbproc::write_refusal` (the message may quote data bytes).
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}
@@ -615,7 +610,7 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
             let mut line = b"Error: ".to_vec();
             line.extend_from_slice(&message);
             line.push(b'\n');
-            crate::rpsbproc::write_stderr_bytes(&line);
+            crate::rpsbproc::write_refusal(&line);
             std::process::exit(1);
         }
     }

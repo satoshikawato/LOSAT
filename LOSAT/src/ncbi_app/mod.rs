@@ -48,11 +48,6 @@ pub(crate) struct Tool {
     /// description, `SetUsageContext` of its `Init`), frozen: the lines after `DESCRIPTION`, each
     /// with its indentation and line feed (`short_usage`).
     pub(crate) short_description: Option<&'static str>,
-    /// The exit status of a run whose write of a help text (on the standard output), a usage or an
-    /// argument error's report (on the standard error) fails: rpsbproc's 4, as its failed write of
-    /// a report (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9). `None`: a failed write is dropped,
-    /// as NCBI's programs drop a failed write to `cout` and `cerr`.
-    pub(crate) write_failure: Option<i32>,
     /// What runs in place of `Run` with `-dryrun` (`DryRun`, after `Init`): the work of the
     /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
     /// nothing (`None`: exit status 0).
@@ -108,7 +103,7 @@ pub(crate) struct Diag<'a> {
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
     record: Option<Vec<u8>>,
-    /// Whether a write to the standard error failed (`Tool::write_failure`; NCBI's bad `cerr`,
+    /// Whether a write to the standard error failed (NCBI's bad `cerr`,
     /// which takes no later text and whose tie no longer writes standard output first).
     failed: bool,
     /// A write of the run's output met a closed pipe where NCBI's process ended before a text
@@ -436,9 +431,7 @@ pub(crate) fn database_error(diag: &mut Diag, error: crate::seqdb::SeqDbError) -
 ///   <message>` for each message of the chain, oldest first, and `Error:  <message>` of the
 ///   exception's own (`Diag::report_arg_exception`); exit status 1.
 ///
-/// A failed write is dropped, or, for a tool with a status of its own (`Tool::write_failure`:
-/// rpsbproc), ends the run with that status: a failed write of the text on `out` is reported on
-/// the standard error first (`<program> failed to write output: <error>`).
+/// A failed write is dropped, as NCBI's programs drop a failed write to `cout` and `cerr`.
 pub(crate) fn read(
     tool: &'static Tool,
     words: &[OsString],
@@ -462,19 +455,10 @@ pub(crate) fn read(
         },
         // `eNoValue` (which prints no usage) is not raised by the reader.
         Err(ArgsError::Invalid(error)) => {
-            let status = diag.report_arg_exception(&error, None);
-            return Err(ReadEnd::Exit(match (diag.failed, tool.write_failure) {
-                (true, Some(failure)) => failure,
-                _ => status,
-            }));
+            return Err(ReadEnd::Exit(diag.report_arg_exception(&error, None)));
         }
     };
-    if let Err(error) = out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
-        if let Some(failure) = tool.write_failure {
-            diag.cerr(format!("{} failed to write output: {error}\n", tool.program).as_bytes());
-            return Err(ReadEnd::Exit(failure));
-        }
-    }
+    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
     Err(ReadEnd::Exit(0))
 }
 

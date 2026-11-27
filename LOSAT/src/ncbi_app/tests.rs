@@ -12,7 +12,6 @@ fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
         components: &[],
         help_full: None,
         short_description: None,
-        write_failure: None,
         dry_run: None,
     };
     fn body(
@@ -129,7 +128,6 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         components: &[],
         help_full: None,
         short_description: None,
-        write_failure: None,
         dry_run: None,
     };
     let mut stderr = Vec::new();

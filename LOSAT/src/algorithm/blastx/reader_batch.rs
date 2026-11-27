@@ -228,22 +228,11 @@ pub(crate) fn set_up_error(
         let Ok(numbers) = subjects.numbers() else {
             return BatchSetUp::Unknown;
         };
-        let probe = [FastaRecord {
-            internal_id: String::new(),
-            title: Vec::new(),
-            sequence: b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTTCTTTTGTTAAATCTCATTTTTCT".to_vec(),
-            lowercase_masks: Vec::new(),
-            source: None,
-            around: None,
-            skipped: None,
-        }];
-        let subjects_pass = prepare_unit_queries(&probe, None, options).is_ok_and(|probe_prep| {
-            let mut probe_params = score_block_for(&probe_prep, options.scoring);
-            probe_params.iter().any(|p| p.valid)
-                && subject_parameters(&probe_prep, &mut probe_params, options, numbers, None)
-                    .is_ok()
-                && subjects.sequence_file_read_error().is_none()
-        });
+        // The subjects' failures of a batch with a valid context (`subject_checks`, then the
+        // search's first read), which read the subjects alone: where there is none, NCBI's batch
+        // fails the same whatever the letters that NCBI reads for its repeats.
+        let subjects_pass = super::parameters::subject_checks(options, numbers).is_ok()
+            && subjects.sequence_file_read_error().is_none();
         return BatchSetUp::NoValidContext { subjects_pass };
     }
     if subjects.is_unreadable() {

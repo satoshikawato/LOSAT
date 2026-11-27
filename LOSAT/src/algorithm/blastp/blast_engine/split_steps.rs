@@ -164,7 +164,7 @@ impl SetupFailures {
         args: &ResolvedBlastpArgs,
         database: Option<&BlastpDatabase>,
         subjects: &[EncodedProtein],
-        contexts: &[QueryContext],
+        any_valid: bool,
     ) -> Self {
         if database.is_some_and(BlastpDatabase::first_oid_read_fails) {
             return Self {
@@ -178,7 +178,7 @@ impl SetupFailures {
         let read_error =
             database.and_then(|database| database.sequence_file_read_error(args.app.name()));
         let checks = call_setup::db_extent(args, database, subjects).and_then(|extent| {
-            match call_setup::setup_fails(args, &extent, contexts)? {
+            match call_setup::setup_fails(args, &extent, any_valid)? {
                 true => Err(SetupText(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into()),
                 false => Ok(()),
             }
@@ -293,7 +293,12 @@ fn call_steps(
     if searched.first().and_then(&split_of).is_none() {
         return Ok(searches);
     }
-    let failures = SetupFailures::of(args, subject_source.database(), subjects, contexts);
+    let failures = SetupFailures::of(
+        args,
+        subject_source.database(),
+        subjects,
+        contexts.iter().any(|ctx| ctx.is_valid),
+    );
     if !failures.pending() {
         return Ok(searches);
     }
@@ -420,7 +425,7 @@ pub(super) fn first_batch_setup<'a>(
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if call_setup::setup_fails(args, &extent, contexts)? {
+    if call_setup::setup_fails(args, &extent, contexts.iter().any(|ctx| ctx.is_valid))? {
         return Err(setup_error(
             b"",
             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
@@ -576,23 +581,15 @@ pub(super) fn refused_batch_setup_error(
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982
-        // Check whether the subjects themselves pass whole-batch set-up for a valid context so
-        // an XML matrix failure can proceed when neither NCBI nor LOSAT fails on the subjects.
-        let probe = [FastaRecord::new(
-            String::new(),
-            b"",
-            b"MKTAYIAKQRQISFVKSHFS",
-        )];
-        let probe_contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, &probe));
-        let subjects_pass = probe_contexts
-            .iter()
-            .any(|context| context.is_valid && context.aa_len > 0)
-            && SetupFailures::of(args, database, &encoded, &probe_contexts)
-                .of_whole_batch()
-                .is_none();
+        // The subjects' failures of a batch with a valid context (`SetupFailures`, which read the
+        // subjects alone): where there is none, NCBI's batch fails the same whatever the letters
+        // that NCBI reads for its repeats (`BatchSetUp::NoValidContext`).
+        let subjects_pass = SetupFailures::of(args, database, &encoded, true)
+            .of_whole_batch()
+            .is_none();
         return BatchSetUp::NoValidContext { subjects_pass };
     }
-    let failures = SetupFailures::of(args, database, &encoded, &contexts);
+    let failures = SetupFailures::of(args, database, &encoded, true);
     let Some(chunks) = chunks else {
         return failures
             .of_whole_batch()

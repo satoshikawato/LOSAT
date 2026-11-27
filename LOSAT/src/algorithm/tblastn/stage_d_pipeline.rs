@@ -1494,18 +1494,14 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 setup_checks,
                 pool,
             )?;
+        // Without a valid context, whether the subjects pass the checks of a batch with one
+        // (`setup_checks` and the kept read failure read the subjects alone): NCBI's batch then
+        // fails the same whatever the letters that NCBI reads for its repeats
+        // (`BatchSetUp::NoValidContext`).
         set_up.outcome.subjects_pass = !any_valid
             && split.chunks.is_none()
             && profile.subject_set.read_fails.is_none()
-            && setup_checks().is_ok()
-            && query_set_setup(
-                &[b"MKTAYIAKQRQISFVKSHFS".to_vec()],
-                inputs,
-                options_searchsp.as_ref().map(std::slice::from_ref),
-                false,
-                None,
-            )
-            .is_ok_and(|probe| probe.valid_contexts.iter().any(|&valid| valid));
+            && setup_checks().is_ok();
         return Ok(Vec::new());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327 (cited at

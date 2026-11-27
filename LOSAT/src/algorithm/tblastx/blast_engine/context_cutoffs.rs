@@ -35,7 +35,6 @@ pub(super) struct CutoffInputs<'a> {
     pub(super) db_length_nucl: i64,
     /// The subject set's sequences (`SubjectSetNumbers::count`).
     pub(super) db_num_seqs: i64,
-    pub(super) subjects: Subjects<'a>,
     pub(super) evalue_threshold: f64,
     pub(super) diag_enabled: bool,
     pub(super) debug_cutoffs_all: bool,
@@ -69,33 +68,21 @@ pub(super) fn search_space_overflow(
     anyhow::Error::new(ErrorAfterBatchReports::new(overflow.into()))
 }
 
-/// The average subject length check (an error after the reports of the batches before), then the
-/// cutoff score, length adjustment and effective search space of every context, the queries'
-/// report statistics and the smallest-Lambda block of the linking cutoffs.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
-/// (`BLAST_GapAlignSetUp`, the average length at :969-980) and :699-850 (`BLAST_CalcEffLengths`);
-/// c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`),
-/// :830-994 (`BlastHitSavingParametersUpdate`) and :91-116 (`s_BlastFindSmallestLambda`).
-pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoffs> {
-    let &CutoffInputs {
-        contexts_ref,
-        numbers,
-        db_length_nucl,
-        db_num_seqs,
-        subjects,
-        evalue_threshold,
-        diag_enabled,
-        debug_cutoffs_all,
-        query_frames,
-    } = inputs;
+/// The average subject length check of `context_cutoffs` (an error after the reports of the batches
+/// before), which reads the subjects alone: a batch with a valid context meets it whatever its
+/// letters (`run_impl::subject_setup_checks`, before `context_cutoffs`).
+pub(super) fn subject_length_check(
+    db_length_nucl: i64,
+    db_num_seqs: i64,
+    subjects: Subjects<'_>,
+) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:521-528
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-939
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
     // The set-up of the search comes after `CheckInternalData` (in `search_query_batch`, before
-    // this call): a batch with a valid context stops NCBI when the subjects have fewer letters
+    // this check): a batch with a valid context stops NCBI when the subjects have fewer letters
     // than subjects (subjects without letters count with none; `AUTHORITY.md` §E3, BI-44).
     // TBLASTX is ungapped, so its Gumbel block is freed and the average length decides. The
     // error comes after the reports of the batches before (`ErrorAfterBatchReports`,
@@ -129,6 +116,28 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         )
         .into());
     }
+    Ok(())
+}
+
+/// The cutoff score, length adjustment and effective search space of every context, the queries'
+/// report statistics and the smallest-Lambda block of the linking cutoffs, after the average
+/// subject length check (`subject_length_check`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
+/// (`BLAST_GapAlignSetUp`, the average length at :969-980) and :699-850 (`BLAST_CalcEffLengths`);
+/// c++/src/algo/blast/core/blast_parameters.c:279-419 (`BlastInitialWordParametersUpdate`),
+/// :830-994 (`BlastHitSavingParametersUpdate`) and :91-116 (`s_BlastFindSmallestLambda`).
+pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoffs> {
+    let &CutoffInputs {
+        contexts_ref,
+        numbers,
+        db_length_nucl,
+        db_num_seqs,
+        evalue_threshold,
+        diag_enabled,
+        debug_cutoffs_all,
+        query_frames,
+    } = inputs;
     // Precompute per-context cutoff scores using NCBI BLAST algorithm.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:280-419
     //

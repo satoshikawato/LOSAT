@@ -4079,20 +4079,13 @@ fn run_batch_loop(
                         .collect();
                     match set_up(&records) {
                         Ok(batch) if batch.searched => BatchSetUp::Searched,
-                        Ok(_) => {
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-                            // None of the given records has a valid context (review 2 B1/B2):
-                            // probe whether the run's subjects themselves pass set-up so XML
-                            // matrix failure proceeds only when subjects pass.
-                            let probe = [FastaRecord::new(
-                                String::new(),
-                                &[],
-                                b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTTCTTTTGTTAAATCTCATTTTTCT",
-                            )];
-                            let subjects_pass = set_up(&probe).is_ok_and(|b| b.searched);
-                            BatchSetUp::NoValidContext { subjects_pass }
-                        }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+                        // None of the given records has a valid context (review 2 B1/B2): whether
+                        // the subjects pass the checks of a batch with one (`subject_setup_checks`).
+                        Ok(_) => BatchSetUp::NoValidContext {
+                            subjects_pass: subject_setup_checks(subjects.subjects, &subjects.numbers)
+                                .is_ok(),
+                        },
                         Err(error) if error.is::<SubjectsUnreadable>() => stores_error
                             .take()
                             .and_then(|error| {
@@ -5126,6 +5119,42 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
+/// A subject set without sequences or letters that is not an unreadable database
+/// (`search_query_batch` searches it with nothing, before any check of its set-up).
+fn no_subjects(subjects: Subjects<'_>, numbers: &SubjectSetNumbers) -> bool {
+    subjects.count() == 0 && numbers.total == 0 && !matches!(subjects, Subjects::Unreadable)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+/// The checks of the set-up of a batch with a valid context that read the subjects alone
+/// (`search_query_batch`, before `context_cutoffs::context_cutoffs`), in NCBI's order. A count of
+/// 0 (of a positive total) is the division by 0 where NCBI's setup of this first batch with a
+/// valid context crashes, before it reads a sequence: LOSAT's refusal
+/// (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
+/// before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume without
+/// its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context does not
+/// reach them and is reported as NCBI's. Then a `-db` whose sequences could not be read (this
+/// first batch with a valid context fails: `run_in_pool` raises the kept read error,
+/// `SubjectsUnreadable`) and the average subject length
+/// (`context_cutoffs::subject_length_check`). A refused batch without a valid context asks them
+/// for a context that NCBI's letters of its repeats may have (`BatchSetUp::NoValidContext`).
+fn subject_setup_checks(subjects: Subjects<'_>, numbers: &SubjectSetNumbers) -> Result<()> {
+    if no_subjects(subjects, numbers) {
+        return Ok(());
+    }
+    crate::algorithm::common::database::check_setup_count(
+        numbers.total,
+        i32::try_from(numbers.count).unwrap_or(i32::MAX),
+        false,
+        "TBLASTX",
+    )
+    .map_err(ErrorAfterBatchReports::new)?;
+    if matches!(subjects, Subjects::Unreadable) {
+        return Err(SubjectsUnreadable.into());
+    }
+    context_cutoffs::subject_length_check(numbers.total, numbers.count, subjects)
+}
+
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
@@ -5225,11 +5254,7 @@ fn search_query_batch<S: TbxScore>(
     // An unreadable database is not empty: its first batch with a valid context fails
     // (`SubjectsUnreadable`, below). A database that a list left without sequences has
     // statistics (`SeqDb::statistics_numbers`) and its queries are reported with them.
-    if queries_raw.is_empty()
-        || (subjects.count() == 0
-            && numbers.total == 0
-            && !matches!(subjects, Subjects::Unreadable))
-    {
+    if queries_raw.is_empty() || no_subjects(subjects, numbers) {
         return Ok(TblastxBatch {
             hits: Vec::new(),
             searched: true,
@@ -5426,25 +5451,7 @@ fn search_query_batch<S: TbxScore>(
             fetched_utf8: None,
         });
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // A count of 0 (of a positive total) is the division by 0 where NCBI's setup of this first
-    // batch with a valid context crashes, before it reads a sequence: LOSAT's refusal
-    // (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
-    // before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume
-    // without its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context
-    // does not reach it and is reported as NCBI's.
-    crate::algorithm::common::database::check_setup_count(
-        db_length_nucl,
-        i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
-        false,
-        "TBLASTX",
-    )
-    .map_err(ErrorAfterBatchReports::new)?;
-    // `-db` whose sequences could not be read: this first batch with a valid context fails
-    // (`run_in_pool` raises the kept read error).
-    if matches!(subjects, Subjects::Unreadable) {
-        return Err(SubjectsUnreadable.into());
-    }
+    subject_setup_checks(subjects, numbers)?;
     // `-db`: the read of the database that failed in this batch's search, if one does (a database
     // changed or damaged after the check, an error of the file system): the batch fails with it
     // once every subject before it is searched (`XReadFailure`).
@@ -5465,7 +5472,6 @@ fn search_query_batch<S: TbxScore>(
         numbers,
         db_length_nucl,
         db_num_seqs,
-        subjects,
         evalue_threshold,
         diag_enabled,
         debug_cutoffs_all,

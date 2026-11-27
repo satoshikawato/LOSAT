@@ -207,9 +207,9 @@ fn a_strategys_subjects_are_searched_once_at_any_thread_count() {
 /// those of the audit, `ss/s3a.*`.
 #[test]
 fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
-    let bp_prolog = Some(("39de21324836dfef", 699usize));
-    let tn_prolog = Some(("19f948e973ed7555", 348usize));
-    let refusals: &[(&str, &str, &str, Option<(&str, usize)>)] = &[
+    let bp_prolog = Some("39de21324836dfef");
+    let tn_prolog = Some("19f948e973ed7555");
+    let refusals: &[(&str, &str, &str, Option<&str>)] = &[
         ("blastx", "blastx_QueryGeneticCode_0", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
         ("blastx", "blastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
         ("blastx", "blastx_QueryGeneticCode_256", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
@@ -249,7 +249,15 @@ fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
         let output = run(&case, None);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let expected_stdout = match expected_prolog {
-            Some((name, len)) => frozen(name)[..*len].to_vec(),
+            Some(name) => {
+                // The prolog: the bytes of NCBI's run before its first query's report.
+                let bytes = frozen(name);
+                let end = bytes
+                    .windows(8)
+                    .position(|window| window == b"\n\nQuery=")
+                    .expect("the first query's report");
+                bytes[..end].to_vec()
+            }
             None => Vec::new(),
         };
         if output.status.code() != Some(1)

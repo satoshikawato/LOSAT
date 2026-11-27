@@ -3289,7 +3289,7 @@ file would differ, and NCBI's programs still could not open the database).
   many queries before the first byte of the query's block, after the reports of the blocks
   before (as outfmt 0's refusal of such a record's masks). NCBI's output before the abort is what
   its stream had flushed, which depends on its buffer (to a file or a pipe, the version line of
-  the prolog), so no prefix of it is NCBI's. BLASTN and, since version 1.109, BLASTP write the
+  the prolog), so no prefix of it is NCBI's. BLASTN and, since version 1.123, BLASTP write the
   prolog before the search, as NCBI does, so the refusal follows the prolog. The other sections of such a record are NCBI's
   (fixture rows `db.of1.bp.self1.*`, `db.of1.bn.selfrc.*`).
 
@@ -3967,7 +3967,7 @@ file would differ, and NCBI's programs still could not open the database).
   2.17.0's report finds in another record or other letters ...": NCBI shows that profile's letters
   and length with the HSPs of the one out of the range; fix round 3, review C N4). RPSBLAST refuses before any report (its search of every query batch
   comes before the reports; with `-outfmt` 0 to 4 after the prolog, which it writes before the
-  search since version 1.109); RPSTBLASTN after the reports of the query batches before. With several
+  search since version 1.123); RPSTBLASTN after the reports of the query batches before. With several
   volumes a profile outside the range past that cut of the merged lists, which no report of NCBI's
   looks up, is NCBI's run: its HSPs count in outfmt 7's `# N hits found` (and in
   `PRE_FETCH_SEQS_LIMIT`'s count), as NCBI counts the whole merged set (probes r1_3v_fo3 and
@@ -4008,7 +4008,7 @@ file would differ, and NCBI's programs still could not open the database).
   supported by LOSAT's RPSBLAST") at the insertion that would make the node, after NCBI's end-point
   checks (which may drop the HSP or the leaf it meets): `BlastIntervalTree::try_add_hsp`, the stop
   of TBLASTN's endless split of 1.18; RPSBLAST before any report (with `-outfmt` 0 to 4 after the prolog,
-  version 1.109), RPSTBLASTN after the reports of the query batches before (NCBI writes the batches
+  version 1.123), RPSTBLASTN after the reports of the query batches before (NCBI writes the batches
   before, then fails). With at most one such
   region in each tree NCBI ends, and LOSAT gives its bytes: the truncated extensions to the right
   and the diagonal table of `Lc` (fixture rows `db.rps.rej.l0`, `db.rpstbn.rej.l0`,
@@ -4038,7 +4038,7 @@ file would differ, and NCBI's programs still could not open the database).
   bytes past the last page (rule 3) or goes on past it, where `Lc` is the rows plus 2 or more: with
   `-xdrop_ungap 100000` and a query that matches the profiles to their end NCBI crashes (SIGSEGV,
   exit status -11; probes p9_over of line RG D1a-4 and g9#1, `NSEQ 5`); RPSBLAST before any report
-  (with `-outfmt` 0 to 4 after the prolog, version 1.109), RPSTBLASTN after the reports of the query
+  (with `-outfmt` 0 to 4 after the prolog, version 1.123), RPSTBLASTN after the reports of the query
   batches before. Elsewhere `Lc` above the rows is NCBI's
   search (its diagonal table of `Lc`; fixture rows `db.rps.rej.over`, `db.rps.rej.n5.over`,
   `db.rps.1v.n4.over.6`).

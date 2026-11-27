@@ -175,7 +175,8 @@ fn a_file_sink_gets_the_bytes_of_a_writer_in_every_program() {
             );
         }
     }
-    // A refusal where NCBI starts the search: the file holds the prolog, as the writer
+    // A refusal at the ungapped finish of the search (the set-up of the Smith-Waterman redo): the
+    // file holds the prolog, as the writer
     // (`-use_sw_tback -comp_based_stats 0 -ungapped`: `redo_run::sw_ungapped_check`).
     let (bytes, error) = same_as_writer(
         "blastp -use_sw_tback -comp_based_stats 0 -ungapped",

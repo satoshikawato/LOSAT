@@ -58,17 +58,6 @@ fn blosum62_ungapped() -> KarlinParams {
     }
 }
 
-/// BLOSUM62 gapped params (11/1) (kbp_gap)
-fn blosum62_gapped() -> KarlinParams {
-    KarlinParams {
-        lambda: 0.267,
-        k: 0.041,
-        h: 0.14,
-        alpha: 1.9,
-        beta: -30.0,
-    }
-}
-
 #[test]
 fn test_gap_trigger_raw_score() {
     let ungapped = blosum62_ungapped();

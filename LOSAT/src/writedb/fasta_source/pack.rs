@@ -419,7 +419,7 @@ const NCBI2NA_LETTER_BLOCK: usize = 64;
 /// `T` (`0x54`) with `U` (`0x55`). Any other byte gives 0 (it is not an NCBI2na literal's).
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:79-351
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:774-806
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:950-1034
 #[inline(always)]
 const fn ncbi4na_code_of_ncbi2na_letter(residue: u8) -> u8 {
     let upper = residue & 0xdf;
@@ -516,7 +516,7 @@ impl Ncbi4naBuilder {
     /// block go to [`Self::push_iupacna`].
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-349
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:774-806
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
     pub(crate) fn push_ncbi2na_letters(&mut self, mut src: &[u8]) {
         debug_assert!(src.iter().all(|&letter| is_ncbi2na_best(letter)));
         if let (true, [first, rest @ ..]) = (self.odd, src) {
@@ -542,7 +542,7 @@ impl Ncbi4naBuilder {
     /// `e_Ncbi2na` to `e_Ncbi8na`, clamped by `AdjustLength` to `src.len() * 4`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-349
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:774-806
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
     pub(crate) fn push_ncbi2na(&mut self, src: &[u8], letters: usize) {
         let count = letters.min(src.len().saturating_mul(4));
         if count == 0 {

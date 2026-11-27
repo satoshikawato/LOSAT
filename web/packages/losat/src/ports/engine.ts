@@ -467,7 +467,7 @@ export interface ToolRunResult {
   /** What the tool wrote to its standard error; empty when `ToolSinks.onStderr` took it. */
   readonly stderr: Blob;
   /**
-   * The files that the run wrote: those it sent as it wrote them (`-out`, `-logfile` of `windowmasker`, `blast_formatter`) in the order it
+   * The files that the run wrote: those it sent as it wrote them (`-out`, `-logfile` of `windowmasker`, `blast_formatter`, `dustmasker`, `segmasker`, `convert2blastmask`) in the order it
    * opened them, then those it made or changed in its directory (`makeblastdb`'s) in the byte order of their names; those
    * that `ToolSinks.onFile` took are not here.
    */
@@ -482,7 +482,7 @@ export interface ToolValidateOptions {
   readonly directory?: readonly DirectoryFile[];
 }
 
-/** What an engine offers for the command line's tools besides the searches (`windowmasker`, `blast_formatter`, `makeblastdb`). */
+/** What an engine offers for the command line's tools besides the searches (`windowmasker`, `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker`, `convert2blastmask`). */
 export interface ToolEngine {
   /**
    * Reads a tool's options, defaults, value lists, ranges and exclusions by running `<tool> -xmlhelp`
@@ -491,7 +491,7 @@ export interface ToolEngine {
   describeTool(tool: string): Promise<ToolDescription>;
   /**
    * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`,
-   * `blast_formatter` or `makeblastdb`, then the command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
+   * `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker` or `convert2blastmask`, then the command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
    * `options.sinks` as they are written (a file's bytes in frames of up to 1 MiB: a small file may arrive only when the run
    * ends), then resolves with the exit status (the command line's, for every status, a refusal
    * of an argument included: its text is on stderr). Rejects for a name that is not a tool that the engine runs, for a

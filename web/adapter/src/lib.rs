@@ -172,7 +172,7 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 }
 
 /// Checks the argv as the CLI does before it reads its inputs (`run::validate`; for a tool's argv,
-/// `windowmasker`, `blast_formatter` or `makeblastdb`, `tool::validate`, which emits nothing) and
+/// a name of `tool::TOOLS`, `tool::validate`, which emits nothing) and
 /// emits the *validation* JSON on stream 2: whether the run reads its inputs with NCBI's data
 /// loaders on and, when the argv parses, whether `-parse_deflines` is active
 /// (`{"data_loaders":true,"parse_deflines":false}`, or `{"data_loaders":true}` when the argv does
@@ -515,10 +515,11 @@ pub unsafe extern "C" fn losat_web2_run(
 }
 
 /// Runs a tool of the command line with its words, `argv[0]` its name (`windowmasker`,
-/// `blast_formatter` or `makeblastdb`; the other programs fail with
-/// `<name> is not available in the browser (ABI v2)`), in the run's working directory, with no
-/// standard input: its standard output on stream 11 and its standard error on stream 3 as they are
-/// written, each file that `windowmasker` or `blast_formatter` writes on stream 12 as it is written
+/// `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker` or `convert2blastmask`; the other
+/// programs fail with `<name> is not available in the browser (ABI v2)`), in the run's working
+/// directory, with no standard input: its standard output on stream 11 and its standard error on
+/// stream 3 as they are written, each file that a tool other than `makeblastdb` writes (`-out`,
+/// `-logfile`) on stream 12 as it is written
 /// (also when the run fails; `makeblastdb` writes its files in the run's working directory), then
 /// its exit status on stream 2 as `{"status":N}` (docs/web/abi_v2.md §3, §4, §5, §9; `tool.rs`).
 /// Returns 0 for every exit status; -1 only for an argv that is not UTF-8 or a name that is not a

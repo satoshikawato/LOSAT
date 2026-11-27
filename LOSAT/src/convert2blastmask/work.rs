@@ -128,6 +128,11 @@ fn run_masks(
         args.flag("parse_seqids"),
     )?;
     let mut out = args.output_file("out", out).map_err(file_failure)?;
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened (windowmasker's place and words).
+    if let Some(reason) = out.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
     let mut writer = writer(
         outfmt,
         &bytes("masking_algorithm"),

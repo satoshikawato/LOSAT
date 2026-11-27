@@ -155,6 +155,11 @@ fn run_masks(
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = args.output_file("out", out).map_err(file_failure)?;
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened (windowmasker's place and words).
+    if let Some(reason) = out.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
     let mut writer = writer(outfmt, window, locut, hicut);
     let result = (|| {
         while let Some(record) = source.next_record()? {

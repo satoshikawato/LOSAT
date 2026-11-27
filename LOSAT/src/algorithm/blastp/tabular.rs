@@ -225,6 +225,30 @@ impl SubjectValues<'_> {
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
+    /// (`report::tabular::RowStop`) says of it: a `-subject` record's title
+    /// (`failed_record_title`), or the database sequence and the load that throws
+    /// (`failed_database_subject`).
+    pub(super) fn stopped_subject(&self, s_idx: usize, lineless: bool) -> String {
+        match self {
+            TabularSubjects::Records { records, .. } => {
+                crate::report::tabular::failed_record_title(s_idx, records[s_idx].shown_id())
+            }
+            TabularSubjects::Database {
+                ordinals,
+                oids,
+                parsed,
+                loads,
+                ..
+            } => crate::report::tabular::failed_database_subject(
+                oids.oid(ordinals[s_idx]),
+                loads.thrown(s_idx),
+                parsed.get(s_idx).and_then(Option::as_deref),
+                lineless,
+            ),
+        }
+    }
+
     /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
     /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
     pub(super) fn seen_at(
@@ -509,7 +533,7 @@ pub(super) fn write_tabular_prolog_warning(
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
 pub(super) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    TabularWriter::new(spec, "", None).prolog(writer)?;
+    TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None).prolog(writer)?;
     Ok(())
 }
 
@@ -532,7 +556,8 @@ pub(super) fn write_tabular_without_queries(
             diagnostics.write_all(line.as_bytes())?;
             diagnostics.flush()?;
         }
-        TabularWriter::new(spec, "", None).epilog(writer, 0)?;
+        TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None)
+            .epilog(writer, 0)?;
         // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
         writer.ncbi_flush()?;
     }
@@ -562,7 +587,8 @@ pub(super) fn write_tabular_round_epilog(
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
+    TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None)
+        .epilog(writer, rounds)?;
     writer.ncbi_flush()?;
     Ok(())
 }
@@ -728,6 +754,7 @@ fn write_tabular_rows<const RPS: bool>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
     let table = TabularWriter::new(
         spec,
+        crate::blastinput::app::Program::Blastp,
         tab.program_version,
         (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
     );
@@ -928,14 +955,29 @@ fn write_tabular_rows<const RPS: bool>(
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
-                table.row(
+                // A row where NCBI has no result ends the run after its bytes before the stop
+                // (`report::tabular::RowStop`).
+                if let Some(stop) = table.row(
                     &mut buf,
                     &mut table_rows,
                     &query,
                     &subject,
                     kept.as_ref(),
                     &row,
-                );
+                ) {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &buf,
+                        stop,
+                        tab.subjects.stopped_subject(stop.subject, stop.lineless),
+                        tab.app.name(),
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 writer.write_all(&buf)?;
                 buf.clear();
                 if let Some(probe) = probe.as_deref_mut() {

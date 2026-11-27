@@ -1373,42 +1373,6 @@ fn before_report(
     Ok(posts.map(|posts| posts.placed_in(ledger)))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-/// What NCBI writes to the standard error of a query batch's reports before it stops at a row
-/// of its last query's report (a `report::tabular::FailedLookupRefusal`), the one owner of that
-/// rule for the programs' refusals: for each of the batch's queries up to the row's (`posts`,
-/// from the batch's first query; `reads` the same way, shorter where the rest read nothing) the
-/// posts before its report (`QueryWarnings::before_query`), the warning of its report's formatter
-/// (`formatter`, `FailedLookupRefusal::formatter_warning`), then the texts of the subjects that
-/// its rows read one by one (`QueryWarnings::subject_read`, where the batch's prefetch is off);
-/// of the row's query only those that its rows up to the row read (`rows`: their subjects, as
-/// `reads` names them), which NCBI reads before the row fails.
-pub fn posts_before_stop(
-    posts: &[Posts],
-    reads: &[QueryReads],
-    rows: &[u32],
-    formatter: Option<&str>,
-) -> Posts {
-    let mut before = Posts::new();
-    let last = posts.len().saturating_sub(1);
-    for (query, query_posts) in posts.iter().enumerate() {
-        before.append(query_posts);
-        if let Some(line) = formatter {
-            before.lines(line.as_bytes());
-        }
-        let query_reads = reads.get(query).map_or(&[][..], Vec::as_slice);
-        before.loads(
-            query_reads
-                .iter()
-                .filter(|read| query < last || rows.contains(&read.subject))
-                .cloned()
-                .collect(),
-        );
-    }
-    before
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
 /// The posts written before each query's report (`QueryWarnings::of_posts`) from the lines of

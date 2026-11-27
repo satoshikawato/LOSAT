@@ -549,13 +549,7 @@ fn run_queries(
                     for posts in utf8.iter().chain([&titled]) {
                         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     }
-                    return Err(
-                        crate::algorithm::common::database::ErrorAfterPosts::written(
-                            failure.error,
-                            &mut *outputs.diagnostics,
-                            args.archive.as_ref(),
-                        )?,
-                    );
+                    return Err(failure.error);
                 }
                 return Err(error);
             }

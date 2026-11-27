@@ -396,7 +396,15 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
             message.contains("non-UTF-8") && message.contains("not supported by LOSAT's BLASTN"),
             "{message}"
         );
-        assert!(output.is_empty(), "outfmt {outfmt}: nothing is written");
+        // NCBI's bytes before the row's stop at `saccver` (line RG-KB item 18b): the first row's
+        // `qaccver` and its tab, after outfmt 7's comment lines.
+        assert!(
+            output.ends_with(b"q1\t")
+                && (outfmt == "6") == (output == b"q1\t")
+                && (outfmt == "7") == output.starts_with(b"# BLASTN"),
+            "outfmt {outfmt}: {}",
+            String::from_utf8_lossy(&output)
+        );
     }
     let run = inputs.run(&["0"], &[], false);
     let report = String::from_utf8_lossy(&run.outputs[0]);

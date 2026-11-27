@@ -16,7 +16,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
+    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed, TextPlace,
 };
 use crate::report::run_files::{OpenFiles, RunFiles, ToolLog};
 use crate::report::serial::encoder::ReplacedChar;
@@ -101,12 +101,19 @@ pub(crate) struct Diag<'a> {
     /// When `Some`, `-logfile` names the run's standard output (`ToolLog::Stdout` in a `Receiver`
     /// run): each diagnostic message goes into the run's shared `out` writer as it is posted.
     stdout: Option<&'a dyn Fn(&[u8])>,
+    /// When `Some`, flushes the caller's stdout writer (`SharedStdout` or `TiedOut`) before a
+    /// `cerr` write (`TextPlace::StandardError`), matching NCBI's `cerr` tie to `cout`.
+    tie_stdout: Option<&'a dyn Fn() -> std::io::Result<()>>,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
     record: Option<Vec<u8>>,
-    /// Whether a write to the standard error failed (`Tool::write_failure`).
+    /// Whether a write to the standard error failed (`Tool::write_failure`; NCBI's bad `cerr`,
+    /// which takes no later text and whose tie no longer writes standard output first).
     failed: bool,
+    /// A write of the run's output met a closed pipe where NCBI's process ended before a text
+    /// (`closed`): no later text is written.
+    closed: bool,
 }
 
 impl<'a> Diag<'a> {
@@ -121,10 +128,12 @@ impl<'a> Diag<'a> {
         Diag {
             target,
             stdout: None,
+            tie_stdout: None,
             stderr,
             tool,
             record: None,
             failed: false,
+            closed: false,
         }
     }
 }
@@ -160,6 +169,41 @@ impl Diag<'_> {
         self.stdout.is_none() && matches!(self.target, DiagTarget::Stderr)
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at
+    // `report::ostream::Cerr`: `cerr` is tied to `cout`)
+    /// NCBI's writes of the run's output before a text that goes to `place`: `cerr` makes the
+    /// output's (standard output writes what it holds, a `-out` file the writes that NCBI's buffer
+    /// made so far: `report::ostream::tie_standard_output`), the file of `-logfile` the writes
+    /// that NCBI's buffer made so far (`sync_report`), nowhere nothing. Whether the text is
+    /// written: not where one of those writes met a closed pipe, where NCBI's process ended
+    /// (`closed`), nor after.
+    fn before_text(&mut self, place: TextPlace) -> bool {
+        if self.closed {
+            return false;
+        }
+        let made = match place {
+            TextPlace::StandardError if !self.failed => {
+                let tied = match self.tie_stdout {
+                    Some(tie) => tie(),
+                    None => Ok(()),
+                };
+                tied.and_then(|()| crate::report::ostream::tie_standard_output())
+            }
+            TextPlace::LogFile => crate::report::ostream::sync_report(),
+            _ => Ok(()),
+        };
+        if made.is_err_and(|error| files::ends_like_sigpipe(&error)) {
+            self.closed = true;
+        }
+        !self.closed
+    }
+
+    /// Whether a write of the run's output met a closed pipe before a text (`before_text`): the
+    /// run ends at once, exit status 0, no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
     /// The standard error stream, which notes a failed write.
     fn noted(&mut self) -> Noted<'_> {
         Noted {
@@ -183,6 +227,17 @@ impl Diag<'_> {
     /// Writes `text`, diagnostic lines that end with their line feeds (an NCBI report made by
     /// `crate::ncbi_exception`: `err_post_x`, `NcbiException::report_default_ex`).
     pub(crate) fn write_text(&mut self, text: &[u8]) {
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+        // When `self.stdout` is set (`ToolLog::Stdout`), `-logfile` is `/dev/stdout`, a log file
+        // rather than `cerr`, so it does not trigger `cerr`'s tie to `cout`.
+        let place = if self.stdout.is_some() {
+            TextPlace::LogFile
+        } else {
+            self.target.place()
+        };
+        if text.is_empty() || !self.before_text(place) {
+            return;
+        }
         if let Some(record) = &mut self.record {
             record.extend_from_slice(text);
         }
@@ -211,6 +266,9 @@ impl Diag<'_> {
     /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
     /// target of `-logfile`: segmasker's report of an exception its `Run` catches.
     pub(crate) fn cerr(&mut self, text: &[u8]) {
+        if !self.before_text(TextPlace::StandardError) {
+            return;
+        }
         let mut stderr = self.noted();
         let _ = stderr.write_all(text);
         let _ = stderr.flush();
@@ -313,9 +371,11 @@ impl Diag<'_> {
             }
             text.push_str(&"=".repeat(72));
             text.push_str("\n\n");
-            let mut stderr = self.noted();
-            let _ = stderr.write_all(text.as_bytes());
-            let _ = stderr.flush();
+            if self.before_text(TextPlace::StandardError) {
+                let mut stderr = self.noted();
+                let _ = stderr.write_all(text.as_bytes());
+                let _ = stderr.flush();
+            }
         }
         let messages = error.messages.iter().map(Vec::as_slice);
         for message in messages.chain(backlog.map(str::as_bytes)) {
@@ -439,7 +499,7 @@ pub(crate) fn run(
     body: Body,
 ) -> i32 {
     // The process's standard output without Rust's buffer (`cli::standard_output`): the
-    // writers' stream states (`Ostream`, blastdbcmd's `-metadata`) drop a failed write's bytes
+    // writers' stream states (`OutputFile`, blastdbcmd's `-metadata`) drop a failed write's bytes
     // and write nothing after it, as NCBI's streams do.
     let mut out = crate::cli::standard_output();
     let stderr = std::io::stderr();
@@ -458,6 +518,7 @@ pub(crate) fn run(
         // `ncbi_app` programs refuses an argument by name or at the run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
         &RunFiles::Disk,
+        true,
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -517,6 +578,7 @@ pub(crate) fn run_with(
         body,
         (&start, None),
         &RunFiles::Disk,
+        false,
     )
 }
 
@@ -549,21 +611,124 @@ pub(crate) fn run_in(
         body,
         (&start, Some(crate::cli::xml_help_text)),
         files,
+        false,
     )
+}
+
+/// Shared stdout state for a `Receiver` tool run whose `-logfile` is `/dev/stdout`
+/// (`ToolLog::Stdout`): models NCBI's 4 KiB pipe `cout` buffer (`NcbiBuffer`) so bytes inserted
+/// into `cout` (`-out -`) stay buffered until NCBI's write point or process exit while
+/// `-logfile /dev/stdout` messages land directly on the underlying writer, matching CLI ordering.
+struct SharedStdout<'b> {
+    out: &'b mut dyn Write,
+    held: Vec<u8>,
+    buffer: crate::cli::NcbiBuffer,
+}
+
+impl SharedStdout<'_> {
+    fn write_log(&mut self, text: &[u8]) {
+        let _ = self.out.write_all(text);
+    }
+
+    fn flush_held(&mut self) -> std::io::Result<()> {
+        self.buffer.flush();
+        if !self.held.is_empty() {
+            self.out.write_all(&self.held)?;
+            self.held.clear();
+        }
+        self.out.flush()
+    }
 }
 
 /// A shared standard-output writer for a `Receiver` tool run whose `-logfile` is `/dev/stdout`
 /// (`ToolLog::Stdout`): both the tool's `out` and its `Diag` reach the same stream (`run_app`)
-/// without changing `RunFiles::Disk`.
-struct SharedOut<'a, 'b>(&'a RefCell<&'b mut dyn Write>);
+/// without changing `RunFiles::Disk`, with `out` buffered by NCBI's `Cout` model.
+struct SharedOut<'a, 'b>(&'a RefCell<SharedStdout<'b>>);
 
 impl Write for SharedOut<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().write(buf)
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut state = self.0.borrow_mut();
+        let before = state.buffer;
+        state.buffer.sputn(buf.len(), buf);
+        let kept = state.buffer.held();
+        if kept == before.held() + buf.len() {
+            state.held.extend_from_slice(buf);
+        } else {
+            let written = buf.len() - kept;
+            if !state.held.is_empty() {
+                let SharedStdout { out, held, .. } = &mut *state;
+                out.write_all(held)?;
+                held.clear();
+            }
+            if written > 0 {
+                state.out.write_all(&buf[..written])?;
+            }
+            state.held.extend_from_slice(&buf[written..]);
+        }
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.borrow_mut().flush()
+        self.0.borrow_mut().flush_held()
+    }
+}
+
+/// Shared state of [`TiedOut`]: the caller's writer and whether any non-empty write has occurred
+/// since the last flush (matching NCBI's `basic_filebuf::sync`, which makes no write when empty).
+struct TiedState<'b> {
+    out: &'b mut dyn Write,
+    dirty: bool,
+}
+
+impl TiedState<'_> {
+    fn flush_if_dirty(&mut self) -> std::io::Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
+        self.dirty = false;
+        self.out.flush()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+/// A caller's standard-output writer wrapped in a `RefCell` so `Diag::before_text` can flush it
+/// before a `cerr` write (`TextPlace::StandardError`) in a library run, matching NCBI's `cerr` tie
+/// to `cout` without flushing on every insertion.
+struct TiedOut<'a, 'b>(&'a RefCell<TiedState<'b>>);
+
+impl Write for TiedOut<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.0.borrow_mut();
+        let n = state.out.write(buf)?;
+        if n > 0 {
+            state.dirty = true;
+        }
+        Ok(n)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        state.out.write_all(buf)?;
+        if !buf.is_empty() {
+            state.dirty = true;
+        }
+        Ok(())
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let mut state = self.0.borrow_mut();
+        let n = state.out.write_vectored(bufs)?;
+        if n > 0 {
+            state.dirty = true;
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush_if_dirty()
     }
 }
 
@@ -572,7 +737,9 @@ impl Write for SharedOut<'_, '_> {
 /// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
 /// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML. The
 /// run's files go to `files`: the file of `-logfile` and the files that the program opens by name
-/// (`Args::files`), through the run's `OpenFiles`.
+/// (`Args::files`), through the run's `OpenFiles`. `command_line`: the run is the command line's
+/// process (`run`), whose standard output and `-out` are NCBI's streams tied to its standard error
+/// (`OpenFiles::of_command_line`).
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
@@ -580,11 +747,17 @@ fn run_app(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &RunFiles,
+    command_line: bool,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
     // The files that the run opens by name, which end when the run ends (`OpenFiles`).
     let files = OpenFiles::new(files);
+    let files = if command_line {
+        files.of_command_line()
+    } else {
+        files
+    };
     match files.log_target_for(words, start, log_file(words)) {
         Err(reason) => {
             let mut diag = Diag::new(&DiagTarget::Stderr, err, tool);
@@ -595,34 +768,60 @@ fn run_app(
         }
         Ok(ToolLog::Target(mut target)) => {
             start.write_log_setup(&mut target, err);
-            run_app_target(
-                tool,
-                words,
-                (input, out, err),
-                body,
-                (start, xml_help),
-                &files,
-                (target, None),
-            )
+            if command_line {
+                run_app_target(
+                    tool,
+                    words,
+                    (input, out, err),
+                    body,
+                    (start, xml_help),
+                    &files,
+                    (target, None, None),
+                )
+            } else {
+                let shared = RefCell::new(TiedState { out, dirty: false });
+                let tie_stdout = || shared.borrow_mut().flush_if_dirty();
+                let mut tied_out = TiedOut(&shared);
+                run_app_target(
+                    tool,
+                    words,
+                    (input, &mut tied_out, err),
+                    body,
+                    (start, xml_help),
+                    &files,
+                    (target, None, Some(&tie_stdout)),
+                )
+            }
         }
         Ok(ToolLog::Stdout) => {
-            let shared = RefCell::new(out);
+            let files = files.with_tool_log_stdout();
+            let shared = RefCell::new(SharedStdout {
+                out,
+                held: Vec::new(),
+                buffer: crate::cli::NcbiBuffer::new(crate::cli::NcbiStdio::Cout {
+                    block: 4096,
+                    lines: false,
+                }),
+            });
             let write_stdout = |text: &[u8]| {
-                let _ = shared.borrow_mut().write_all(text);
+                shared.borrow_mut().write_log(text);
             };
+            let tie_stdout = || shared.borrow_mut().flush_held();
             if let Ok(text) = start.usage_report() {
                 write_stdout(text.as_bytes());
             }
             let mut shared_out = SharedOut(&shared);
-            run_app_target(
+            let status = run_app_target(
                 tool,
                 words,
                 (input, &mut shared_out, err),
                 body,
                 (start, xml_help),
                 &files,
-                (DiagTarget::Stderr, Some(&write_stdout)),
-            )
+                (DiagTarget::Stderr, Some(&write_stdout), Some(&tie_stdout)),
+            );
+            let _ = shared_out.flush();
+            status
         }
     }
 }
@@ -636,7 +835,11 @@ fn run_app_target<'a>(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &OpenFiles,
-    (mut target, stdout): (DiagTarget, Option<&'a dyn Fn(&[u8])>),
+    (mut target, stdout, tie_stdout): (
+        DiagTarget,
+        Option<&'a dyn Fn(&[u8])>,
+        Option<&'a dyn Fn() -> std::io::Result<()>>,
+    ),
 ) -> i32 {
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
@@ -665,6 +868,7 @@ fn run_app_target<'a>(
     };
     let mut diag = Diag::new(&target, err, tool);
     diag.stdout = stdout;
+    diag.tie_stdout = tie_stdout;
     match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
@@ -686,25 +890,38 @@ fn run_app_target<'a>(
     // after the arguments have passed their definitions; LOSAT refuses the settings it refuses
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
     // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
-    if dryrun {
-        return match tool.dry_run {
+    let status = if dryrun {
+        match tool.dry_run {
             Some(init) => init(
-                &args,
+                &args.with_files(files),
                 &settings,
                 &mut files::Cin::new(input),
                 out,
                 &mut diag,
             ),
             None => 0,
-        };
+        }
+    } else {
+        body(
+            &args.with_files(files),
+            &settings,
+            &mut files::Cin::new(input),
+            out,
+            &mut diag,
+        )
+    };
+    // NCBI's arguments close the program's output streams after `Run` and its texts (the `-out`
+    // file's buffer is written then, standard output's at the exit). Where a write of them met a
+    // closed pipe, NCBI's process ended there by SIGPIPE: exit status 0, no message
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    let mut closed = files.finish_streams() || diag.closed();
+    if let Err(error) = out.flush() {
+        closed |= files::ends_like_sigpipe(&error);
     }
-    body(
-        &args.with_files(files),
-        &settings,
-        &mut files::Cin::new(input),
-        out,
-        &mut diag,
-    )
+    if closed {
+        return 0;
+    }
+    status
 }
 
 #[cfg(test)]

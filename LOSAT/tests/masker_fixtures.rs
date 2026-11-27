@@ -900,6 +900,110 @@ fn blast_formatter_standard_output_failure_aborts() {
     }
 }
 
+/// blast_formatter where a stream of NCBI's fails: the rows of `tests/blast_formatter/streams.tsv`
+/// give NCBI's exit status, standard output and error (in LOSAT's words) and the file of `-out`.
+/// The file under a size limit fails where NCBI's buffer meets the limit (the pieces of the
+/// serial stream's tokens); a standard error that failed before standard output flushes no tie,
+/// so the failure ends the run as on a file, where a good one's tie aborts it
+/// (`blast_formatter_standard_output_failure_aborts`). Needs `/dev/full`, `sh` and `prlimit`.
+#[cfg(target_os = "linux")]
+#[test]
+fn blast_formatter_failed_streams_give_ncbis_results() {
+    let dir = fixtures("blast_formatter");
+    let table = fs::read_to_string(dir.join("streams.tsv")).unwrap();
+    let full = || {
+        fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap()
+    };
+    let mut checked = 0;
+    for row in table.lines().filter(|line| !line.starts_with('#')) {
+        let [name, stdout, stderr, limit, arguments] = row.split('\t').collect::<Vec<_>>()[..]
+        else {
+            panic!("row {row:?}");
+        };
+        let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("bf-streams-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        fs::create_dir_all(&out).unwrap();
+        let (words, _) = shell_words(&arguments.replace(OUT, &out.to_string_lossy()));
+        let case = Case {
+            name: name.to_string(),
+            words,
+            stdin: None,
+            variables: Vec::new(),
+        };
+        let plain = command(
+            Path::new(env!("CARGO_BIN_EXE_losat")),
+            "blast_formatter",
+            &case,
+        );
+        let mut run = if limit == "-" {
+            plain
+        } else {
+            let mut wrapped = Command::new("sh");
+            wrapped
+                .arg("-c")
+                .arg(r#"trap '' XFSZ; l=$1; shift; exec prlimit --fsize="$l" -- "$@""#)
+                .arg("sh")
+                .arg(limit)
+                .arg(plain.get_program())
+                .args(plain.get_args())
+                .current_dir(plain.get_current_dir().unwrap())
+                .stdin(Stdio::null());
+            for (variable, value) in plain.get_envs() {
+                match value {
+                    Some(value) => wrapped.env(variable, value),
+                    None => wrapped.env_remove(variable),
+                };
+            }
+            wrapped
+        };
+        match stdout {
+            "piped" => run.stdout(Stdio::piped()),
+            "full" => run.stdout(full()),
+            "closed" => {
+                let (reader, writer) = std::io::pipe().unwrap();
+                drop(reader);
+                run.stdout(writer)
+            }
+            other => panic!("{name}: standard output {other}"),
+        };
+        match stderr {
+            "piped" => run.stderr(Stdio::piped()),
+            "full" => run.stderr(full()),
+            other => panic!("{name}: standard error {other}"),
+        };
+        let output = run.output().unwrap();
+        let ncbi =
+            |extension: &str| fs::read(dir.join("streams").join(format!("{name}.{extension}")));
+        let status: i32 = String::from_utf8(ncbi("rc").unwrap())
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(status), "{name}: exit status");
+        if stdout == "piped" {
+            let want = losat::wording::losat_output_bytes(&ncbi("out").unwrap()).into_owned();
+            assert_eq!(output.stdout, want, "{name}: standard output");
+        }
+        if stderr == "piped" {
+            let want = losat::wording::losat_output_bytes(&ncbi("err").unwrap()).into_owned();
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&want),
+                "{name}: standard error"
+            );
+        }
+        let file = fs::read(out.join("o.txt")).ok();
+        assert_eq!(file, ncbi("o.txt").ok(), "{name}: the file of -out");
+        fs::remove_dir_all(&out).unwrap();
+        checked += 1;
+    }
+    assert_eq!(checked, 3);
+}
+
 // `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and
 // `run_blast_formatter` run NCBI's application start as the command line does
 // (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,

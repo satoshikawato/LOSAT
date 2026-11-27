@@ -49,7 +49,8 @@ pub enum Site {
     /// (whose buffer keeps the bytes it could not write, as NCBI BLAST+ 2.17.0's `-out` runs show)
     /// and posts 802.4, and the exception ends the run at `CATCH_ALL`. Where only `Close`'s flush
     /// fails, its destructor's catch posts 802.4 and the run goes on with a bad stream, whose next
-    /// insertion throws. On standard output each post's tie throws (`std::terminate`). `whole`:
+    /// insertion throws. On standard output each post's tie throws (`std::terminate`; where the posts
+    /// flush it, `Core::tied_posts`, else as on a file). `whole`:
     /// LOSAT inserts the object in one insertion, and a failure of its device write is decided by
     /// NCBI's pieces (`ReportWrite::resolve_object`, which the writer calls after an
     /// `is_undecided_report_write_failure`); else it inserts NCBI's pieces.
@@ -101,10 +102,16 @@ pub const TERMINATE_TEXT: &str = "terminate called after throwing an instance of
 
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
 /// The post of `~CObjectOStream` whose `Close` flushed the failed report stream of `program`
-/// (`[program]` is the application's name in NCBI's posts).
+/// (`[program]` is the application's name in NCBI's posts; none where the application sets no
+/// prefix, `program` empty: blast_formatter's).
 pub fn cannot_close_post(program: &str) -> String {
+    let tag = if program.is_empty() {
+        String::new()
+    } else {
+        format!("[{program}] ")
+    };
     format!(
-        "Error: (802.4) [{program}] [Cannot close serializing output stream] Exception: \
+        "Error: (802.4) {tag}[Cannot close serializing output stream] Exception: \
          basic_ios::clear: iostream error\n"
     )
 }
@@ -325,6 +332,9 @@ struct Core {
     /// NCBI's do whatever write fails (`EAGAIN` of the k-th write on a non-blocking standard
     /// output, line RG KD-11b2), and the tests' reference of `pending`.
     immediate: bool,
+    /// NCBI's posts go to the file of `-logfile`, not to `cerr` (`ReportStream::formatter_output`):
+    /// no post flushes standard output (`tied_posts`).
+    untied_posts: bool,
 }
 
 /// One write of NCBI's buffer that LOSAT has not made yet (`Core::pending`): where it ends in the
@@ -859,7 +869,7 @@ impl Core {
         if !write.throws {
             return self.closed_by(&error);
         }
-        if let (Some(object), false) = (write.object, self.standard_output) {
+        if let (Some(object), false) = (write.object, self.tied_posts()) {
             self.undecided = Some(object);
             return Err(undecided_failure());
         }
@@ -989,7 +999,7 @@ impl Core {
                 }
                 return Err(caught_failure());
             }
-            Site::Serial { .. } if self.standard_output => Failure::Terminate,
+            Site::Serial { .. } if self.tied_posts() => Failure::Terminate,
             // `Close`'s flush alone failed: its destructor posts and the run goes on.
             Site::Serial { .. } if flushing => {
                 self.post(&cannot_close_post(self.program))?;
@@ -998,7 +1008,7 @@ impl Core {
             Site::Serial { .. } => Failure::Thrown {
                 posts: cannot_close_post(self.program),
             },
-            Site::Xml2Report { .. } if self.standard_output => Failure::Terminate,
+            Site::Xml2Report { .. } if self.tied_posts() => Failure::Terminate,
             Site::Xml2Report { .. } if flushing => {
                 self.post(&cannot_close_post(self.program))?;
                 return Ok(());
@@ -1047,14 +1057,10 @@ impl Core {
     /// without the post.
     /// A failed `cerr` takes no text and flushes no tie (`Cerr`).
     fn post(&mut self, text: &str) -> std::io::Result<()> {
-        let cerr = match &self.diagnostics {
-            Some((_, cerr)) => cerr,
-            None => &PROCESS_CERR,
-        };
-        if text.is_empty() || cerr.failed() {
+        if text.is_empty() || self.cerr().failed() {
             return Ok(());
         }
-        if self.standard_output {
+        if self.tied_posts() {
             self.tie()?;
         } else {
             self.sync()?;
@@ -1064,6 +1070,25 @@ impl Core {
             None => PROCESS_CERR.write_process(text.as_bytes()),
         }
         Ok(())
+    }
+
+    /// Where NCBI's posts go (`post`): the process's `cerr`, or the diagnostics' own.
+    fn cerr(&self) -> &Cerr {
+        match &self.diagnostics {
+            Some((_, cerr)) => cerr,
+            None => &PROCESS_CERR,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at `Cerr`)
+    /// Whether a post flushes the stream first: standard output, tied to a good `cerr` that takes
+    /// NCBI's posts (a bad `cerr`'s sentry fails before its tie: NCBI BLAST+ 2.17.0
+    /// blast_formatter with both streams on `/dev/full` after a warning exits with status 6,
+    /// line RG item T8b, probe `bfx.warn.8.ff`; the file of `-logfile` is written without the
+    /// tie, `bfx.batch.8.lf`). Where the stream failed while the formatter lives, that flush
+    /// throws inside the post's destructor (`std::terminate`).
+    fn tied_posts(&self) -> bool {
+        self.standard_output && !self.untied_posts && !self.cerr().failed()
     }
 
     /// The region of the insertions from here on (`ReportWrite::site`): each declaration starts a
@@ -1222,6 +1247,7 @@ impl ReportStream {
             sigpipe: false,
             closed: false,
             immediate: false,
+            untied_posts: false,
         })))
     }
 
@@ -1358,6 +1384,69 @@ impl ReportStream {
         core.throws = false;
         core.sigpipe = true;
         core.immediate = true;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:335
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+    /// blast_formatter's `-out` stream (`blast_formatter::archive`): the `-out` file `file`
+    /// (NCBI's file buffer) or, with `None`, the command line's standard output (`cout`), the
+    /// stream of an `eOutputFile` argument (no exception mask, `AsOutputFile`) that each archive
+    /// object's formatter sets to throw while it lives (`begin_formatter`, `finish`), as the
+    /// search programs' formatter does. Its own posts (`Core::post`: 802.4) go to `posts`, which
+    /// the caller writes where its diagnostics go; `untied_posts`: they go to the file of
+    /// `-logfile`, so that none flushes standard output (`Core::tied_posts`). NCBI's blast_formatter
+    /// ignores SIGPIPE (the connection library's start, ncbi_socket.c:865-873): a write to a pipe
+    /// whose reader closed it is a failed write like the others (NCBI BLAST+ 2.17.0: a closed
+    /// standard output aborts as `/dev/full` does, line RG item T8b, probe `bf.*.closed`).
+    pub(crate) fn formatter_output(
+        file: Option<Box<dyn std::io::Write + Send>>,
+        posts: Box<dyn std::io::Write + Send>,
+        untied_posts: bool,
+    ) -> Self {
+        let standard_output = file.is_none();
+        let (device, stdio) = match file {
+            Some(file) => (file, NcbiStdio::File),
+            None => (standard_output_device(), NcbiStdio::cout()),
+        };
+        let stream = Self::new(
+            device,
+            Some(NcbiBuffer::new(stdio)),
+            standard_output,
+            "",
+            Site::Report,
+        );
+        {
+            let mut core = lock(&stream.0);
+            core.throws = false;
+            core.diagnostics = Some((posts, Cerr::new()));
+            core.untied_posts = untied_posts;
+        }
+        stream
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+    /// The constructor of a formatter (`CBlastFormat`) whose report starts in `site`: the stream
+    /// set to throw on `badbit` (`exceptions`), which throws at once on a stream that failed before
+    /// (the application's `CATCH_ALL`: "BLAST failed to write output", exit status 6, at `finish`).
+    pub(crate) fn begin_formatter(&self, site: Site) -> std::io::Result<()> {
+        let mut core = lock(&self.0);
+        core.change_site(site);
+        core.throws = true;
+        if core.bad {
+            core.failure.get_or_insert(Failure::Thrown {
+                posts: String::new(),
+            });
+            return Err(write_failure());
+        }
+        Ok(())
+    }
+
+    /// The `cerr` that takes the stream's posts failed (`formatter_output`'s caller saw a write of
+    /// its diagnostics fail): it takes no later post, and no post flushes the stream any more.
+    pub(crate) fn note_cerr_failed(&self) {
+        if let Some((_, cerr)) = &lock(&self.0).diagnostics {
+            cerr.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Makes this the stream that a text on standard error makes NCBI's writes of first

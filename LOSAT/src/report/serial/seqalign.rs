@@ -2487,11 +2487,14 @@ pub(super) fn query_pieces(
 
 /// NCBI's insertions of `document` into the report's stream (`Traced::pieces`): the writes of
 /// its object stream's buffer, from a second encoding of it; none for a stream without a model of
-/// its buffer.
+/// its buffer. The search programs' documents and blast_formatter's (`blast_formatter::archive`).
 #[cold]
 #[inline(never)]
-fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Vec<usize> {
-    fn pieces<E: Encoder>(mut enc: Traced<E>, document: &QueryDocument<'_, '_>) -> Vec<usize> {
+pub(crate) fn document_pieces<D: SeqAnnotDocument>(
+    format: SerialFormat,
+    document: &D,
+) -> Vec<usize> {
+    fn pieces<E: Encoder, D: SeqAnnotDocument>(mut enc: Traced<E>, document: &D) -> Vec<usize> {
         write_seq_annot(&mut enc, document);
         enc.piece_sizes()
     }

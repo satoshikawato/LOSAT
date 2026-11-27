@@ -171,7 +171,9 @@ impl Diag<'_> {
     /// made so far: `report::ostream::tie_standard_output`), the file of `-logfile` the writes
     /// that NCBI's buffer made so far (`sync_report`), nowhere nothing. Whether the text is
     /// written: not where one of those writes met a closed pipe, where NCBI's process ended
-    /// (`closed`), nor after.
+    /// (`closed`), nor after; nor where `cerr`'s tie threw (a failed standard output while
+    /// blast_formatter's formatter lives: `std::terminate` inside the post's destructor, which the
+    /// stream reports at its end, `report::ostream::ReportStream::finish`).
     fn before_text(&mut self, place: TextPlace) -> bool {
         if self.closed {
             return false;
@@ -187,10 +189,18 @@ impl Diag<'_> {
             TextPlace::LogFile => crate::report::ostream::sync_report(),
             _ => Ok(()),
         };
-        if made.is_err_and(|error| files::ends_like_sigpipe(&error)) {
-            self.closed = true;
+        match made {
+            Err(error) if files::ends_like_sigpipe(&error) => self.closed = true,
+            Err(error) if crate::report::ostream::is_report_write_failure(&error) => return false,
+            _ => {}
         }
         !self.closed
+    }
+
+    /// Whether a write to the standard error failed (NCBI's bad `cerr`, whose tie no longer
+    /// writes standard output first).
+    pub(crate) fn cerr_failed(&self) -> bool {
+        self.failed
     }
 
     /// Whether a write of the run's output met a closed pipe before a text (`before_text`): the

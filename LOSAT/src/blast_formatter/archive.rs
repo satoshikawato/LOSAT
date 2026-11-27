@@ -41,7 +41,8 @@ use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
 use crate::report::archive::writer::FLUSH_BYTES;
-use crate::report::run_files::{OpenFiles, OpenedFile};
+use crate::report::ostream::{ReportStream, ReportWrite, Site};
+use crate::report::run_files::OpenFiles;
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
@@ -50,15 +51,12 @@ use crate::report::serial::asn_types::write::write_value;
 use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::seqalign::{
-    write_document, write_document_posting, AnnotDesc, DatabaseDesc, SeqAlignError,
-    SeqAnnotDocument, SerialFormat,
+    document_pieces, write_document, write_document_posting, AnnotDesc, DatabaseDesc,
+    SeqAlignError, SeqAnnotDocument, SerialFormat,
 };
 use crate::seqdb::{DbList, SeqDb, SeqDbError, SeqType, TaxidList};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::ParsedSeqId;
-use crate::writedb::cout::CoutBuf;
-use crate::writedb::metadata::{OStreamBuffer, ObjectOStream};
-use crate::writedb::ofstream::{BasicStream, FileBuf, IoState, StreamBuf};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:506-529
 /// The formatting of the archive `archive` with the command line's `options` and the
@@ -84,6 +82,7 @@ pub(crate) fn format_archive(
             files,
             stream: None,
             formatting: false,
+            posts: Posts::default(),
         },
         search_options: None,
         hitlist: 0,
@@ -118,79 +117,154 @@ struct Run<'r, 'o> {
 }
 
 /// The `-out` stream: the standard output until `-out` is opened (`AsOutputFile`, at the first
-/// formatted object), then `cout` or the file's `ofstream` as the release's C++ runtime has them
-/// (`writedb::ofstream`, `writedb::cout`: what they hold, when a write fails, their state and its
-/// exceptions).
+/// formatted object), then NCBI's stream of it, the search programs' report stream
+/// (`ReportStream::formatter_output`: the command line's standard output or the file, which each
+/// object's formatter sets to throw while it lives, `begin_object`, `end_object`), or the
+/// caller's writer of a library run's or LOSAT Web's standard output (`CallerReport`).
 struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
     /// The run's files, where `-out` is opened (`OpenFiles::create`).
     files: &'o OpenFiles,
     /// The opened stream.
-    stream: Option<BasicStream<OutBuf<'o>>>,
+    stream: Option<OutStream<'o>>,
     /// Whether an object's formatter holds the stream (`begin_object`, `end_object`).
     formatting: bool,
+    /// The stream's own posts (`Core::post`'s 802.4), which go where the diagnostics go
+    /// (`drain_posts`).
+    posts: Posts,
 }
 
-/// The buffer of the `-out` stream: the file's (`writedb::ofstream::FileBuf`, the `ofstream` of
-/// an `eOutputFile` argument) or the standard output's (`writedb::cout::CoutBuf`, NCBI's `cout`:
-/// the C library's `stdout`, whose block is the device's, 4096 bytes on a pipe or `/dev/full`;
-/// observed with blast_formatter 2.17.0, a Seq-annot of 2390 bytes failing at its close and one
-/// of 4845 bytes in its write, line RG item F3, agent C6, 2026-11-23,
-/// `remaining-gaps-20261112/F/f3/tmp/c6/pc`). Its stream can be set to throw (`exceptions`).
-enum OutBuf<'o> {
-    File(FileBuf<OpenedFile>),
-    Cout(CoutBuf<'o>),
+/// The opened `-out` stream (`Output`).
+enum OutStream<'o> {
+    /// NCBI's stream: the command line's standard output, or a file.
+    Report(ReportStream),
+    /// The caller's writer of a library run's or LOSAT Web's standard output.
+    Caller(CallerReport<'o>),
 }
 
-impl StreamBuf for OutBuf<'_> {
-    const MASKABLE: bool = true;
+/// The posts of the stream (`ReportStream::formatter_output`), kept until the run writes them
+/// with its diagnostics (`Output::drain_posts`).
+#[derive(Clone, Default)]
+struct Posts(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
-    fn put_bytes(&mut self, data: &[u8]) -> bool {
-        match self {
-            OutBuf::File(buf) => StreamBuf::put_bytes(buf, data),
-            OutBuf::Cout(buf) => StreamBuf::put_bytes(buf, data),
-        }
-    }
-
-    fn put_byte(&mut self, byte: u8) -> bool {
-        match self {
-            OutBuf::File(buf) => StreamBuf::put_byte(buf, byte),
-            OutBuf::Cout(buf) => StreamBuf::put_byte(buf, byte),
-        }
-    }
-
-    fn sync(&mut self) -> bool {
-        match self {
-            OutBuf::File(buf) => StreamBuf::sync(buf),
-            OutBuf::Cout(buf) => StreamBuf::sync(buf),
-        }
-    }
-
-    /// Never: blast_formatter links NCBI's connection library, which masks SIGPIPE
-    /// (ncbi_socket.c:865-873), so a write to a closed pipe is a failed write like the others
-    /// (observed: blast_formatter 2.17.0 aborts on a closed standard output as on `/dev/full`;
-    /// line RG item F3, agent C6, 2026-11-23).
-    fn closed_pipe(&self) -> bool {
-        false
+impl Posts {
+    /// The posts kept so far, which are forgotten.
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 }
 
-impl Drop for OutBuf<'_> {
-    /// At the program's end the C library writes what `stdout` holds, whatever `cout`'s state
-    /// (the file of `-out` is closed by its buffer's own destructor).
-    fn drop(&mut self) {
-        if let OutBuf::Cout(buf) = self {
-            StreamBuf::sync(buf);
-        }
+impl Write for Posts {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
     }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The caller's writer of a library run's or LOSAT Web's standard output (no stream of NCBI's to
+/// model, as the tools' `ncbi_app::files::CallerOutput` and the search programs' library writers):
+/// each insertion is written at once and a flush of NCBI's flushes the writer. A failed write
+/// fails every later one, and a failure while a formatter lives ends the run with "BLAST failed
+/// to write output", exit status 6 (`CATCH_ALL`'s; the caller's writers are tied by nothing, so
+/// no `std::terminate`).
+struct CallerReport<'o> {
+    out: &'o mut dyn Write,
+    bad: bool,
+}
+
+impl CallerReport<'_> {
+    fn checked(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
+        if outcome.is_err() {
+            self.bad = true;
+            return Err(caller_failure());
+        }
+        Ok(())
+    }
+}
+
+impl Write for CallerReport<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_all(buf)?;
+        Ok(buf.len())
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        if self.bad {
+            return Err(caller_failure());
+        }
+        let outcome = self.out.write_all(buf);
+        self.checked(outcome)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl ReportWrite for CallerReport<'_> {
+    fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        if self.bad {
+            return Err(caller_failure());
+        }
+        let outcome = self.out.flush();
+        self.checked(outcome)
+    }
+}
+
+/// The failed write of the caller's writer (`CallerReport`).
+#[derive(Debug)]
+struct CallerFailure;
+
+impl std::fmt::Display for CallerFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BLAST failed to write output")
+    }
+}
+
+impl std::error::Error for CallerFailure {}
+
+fn caller_failure() -> std::io::Error {
+    std::io::Error::other(CallerFailure)
+}
+
+/// Whether `error` is the caller's failed write (`CallerReport`) or an error after it.
+fn is_caller_failure(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.is::<CallerFailure>()
+            || cause
+                .downcast_ref::<std::io::Error>()
+                .and_then(|error| error.get_ref())
+                .is_some_and(|inner| inner.is::<CallerFailure>())
+    })
+}
+
+/// Whether `error` is the report stream's failed write of an object that it took whole
+/// (`is_undecided_report_write_failure`): NCBI's pieces of the object decide NCBI's end.
+fn is_undecided(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(crate::report::ostream::is_undecided_report_write_failure)
 }
 
 impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:335
     /// `args[kArgOutput].AsOutputFile()` of `-out` `value`: opened the first time (NCBI's
-    /// `Argument "out". File is not accessible` there), the same stream after.
-    fn open(&mut self, value: &OsStr) -> anyhow::Result<()> {
+    /// `Argument "out". File is not accessible` there), the same stream after. `tied`: the
+    /// diagnostics go to `cerr` (`Diag::is_cerr`), whose posts flush standard output first.
+    fn open(&mut self, value: &OsStr, tied: bool) -> anyhow::Result<()> {
         if self.stream.is_some() {
             return Ok(());
         }
@@ -200,11 +274,19 @@ impl<'o> Output<'o> {
             .expect("the standard output until -out is opened");
         let file = files::open_output_device("out", value, stdout, self.files)
             .map_err(|error| command_line_argument_error(error.message()))?;
-        let buf = match file {
-            OutputDevice::Stdout(out) => {
-                OutBuf::Cout(CoutBuf::new(out, crate::cli::NcbiStdio::cout()))
+        let posts = Box::new(self.posts.clone());
+        let stream = match file {
+            OutputDevice::Stdout(out) if !self.files.command_line() => {
+                OutStream::Caller(CallerReport { out, bad: false })
             }
-            OutputDevice::File(file) => OutBuf::File(FileBuf::of_file(file)),
+            OutputDevice::Stdout(_) => {
+                OutStream::Report(ReportStream::formatter_output(None, posts, !tied))
+            }
+            OutputDevice::File(file) => OutStream::Report(ReportStream::formatter_output(
+                Some(Box::new(file)),
+                posts,
+                !tied,
+            )),
             // LOSAT Web's refusal of a name that it does not write, in blastdbcmd's words
             // (`OutputDevice::Refused`); the command line and the library open every name.
             OutputDevice::Refused(reason) => {
@@ -213,55 +295,96 @@ impl<'o> Output<'o> {
                 )))
             }
         };
-        self.stream = Some(BasicStream::with_buf(buf));
+        if let OutStream::Report(stream) = &stream {
+            if self.files.command_line() {
+                stream.tie_to_process();
+            }
+        }
+        self.stream = Some(stream);
         Ok(())
     }
 
-    /// The opened stream and whether it is `cout`.
-    fn opened(&mut self) -> (&mut BasicStream<OutBuf<'o>>, bool) {
-        let stream = self
+    /// The opened stream as the formatter writes it (`ReportWrite`: NCBI's insertions, flushes and
+    /// regions); an error of a write is NCBI's failed write, which `end_object` ends as NCBI does.
+    fn writer(&mut self) -> &mut dyn ReportWrite {
+        match self
             .stream
             .as_mut()
-            .expect("-out opened at the object's start");
-        let is_stdout = matches!(stream.rdbuf(), OutBuf::Cout(_));
-        (stream, is_stdout)
+            .expect("-out opened at the object's start")
+        {
+            OutStream::Report(stream) => stream,
+            OutStream::Caller(caller) => caller,
+        }
+    }
+
+    /// The report stream of the command line or of a file (`None` for the caller's writer), with
+    /// the state of `cerr` that `diag` saw (`ReportStream::note_cerr_failed`).
+    fn report(&self, diag: &Diag) -> Option<ReportStream> {
+        match &self.stream {
+            Some(OutStream::Report(stream)) => {
+                if diag.cerr_failed() {
+                    stream.note_cerr_failed();
+                }
+                Some(stream.share())
+            }
+            _ => None,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-    /// The constructor of the object's formatter (`CBlastFormat`): the stream set to throw on
-    /// `badbit`, which throws at once on a stream that failed before (`BLAST failed to write
-    /// output`; the destructor of a formatter whose constructor threw does not run).
-    fn begin_object(&mut self) -> anyhow::Result<()> {
-        let (stream, _) = self.opened();
-        stream.set_exceptions(IoState::BAD);
-        if stream.take_thrown() {
-            return Err(NativeError::write_failure().into());
-        }
+    /// The constructor of the object's formatter (`CBlastFormat`) for a report that starts in
+    /// `site` (`Site::of_format`): the stream set to throw on `badbit`, which throws at once on a
+    /// stream that failed before (`BLAST failed to write output` at `end_object`; the destructor
+    /// of a formatter whose constructor threw does not run, and its flush would write nothing).
+    fn begin_object(&mut self, site: Site, diag: &Diag) -> anyhow::Result<()> {
         self.formatting = true;
+        if let Some(stream) = self.report(diag) {
+            stream.begin_formatter(site)?;
+        } else if let Some(OutStream::Caller(caller)) = &self.stream {
+            if caller.bad {
+                return Err(caller_failure().into());
+            }
+        }
         Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:318-324
-    /// The formatter's destructor, at the object's end or on an error that leaves it: the
-    /// stream's former mask (none) restored, then `flush`.
-    fn end_object(&mut self) {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// The formatter's destructor after the object's `result` (the stream's former mask, none,
+    /// restored, then `flush`) and, for a failure of the stream while the formatter lived, the
+    /// application's `CATCH_ALL` (`ReportStream::finish`: "BLAST failed to write output", exit
+    /// status 6, after the posts of the region, or `std::terminate`); otherwise `result`.
+    fn end_object(&mut self, result: anyhow::Result<()>, diag: &mut Diag) -> anyhow::Result<()> {
         if !std::mem::take(&mut self.formatting) {
-            return;
+            return result;
         }
-        let (stream, _) = self.opened();
-        stream.set_exceptions(IoState::GOOD);
-        stream.flush();
+        let ended = match self.report(diag) {
+            Some(mut stream) => stream.finish(result),
+            None => {
+                if let Some(OutStream::Caller(caller)) = &mut self.stream {
+                    if !caller.bad {
+                        let _ = caller.out.flush();
+                    }
+                }
+                result.map_err(|error| {
+                    if is_caller_failure(&error) {
+                        NativeError::write_failure().into()
+                    } else {
+                        error
+                    }
+                })
+            }
+        };
+        self.drain_posts(diag);
+        ended
     }
 
-    /// `cerr`'s tie to `cout` before a diagnostic line where the diagnostics go to `cerr`
-    /// (`tied`): `cout` writes what it holds first (a file of `-out` does not). The posts of the
-    /// loop come between objects, where the stream throws on nothing.
-    fn before_diagnostic(&mut self, tied: bool) {
-        if let Some(stream) = &mut self.stream {
-            if tied && matches!(stream.rdbuf(), OutBuf::Cout(_)) {
-                stream.flush();
-                let _ = stream.take_thrown();
-            }
+    /// Writes the stream's own posts (`Posts`) where the diagnostics go, in the order of NCBI's
+    /// (each was made where NCBI makes it, after the stream's writes before it).
+    fn drain_posts(&mut self, diag: &mut Diag) {
+        let posts = self.posts.take();
+        if !posts.is_empty() {
+            diag.write_text(&posts);
         }
     }
 
@@ -269,13 +392,13 @@ impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:310-323
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
     /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
-    /// takes the format, then the Seq-annot): an object stream of its own over the stream
-    /// (`writedb::metadata::ObjectOStream`, no diagnostic prefix) takes the bytes
-    /// (`write_streamed` through `AnnotSink`, then `EndOfWrite`), and its destructor closes it.
-    /// A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw then ends
-    /// the run (`BLAST failed to write output`, exit status 6). Where the posts go to `cerr` and
-    /// the stream is `cout`, the post's flush of `cout` (the tie) throws again inside the
-    /// destructor: `std::terminate` (`NativeError::ios_failure_abort`), without the post.
+    /// takes the format, then the Seq-annot), as the search programs insert theirs
+    /// (`report::serial::seqalign::write_query_to`): one object of NCBI's object stream
+    /// (`Site::Serial`), its bytes (`write_streamed`, in parts of LOSAT's), then
+    /// `~CObjectOStream`'s flush. Where a device write fails, NCBI's pieces of the object
+    /// (`document_pieces`) decide NCBI's end: `Close`'s 802.4 and the end of the run, or the 802.4
+    /// alone where only `Close`'s flush fails (the run goes on with the failed stream, whose next
+    /// formatter throws); on standard output tied to `cerr`, `std::terminate`.
     fn write_annot(
         &mut self,
         format: SerialFormat,
@@ -284,106 +407,48 @@ impl<'o> Output<'o> {
         buf: &mut Vec<u8>,
         diag: &mut Diag,
     ) -> anyhow::Result<()> {
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
-        let tied = diag.is_cerr();
-        let (stream, is_stdout) = self.opened();
-        let tie = tied && is_stdout;
-        let mut object = ObjectOStream::new(OStreamBuffer::new(stream), None);
-        let mut sink = AnnotSink {
-            buffer: &mut object.output,
-            tie,
+        let report = self.report(diag);
+        let writer = self.writer();
+        writer.site(Site::Serial { whole: true })?;
+        let mut diagnostics = DiagWriter {
+            diag: &mut *diag,
+            report: report.as_ref(),
         };
-        let written = write_streamed(
-            format,
-            desc,
-            aligns,
-            buf,
-            &mut sink,
-            &mut DiagWriter(&mut *diag),
-        )
-        .and_then(|()| {
-            object
-                .output
-                .end_of_write()
-                .map_err(|_| anyhow::Error::from(thrown()))
-        });
-        let mut posts = Vec::new();
-        object.destroy(&mut posts);
-        if !posts.is_empty() {
-            if tie {
-                return Err(NativeError::ios_failure_abort().into());
+        let written = write_streamed(format, desc, aligns, buf, &mut *writer, &mut diagnostics)
+            .and_then(|()| Ok(writer.ncbi_flush()?));
+        let ended = match written {
+            Err(error) if is_undecided(&error) => {
+                let document = ArchiveDocument {
+                    desc,
+                    aligns,
+                    spill: None,
+                };
+                writer
+                    .resolve_object(&document_pieces(format, &document))
+                    .map_err(Into::into)
             }
-            diag.write_text(&posts);
+            written => written,
         }
-        written.map_err(|error| {
-            if is_thrown(&error) {
-                NativeError::write_failure().into()
-            } else {
-                error
-            }
-        })
-    }
-}
-
-/// The `ios_base::failure` of the stream (a state change that met its exceptions mask), as the
-/// I/O error of the writes of a Seq-annot (`AnnotSink`).
-#[derive(Debug)]
-struct Thrown;
-
-impl std::fmt::Display for Thrown {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(crate::writedb::ofstream::IOS_FAILURE_WHAT)
-    }
-}
-
-impl std::error::Error for Thrown {}
-
-fn thrown() -> std::io::Error {
-    std::io::Error::other(Thrown)
-}
-
-/// Whether `error` is the stream's throw (`thrown`).
-fn is_thrown(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<std::io::Error>()
-        .and_then(|error| error.get_ref())
-        .is_some_and(|inner| inner.is::<Thrown>())
-}
-
-/// The bytes of a Seq-annot as its object stream's buffer takes them (`COStreamBuffer::Write`);
-/// a throw of the stream is `thrown`. `flush` is `cerr`'s tie to `cout` before a post of a
-/// replaced byte (`tie`): what the buffer and `cout` hold is written; otherwise nothing.
-struct AnnotSink<'b, 'a, 'o> {
-    buffer: &'b mut OStreamBuffer<'a, OutBuf<'o>>,
-    tie: bool,
-}
-
-impl Write for AnnotSink<'_, '_, '_> {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.buffer.write_bytes(data).map_err(|_| thrown())?;
-        Ok(data.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if self.tie {
-            self.buffer.end_of_write().map_err(|_| thrown())?;
-            let stream = self.buffer.output();
-            stream.flush();
-            if stream.take_thrown() {
-                return Err(thrown());
-            }
-        }
-        Ok(())
+        .and_then(|()| Ok(writer.site(Site::Report)?));
+        self.drain_posts(diag);
+        ended
     }
 }
 
 /// The diagnostics as a stream, for the posts of the bytes that NCBI's object stream replaces
-/// while it writes a Seq-annot (`write_document_posting`).
-struct DiagWriter<'d, 'a>(&'d mut Diag<'a>);
+/// while it writes a Seq-annot (`write_document_posting`): after each, the state of `cerr` for the
+/// report stream `report` (`ReportStream::note_cerr_failed`).
+struct DiagWriter<'d, 'a> {
+    diag: &'d mut Diag<'a>,
+    report: Option<&'d ReportStream>,
+}
 
 impl Write for DiagWriter<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write_text(buf);
+        self.diag.write_text(buf);
+        if let (Some(report), true) = (self.report, self.diag.cerr_failed()) {
+            report.note_cerr_failed();
+        }
         Ok(buf.len())
     }
 
@@ -450,8 +515,7 @@ impl<'r, 'o> Run<'r, 'o> {
             self.search_options = Some(options);
         }
         let printed = self.print(&search, diag);
-        self.output.end_object();
-        printed
+        self.output.end_object(printed, diag)
     }
 
     /// The stored messages as `LoadFromArchive` posts them at the diagnostic level `Warning`:
@@ -502,7 +566,7 @@ impl<'r, 'o> Run<'r, 'o> {
     /// variable, and the Seq-annot of each query that has alignments (`x_PrintStructuredReport`,
     /// `Output::write_annot`).
     fn print(&mut self, search: &Search, diag: &mut Diag) -> anyhow::Result<()> {
-        self.output.open(&self.options.out)?;
+        self.output.open(&self.options.out, diag.is_cerr())?;
         // A negative hit list size (an archive that NCBI's searches do not write, probes
         // P9.005, P9.009): `ExtractAlgorithmOptions` keeps it where no option sets the size, and
         // posts its warning (`hitlist_size < 5`) as for 0, which the handler reads in its place.
@@ -541,7 +605,8 @@ impl<'r, 'o> Run<'r, 'o> {
             None => None,
         };
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:402-422
-        self.output.begin_object()?;
+        self.output
+            .begin_object(Site::of_format(formatting.choice.number), diag)?;
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
             return Err(refusal.into());
@@ -599,14 +664,15 @@ impl<'r, 'o> Run<'r, 'o> {
     }
 }
 
-/// Posts `text` (whole diagnostic lines, none when empty) after the standard output written
-/// before it (`Output::before_diagnostic`).
+/// Posts `text` (whole diagnostic lines, none when empty) after the stream's own posts before it
+/// (`Output::drain_posts`); on the command line `Diag` makes the stream's writes before the text
+/// (`cerr`'s tie to standard output, `report::ostream::tie_standard_output`).
 fn post_line(output: &mut Output<'_>, diag: &mut Diag, text: &[u8]) {
     if text.is_empty() {
         return;
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
-    output.before_diagnostic(diag.is_cerr());
+    output.drain_posts(diag);
     diag.write_text(text);
 }
 
@@ -655,7 +721,7 @@ struct Spill<'w> {
 }
 
 /// The bytes that `Spill` keeps back for the ASN.1 text and binary formats.
-const SPILL_LAG: usize = 2 * crate::writedb::ofstream::BUFSIZ;
+const SPILL_LAG: usize = 2 * crate::cli::NCBI_BUFSIZ;
 
 impl Spill<'_> {
     /// After an element of the Seq-annot's list: the encoder's final bytes handed on, once it

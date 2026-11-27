@@ -805,23 +805,6 @@ impl NativeError {
         }
     }
 
-    /// The end of NCBI's program where its stream's `ios::failure` leaves a destructor or is
-    /// thrown while another unwinds: `std::terminate`, whose C++ runtime writes this report on the
-    /// standard error and aborts (SIGABRT, exit status 134 in a shell; observed with NCBI BLAST+
-    /// 2.17.0, the official Linux x64 release: blastx's tabular formats, blast_formatter's
-    /// standard output on a full device or a closed pipe). `exit_on_native_error` aborts.
-    pub(crate) fn ios_failure_abort() -> NativeError {
-        NativeError {
-            exit: -6,
-            message: format!(
-                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
-                 {}\n",
-                crate::writedb::ofstream::IOS_FAILURE_WHAT
-            )
-            .into_bytes(),
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
     /// `CATCH_ALL`'s report of a `std::bad_alloc` (a string or byte block of a PSSM file in ASN.1
     /// binary whose length passes every allocation, `report::serial::asn_input::reserve`): exit

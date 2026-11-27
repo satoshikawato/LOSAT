@@ -1,6 +1,5 @@
 //! makeblastdb's output file stream: an output-only `std::ofstream` as makeblastdb 2.17.0 (the
-//! official Linux x64 release) has it; blast_formatter's `-out` file of the same release is one
-//! too (`blast_formatter::archive`), whose formatter makes it throw on `badbit` (`exceptions`).
+//! official Linux x64 release) has it.
 //!
 //! makeblastdb writes every database file (`.phr`, `.psq`, `.pin`, the ISAM files, `.pos`,
 //! `.pot`, `.pto`, the alias file, the metadata file ...) through an `ofstream` whose state it
@@ -65,12 +64,9 @@
 //!   `failbit` set (both as the standard says); with `badbit` set it also sets `failbit`
 //!   (observed behaviour, not in the standard's text).
 //! * `endl` is `put('\n')` and then `flush`, each with its own sentry.
-//! * `exceptions(mask)` sets the mask and then calls `clear(rdstate())`; `clear` and `setstate`
-//!   throw `ios_base::failure` when the new state has a bit of the mask (the standard's text). The
-//!   model records the throw ([`BasicStream::take_thrown`]); an operation that throws ends there,
-//!   as each operation here ends with its state change. makeblastdb and blastdbcmd set no mask:
-//!   only a stream whose buffer says so ([`StreamBuf::MASKABLE`], blast_formatter's `-out`) has
-//!   `exceptions`; the others' state changes test none.
+//! * makeblastdb and blastdbcmd set no `exceptions` mask: no state change throws. (A stream that
+//!   throws is the report stream's, `crate::report::ostream::ReportStream`: blast_formatter's
+//!   `-out` and the search programs' reports.)
 //!
 //! `close(2)` is reported on Unix (rustix's `try_close`); other targets close by dropping the
 //! file and never see a close error.
@@ -87,12 +83,6 @@ use crate::report::run_files::OpenedFile;
 /// and when its bytes are written is the rule of NCBI's file buffer (`NcbiBuffer`,
 /// `NcbiStdio::File`), the one rule of the report stream too (line RG item T8a).
 pub(crate) const BUFSIZ: usize = crate::cli::NCBI_BUFSIZ;
-
-/// `what()` of the `ios_base::failure` that `clear` throws, as the release's runtime words it
-/// (observed: NCBI BLAST+ 2.17.0 blast_formatter, the official Linux x64 release, with `-out
-/// /dev/full` and with its standard output on `/dev/full`; line RG item F3, agent C6, 2026-11-23,
-/// `remaining-gaps-20261112/F/f3/tmp/c6/pb`).
-pub(crate) const IOS_FAILURE_WHAT: &str = "basic_ios::clear: iostream error";
 
 /// The stream state (`std::ios_base::iostate`): `goodbit`, `badbit` and `failbit`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,10 +196,6 @@ pub(crate) trait StreamBuf {
     /// Whether a write found a pipe closed where that ends NCBI's process by SIGPIPE
     /// (`crate::ncbi_app::files::ends_like_sigpipe`).
     fn closed_pipe(&self) -> bool;
-    /// Whether a stream over this buffer can be set to throw (`exceptions`: blast_formatter's
-    /// `-out`). makeblastdb's and blastdbcmd's streams never are (they set no mask), so their
-    /// state changes test none.
-    const MASKABLE: bool = false;
 }
 
 /// The file buffer: the held bytes and the file.
@@ -229,14 +215,6 @@ impl<F: RawFile> FileBuf<F> {
             held: Vec::with_capacity(BUFSIZ),
             closed_pipe: false,
         }
-    }
-
-    /// The buffer of `file`, open already (blast_formatter's `-out` file, which an `eOutputFile`
-    /// argument opened: `crate::ncbi_app::files::open_output_file`).
-    pub(crate) fn of_file(file: F) -> Self {
-        let mut buf = FileBuf::closed();
-        buf.file = Some(file);
-        buf
     }
 
     /// Writes all of `segments` (the first call as given, the calls after a short count with
@@ -407,10 +385,6 @@ pub(crate) fn end_at_closed_pipe() {
 /// (`super::cout`).
 pub(crate) struct BasicStream<B> {
     state: IoState,
-    /// `exceptions()`.
-    exceptions: IoState,
-    /// Whether a state change met `exceptions` since [`BasicStream::take_thrown`] was last asked.
-    thrown: bool,
     buf: B,
 }
 
@@ -436,8 +410,6 @@ impl<B> BasicStream<B> {
     pub(crate) fn with_buf(buf: B) -> Self {
         BasicStream {
             state: IoState::GOOD,
-            exceptions: IoState::GOOD,
-            thrown: false,
             buf,
         }
     }
@@ -491,36 +463,11 @@ impl<B: StreamBuf> BasicStream<B> {
     /// `clear(state)`.
     pub(crate) fn clear(&mut self, state: IoState) {
         self.state = state;
-        self.check_exceptions();
     }
 
     /// `setstate(state)`.
     pub(crate) fn setstate(&mut self, state: IoState) {
         self.state = self.state | state;
-        self.check_exceptions();
-    }
-
-    /// `exceptions(mask)`: the mask set, then `clear(rdstate())`, which throws when the state
-    /// already has a bit of `mask`. Only a stream whose buffer can throw has it
-    /// ([`StreamBuf::MASKABLE`]).
-    pub(crate) fn set_exceptions(&mut self, mask: IoState) {
-        const { assert!(B::MASKABLE, "this stream sets no exceptions mask") };
-        self.exceptions = mask;
-        self.clear(self.state);
-    }
-
-    /// Whether the stream threw `ios_base::failure` since the last call (a state change that met
-    /// `exceptions`), which is then forgotten.
-    pub(crate) fn take_thrown(&mut self) -> bool {
-        std::mem::take(&mut self.thrown)
-    }
-
-    /// The throw of `clear`: the state has a bit of `exceptions` (a stream whose buffer can throw,
-    /// [`StreamBuf::MASKABLE`]).
-    fn check_exceptions(&mut self) {
-        if B::MASKABLE && self.state.0 & self.exceptions.0 != 0 {
-            self.thrown = true;
-        }
     }
 
     /// `fail()`: `failbit` or `badbit`.

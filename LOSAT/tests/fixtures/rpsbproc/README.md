@@ -35,7 +35,8 @@ Inputs and frozen NCBI outputs for `losat rpsbproc` (NCBI rpsbproc 0.5.1, the 20
   - `xml_missing_input`: `-i` names a missing file and the standard input is XML (oracle request M4 of the review).
 
 - The rows `full_o_*`, `logstdout_mat` (`linux`) and the `device` rows (line RG item T8b, 2026-11-27): NCBI's rpsbproc
-  0.5.1, both binaries (same bytes), on ws under `unshare -rn`, by
+  0.5.1 Linux x64 binary (the one of `oracle/`, copied from ws with its `libstdc++` and `libbz2`; its 83 probe runs of
+  the item gave Bioconda's bytes) on the local machine under `unshare -rn`, by
   `remaining-gaps-20261112/T/t8b/tools/freeze_rp.py` (a run as the test runs it; standard output on `/dev/full`, a
   pipe closed before the start, standard error so, standard error on `/dev/full`, standard error into the pipe of
   standard output). `rc` holds the exit status, or minus the signal that ended NCBI's process (`-13`: SIGPIPE).

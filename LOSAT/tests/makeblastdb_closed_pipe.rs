@@ -208,22 +208,31 @@ fn a_logfile_that_is_the_closed_pipe_makes_no_file() {
 // `remaining-gaps-20261112/T/t8b/part3`, nucleotide and protein, versions 4 and 5). LOSAT ends
 // there with exit status 0 and drops those bytes too (`writedb::ofstream::end_at_closed_pipe`).
 // NCBI's ended process also leaves LMDB's lock files, which LOSAT does not make
-// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). With one sequence the volume is not made
+// before that line, and neither program leaves a file.
 #[test]
 fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
     use std::io::{BufRead, Write};
+    let two_proteins =
+        format!("{PROT}>sp|P12346|BBB_HUMAN Beta protein\nMKTAYIAKQRQISFVKSHFSRQLEERLG\n");
     for (name, input, words, volume) in [
         (
             "late_nucl",
             NUC,
             &["-dbtype", "nucl"][..],
-            ["d.00.nhr", "d.00.nin", "d.00.nsq"],
+            Some(["d.00.nhr", "d.00.nin", "d.00.nsq"]),
         ),
         (
             "late_prot",
+            two_proteins.as_str(),
+            &["-dbtype", "prot", "-parse_seqids"],
+            Some(["d.00.phr", "d.00.pin", "d.00.psq"]),
+        ),
+        (
+            "late_one",
             PROT,
             &["-dbtype", "prot", "-parse_seqids"],
-            ["d.00.phr", "d.00.pin", "d.00.psq"],
+            None,
         ),
     ] {
         let dir = TempDir::new(name);
@@ -252,7 +261,10 @@ fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
         let mut line = String::new();
         while !line.starts_with("Maximum file size") {
             line.clear();
-            assert!(reader.read_line(&mut line).unwrap() > 0, "{name}: the log ended");
+            assert!(
+                reader.read_line(&mut line).unwrap() > 0,
+                "{name}: the log ended"
+            );
         }
         drop(reader);
         let mut stdin = child.stdin.take().unwrap();
@@ -262,6 +274,10 @@ fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
         assert_eq!(output.status.code(), Some(0), "{name}");
         assert!(output.stderr.is_empty(), "{name}: {:?}", output.stderr);
         let p = dir.0.join("p");
+        let Some(volume) = volume else {
+            assert!(!p.exists(), "{name}");
+            continue;
+        };
         for file in volume {
             assert_eq!(
                 std::fs::metadata(p.join(file)).unwrap().len(),

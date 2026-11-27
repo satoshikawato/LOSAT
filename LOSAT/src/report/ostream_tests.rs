@@ -536,6 +536,53 @@ fn a_serial_object_that_fails_inside_ends_the_run_and_one_that_fails_at_close_go
 }
 
 #[test]
+fn a_serial_object_on_standard_output_after_a_failed_standard_error_ends_as_on_a_file() {
+    // A bad `cerr`'s sentry fails before its tie (`Core::tied_posts`): NCBI BLAST+ 2.17.0 blastn
+    // with a warning and both streams on `/dev/full` exits with status 0 for outfmt 8, 9, 11
+    // and 12 and 6 for outfmt 16 (line RG item T8b, `T/t8b/tools/search_cerr.py`), where the
+    // tie of a good `cerr` throws (`std::terminate`).
+    let standard_output = || {
+        let stream = ReportStream::new(
+            Box::new(FailAt(0)),
+            Some(NcbiBuffer::new(NcbiStdio::Cout {
+                block: 4096,
+                lines: false,
+            })),
+            true,
+            "blastn",
+            Site::Report,
+        );
+        lock(&stream.0).diagnostics = Some((Box::new(FailAt(0)), Cerr::new()));
+        lock(&stream.0).post("Warning: [blastn] w\n").unwrap();
+        assert!(lock(&stream.0).cerr().failed());
+        stream
+    };
+    let mut stream = standard_output();
+    let mut ostream = NcbiOstream::report(stream_of(&mut stream));
+    serial_object(&mut ostream, 3000, &[3000]).unwrap();
+    drop(ostream);
+    assert!(stream.finish(Ok(())).is_ok());
+    // The XML2 report: `Close`'s failure is caught, and the end of the document throws.
+    let mut stream = standard_output();
+    let mut ostream = NcbiOstream::report(stream_of(&mut stream));
+    let report = b"<BlastOutput2>\n</BlastOutput2>\n";
+    let mut cuts = Cuts::default();
+    cuts.push(0, Cut::Site(Site::Xml2Report { json: false }));
+    cuts.push(report.len(), Cut::Flush);
+    cuts.push(report.len(), Cut::Site(Site::Report));
+    cuts.cursor()
+        .write(&mut ostream, report, 0, report.len())
+        .unwrap();
+    use std::io::Write;
+    let error = ostream
+        .write_all(b"</BlastXML2>\n")
+        .and_then(|()| ostream.ncbi_flush())
+        .unwrap_err();
+    drop(ostream);
+    assert_eq!(native(stream.finish(Err(error.into()))).0, 6);
+}
+
+#[test]
 fn an_error_archive_into_the_failed_stream_is_a_write_fault() {
     use std::io::Write;
     // `PrintErrorArchive` after `CATCH_ALL` (probe `T/t6/survey` blastn.f11.q1 full2: 802.5

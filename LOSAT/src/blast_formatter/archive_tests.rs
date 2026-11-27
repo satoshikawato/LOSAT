@@ -199,53 +199,77 @@ fn run_archive_full(words: &[&str]) -> (i32, String) {
 }
 
 #[test]
-fn a_failed_standard_output_ends_the_run_as_ncbi_s_runtime_does() {
-    // The diagnostics on `cerr`: the close's post flushes `cout` through the tie, which throws
-    // inside the destructor (`std::terminate`, exit status 134 in a shell; the library returns
-    // -6 and the command line aborts).
+fn a_failed_writer_of_the_caller_ends_the_run_with_the_write_failure() {
+    // A library run's standard output is the caller's writer, no stream of NCBI's (as the
+    // tools' and the search programs' library writers): its failed write ends the run with
+    // `CATCH_ALL`'s text, wherever the diagnostics go. NCBI's runtime on a failed standard output
+    // of the command line (`std::terminate`): `blast_formatter_standard_output_failure_aborts` of
+    // tests/masker_fixtures.rs.
     for outfmt in ["8", "9", "12"] {
         assert_eq!(
             run_archive_full(&["-outfmt", outfmt]),
-            (
-                -6,
-                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
-                 basic_ios::clear: iostream error\n"
-                    .to_string()
-            ),
+            (6, "BLAST failed to write output\n".to_string()),
             "outfmt {outfmt}"
         );
     }
-    // Without the tie (`-logfile`): the one Seq-annot fits in the C library's buffer, its close
-    // fails and posts where the diagnostics go; nothing writes to the stream after it.
     assert_eq!(
         run_archive_full(&["-outfmt", "8", "-logfile", "/dev/null"]),
-        (0, String::new())
+        (6, String::new())
     );
+}
+
+/// A file on which every write fails, as on a full device.
+struct FullFile;
+
+impl std::io::Write for FullFile {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]
 fn the_formatter_s_constructor_throws_on_a_stream_that_failed() {
     let files = crate::report::run_files::OpenFiles::disk();
+    let posts = Posts::default();
     let mut output = Output {
-        stdout: Some(Box::leak(Box::new(FullDevice))),
+        stdout: None,
         files: &files,
-        stream: None,
+        stream: Some(OutStream::Report(ReportStream::formatter_output(
+            Some(Box::new(FullFile)),
+            Box::new(posts.clone()),
+            false,
+        ))),
         formatting: false,
+        posts,
     };
-    output.open(OsStr::new("-")).unwrap();
-    output.begin_object().unwrap();
-    let (stream, is_stdout) = output.opened();
-    assert!(is_stdout);
-    stream.write(b"x");
-    stream.flush();
-    assert!(stream.take_thrown());
-    output.end_object();
-    // The next object's formatter: `BLAST failed to write output`, exit status 6.
-    let (status, message) = native(output.begin_object().unwrap_err());
+    let target = crate::blastinput::ncbi_environment::DiagTarget::Stderr;
+    let mut stderr = Vec::new();
+    let mut diag = Diag::new(&target, &mut stderr, &super::super::TOOL);
+    output.begin_object(Site::Report, &diag).unwrap();
+    // The flush of what the file buffer holds fails (NCBI's write, made by the object's end at
+    // the latest): the formatter's exception, "BLAST failed to write output" at its end.
+    let writer = output.writer();
+    writer.write_all(b"x").unwrap();
+    let _ = writer.ncbi_flush();
+    let (status, message) = native(output.end_object(Ok(()), &mut diag).unwrap_err());
     assert_eq!(
         (status, message.as_str()),
         (6, "BLAST failed to write output\n")
     );
+    // The next object's formatter throws at its start: the same end.
+    let started = output.begin_object(Site::Report, &diag);
+    assert!(started.is_err());
+    let (status, message) = native(output.end_object(started, &mut diag).unwrap_err());
+    assert_eq!(
+        (status, message.as_str()),
+        (6, "BLAST failed to write output\n")
+    );
+    drop(diag);
+    assert!(stderr.is_empty());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2801-2851

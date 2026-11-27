@@ -847,6 +847,60 @@ fn a_failed_write_of_a_blastp_pairwise_format_exits_as_ncbi() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+// A search whose standard output is on `/dev/full`, after a warning (`-max_target_seqs 1`):
+// with standard error on `/dev/full` too, `cerr` is bad before the report fails, and a bad
+// `cerr`'s post flushes no tie, so the failure ends as on a file (NCBI BLAST+ 2.17.0 blastn,
+// line RG item T8b, `T/t8b/tools/search_cerr.py`: exit status 0 for outfmt 8, 9, 11 and 12, 6
+// for outfmt 16); with a standard error that takes the warning the post's tie throws
+// (`std::terminate`, SIGABRT) in each of them.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_failed_standard_output_after_a_failed_standard_error_ends_as_ncbi() {
+    use std::os::unix::process::ExitStatusExt;
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/blast_formatter/in");
+    let full = || {
+        fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .expect("open /dev/full")
+    };
+    for (outfmt, status) in [("8", 0), ("9", 0), ("11", 0), ("12", 0), ("16", 6)] {
+        for bad_stderr in [true, false] {
+            let mut command = clean_losat_command();
+            command.args([
+                "blastn",
+                "-outfmt",
+                outfmt,
+                "-max_target_seqs",
+                "1",
+                "-query",
+            ]);
+            command
+                .arg(dir.join("q.fa"))
+                .arg("-subject")
+                .arg(dir.join("s.fa"));
+            command
+                .current_dir(env!("CARGO_TARGET_TMPDIR"))
+                .stdout(full());
+            if bad_stderr {
+                command.stderr(full());
+            }
+            let output = command.output().expect("run blastn");
+            let got = (output.status.code(), output.status.signal());
+            let want = if bad_stderr {
+                (Some(status), None)
+            } else {
+                (None, Some(6))
+            };
+            assert_eq!(
+                got, want,
+                "outfmt {outfmt}, standard error failed {bad_stderr}"
+            );
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
 #[test]
 fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {

@@ -496,10 +496,43 @@ fn expected_row(program: &str, name: &str) -> Streams {
         _ => err,
     };
     (
-        losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
+        output_in_losat_words(&fs::read(file("out")).unwrap()),
         losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )
+}
+
+/// NCBI's standard output and the files of its `-out` (`with_files`) in LOSAT's words
+/// (`losat::wording::losat_output_bytes`), each part on its own: a file's line `@OUT@/<name>
+/// <length>` gives the length of its bytes in LOSAT's words (a report's version line is
+/// LOSAT's).
+fn output_in_losat_words(bytes: &[u8]) -> Vec<u8> {
+    let marker = format!("\n{OUT}/");
+    let find = |from: usize| {
+        bytes[from..]
+            .windows(marker.len())
+            .position(|window| window == marker.as_bytes())
+            .map(|at| from + at)
+    };
+    let Some(mut at) = find(0) else {
+        return losat::wording::losat_output_bytes(bytes).into_owned();
+    };
+    let mut out = losat::wording::losat_output_bytes(&bytes[..at]).into_owned();
+    loop {
+        let line_end = at + 1 + bytes[at + 1..].iter().position(|&b| b == b'\n').unwrap();
+        let line = std::str::from_utf8(&bytes[at + 1..line_end]).unwrap();
+        let (name, length) = line.rsplit_once(' ').unwrap();
+        let start = line_end + 1;
+        let end = start + length.parse::<usize>().unwrap();
+        let file = losat::wording::losat_output_bytes(&bytes[start..end]);
+        out.extend_from_slice(format!("\n{name} {}\n", file.len()).as_bytes());
+        out.extend_from_slice(&file);
+        match find(end) {
+            Some(next) if next == end => at = next,
+            None if end == bytes.len() => return out,
+            _ => panic!("NCBI's output with bytes after a file of -out"),
+        }
+    }
 }
 
 /// A row that LOSAT refuses by name (`refused/<name>.err`): the kind of its refusal, the exit
@@ -516,7 +549,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 10] = [
+const REFUSED_ROWS: [RefusedRow; 13] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -536,7 +569,7 @@ const REFUSED_ROWS: [RefusedRow; 10] = [
         ncbi_err: "Note[F]",
         losat_err: "severity Fatal",
     },
-    // An output format outside what LOSAT's blast_formatter writes (0, 6 to 10, 12 and 20): NCBI
+    // An output format outside what LOSAT's blast_formatter writes (0 to 4, 6 to 10, 12 and 20): NCBI
     // writes it.
     RefusedRow {
         program: "blast_formatter",
@@ -605,6 +638,37 @@ const REFUSED_ROWS: [RefusedRow; 10] = [
         ncbi_status: 0,
         ncbi_err: "",
         losat_err: "PRE_FETCH_SEQS_LIMIT=2147483647",
+    },
+    // The query-anchored reports (outfmt 1 to 4) of a translated search's archive (PR 4c of line
+    // RG-F3): NCBI writes them.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_qa1_rpstblastn",
+        kind: "NotCovered",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a translated search",
+    },
+    // `-subject` sequences with `BL2SEQ_LEGACY` at outfmt 3: NCBI writes the legacy bl2seq
+    // report (decision O8 of PR 4).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_qa3_bl2seq_legacy",
+        kind: "NotCovered",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "BL2SEQ_LEGACY set",
+    },
+    // A hand-made Dense-seg whose segments change strands (minus/minus, then plus/plus): NCBI
+    // shows each segment where it lies; LOSAT's writers draw the rows from an edit script of
+    // BLAST's (decision O1 of PR 4), as the search programs write them.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_pw_strands_mp",
+        kind: "NotCovered",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a Seq-align whose strands BLAST does not write",
     },
     // A NaN or an infinite real number in the results: NCBI stops at it in JSON with an error of
     // its stream (in ASN.1 binary it writes its one special octet, as LOSAT does: row

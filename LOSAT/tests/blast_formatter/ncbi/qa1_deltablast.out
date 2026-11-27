@@ -1,0 +1,74 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       19.2    0.92 
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       18.9    1.3  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       18.5    1.7  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       17.7    2.8  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       17.3    5.0  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       16.9    5.6  
+
+
+
+Query_1  3     LTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+74       82            NFGGYI.L.G.SG.II.GLGEPI..EL..L  113
+                                             \       
+                                             |       
+                                            RD
+18       1897  ...IL..QEKQIT..LDVKA..S.                1922
+                                 \                   
+                                 |                   
+                                GY
+31       291              .YMM..RH.VQSGDC...F.         310
+58       883     .RVDVIK..YS.MYGVSLLDMTVSLPD.I.        912
+82       3480      .K.RN..MT.ALDG---.N.REY.E.ME        3504
+81       1147                 .V.GL.SM..Q              1157
+
+
+
+
+Effective search space used: 1636200
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

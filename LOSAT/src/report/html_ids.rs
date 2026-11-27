@@ -76,6 +76,9 @@ pub enum HtmlPost {
 pub struct HtmlReport {
     pub(crate) links: Arc<HtmlLinks>,
     oids: Vec<Oid>,
+    /// The Seq-ids of the records shown as records by subject index (`with_record_ids`), where
+    /// their number is not the subject's: none for the search programs' `-subject` records.
+    record_ids: Vec<Option<ParsedSeqId>>,
 }
 
 impl HtmlReport {
@@ -85,7 +88,17 @@ impl HtmlReport {
         HtmlReport {
             links: Arc::clone(links),
             oids: oids.into_iter().collect(),
+            record_ids: Vec::new(),
         }
+    }
+
+    /// The report whose subjects shown as records (`ParsedSubject::shown_as_record`: a local id
+    /// `Subject_N` of their own) have the Seq-ids `ids` by subject index, `None` for the others:
+    /// blast_formatter's `-subject` Bioseqs, whose `N` is the search's and not their subject
+    /// index in the report.
+    pub(crate) fn with_record_ids(mut self, ids: Vec<Option<ParsedSeqId>>) -> Self {
+        self.record_ids = ids;
+        self
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:459-494
@@ -151,8 +164,12 @@ impl HtmlReport {
     }
 
     /// The id of the subject of index `s_idx` without parsed Seq-ids: `gnl|BL_ORD_ID|<oid>` of a
-    /// database sequence, `lcl|Subject_<s_idx + 1>` of a `-subject` record.
+    /// database sequence, `lcl|Subject_<s_idx + 1>` of a `-subject` record (or the record's own,
+    /// `with_record_ids`).
     fn unparsed_id(&self, s_idx: u32) -> ParsedSeqId {
+        if let Some(Some(id)) = self.record_ids.get(s_idx as usize) {
+            return id.clone();
+        }
         match self.oids.get(s_idx as usize) {
             Some(oid) => ParsedSeqId::General(Dbtag {
                 db: b"BL_ORD_ID".to_vec(),

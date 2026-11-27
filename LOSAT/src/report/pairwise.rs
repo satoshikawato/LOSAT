@@ -3255,6 +3255,25 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
     crate::cli::insert(writer, b"\n")
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1494
+/// The start of a query's report in outfmt 0 to 4 (`PrintOneResultSet`), the one writer of it:
+/// a round's `Results from round N` line (`round`, psiblast's), two line feeds and the query's
+/// `Query=` block (`write_blastp_query_header`).
+pub(crate) fn write_query_preamble<W: Write + ?Sized>(
+    writer: &mut W,
+    round: Option<u32>,
+    query_title: &[u8],
+    query_length: usize,
+    html: bool,
+) -> io::Result<()> {
+    if let Some(round) = round {
+        writeln!(writer, "Results from round {round}")?;
+    }
+    writer.write_all(b"\n\n")?;
+    write_blastp_query_header(writer, query_title, query_length, html)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
@@ -4071,20 +4090,14 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         // psiblast's results carry their round (`PrintOneResultSet` with
         // `itr.GetIterationNumber()`, psiblast_app.cpp:283-285); LOSAT's psiblast runs its
         // first round only.
-        if self.config.program == "psiblast" {
-            writeln!(writer, "Results from round 1")?;
-        }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
-        // Emit two blank lines before the query header.
-        writeln!(writer)?;
-        writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
         let query_title = self
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            (self.config.program == "psiblast").then_some(1),
             query_title,
             query.query_length,
             self.config.html.is_some(),
@@ -5318,10 +5331,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
-        writer.write_all(b"\n\n")?;
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            None,
             &query.query_name,
             query.query_length,
             self.config.html.is_some(),
@@ -5968,10 +5980,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
-        writer.write_all(b"\n\n")?;
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            None,
             &query.query_name,
             query.query_length,
             self.config.html.is_some(),
@@ -6332,12 +6343,9 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
-        // Emit two blank lines before the query header.
-        writeln!(writer)?;
-        writeln!(writer)?;
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            None,
             &self.query_titles[q_idx],
             query.query_length,
             self.config.html.is_some(),
@@ -6970,11 +6978,9 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1492
-        writeln!(writer)?;
-        writeln!(writer)?;
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            None,
             &query.query_name,
             query.query_length,
             self.config.html.is_some(),

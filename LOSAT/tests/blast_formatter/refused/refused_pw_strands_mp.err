@@ -1,0 +1,1 @@
+Error: the pairwise and query-anchored output formats (0 to 4) of a BLAST archive with a Seq-align whose strands BLAST does not write are not supported by LOSAT's BLAST_FORMATTER

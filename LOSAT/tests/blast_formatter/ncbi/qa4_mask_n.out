@@ -1,0 +1,80 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 440 total letters
+
+
+
+Query= qm1 masked query
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sm1 masked subject                                                    333     3e-96
+
+
+
+Query_1    1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  60
+Subject_1  31   CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  90
+
+Query_1    61   cacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca  120
+Subject_1  91   CACACACACACACACACACACACACACACACACACACACACACACACACACACACACACA  150
+
+Query_1    121  AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  180
+Subject_1  151  AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  210
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 71400
+
+
+Query= qm2 second query
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sm2 second subject                                                    185     5e-52
+
+
+
+Query_2    1   AGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGTCGT  60
+Subject_2  1   AGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGTCGT  60
+
+Query_2    61  GGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGC  100
+Subject_2  61  GGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGC  100
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 71400
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 440
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

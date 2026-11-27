@@ -1,0 +1,1 @@
+Error: the pairwise and query-anchored output formats (0 to 4) of a BLAST archive with -subject sequences and BL2SEQ_LEGACY set (NCBI BLAST+'s legacy bl2seq report, which LOSAT's search programs refuse too) are not supported by LOSAT's BLAST_FORMATTER

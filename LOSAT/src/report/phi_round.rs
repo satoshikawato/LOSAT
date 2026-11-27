@@ -12,10 +12,10 @@
 
 use super::super::{
     blastp_family_program, cpp_default_double, write_blast_database_header,
-    write_blastp_database_header_spacing, write_blastp_query_header, write_description_table,
-    write_no_hits_found, write_prolog, write_spaces, write_tblastn_unsearched_query_footer_spacing,
-    BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
-    RowDecoration,
+    write_blastp_database_header_spacing, write_description_table, write_no_hits_found,
+    write_prolog, write_query_preamble, write_spaces,
+    write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
+    PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -178,13 +178,16 @@ pub(crate) fn write_phi_round_report(
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2068-2080
-    writeln!(writer, "Results from round {}", sections.round.number)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
     let query_title = query_titles
         .get(q_idx)
         .map_or(&b""[..], |title| title.as_ref());
-    write_blastp_query_header(writer, query_title, queries[q_idx].query_length, false)?;
+    write_query_preamble(
+        writer,
+        Some(sections.round.number),
+        query_title,
+        queries[q_idx].query_length,
+        false,
+    )?;
     if let Some(info) = info {
         write_phi_info(writer, info)?;
     }

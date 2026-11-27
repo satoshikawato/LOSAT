@@ -7,6 +7,7 @@
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
 # Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
 # Rows from pw_default_subject on (line RG item F3 PR 4a, agent 4A of ad-RG-F3-12, 2026-11-27): the pairwise report (outfmt 0, the default without -outfmt) and -html. NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was full), by remaining-gaps-20261112/F/f3/tools/fixPW.py, every NCBI run under unshare -rn. New inputs: in/qmask.fa and in/smask.fa (a query whose middle 60 letters are a dinucleotide repeat that dust masks, and a subject holding it whole, so that its HSP crosses the mask; a second query without a mask), in/qmask.faa and in/smask.faa (a 20-residue run that SEG masks), in/s3gi.fa (the records of in/s3.fa with gi and GenBank ids) and in/gidb/g (makeblastdb -parse_seqids -blastdb_version 4 of it); in/mask_n.asn (blastn -query in/qmask.fa -subject in/smask.fa), in/mask_p.asn (blastp -query in/qmask.faa -subject in/smask.faa -seg yes), in/gi.asn (blastn -query in/q2.fa -db in/gidb/g), each -outfmt 11 of NCBI's search programs.
+# Rows from qa1_subject on (line RG item F3 PR 4b, agent 4A of ad-RG-F3-12, 2026-11-27): the query-anchored reports (outfmt 1 to 4), also with -html, on the archives of the rows before; NCBI BLAST+ 2.17.0, the official release build on the local machine (ws paused), by remaining-gaps-20261112/F/f3/tools/fixPW.py rows4b, every NCBI run under unshare -rn.
 noargs	
 h	-h
 help	-help
@@ -327,7 +328,7 @@ pw0_bit_pinf	-archive in/bit_pinf.asn
 pw0_minus	-archive in/minus.asn
 pw0_minus_subj	-archive in/minus_subj.asn
 pw0_strands_pm	-archive in/strands_pm.asn
-pw0_strands_mp	-archive in/strands_mp.asn
+refused_pw_strands_mp	-archive in/strands_mp.asn
 pw0_zero	-archive in/zero.asn
 pw0_qcovus_wrap	-archive in/qcovus_wrap.asn
 pw0_missing_scores	-archive in/missing_scores.asn
@@ -358,3 +359,95 @@ out_full_db_0	-archive in/db.asn -out /dev/full
 refused_pw_prefetch_max	PRE_FETCH_SEQS_LIMIT=2147483647 -archive in/db.asn
 refused_pw_bl2seq_legacy	BL2SEQ_LEGACY=1 -archive in/bn.asn
 refused_pw_rpstblastn	-archive in/rtn.asn
+qa1_subject	-archive in/bn.asn -outfmt 1
+qa1_db	-archive in/db.asn -outfmt 1
+qa1_batch	-archive in/batch.asn -outfmt 1
+qa1_psiblast	-archive in/ps.asn -outfmt 1
+qa1_rpsblast	-archive in/rps.asn -outfmt 1
+qa1_deltablast	-archive in/delta.asn -outfmt 1
+qa1_phi	-archive in/phi.asn -outfmt 1
+qa1_blastp_db	-archive in/bp_db.asn -outfmt 1
+qa1_blastp_subject	-archive in/bp_subject.asn -outfmt 1
+qa1_mask_n	-archive in/mask_n.asn -outfmt 1
+qa1_mask_p	-archive in/mask_p.asn -outfmt 1
+qa1_minus	-archive in/minus.asn -outfmt 1
+qa1_self_subj	-archive in/self_subj.asn -outfmt 1
+qa1_ungapped	-archive in/bn_ungapped.asn -outfmt 1
+qa1_blastp_ungapped	-archive in/bp_ungapped.asn -outfmt 1
+qa1_two_ids	-archive in/two_ids.asn -outfmt 1
+qa1_db_html	-archive in/db.asn -outfmt 1 -html
+qa1_blastp_db_html	-archive in/bp_db.asn -outfmt 1 -html
+qa1_gi_show_gis	-archive in/gi.asn -outfmt 1 -show_gis
+qa1_bnspd_pd	-archive in/bnspd.asn -outfmt 1 -parse_deflines
+qa1_db_ll40	-archive in/db.asn -outfmt 1 -line_length 40
+qa2_subject	-archive in/bn.asn -outfmt 2
+qa2_db	-archive in/db.asn -outfmt 2
+qa2_batch	-archive in/batch.asn -outfmt 2
+qa2_psiblast	-archive in/ps.asn -outfmt 2
+qa2_rpsblast	-archive in/rps.asn -outfmt 2
+qa2_deltablast	-archive in/delta.asn -outfmt 2
+qa2_phi	-archive in/phi.asn -outfmt 2
+qa2_blastp_db	-archive in/bp_db.asn -outfmt 2
+qa2_blastp_subject	-archive in/bp_subject.asn -outfmt 2
+qa2_mask_n	-archive in/mask_n.asn -outfmt 2
+qa2_mask_p	-archive in/mask_p.asn -outfmt 2
+qa2_minus	-archive in/minus.asn -outfmt 2
+qa2_self_subj	-archive in/self_subj.asn -outfmt 2
+qa2_ungapped	-archive in/bn_ungapped.asn -outfmt 2
+qa2_blastp_ungapped	-archive in/bp_ungapped.asn -outfmt 2
+qa2_two_ids	-archive in/two_ids.asn -outfmt 2
+qa2_db_html	-archive in/db.asn -outfmt 2 -html
+qa2_blastp_db_html	-archive in/bp_db.asn -outfmt 2 -html
+qa2_gi_show_gis	-archive in/gi.asn -outfmt 2 -show_gis
+qa2_bnspd_pd	-archive in/bnspd.asn -outfmt 2 -parse_deflines
+qa2_db_ll40	-archive in/db.asn -outfmt 2 -line_length 40
+qa3_subject	-archive in/bn.asn -outfmt 3
+qa3_db	-archive in/db.asn -outfmt 3
+qa3_batch	-archive in/batch.asn -outfmt 3
+qa3_psiblast	-archive in/ps.asn -outfmt 3
+qa3_rpsblast	-archive in/rps.asn -outfmt 3
+qa3_deltablast	-archive in/delta.asn -outfmt 3
+qa3_phi	-archive in/phi.asn -outfmt 3
+qa3_blastp_db	-archive in/bp_db.asn -outfmt 3
+qa3_blastp_subject	-archive in/bp_subject.asn -outfmt 3
+qa3_mask_n	-archive in/mask_n.asn -outfmt 3
+qa3_mask_p	-archive in/mask_p.asn -outfmt 3
+qa3_minus	-archive in/minus.asn -outfmt 3
+qa3_self_subj	-archive in/self_subj.asn -outfmt 3
+qa3_ungapped	-archive in/bn_ungapped.asn -outfmt 3
+qa3_blastp_ungapped	-archive in/bp_ungapped.asn -outfmt 3
+qa3_two_ids	-archive in/two_ids.asn -outfmt 3
+qa3_db_html	-archive in/db.asn -outfmt 3 -html
+qa3_blastp_db_html	-archive in/bp_db.asn -outfmt 3 -html
+qa3_gi_show_gis	-archive in/gi.asn -outfmt 3 -show_gis
+qa3_bnspd_pd	-archive in/bnspd.asn -outfmt 3 -parse_deflines
+qa3_db_ll40	-archive in/db.asn -outfmt 3 -line_length 40
+qa4_subject	-archive in/bn.asn -outfmt 4
+qa4_db	-archive in/db.asn -outfmt 4
+qa4_batch	-archive in/batch.asn -outfmt 4
+qa4_psiblast	-archive in/ps.asn -outfmt 4
+qa4_rpsblast	-archive in/rps.asn -outfmt 4
+qa4_deltablast	-archive in/delta.asn -outfmt 4
+qa4_phi	-archive in/phi.asn -outfmt 4
+qa4_blastp_db	-archive in/bp_db.asn -outfmt 4
+qa4_blastp_subject	-archive in/bp_subject.asn -outfmt 4
+qa4_mask_n	-archive in/mask_n.asn -outfmt 4
+qa4_mask_p	-archive in/mask_p.asn -outfmt 4
+qa4_minus	-archive in/minus.asn -outfmt 4
+qa4_self_subj	-archive in/self_subj.asn -outfmt 4
+qa4_ungapped	-archive in/bn_ungapped.asn -outfmt 4
+qa4_blastp_ungapped	-archive in/bp_ungapped.asn -outfmt 4
+qa4_two_ids	-archive in/two_ids.asn -outfmt 4
+qa4_db_html	-archive in/db.asn -outfmt 4 -html
+qa4_blastp_db_html	-archive in/bp_db.asn -outfmt 4 -html
+qa4_gi_show_gis	-archive in/gi.asn -outfmt 4 -show_gis
+qa4_bnspd_pd	-archive in/bnspd.asn -outfmt 4 -parse_deflines
+qa4_db_ll40	-archive in/db.asn -outfmt 4 -line_length 40
+qa1_db_na1	-archive in/db.asn -outfmt 1 -num_alignments 1
+qa3_db_nd0	-archive in/db.asn -outfmt 3 -num_descriptions 0
+qa2_blastp_db_sorthits1	-archive in/bp_db.asn -outfmt 2 -sorthits 1
+qa1_mask_n_html	-archive in/mask_n.asn -outfmt 1 -html
+qa4_db_out	-archive in/db.asn -outfmt 4 -out @OUT@/o.txt
+out_full_db_1	-archive in/db.asn -outfmt 1 -out /dev/full
+refused_qa1_rpstblastn	-archive in/rtn.asn -outfmt 1
+refused_qa3_bl2seq_legacy	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 3

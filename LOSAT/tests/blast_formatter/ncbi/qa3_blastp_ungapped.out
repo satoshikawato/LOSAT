@@ -1,0 +1,65 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       20.1    0.86 
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       18.7    2.3  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       17.8    4.3  
+BDT63515.1 wsv139-like protein [Pasiphaea japonica whispovirus]       17.3    6.0  
+BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]       16.8    8.3  
+
+
+
+Query_1  3     LTKKIELDDHAAHLLFSANRWEVCSKIKQLLD  34
+58       883     .RVDVIK..YS.MYGVSLLDMTVSLPD.I.  912
+31       291              .YMM..RH.VQSGDC...F.   310
+81       1147                 .V.GL.SM..Q        1157
+17       680   II.NLSEN..TE..                    693
+54       314                .PIA..F.DF.          324
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 968820
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

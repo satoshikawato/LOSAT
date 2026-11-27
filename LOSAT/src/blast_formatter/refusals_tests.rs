@@ -39,8 +39,8 @@ fn the_documented_refusals_are_one_of_each_kind() {
 fn the_texts_are_losat_s() {
     assert_eq!(
         Refusal::OutputFormat(5).reason(),
-        "output format 5 is not supported by LOSAT's BLAST_FORMATTER (it writes 0, 6, 7, 8, 9, \
-         10, 12 and 20)"
+        "output format 5 is not supported by LOSAT's BLAST_FORMATTER (it writes 0, 1, 2, 3, 4, \
+         6, 7, 8, 9, 10, 12 and 20)"
     );
     assert_eq!(
         Refusal::Rid.reason(),

@@ -1,0 +1,88 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.9    0.15 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  15.1    2.9  
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  13.9    6.3  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  142  SEIINLTINGVARGNHFNFVNGTLQTRNYGKVYVAGQGTSDSELVKKKGDIILTSLLGDG  321
+101      28   TYLK.IYQQENGGNK.CL..KHS.E..-..                                56
+
+Query_1  322  DHTLNVNKAESKELELYARVYNNTKRDITVDSVSLSPGLNAT  447
+103      54                        S.SN.QTPITRIEE.L..RFI  74
+
+For reading frame +2 of query sequence:
+
+Query_1  158  LPLMV*REGTILTL*MGRYKHETTGKFTWLVRGQATAS**RKKGILS*PRSSVMGTTPST  337
+102      96                      .Y.AE..GKEV.KAR.                           111
+103      11                .VLEKM.NK..DSLLL.                                27
+103      138  ..I.L                                                         142
+
+Query_1  338  *TRPNLKNWNYTPEYIITQSAISRWTRFRCRLA*MRPVENFLPISLFCTLSQQC  499
+103      103                                         DYF.-EIV.DINM.F  116
+
+For reading frame +3 of query sequence:
+
+Query_1  252  GDKRQ  266
+102      13   ....R  17
+
+For reading frame -2 of query sequence:
+
+Query_1  591  PHTQKIVSVSVIYILIK  541
+101      139  .Y.NS..KLASKCMIC.  155
+
+For reading frame -3 of query sequence:
+
+Query_1  626  SPTLNKSLPGLNLILKR*CLLVSSISSSKVAPKTKVLIRFFFNTVGLKYKTNLLAENSRP  447
+103      92   ..NM.VTAA.MD                                                  103
+
+Query_1  446  VAFKPGDSETESTVISRFVLLYTRAYNSNSLDSALFTLRVWSPSPRSEVKIISPFFFTNS  267
+
+Query_1  266  LSLVP*PAT*TFP*FRVCNVPFTKLKWFPRATPLMVRLIISDSTG*ASLSFLSSFLLSSI  87
+
+Query_1  86   LVTTMLITTSIKVNPAKMAA*TPHIC  9
+102      115             QI.S.RIETG..YV.  129
+
+
+Lambda      K        H
+   0.317    0.136    0.383 
+
+Gapped
+Lambda      K        H
+   0.267   0.0500    0.140 
+
+Effective search space used: 87584
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

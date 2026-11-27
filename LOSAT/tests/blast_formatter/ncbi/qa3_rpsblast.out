@@ -1,0 +1,74 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  317     5e-113
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.9    0.30  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.3    8.5   
+
+
+
+Query_1  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+101      1    ............................................................  60
+
+Query_1  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+101      61   ............................................................  120
+
+Query_1  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+101      121  ............................................................  180
+103      149                                                             .  149
+
+Query_1  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLY--GGEYMCF  238
+101      181  ..........                                                    190
+102      83                                                  .DVH--.E.FKAL  93
+102      106                                     VVK.RA.FDQI..ARIET.TP.V..  130
+103      150  .HIT.GK..                                                     158
+
+Query_1  239  PD----RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRY  294
+102      94   YE----KYEAE..                                                 102
+102      131  K.TINRK.NQ                                                    140
+
+Query_1  295  YYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQE  354
+
+Query_1  355  RARALFLDLAN  365
+102      108  K.....DQINS  118
+
+
+Lambda      K        H
+   0.320    0.137    0.406 
+
+Gapped
+Lambda      K        H
+   0.267   0.0500    0.140 
+
+Effective search space used: 169824
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

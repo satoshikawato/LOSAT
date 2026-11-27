@@ -1,0 +1,1 @@
+Error: PRE_FETCH_SEQS_LIMIT=2147483647, with which NCBI BLAST+ loads the subject sequences of output formats 0 to 4, 8, 9 and 12 ahead (from NCBI's servers where the database lacks one), is not supported by LOSAT's BLAST_FORMATTER

@@ -12,13 +12,13 @@ use crate::ncbi_app::Diag;
 
 /// The output formats that blast_formatter writes; it refuses the others by name
 /// (`Refusal::OutputFormat`).
-pub(crate) const WRITTEN_FORMATS: [i32; 8] = [0, 6, 7, 8, 9, 10, 12, 20];
+pub(crate) const WRITTEN_FORMATS: [i32; 12] = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 20];
 
 /// The tabular formats' name in `Refusal::NotCovered`.
 pub(crate) const TABULAR_FORMATS: &str = "tabular output formats (6, 7, 10 and 20)";
 
-/// The pairwise formats' name in `Refusal::NotCovered`.
-pub(crate) const PAIRWISE_FORMATS: &str = "pairwise output format (0)";
+/// The pairwise and query-anchored formats' name in `Refusal::NotCovered`.
+pub(crate) const PAIRWISE_FORMATS: &str = "pairwise and query-anchored output formats (0 to 4)";
 
 /// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
 /// tests' list of the refusals (`documented`).
@@ -48,7 +48,7 @@ pub(crate) enum Refusal {
     UnreadArchive(String),
     /// A stored message of the severity `Fatal`, whose post ends NCBI's program (`abort`).
     FatalMessage,
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` with an output format that LOSAT writes (8, 9, 12):
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` with an output format that LOSAT writes (0 to 4, 8, 9, 12):
     /// NCBI's blast_formatter then loads each subject of the results through its data loaders
     /// (its BLAST database loader, or NCBI's servers where the database or the subjects lack
     /// one), which may post their own texts (decision C3-1 of line RG).
@@ -106,7 +106,7 @@ impl Refusal {
             ),
             Refusal::Prefetch => format!(
                 "PRE_FETCH_SEQS_LIMIT=2147483647, with which NCBI BLAST+ loads the subject \
-                 sequences of output formats 0, 8, 9 and 12 ahead (from NCBI's servers where the \
+                 sequences of output formats 0 to 4, 8, 9 and 12 ahead (from NCBI's servers where the \
                  database lacks one), is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
@@ -146,7 +146,10 @@ impl Refusal {
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
             Refusal::Unwritable(..) => "an archive's results".to_string(),
-            Refusal::NotCovered { format, .. } => format.to_string(),
+            // The formats' name without their numbers (`tabular output formats`).
+            Refusal::NotCovered { format, .. } => {
+                format.split(" (").next().unwrap_or(format).to_string()
+            }
         }
     }
 }

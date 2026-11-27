@@ -1,9 +1,11 @@
-//! blast_formatter's pairwise report (`-outfmt 0`, the default, with or without `-html`) of one
-//! archive object: NCBI's `CBlastFormat` with `PrintProlog`, the prefetch, `PrintOneResultSet` of
+//! blast_formatter's pairwise report (`-outfmt 0`, the default) and query-anchored reports
+//! (`-outfmt` 1 to 4), with or without `-html`, of one archive object: NCBI's `CBlastFormat` with `PrintProlog`, the prefetch, `PrintOneResultSet` of
 //! each query and `PrintEpilog`, written by the search programs' report writers
 //! (`report::pairwise`, `report::pairwise::psiblast_round`) from the archive's Seq-aligns as
 //! `CDisplaySeqalign` reads them (decision F3-19 of line RG, O1: the writers' `PairwiseHit`, made
-//! here from each Seq-align's Dense-seg and the letters of its query and subject).
+//! here from each Seq-align's Dense-seg and the letters of its query and subject). The
+//! query-anchored reports read the sequences, their labels and masks (`ArchiveSequences`), as
+//! the search programs' do.
 //!
 //! The object's scope is the tabular driver's (`tabular`: the request's queries, the database
 //! that the archive names or its `-subject` Bioseqs, a query Bioseq found first as NCBI's scope
@@ -31,16 +33,16 @@ use super::tabular::{
 use super::PROGRAM;
 use crate::algorithm::common::database::{
     check_pairwise_parsed, check_reported_title, check_shown_protein_title, pairwise_database,
-    pairwise_database_masked,
-    prefetch_messages, prefetch_warning_of, refuse_described_lines_of, refuse_described_records_of,
-    ReportedHeader, TitleReads,
+    pairwise_database_masked, prefetch_messages, prefetch_warning_of, refuse_described_lines_of,
+    refuse_described_records_of, ReportedHeader, TitleReads,
 };
+use crate::blastinput::app::ReportFormat;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
 use crate::report::archive::read::request::{Queries, Request};
 use crate::report::archive::read::results::{MaskRange, Results};
-use crate::report::archive::read::seq_align_id;
+use crate::report::archive::read::{seq_align_id, Stop};
 use crate::report::db_subject::{HitLoad, HitLoads, ParsedSubject};
 use crate::report::defline::SourceTaxname;
 use crate::report::ostream::ReportWrite;
@@ -48,13 +50,14 @@ use crate::report::pairwise::psiblast_round::{
     write_psiblast_epilog, write_psiblast_round_report, ReportRound,
 };
 use crate::report::pairwise::{
-    scan_mode_definition_bytes, write_blastn_pairwise_report, write_blastp_pairwise_window,
-    Ancillary, BlastnIntro, BlastnPairwiseQuery, BlastnPairwiseReport, BlastpPairwiseQuery,
+    blastn_section_hsps, blastp_section_aborts, blastp_section_frees, scan_mode_definition_bytes,
+    section_aborts, write_blastn_pairwise_report, write_blastp_pairwise_window, Ancillary,
+    BlastnIntro, BlastnPairwiseQuery, BlastnPairwiseReport, BlastpPairwiseQuery,
     BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseEdge, PairwiseHit,
     PairwiseView,
 };
 use crate::report::query_anchored::aln_vec::{AlnMap, MapBuffers};
-use crate::report::query_anchored::{Denseg, SeqKey};
+use crate::report::query_anchored::{fill_seqid, Denseg, Mask, ReportSequences, SeqKey};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::serial::seqalign::{Segments, Strand};
 use crate::report::serial::seqalign_read::{read_set, PairDenseg, ReadAlign, ReadStop};
@@ -204,8 +207,8 @@ pub(super) fn print_object(
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:276-282
     if inputs.database.is_none() && std::env::var_os("BL2SEQ_LEGACY").is_some() {
         return Err(refused(
-            "-subject sequences with BL2SEQ_LEGACY set, whose legacy bl2seq report LOSAT's \
-             search programs refuse too",
+            "-subject sequences and BL2SEQ_LEGACY set (NCBI BLAST+'s legacy bl2seq report, \
+             which LOSAT's search programs refuse too)",
         ));
     }
     let program_type = super::search_program::program_type(options.program);
@@ -280,28 +283,53 @@ pub(super) fn print_object(
     }
     let prefetched_subjects = subjects.sources.len();
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:617-656
+    let view = ReportFormat::from_number(inputs.choice.number)
+        .and_then(PairwiseView::of)
+        .unwrap_or_default();
+    let sort = view.report_sort(formatting.formatting.report_sort());
+
     // Each query's Seq-aligns as the report reads them (`PrepareBlastUngappedSeqalign` where the
-    // search is ungapped), their subjects and the runs of their subject ids.
+    // search is ungapped), their subjects and the runs of their subject ids, up to a Seq-align
+    // whose Seq-ids do not read (`ids_stop`): the report ends in that query's, after the queries
+    // before it.
     let mut runs = RunSubjects::default();
     let mut planned: Vec<Vec<(ReadAlign<'_>, u32)>> = Vec::with_capacity(sets.len());
-    for (q, set) in sets.iter().enumerate() {
+    let mut stopped: Option<(usize, anyhow::Error)> = None;
+    'queries: for (q, set) in sets.iter().enumerate() {
         let all = read_set(&alignments[set.clone()], ungapped && !set.is_empty());
         let mut aligns = Vec::with_capacity(all.len());
         let mut previous: Option<(&ParsedSeqId, usize)> = None;
+        // The runs of subject ids among the query's Seq-aligns before this one.
+        let mut runs_before = 0usize;
         for align in all {
             if matches!(align.variant(), "std" | "disc") {
                 return Err(refused(
                     "Std-seg or discontinuous Seq-aligns (those of a translated search)",
                 ));
             }
-            let query_id = align.seq_id(0).map_err(super::archive::stop_error)?;
+            let read_by_table =
+                sort.sorts() || runs_before.saturating_sub(1) < formatting.counts.num_descriptions;
+            let query_id = match align.seq_id(0) {
+                Ok(id) => id,
+                Err(stop) => {
+                    stopped = Some((q, ids_stop(stop, read_by_table)?));
+                    break 'queries;
+                }
+            };
             if scope.queries_holding(query_id).as_slice() != [q] {
                 return Err(refused(
                     "a query id that names another query Bioseq of the request, or none, or \
                      several",
                 ));
             }
-            let id = align.seq_id(1).map_err(super::archive::stop_error)?;
+            let id = match align.seq_id(1) {
+                Ok(id) => id,
+                Err(stop) => {
+                    stopped = Some((q, ids_stop(stop, read_by_table)?));
+                    break 'queries;
+                }
+            };
             let source = subjects.index_of(inputs, &scope, id)?;
             let s_idx = match previous {
                 Some((previous_id, _)) if compare(previous_id, id) == Sic::Yes => {
@@ -315,6 +343,7 @@ pub(super) fn print_object(
                 }
                 _ => {
                     runs.sources.push(source);
+                    runs_before += 1;
                     runs.sources.len() - 1
                 }
             };
@@ -342,6 +371,7 @@ pub(super) fn print_object(
             source,
             at,
             &records,
+            &scope,
             db,
             protein_subjects,
             taxdb_found,
@@ -416,12 +446,21 @@ pub(super) fn print_object(
     let mut letters = LetterCache::default();
     let mut map = MapBuffers::default();
     let mut hits: Vec<PairwiseHit> = Vec::with_capacity(seq_aligns);
+    // The subject letters that each run's rows read, and the query of the run.
+    let mut spans: Vec<(usize, Option<(u32, u32)>)> = vec![(0, None); runs.sources.len()];
     for (q, aligns) in planned.iter().enumerate() {
         for (align, s_idx) in aligns {
             let source_at = runs.sources[*s_idx as usize];
             let source = &subjects.sources[source_at];
             let ds = align.dense_seg().map_err(read_stop)?;
-            let row_letters = match letters.letters(subject_range(&ds), &scope, inputs, source, q) {
+            let range = subject_range(&ds);
+            let span = &mut spans[*s_idx as usize];
+            span.0 = q;
+            span.1 = match (span.1, range) {
+                (Some((from, to)), Some((a, b))) => Some((from.min(a), to.max(b))),
+                (span, range) => span.or(range),
+            };
+            let row_letters = match letters.letters(range, &scope, inputs, source, q) {
                 Ok(letters) => letters,
                 Err(LetterEnd::Refusal(error)) => return Err(error),
                 Err(LetterEnd::Exception(_)) => {
@@ -451,16 +490,34 @@ pub(super) fn print_object(
         }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4290-4320
-    // The masks lower the query rows (`x_FillLocList`); a mask of the subject's id would lower
-    // its rows too.
+    // The masks lower the query rows of outfmt 0 (`x_FillLocList`); the query-anchored reports
+    // read them with the sequences (`ArchiveSequences`).
     let html = formatting.html;
-    let mut html_masks = html.then(Vec::new);
-    crate::algorithm::blastp::blast_engine::set_row_masks(
-        &mut hits,
-        Some(query_masks.as_slice()),
-        [&HashMap::new(), &HashMap::new()],
-        html_masks.as_mut(),
-    );
+    let mut html_masks = None;
+    let sequences = if view == PairwiseView::Pairwise {
+        html_masks = html.then(Vec::new);
+        crate::algorithm::blastp::blast_engine::set_row_masks(
+            &mut hits,
+            Some(query_masks.as_slice()),
+            [&HashMap::new(), &HashMap::new()],
+            html_masks.as_mut(),
+        );
+        None
+    } else {
+        Some(ArchiveSequences::of(
+            &queries,
+            &subject_bioseqs,
+            &subjects.sources,
+            &runs,
+            &shown,
+            &spans,
+            &mut letters,
+            &scope,
+            inputs,
+            &query_masks,
+            formatting.show_gis,
+        )?)
+    };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:90, 224
     let links = crate::blastinput::app::html_links_of(
@@ -476,8 +533,8 @@ pub(super) fn print_object(
         program: program.to_string(),
         protein_matrix: matrix,
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:423-424
-        sort: PairwiseView::Pairwise.report_sort(formatting.formatting.report_sort()),
-        view: PairwiseView::Pairwise,
+        sort,
+        view,
         // The OIDs of a database object's subjects by subject index (a query Bioseq's self hit
         // has its own ids, which name it); none for `-subject` Bioseqs.
         html: links.as_ref().map(|links| {
@@ -489,6 +546,19 @@ pub(super) fn print_object(
                         .iter()
                         .map(move |&at| shown[at].oid.unwrap_or(db.oid(0)))
                 }),
+            )
+            // A Bioseq's local id `Subject_N` (NCBI's anchor and id link) is the search's.
+            .with_record_ids(
+                runs.sources
+                    .iter()
+                    .map(|&at| {
+                        shown[at]
+                            .parsed
+                            .as_deref()
+                            .filter(|subject| subject.shown_as_record())
+                            .map(|subject| subject.alignment_id().clone())
+                    })
+                    .collect(),
             )
         }),
         unreadable_query: None,
@@ -507,6 +577,21 @@ pub(super) fn print_object(
         .iter()
         .map(|query| Arc::from(query.title.as_slice()))
         .collect();
+    if let Some(sequences) = &sequences {
+        refuse_anchored_aborts(
+            view,
+            formatting.formatting.report_sort(),
+            formatting.counts.num_alignments,
+            sequences,
+            &hits,
+            &subject_titles,
+            nucleotide,
+            ungapped,
+        )?;
+    }
+    let anchored = sequences
+        .as_ref()
+        .map(|sequences| sequences as &dyn ReportSequences);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2250
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:126-128
@@ -660,7 +745,7 @@ pub(super) fn print_object(
                 None,
                 Some(&mut warnings),
                 None,
-                None,
+                anchored,
                 row_masks,
                 &loads,
             );
@@ -686,7 +771,7 @@ pub(super) fn print_object(
                     number: round_number,
                     found_before: None,
                 },
-                None,
+                anchored,
             )?;
             if epilog {
                 write_psiblast_epilog(
@@ -716,7 +801,7 @@ pub(super) fn print_object(
             prolog,
             epilog,
             None,
-            None,
+            anchored,
             row_masks,
             &loads,
         )
@@ -739,7 +824,265 @@ pub(super) fn print_object(
     if psi_task && inputs.iteration.is_err() && !sets.is_empty() {
         return Err(super::archive::invalid_archive());
     }
-    write(0..sets.len(), false, true).map_err(|error| cell.error_of(error))
+    let Some((q, error)) = stopped else {
+        return write(0..planned.len(), false, true).map_err(|error| cell.error_of(error));
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1494
+    // The queries before, then the start of the report of the query whose Seq-align throws.
+    write(0..q, false, false).map_err(|error| cell.error_of(error))?;
+    crate::report::pairwise::write_query_preamble(
+        &mut out,
+        psi_task.then_some(round_number),
+        &queries[q].title,
+        usize::try_from(queries[q].length).unwrap_or(0),
+        config.html.is_some(),
+    )
+    .and_then(|()| out.flush())
+    .map_err(|error| cell.error_of(error))?;
+    Err(error)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1082-1128
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1541
+/// The end of the report at a Seq-align whose Seq-ids do not read (`stop`): one of NCBI's
+/// exceptions (`archive::stop_error`) where NCBI reads them after the query's `Query=` block
+/// (`read_by_table`): the sort of `-sorthits` or `-sorthsps` above 0 reads every Seq-align's, the
+/// description table those of its first `-num_descriptions` subjects and the first Seq-align of
+/// the next. A Seq-align past them is read by the alignments' display, which is refused, as the
+/// stops NCBI has no result for.
+fn ids_stop(stop: Stop, read_by_table: bool) -> Result<anyhow::Error> {
+    match stop {
+        Stop::Exception(_) | Stop::InvalidSelection { .. } | Stop::Unassigned { .. }
+            if read_by_table =>
+        {
+            Ok(super::archive::stop_error(stop))
+        }
+        Stop::Exception(_) | Stop::InvalidSelection { .. } | Stop::Unassigned { .. } => {
+            Err(refused(
+                "a Seq-align whose Seq-ids do not read past the Seq-aligns of the description \
+                 table, which NCBI BLAST+'s alignment display reads",
+            ))
+        }
+        other => Err(super::archive::stop_error(other)),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4545-4572
+/// The sequences of an object's query-anchored reports (outfmt 1 to 4,
+/// `query_anchored::ReportSequences`), read as outfmt 0's rows read them:
+///
+/// - Letters: each query Bioseq's whole, each run subject's from the first to the last letter
+///   that its rows read (`LetterCache`), at the sequences' positions.
+/// - Labels: `x_FillSeqid` of the scope's Bioseq: a query or `-subject` Bioseq by its stored
+///   Seq-ids (`query_anchored::fill_seqid`), a database sequence by its parsed Seq-ids, else its
+///   OID (`query_anchored::database_label`).
+/// - Masks: the query's masks that its rows show (`query_masks`); the archive keeps no subject
+///   masks.
+struct ArchiveSequences<'a> {
+    queries: Vec<Vec<u8>>,
+    /// By run subject index: where its letters start, and its letters.
+    subjects: Vec<(u32, Vec<u8>)>,
+    query_labels: Vec<Vec<u8>>,
+    subject_labels: Vec<Vec<u8>>,
+    /// By run subject index: the query whose Bioseq it is (a self-hit, `SubjectSource::Query`).
+    self_hits: Vec<Option<usize>>,
+    query_masks: &'a [Vec<(i32, i32)>],
+}
+
+impl<'a> ArchiveSequences<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn of(
+        queries: &[QueryEntry<'_>],
+        subject_bioseqs: &[crate::report::archive::read::request::Bioseq<'_>],
+        sources: &[SubjectSource],
+        runs: &RunSubjects,
+        shown: &[SourceShown],
+        spans: &[(usize, Option<(u32, u32)>)],
+        letters: &mut LetterCache,
+        scope: &ScopeBioseqs<'_, '_>,
+        inputs: &ObjectInputs<'_>,
+        query_masks: &'a [Vec<(i32, i32)>],
+        show_gis: bool,
+    ) -> Result<Self> {
+        let label = |ids: &mut dyn Iterator<Item = &ParsedSeqId>| {
+            let ids: Vec<ParsedSeqId> = ids.cloned().collect();
+            let mut out = Vec::new();
+            fill_seqid(&ids, show_gis, &mut out);
+            out
+        };
+        let unread = |end: LetterEnd| match end {
+            LetterEnd::Refusal(error) => error,
+            LetterEnd::Exception(_) => {
+                refused("a sequence whose letters NCBI BLAST+'s alignment display cannot read")
+            }
+        };
+        let mut query_letters = Vec::with_capacity(queries.len());
+        for query in queries {
+            query_letters
+                .push(super::tabular::read_bioseq(query.bioseq, "a query Bioseq").map_err(unread)?);
+        }
+        let mut subjects = Vec::with_capacity(runs.sources.len());
+        let mut subject_labels = Vec::with_capacity(runs.sources.len());
+        let mut self_hits = Vec::with_capacity(runs.sources.len());
+        for (s_idx, &at) in runs.sources.iter().enumerate() {
+            let (q, span) = spans[s_idx];
+            let read = letters
+                .letters(span, scope, inputs, &sources[at], q)
+                .map_err(unread)?;
+            subjects.push((read.subject_from, read.subject.to_vec()));
+            let mut out = Vec::new();
+            match sources[at] {
+                SubjectSource::Database { .. } => crate::report::query_anchored::database_label(
+                    shown[at].parsed.as_deref(),
+                    shown[at].oid.expect("a database subject's OID"),
+                    &mut out,
+                ),
+                SubjectSource::Bioseq(bioseq) => {
+                    out = label(&mut subject_bioseqs[bioseq].ids());
+                }
+                SubjectSource::Query(query) => {
+                    out = label(&mut queries[query].bioseq.ids());
+                }
+            }
+            subject_labels.push(out);
+            self_hits.push(match sources[at] {
+                SubjectSource::Query(query) => Some(query),
+                _ => None,
+            });
+        }
+        Ok(ArchiveSequences {
+            queries: query_letters,
+            subjects,
+            query_labels: queries
+                .iter()
+                .map(|query| label(&mut query.bioseq.ids()))
+                .collect(),
+            subject_labels,
+            self_hits,
+            query_masks,
+        })
+    }
+}
+
+/// Appends the letters `from..=to` of `letters`, which start at position `start`, as far as they
+/// go.
+fn push_letters(letters: &[u8], start: u32, from: u32, to: u32, out: &mut Vec<u8>) {
+    let (Some(from), Some(to)) = (from.checked_sub(start), to.checked_sub(start)) else {
+        return;
+    };
+    let end = (to as usize + 1).min(letters.len());
+    if let Some(range) = letters.get(from as usize..end) {
+        out.extend_from_slice(range);
+    }
+}
+
+impl ReportSequences for ArchiveSequences<'_> {
+    fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
+        self.self_hits.get(s_idx as usize).copied().flatten() == Some(q_idx)
+    }
+
+    fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
+        push_letters(&self.queries[q_idx], 0, from, to, out);
+    }
+
+    fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>) {
+        let (start, letters) = &self.subjects[s_idx as usize];
+        push_letters(letters, *start, from, to, out);
+    }
+
+    fn query_label(&self, q_idx: usize, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.query_labels[q_idx]);
+    }
+
+    fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.subject_labels[s_idx as usize]);
+    }
+
+    fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>) {
+        if let Some(masks) = self.query_masks.get(q_idx) {
+            out.extend(
+                masks
+                    .iter()
+                    .map(|&(from, to)| (from.max(0) as u32, to.max(0) as u32, 0)),
+            );
+        }
+    }
+
+    fn subject_masks(&self, _q_idx: usize, _s_idx: u32, _out: &mut Vec<Mask>) {}
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2003-2040
+/// The refusal of a query-anchored report (`view`) on which NCBI BLAST+ aborts or crashes, before
+/// the object's first byte, as the search programs refuse it (`pairwise::section_aborts`,
+/// `pairwise::blastp_section_frees`): a section with a self-hit, whose merge leaves out the
+/// subject's rows, and an ungapped protein section whose HSP of length 0 the merge frees and
+/// reads.
+#[allow(clippy::too_many_arguments)]
+fn refuse_anchored_aborts(
+    view: PairwiseView,
+    sort: crate::report::hit_sort::ReportSort,
+    num_alignments: usize,
+    sequences: &ArchiveSequences<'_>,
+    hits: &[PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    nucleotide: bool,
+    ungapped: bool,
+) -> Result<()> {
+    let io_error = |error: io::Error| anyhow::Error::from(error);
+    for q in 0..sequences.queries.len() {
+        let is_query = |s_idx: u32| sequences.subject_is_query(q, s_idx);
+        let aborts = if !sequences.self_hits.contains(&Some(q)) {
+            false
+        } else if nucleotide {
+            section_aborts(
+                view,
+                sort,
+                num_alignments,
+                q,
+                hits,
+                subject_titles,
+                is_query,
+                |group| blastn_section_hsps(num_alignments, group, &[], is_query),
+            )
+            .map_err(io_error)?
+        } else {
+            blastp_section_aborts(
+                view,
+                sort,
+                num_alignments,
+                q,
+                hits,
+                subject_titles,
+                is_query,
+            )
+            .map_err(io_error)?
+        };
+        if aborts {
+            return Err(refused(
+                "a query Bioseq among its own subjects in the query-anchored output formats, on \
+                 whose alignments NCBI BLAST+ aborts",
+            ));
+        }
+        if ungapped
+            && !nucleotide
+            && blastp_section_frees(
+                view,
+                sort,
+                num_alignments,
+                q,
+                hits,
+                subject_titles,
+                |_, _| false,
+            )
+            .map_err(io_error)?
+        {
+            return Err(refused(
+                "an ungapped HSP of length 0 in the query-anchored output formats, whose merge \
+                 NCBI BLAST+ frees and reads",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The masks of each query that its rows show (`TMaskedQueryRegions` of its result,
@@ -794,6 +1137,7 @@ fn source_shown(
     source: &SubjectSource,
     at: usize,
     records: &BioseqRecords,
+    scope: &ScopeBioseqs<'_, '_>,
     db: Option<&crate::seqdb::SeqDb>,
     protein: bool,
     taxdb_found: bool,
@@ -869,14 +1213,33 @@ fn source_shown(
         }
         SubjectSource::Bioseq(_) | SubjectSource::Query(_) => {
             let title = records.records[at].title.as_slice();
-            let parsed = records.parsed[at].as_ref().map(shown_parsed);
-            match &parsed {
-                Some(subject) => crate::report::db_subject::check_pairwise_records(
-                    std::slice::from_ref(&Some(Arc::clone(subject))),
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:891-905
+            // A Bioseq of one local id (whose tabular rows show it as a record,
+            // `BioseqRecords::ids`) shows the id before its title in the description line and
+            // the heading unless it is `lcl|Subject_N`, as a `-subject` record of
+            // `-parse_deflines` in the search programs (`ParsedSubject::of_record`).
+            let subject = match &records.parsed[at] {
+                Some(subject) => shown_parsed(subject),
+                None => {
+                    let bioseq = match *source {
+                        SubjectSource::Bioseq(index) => scope.subjects[index],
+                        SubjectSource::Query(index) => scope.queries[index].bioseq,
+                        SubjectSource::Database { .. } => unreachable!("a Bioseq subject"),
+                    };
+                    let ids = crate::blastinput::fasta_reader::believed::BelievedIds::new(
+                        bioseq.ids().cloned().collect(),
+                        crate::report::archive::bioseq::SeqLocStrand::Unknown,
+                    );
+                    shown_parsed(&Arc::new(ParsedSubject::of_record(&ids, title)))
+                }
+            };
+            match subject.shown_as_record() {
+                false => crate::report::db_subject::check_pairwise_records(
+                    std::slice::from_ref(&Some(Arc::clone(&subject))),
                     protein,
                     PROGRAM,
                 )?,
-                None => {
+                true => {
                     // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4092-4095
                     let reads_past_end = protein
                         && [false, true].into_iter().any(|leave_prefix| {
@@ -894,7 +1257,7 @@ fn source_shown(
             }
             Ok(SourceShown {
                 title: Arc::from(title),
-                parsed,
+                parsed: Some(subject),
                 source: SourceTaxname::default(),
                 length: records.lengths[at],
                 oid: None,

@@ -1,0 +1,95 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: in/s3.fa
+           3 sequences; 1,000 total letters
+
+
+
+Query= q1 query one
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject one                                                        217     4e-61
+s2 subject two                                                        204     3e-57
+
+
+
+Query_1  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGT  40
+0        101  CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGT  140
+1        102   GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGT  140
+
+Query_1  41   AGACACGGTCTCGTGCCCACAATATACTGTTATGAGACAT  80
+0        141  AGACACGGTCTCGTGCCCACCATATACTGTTATGAGACAT  180
+1        141  CGACACGGTCTCGTGCCCACCATATACTGTTATGAGACAT  180
+
+Query_1  81   TGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+0        181  TGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+1        181  AGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+Query= q2 query two
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s3 subject three                                                      185     1e-51
+s1 subject one                                                        185     1e-51
+s2 subject two                                                        174     2e-48
+
+
+
+Query_2  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCA  40
+2        31   AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCA  70
+0        231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCA  270
+1        231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTAGCGCTGGCA  270
+
+Query_2  41   CCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGAT  80
+2        71   CCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGAT  110
+0        271  CCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGAT  310
+1        271  CCCAATTGGCGTTGTTCACTCCCTAAACGCAGAAACAGAT  310
+
+Query_2  81   CTCCTCACACCCCGTACCAA  100
+2        111  CTCCTCACACCCCGTACCAA  130
+0        311  CTCCTCACACCCCGTACCAA  330
+1        311  CTCCTCACACCCCGTACCAA  330
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+  Database: in/s3.fa
+    Posted date:  Nov 23, 2026  7:19 AM
+  Number of letters in database: 1,000
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

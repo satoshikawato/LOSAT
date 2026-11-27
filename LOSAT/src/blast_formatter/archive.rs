@@ -604,7 +604,8 @@ impl<'r, 'o> Run<'r, 'o> {
         // `PrintProlog` writes nothing; the tabular driver reads the variable after its prolog.
         let tabular = TabularSpec::of_formatter(&formatting.choice).is_some();
         // The pairwise report reads the variable after its prolog (`pairwise::print_object`).
-        let pairwise = formatting.choice.number == output_format::PAIRWISE;
+        let pairwise = (output_format::PAIRWISE..=output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+            .contains(&formatting.choice.number);
         if !tabular && !pairwise && prefetch_seqs_limit()? == Some(i32::MAX) {
             return Err(Refusal::Prefetch.into());
         }

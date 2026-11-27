@@ -14,9 +14,9 @@
 
 use super::{
     alignment_id_local, blastp_family_program, database_description_label, shown_hsp, table_scores,
-    write_blast_database_header, write_blastp_database_header_spacing, write_blastp_query_header,
-    write_blastp_subject_part, write_description_row_start, write_description_table,
-    write_no_hits_found, write_prolog, write_query_footer, write_spaces,
+    write_blast_database_header, write_blastp_database_header_spacing, write_blastp_subject_part,
+    write_description_row_start, write_description_table, write_no_hits_found, write_prolog,
+    write_query_footer, write_query_preamble, write_spaces,
     write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
     HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit, PairwiseView,
     RowDecoration,
@@ -415,15 +415,13 @@ impl QuerySections for RoundSections<'_> {
         place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        writeln!(writer, "Results from round {}", self.round.number)?;
-        writeln!(writer)?;
-        writeln!(writer)?;
         let query_title = self
             .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
-        write_blastp_query_header(
+        write_query_preamble(
             writer,
+            Some(self.round.number),
             query_title,
             query.query_length,
             self.config.html.is_some(),

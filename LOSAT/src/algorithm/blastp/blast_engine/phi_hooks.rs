@@ -272,7 +272,7 @@ impl PhiCall<'_> {
             &[Option<BlastpHitList>],
             usize,
         ) -> Result<Vec<crate::report::PairwiseHit>>,
-        observer: Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
+        observer: Option<&mut (dyn crate::api::local_blast::FormatObserver + Send + '_)>,
     ) -> Result<Vec<crate::report::PairwiseHit>> {
         let (mut rows, mut occurrences) = (Vec::new(), Vec::new());
         for batch in self

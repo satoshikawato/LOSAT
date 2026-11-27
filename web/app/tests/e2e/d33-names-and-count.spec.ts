@@ -53,6 +53,8 @@ test('a list file whose name starts or ends with a space is run and shown under 
     // The command names the file as the user's file is called, quoted: it runs on the command line next to the file.
     const shown = (await page.getByTestId('run-argv').textContent()) ?? '';
     expect(shown, flag).toContain(`${flag} '${name}'`);
+    // The line of the database's filter lists names the file the same way (R1, L1).
+    await expect(page.getByTestId('run-database-filters')).toContainText(`${flag} '${name}'`);
   }
 });
 
@@ -70,12 +72,15 @@ test('the button names no count of an older argv after a help or version word is
   // A sampler of the button's text in every frame, from the edit to the engine's answer.
   // `from` is where the samples start that come after the edit's input event.
   await page.evaluate(() => {
-    const w = window as unknown as { __labels: string[]; __from: number };
+    const w = window as unknown as { __labels: string[]; __widths: number[]; __from: number };
     w.__labels = [];
+    w.__widths = [];
     w.__from = 0;
     document.addEventListener('input', () => void (w.__from = w.__labels.length), true);
     const sample = () => {
-      w.__labels.push((document.querySelector('[data-testid="run-losat"]')?.textContent ?? '').trim());
+      const button = document.querySelector('[data-testid="run-losat"]');
+      w.__labels.push((button?.textContent ?? '').trim());
+      w.__widths.push(button?.getBoundingClientRect().width ?? 0);
       requestAnimationFrame(sample);
     };
     sample();
@@ -85,16 +90,24 @@ test('the button names no count of an older argv after a help or version word is
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await expect(button).toHaveText(settle);
     return page.evaluate(() => {
-      const w = window as unknown as { __labels: string[]; __from: number };
-      return w.__labels.slice(w.__from);
+      const w = window as unknown as { __labels: string[]; __widths: number[]; __from: number };
+      // Nothing moves under a press: the button is as wide with every label.
+      const widths = new Set(w.__widths.slice(Math.max(0, w.__from - 1)).map((width) => Math.round(width)));
+      return [...w.__labels.slice(w.__from), ...(widths.size === 1 ? [] : [`WIDTHS ${[...widths].join(',')}`])];
     });
   };
   for (const word of ['-version', '-h']) {
     const typed = await sampled(() => page.getByTestId('param-extra').fill(word), 'Run LOSAT');
-    expect(typed.filter((label) => label.includes('runs')), `after ${word}`).toEqual([]);
-    // Taken out: the label says no count until the answer, then the 2 runs again.
-    await sampled(() => page.getByTestId('param-extra').fill(''), 'Run LOSAT (2 runs)');
+    expect(typed.filter((label) => label.includes('runs') || label.startsWith('WIDTHS')), `after ${word}`).toEqual([]);
+    // Taken out: the label says no count until the answer, then the 2 runs again, in a button as wide as before.
+    const taken = await sampled(() => page.getByTestId('param-extra').fill(''), 'Run LOSAT (2 runs)');
+    expect(taken.filter((label) => label.startsWith('WIDTHS')), `after ${word} was taken out`).toEqual([]);
   }
+  // An edit that does not print: the count is back after a round trip, and the button never changes its width.
+  const ordinary = await sampled(() => page.getByTestId('param-extra').fill('-outfmt 17'), 'Run LOSAT (2 runs)');
+  expect(ordinary.filter((label) => label.startsWith('WIDTHS')), 'after -outfmt 17').toEqual([]);
+  await page.getByTestId('param-extra').fill('');
+  await expect(button).toHaveText('Run LOSAT (2 runs)');
   // A press at once after the word starts one run, as the label that waits for the answer says.
   await page.getByTestId('param-extra').fill('-version');
   await submit(page);

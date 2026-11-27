@@ -315,6 +315,25 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(await combined!.file.text()).toBe('>a\nACGT\n>b\nTGCA\n');
   });
 
+  // Line WQA's D33 R1 (M3): the WindowMasker button counts one run for a help or version word, as the press starts one print request.
+  it('counts one run for a help or version word in Additional options, with two FASTA files in separate mode', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    expect(draft.runCount()).toBe(2);
+    for (const word of ['-version', '-h', '-help', '-version-full']) {
+      draft.setExtra(word);
+      expect(draft.runCount(), word).toBe(1);
+    }
+    draft.setExtra('');
+    expect(draft.runCount()).toBe(2);
+    draft.setExtra('-version');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted.at(-1)).toHaveLength(1);
+  });
+
   it('refuses duplicate filenames and detects blastdb names from opened folder files', async () => {
     const { draft } = setupDraft();
     draft.setField('-infmt', 'blastdb');

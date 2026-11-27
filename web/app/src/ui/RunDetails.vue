@@ -129,7 +129,7 @@ const inputs = computed(() => {
               <br />
               <span class="muted small" data-testid="run-database-filters">
                 Filter lists:
-                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${f.name} (${formatBytes(f.size)})`).join(', ') }}
+                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${shellWord(f.name)} (${formatBytes(f.size)})`).join(', ') }}
               </span>
             </template>
           </dd>

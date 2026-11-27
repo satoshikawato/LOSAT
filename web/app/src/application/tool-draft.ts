@@ -356,6 +356,17 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
 
   // --- command line & validation ----------------------------------------------------------
 
+  /**
+   * The runs that "Run LOSAT" starts now: one for each input of a FASTA box in "separate" mode, and one print request for a help
+   * or version word of the Additional options, as `buildRequests` makes them (the same `toolPrintsKind`; line WQA's D33, M3).
+   */
+  runCount(state: ToolDraftState = this.state.get()): number {
+    if (!this.usesFastaBox(state)) return 1;
+    if (toolPrintsKind(this.previewArgv(state)) !== null) return 1;
+    const count = (state.fastaPaste.trim() !== '' ? 1 : 0) + state.fastaFiles.length;
+    return state.fastaMode === 'separate' && count > 1 ? count : 1;
+  }
+
   /** Whether the active stage currently reads `-in` as FASTA files/paste rather than a named blastdb/seqids/fa_list. */
   usesFastaBox(state: ToolDraftState = this.state.get()): boolean {
     if (state.stage === 'convert') return false;

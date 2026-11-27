@@ -1586,6 +1586,85 @@ describe('SearchDraft submit', () => {
     expect(draft.runCount()).toBe(3);
   });
 
+  // Line WQA's D33 R1 (M1): the engine's start is asked at once on an edit of the words, not after the form's pause and the
+  // validation, so the blank of the count lasts a round trip; typing a word that does not print never blanks a longer time.
+  it('asks the engine start for the typed words at once, and one at a time', async () => {
+    const asked: string[][] = [];
+    const { draft } = setup({
+      start: (argv) => {
+        asked.push([...argv]);
+        return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false } };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    const before = asked.length;
+    draft.setExtra('-outfmt 17');
+    expect(draft.runCount()).toBe(1);
+    // A round trip (a microtask turn of the fake engine), not the form's pause.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(asked.length).toBeGreaterThan(before);
+    expect(asked.at(-1)).toContain('-outfmt');
+    expect(draft.runCount()).toBe(2);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+  });
+
+  // Line WQA's D33 R1 (M2): while the validation of unchanged words runs ("checking"), the count of an argv that prints stays 1.
+  it('keeps the count of a print argv while the validation checks, with the words unchanged', async () => {
+    let release: (() => void) | undefined;
+    let hold = false;
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+      validate: async () => {
+        if (hold) await new Promise<void>((resolve) => void (release = resolve));
+        return { ok: true, dataLoaders: true, parseDeflines: false };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+    hold = true;
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    for (let i = 0; i < 50 && draft.state.get().validation.state !== 'checking'; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(draft.state.get().validation.state).toBe('checking');
+    expect(draft.runCount()).toBe(1);
+    release?.();
+    hold = false;
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+  });
+
+  // Line WQA's D33 R1: a press in the gap between the word and the engine's answer starts the one run that prints (the
+  // validation settles first), whatever the button said.
+  it('starts one run for a print word pressed before the engine has answered', async () => {
+    const { draft, requests } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    draft.setExtra('-version');
+    expect(draft.runCount()).toBe(1);
+    const result = await draft.submit();
+    expect(result).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+  });
+
   // Line WQA's D20 round 4: Run LOSAT reads whether the argv prints after the validation is idle, so a word typed just before
   // the press (a pasted accession is not refused with the accession message) or taken out (the accession check is not
   // skipped) decides as the engine's answer for the argv says.
@@ -2156,7 +2235,7 @@ describe('SearchDraft submit', () => {
     const runId = (result as { runIds: readonly string[] }).runIds[0]!;
     expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints).toBe('help');
     // A search needs its inputs again.
-    draft.setExtra('-outfmt 17');
+    draft.setExtra('-evalue 1');
     await draft.idle();
     expect(draft.readiness()).toBeDefined();
     expect(await draft.submit()).toMatchObject({ ok: false });

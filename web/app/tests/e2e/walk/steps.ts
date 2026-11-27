@@ -96,7 +96,7 @@ export class Draws {
 export interface Walker {
   readonly page: Page;
   readonly fixtures: FixtureLibrary;
-  /** Where the native CLI's files go. */
+  /** Where a failed comparison with the native CLI keeps its files (keepEvidence); the CLI itself runs in a temporary folder. */
   readonly outDir: string;
   model: InputModel;
   program: string;
@@ -981,7 +981,7 @@ async function verifyRun(walker: Walker, run: number, before: Submitted, at: num
       if (words[0] !== 'losat') throw new StepFailure('command', `run ${run}: the command of ${format} does not start with losat: ${words.join(' ')}`);
       const cli = spawnSync(NATIVE, words.slice(1), { cwd: directory, maxBuffer: 1 << 28, timeout: 60_000 });
       if (cli.status !== 0) {
-        const kept = keepEvidence(walker, run, files, { [`native.${format}.stderr`]: cli.stderr ?? '' });
+        const kept = keepEvidence(walker, run, files, { [`web.${format}.out`]: stored.get(format) ?? '', [`native.${format}.stderr`]: cli.stderr ?? '' });
         throw new StepFailure(
           'native-refuses',
           `run ${run}: the run completed, but its command of outfmt ${format} fails in the CLI (${cli.status}): ${String(cli.stderr).slice(0, 400)}\n${words.join(' ')} (files in ${kept})`,

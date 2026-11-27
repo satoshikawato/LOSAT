@@ -1,11 +1,11 @@
 // The names a test leaves for CI's artifact upload (tests/e2e/support/artifact-names.ts): the upload
 // refuses a whole artifact for one name with " : < > | * ? CR or LF, so every e2e test fails on such a
-// name, and evidence keeps its files under uploadable names.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+// name after renaming it, and evidence keeps its files under uploadable names.
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { unuploadableNames, uploadableName } from '../e2e/support/artifact-names';
+import { RENAMED_NAMES_FILE, renameUnuploadable, unuploadableNames, uploadableName } from '../e2e/support/artifact-names';
 import { makeFixtures } from '../e2e/walk/fixtures';
 
 const folders: string[] = [];
@@ -30,6 +30,25 @@ describe('artifact names', () => {
       ['bad|folder', ...['a"b.fa', 'c:d', 'e<f', 'g>h', 'i|j', 'k*l', 'm?n', 'o\rp', 'q\nr'].map((name) => join('native', 'run-1', name))].sort(),
     );
     expect(unuploadableNames(join(root, 'missing'))).toEqual([]);
+  });
+
+  it('renames every refused name, in folders and of folders, keeps the bytes and records the names', () => {
+    const root = folder();
+    mkdirSync(join(root, 'native', 'run|1'), { recursive: true });
+    writeFileSync(join(root, 'native', 'run|1', '<svg onload="x">.fa'), '>s\nACGT\n');
+    writeFileSync(join(root, 'native', 'run|1', '%3Csvg onload=%22x%22%3E.fa'), 'taken');
+    writeFileSync(join(root, 'a:b.txt'), 'b');
+    writeFileSync(join(root, 'trace.zip'), 'z');
+    expect(renameUnuploadable(root).sort()).toEqual([join('native', 'run|1'), join('native', 'run|1', '<svg onload="x">.fa'), 'a:b.txt'].sort());
+    expect(unuploadableNames(root)).toEqual([]);
+    expect(readFileSync(join(root, 'native', 'run%7C1', '%3Csvg onload=%22x%22%3E-2.fa'), 'utf8')).toBe('>s\nACGT\n');
+    expect(readFileSync(join(root, 'native', 'run%7C1', '%3Csvg onload=%22x%22%3E.fa'), 'utf8')).toBe('taken');
+    expect(readFileSync(join(root, 'a%3Ab.txt'), 'utf8')).toBe('b');
+    expect(readdirSync(root).sort()).toEqual([RENAMED_NAMES_FILE, 'a%3Ab.txt', 'native', 'trace.zip'].sort());
+    const recorded = JSON.parse(readFileSync(join(root, RENAMED_NAMES_FILE), 'utf8')) as Array<{ path: string; renamed: string }>;
+    expect(recorded).toContainEqual({ path: join('native', 'run|1', '<svg onload="x">.fa'), renamed: '%3Csvg onload=%22x%22%3E-2.fa' });
+    expect(recorded).toContainEqual({ path: join('native', 'run|1'), renamed: 'run%7C1' });
+    expect(renameUnuploadable(folder())).toEqual([]);
   });
 
   it('gives every walk fixture a name the upload keeps, and two names two kept names', () => {

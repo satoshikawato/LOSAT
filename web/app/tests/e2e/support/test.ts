@@ -9,9 +9,10 @@
 // Firefox keep the real API in the others.
 //
 // Every test also fails if it leaves a file whose name CI's artifact upload refuses
-// (support/artifact-names.ts): one such name made a failed job upload nothing.
+// (support/artifact-names.ts): one such name made a failed job upload nothing. The fixture renames
+// such files first (renamed-names.json keeps the names), so the upload keeps every test's evidence.
 import { test as base } from '@playwright/test';
-import { unuploadableNames } from './artifact-names';
+import { RENAMED_NAMES_FILE, renameUnuploadable } from './artifact-names';
 
 export const test = base.extend<{ uploadableOutputs: void }>({
   context: async ({ context, browserName }, use) => {
@@ -21,10 +22,11 @@ export const test = base.extend<{ uploadableOutputs: void }>({
   uploadableOutputs: [
     async ({}, use, testInfo) => {
       await use();
-      const names = unuploadableNames(testInfo.outputDir);
+      const names = renameUnuploadable(testInfo.outputDir);
       if (names.length > 0) {
         throw new Error(
-          `the test left files whose names CI's artifact upload refuses (" : < > | * ? CR LF), so a failed job would upload no evidence of any test: ${names.join(', ')}`,
+          `the test left files whose names CI's artifact upload refuses (" : < > | * ? CR LF), which would make a failed job upload no evidence of any test; ` +
+            `renamed (see ${RENAMED_NAMES_FILE}): ${names.join(', ')}`,
         );
       }
     },

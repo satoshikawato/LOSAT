@@ -136,6 +136,42 @@ pub struct QueryContext {
     pub karlin_params: KarlinParams,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+/// The queries whose words a lookup table holds: every query of its lookup query, or those of the
+/// ranges `Of` (query indices, `QueryContext::q_idx`, in order and disjoint). NCBI builds no table
+/// for a query batch that it splits into chunks, each of which builds its own, so a BLASTP call
+/// leaves the words of such a batch's queries out of its table (`blastp::blast_engine`'s
+/// `CallTableWords`, the one producer of the ranges).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TableWords<'a> {
+    All,
+    Of(&'a [std::ops::Range<usize>]),
+}
+
+impl TableWords<'_> {
+    /// Keeps the lookup segments `locations` (inclusive offsets of the lookup query, in the order
+    /// of `contexts`, each inside its context) of the contexts whose query's words the table holds.
+    pub(crate) fn keep_segments(self, locations: &mut Vec<(i32, i32)>, contexts: &[QueryContext]) {
+        let TableWords::Of(queries) = self else {
+            return;
+        };
+        let (mut context, mut range) = (0usize, 0usize);
+        locations.retain(|&(left, _)| {
+            while contexts
+                .get(context + 1)
+                .is_some_and(|next| next.frame_base <= left)
+            {
+                context += 1;
+            }
+            let query = contexts[context].q_idx as usize;
+            while queries.get(range).is_some_and(|kept| kept.end <= query) {
+                range += 1;
+            }
+            queries.get(range).is_some_and(|kept| kept.start <= query)
+        });
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-453
 pub(crate) use backbone::{build_ncbi_lookup_from_prepared, build_ncbi_lookup_from_prepared_of};
 // BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export

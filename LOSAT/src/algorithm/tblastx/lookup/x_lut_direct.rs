@@ -630,16 +630,18 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    /// EXPERIMENT (LOSAT_X_BPLKREUSE): `x_bp_build_lookup(true, queries, threshold, karlin_params,
-    /// check_ideal)` (where [`Self::x_applies`]) on the calling thread, with its neighbour lists,
+    /// EXPERIMENT (LOSAT_X_BPLKREUSE): `x_bp_build_lookup(queries, words, threshold, check_ideal)`
+    /// (where [`Self::x_applies`]) on the calling thread, with its neighbour lists,
     /// for a block search whose tables are not built ahead: the table built on the vectors the
     /// block before gave back (`give`), each grown in place where it is short
     /// (`XAaVectors::x_take_zeroed`), or on new ones for the first block. Where the in-place
     /// builder declines (it does not where `x_applies`), the reference builder builds it and the
     /// vectors stay kept.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn x_build_on_block_spare(
         &self,
         queries: &[Vec<QueryFrame>],
+        words: TableWords<'_>,
         threshold: i32,
         karlin_params: &KarlinParams,
         check_ideal: bool,
@@ -647,7 +649,7 @@ impl XAaSpares {
         word_length: usize,
     ) -> (BlastAaLookupTable, Vec<QueryContext>) {
         let _ = karlin_params;
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+        let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         match self.x_on_block_spare::<BackboneCell>(prepared, threshold, matrix, word_length) {
@@ -702,19 +704,28 @@ impl XAaSpares {
     pub(crate) fn x_build_on_block_spare16(
         &self,
         queries: &[Vec<QueryFrame>],
+        words: TableWords<'_>,
         threshold: i32,
         check_ideal: bool,
         matrix: ScoringMatrix,
         word_length: usize,
     ) -> (XBpLookup, Vec<QueryContext>) {
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+        let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let prepared = if x_bplk16_fits(&prepared) {
             match self.x_on_block_spare::<BackboneCell16>(prepared, threshold, matrix, word_length)
             {
                 Ok(table) => {
-                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, &table);
+                    x_bplk16_shadow(
+                        queries,
+                        words,
+                        threshold,
+                        check_ideal,
+                        matrix,
+                        word_length,
+                        &table,
+                    );
                     return (XBpLookup::Narrow(table), contexts);
                 }
                 Err(prepared) => prepared,
@@ -841,14 +852,16 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    /// `x_bp_build_lookup(queries, threshold, check_ideal)` (where
+    /// `x_bp_build_lookup(queries, words, threshold, check_ideal)` (where
     /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
     /// in-place builder declines (the reference builder would build it).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn x_build_ahead(
         &self,
         queries: &[Vec<QueryFrame>],
+        words: TableWords<'_>,
         threshold: i32,
         karlin_params: &KarlinParams,
         check_ideal: bool,
@@ -856,7 +869,7 @@ impl XAaSpares {
         word_length: usize,
     ) -> Option<(BlastAaLookupTable, Vec<QueryContext>)> {
         let _ = karlin_params;
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+        let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let mut room = std::mem::take(&mut *x_locked(&self.ahead));
@@ -889,12 +902,13 @@ impl XAaSpares {
     pub(crate) fn x_build_ahead16(
         &self,
         queries: &[Vec<QueryFrame>],
+        words: TableWords<'_>,
         threshold: i32,
         check_ideal: bool,
         matrix: ScoringMatrix,
         word_length: usize,
     ) -> Option<(XBpLookup, Vec<QueryContext>)> {
-        let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+        let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
         let narrow = x_bplk16_fits(&prepared);
@@ -932,7 +946,15 @@ impl XAaSpares {
         match built {
             Ok(Some(table)) => {
                 if let XBpLookup::Narrow(narrow) = &table {
-                    x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, narrow);
+                    x_bplk16_shadow(
+                        queries,
+                        words,
+                        threshold,
+                        check_ideal,
+                        matrix,
+                        word_length,
+                        narrow,
+                    );
                 }
                 Some((table, contexts))
             }
@@ -970,6 +992,7 @@ fn x_bplk16_fits(prepared: &PreparedLookupQuery) -> bool {
 /// panics with the cell's index.
 fn x_bplk16_shadow(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
     matrix: ScoringMatrix,
@@ -981,7 +1004,7 @@ fn x_bplk16_shadow(
         return;
     }
     let (wide, _) = build_lookup_from_prepared(
-        x_bp_prepared_query(queries, check_ideal, matrix, word_length),
+        x_bp_prepared_query(queries, words, check_ideal, matrix, word_length),
         threshold,
         matrix,
         word_length,
@@ -2657,11 +2680,13 @@ where
 /// the reference builder where that declines.
 pub(super) fn x_bp_build_lookup(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     x_build_direct_or_reference(
         queries,
+        words,
         threshold,
         check_ideal,
         |_| {},
@@ -2681,13 +2706,14 @@ pub(super) fn x_bp_build_lookup(
 /// is the one `x_bp_build_lookup` would build with that matrix and word size).
 pub(super) fn x_bp_build_lookup_as(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> (XBpLookup, Vec<QueryContext>) {
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+    let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
     let prepared = if narrow && x_bplk16_fits(&prepared) {
@@ -2707,7 +2733,15 @@ pub(super) fn x_bp_build_lookup_as(
         });
         match built {
             Ok(table) => {
-                x_bplk16_shadow(queries, threshold, check_ideal, matrix, word_length, &table);
+                x_bplk16_shadow(
+                    queries,
+                    words,
+                    threshold,
+                    check_ideal,
+                    matrix,
+                    word_length,
+                    &table,
+                );
                 return (XBpLookup::Narrow(table), contexts);
             }
             Err(prepared) => prepared,
@@ -2738,6 +2772,7 @@ pub(super) fn x_bp_build_lookup_as(
 /// reference builder).
 pub(crate) fn x_bp_build_wide_lookup(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
@@ -2749,7 +2784,7 @@ pub(crate) fn x_bp_build_wide_lookup(
     {
         return None;
     }
-    let prepared = x_bp_prepared_query(queries, false, matrix, word_length);
+    let prepared = x_bp_prepared_query(queries, words, false, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
     let table =
@@ -2832,12 +2867,15 @@ fn x_tbx_build_direct(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (cited at
+// `TableWords`)
 /// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., matrix, word_length)`
 /// prepares it (`word_length`: the search's word size, 3 or, item SC3, 2) ([`x_build_direct_or_reference`] and
 /// [`XAaSpares::x_build_ahead`]): the contexts' Karlin blocks of the matrix's scores, bounds and
-/// ideal block.
+/// ideal block, and the lookup segments of the queries whose words the table holds (`words`).
 fn x_bp_prepared_query(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     check_ideal: bool,
     matrix: ScoringMatrix,
     word_length: usize,
@@ -2848,7 +2886,7 @@ fn x_bp_prepared_query(
     } else {
         matrix_score_bounds(matrix)
     };
-    prepare_lookup_query(
+    let mut prepared = prepare_lookup_query(
         queries,
         ideal_karlin_params_for_matrix(matrix, bounds),
         &compute_std_aa_composition(),
@@ -2856,7 +2894,9 @@ fn x_bp_prepared_query(
         check_ideal,
         matrix,
         bounds,
-    )
+    );
+    words.keep_segments(&mut prepared.lookup_locations, &prepared.contexts);
+    prepared
 }
 
 /// The direct builder of [`x_build_direct_or_reference`]: TBLASTX's [`x_tbx_build_direct`] or
@@ -2896,6 +2936,7 @@ fn x_build_ncbi_lookup_with(
     }
     x_build_direct_or_reference(
         queries,
+        TableWords::All,
         threshold,
         check_ideal,
         reach,
@@ -2910,8 +2951,10 @@ fn x_build_ncbi_lookup_with(
 /// the table is built with `build_direct` ([`x_tbx_build_direct`] for TBLASTX,
 /// [`x_bp_build_direct`] for BLASTP), falling back to the reference builder where that declines.
 /// `reach` is called with whether the table was built without the chains.
+#[allow(clippy::too_many_arguments)]
 fn x_build_direct_or_reference(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
     reach: fn(bool),
@@ -2919,7 +2962,7 @@ fn x_build_direct_or_reference(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    let prepared = x_bp_prepared_query(queries, check_ideal, matrix, word_length);
+    let prepared = x_bp_prepared_query(queries, words, check_ideal, matrix, word_length);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
     match build_direct(prepared, threshold, matrix, word_length) {

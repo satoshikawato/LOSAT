@@ -2251,10 +2251,11 @@ fn test_build_restricted_align_array_uses_qoff_not_cached_context() {
     assert_eq!(restricted, vec![false, true]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-209
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
 // The compressed tables of NCBI's query batches as ranges of lookup segments: a batch that
-// NCBI splits (19,800 letters or more with the default CHUNK_SIZE) has none, and a query
-// chunk's search is one table.
+// NCBI splits (19,800 letters or more with the default CHUNK_SIZE) has none and its queries'
+// segments leave the call's table, a query chunk's search is one table, and an ungapped search
+// splits no batch.
 #[test]
 fn test_ncbi_compressed_lookup_tables_are_unsplit_batches() {
     let lengths = [5000usize, 6000, 3000, 25000];
@@ -2284,16 +2285,82 @@ fn test_ncbi_compressed_lookup_tables_are_unsplit_batches() {
             searched: 4..4,
         },
     ];
+    let mut args = make_blastp_args();
+    args.comp_based_stats = std::ffi::OsString::from("0");
+    let gapped = args.resolve().expect("gapped");
+    args.ungapped = true;
+    let ungapped = args.resolve().expect("ungapped");
+    let tables = |args: &ResolvedBlastpArgs, query_chunk: bool| {
+        let mut kept = locations.to_vec();
+        let tables = ncbi_compressed_lookup_tables(
+            args,
+            &batches,
+            &lengths,
+            &contexts,
+            &mut kept,
+            query_chunk,
+        )
+        .unwrap();
+        (tables, kept)
+    };
     assert_eq!(
-        ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false, true)
-            .unwrap(),
-        vec![0..3, 3..3]
+        tables(&gapped, false),
+        (vec![0..3, 3..3], locations[..3].to_vec())
     );
+    assert_eq!(tables(&gapped, true), (vec![0..4], locations.to_vec()));
     assert_eq!(
-        ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, true, true)
-            .unwrap(),
-        vec![0..4]
+        tables(&ungapped, false),
+        (vec![0..3, 3..3, 3..4], locations.to_vec())
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
+// The queries of a call's table: every query where no searched batch is split (an ungapped
+// search, a query chunk's call, batches under the chunk size), else the searched queries of the
+// batches that NCBI does not split.
+#[test]
+fn test_call_table_words_leave_out_split_batches() {
+    let lengths = [5000usize, 6000, 3000, 25000, 400];
+    let batch = |input: std::ops::Range<usize>, searched: std::ops::Range<usize>| {
+        seq_range::RangedBatch { input, searched }
+    };
+    let split = [
+        batch(0..2, 0..2),
+        batch(2..3, 2..3),
+        batch(3..4, 3..4),
+        batch(4..5, 4..5),
+    ];
+    let unsplit = [batch(0..2, 0..2), batch(2..3, 2..3), batch(4..5, 4..5)];
+    let mut args = make_blastp_args();
+    args.comp_based_stats = std::ffi::OsString::from("0");
+    let gapped = args.resolve().expect("gapped");
+    args.ungapped = true;
+    let ungapped = args.resolve().expect("ungapped");
+    let words =
+        |args: &ResolvedBlastpArgs, batches: &[seq_range::RangedBatch], query_chunk: bool| {
+            CallTableWords::of(args, batches, &lengths, query_chunk)
+                .unwrap()
+                .0
+        };
+    assert_eq!(words(&gapped, &split, false), Some(vec![0..2, 2..3, 4..5]));
+    assert_eq!(
+        CallTableWords::of(&gapped, &split, &lengths, false)
+            .unwrap()
+            .words(),
+        TableWords::Of(&[0..2, 2..3, 4..5])
+    );
+    assert_eq!(words(&gapped, &split, true), None);
+    assert_eq!(words(&ungapped, &split, false), None);
+    assert_eq!(words(&gapped, &unsplit, false), None);
+    assert_eq!(
+        CallTableWords::of(&gapped, &unsplit, &lengths, false)
+            .unwrap()
+            .words(),
+        TableWords::All
+    );
+    // A split batch alone: the call's table holds no word.
+    assert_eq!(words(&gapped, &split[2..3], false), Some(vec![]));
 }
 
 // Protein records of `lengths` letters (a deterministic generator), some with runs that SEG
@@ -2325,16 +2392,21 @@ fn x_block_test_records(lengths: &[usize]) -> Vec<FastaRecord> {
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's compressed table is tested with the tables of the
 // block's own query batches, as ranges of the block's lookup segments.
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-260
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
 // The block search gives `run_resolved_in_pool` a block's records as the whole input, whose
-// batches are those of the whole input; the blocks' tables, each shifted by the block's first
-// lookup segment, are the tables of the search of all queries, and the blocks' lookup segments
-// are those of the search of all queries.
+// batches are those of the whole input; the blocks' tables, each with the segments of its
+// queries shifted by the block's first offset, are the tables of the search of all queries, and
+// the blocks' lookup segments are those of the search of all queries. The split batch (25,000
+// letters) has no table, and its segments are in no table.
 #[test]
 fn test_x_query_block_compressed_tables_are_the_blocks_batches() {
     let lengths = [
         3000usize, 4000, 2500, 6000, 25000, 0, 7000, 1500, 9000, 200, 12000, 800,
     ];
     let records = x_block_test_records(&lengths);
+    let mut args = make_blastp_args();
+    args.task = "blastp-fast".to_string();
+    let resolved = args.resolve().expect("resolved blastp-fast args");
     let seg = crate::utils::seg::SegParams::default();
     let lookup_query = |records: &[FastaRecord]| {
         let frames: Vec<Vec<QueryFrame>> = records
@@ -2352,20 +2424,48 @@ fn test_x_query_block_compressed_tables_are_the_blocks_batches() {
             );
         (locations, contexts)
     };
-    let tables = |records: &[FastaRecord]| {
-        let (locations, contexts) = lookup_query(records);
+    // Each table's segments, shifted by `base`.
+    let tables = |records: &[FastaRecord], base: i32| {
+        let (mut locations, contexts) = lookup_query(records);
         let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
         let batches = seq_range::QueryInput::whole(records).batches(10000);
-        ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false, true)
-            .unwrap()
+        let tables = ncbi_compressed_lookup_tables(
+            &resolved,
+            &batches,
+            &lengths,
+            &contexts,
+            &mut locations,
+            false,
+        )
+        .unwrap();
+        let covered: usize = tables.iter().map(|table| table.len()).sum();
+        assert_eq!(
+            covered,
+            locations.len(),
+            "the tables cover the kept segments"
+        );
+        tables
+            .into_iter()
+            .map(|table| {
+                locations[table]
+                    .iter()
+                    .map(|&(left, right)| (left + base, right + base))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
     };
     let (whole_locations, whole_contexts) = lookup_query(&records);
-    let whole_tables = tables(&records);
+    let whole_tables = tables(&records, 0);
     assert!(
         whole_locations.len() > lengths.len(),
         "SEG splits some queries"
     );
     assert!(whole_tables.len() >= 4);
+    let split = &whole_contexts[4];
+    let in_split =
+        |&(left, _): &(i32, i32)| left >= split.frame_base && left < whole_contexts[5].frame_base;
+    assert!(whole_locations.iter().any(in_split));
+    assert!(!whole_tables.iter().flatten().any(in_split));
     let whole_batches = seq_range::QueryInput::whole(&records).batches(10000);
     for block_letters in [1, 20000] {
         let blocks = super::super::x_query_blocks::x_query_blocks(
@@ -2386,11 +2486,7 @@ fn test_x_query_block_compressed_tables_are_the_blocks_batches() {
                 .map(|&(left, right)| (left - base, right - base))
                 .collect();
             assert_eq!(block_locations, expected, "block {block:?}");
-            shifted.extend(
-                tables(&records[block.clone()])
-                    .into_iter()
-                    .map(|table| table.start + first..table.end + first),
-            );
+            shifted.extend(tables(&records[block.clone()], base));
         }
         assert_eq!(shifted, whole_tables, "blocks of {block_letters}");
     }
@@ -2761,7 +2857,7 @@ fn x_blocks_contexts_are_the_builders_contexts() {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let (_, built) = match resolved.lookup_table_type {
                     BlastpLookupTableType::AaLookupTable => {
-                        blastp_aa_lookup(&resolved, &frames, false, pool)
+                        blastp_aa_lookup(&resolved, &frames, TableWords::All, false, pool)
                     }
                     BlastpLookupTableType::CompressedAaLookupTable => {
                         match blastp_compressed_lookup(

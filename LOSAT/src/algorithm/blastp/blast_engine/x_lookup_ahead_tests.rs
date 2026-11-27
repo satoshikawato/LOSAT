@@ -726,7 +726,10 @@ fn own_build(
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     match args.lookup_table_type {
         BlastpLookupTableType::AaLookupTable => {
-            super::super::blastp_aa_lookup(args, frames, false, pool)
+            let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+            let batches = seq_range::QueryInput::whole(records).batches(batch_size);
+            let words = super::super::CallTableWords::of(args, &batches, &lengths, false).unwrap();
+            super::super::blastp_aa_lookup(args, frames, words.words(), false, pool)
         }
         BlastpLookupTableType::CompressedAaLookupTable => {
             let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
@@ -834,7 +837,11 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
                         x_make_room(&pool, &first_lookup, &Cell::new(0)),
                         "{no_spares}"
                     );
-                    x_run_with_build_ahead(|| x_build_ahead(&args, &next, &pool), |spawn| spawn()).1
+                    x_run_with_build_ahead(
+                        || x_build_ahead(&args, &next, batch_size, &pool),
+                        |spawn| spawn(),
+                    )
+                    .1
                 }
             };
             let Some(XBuilt::Values(ahead)) = built else {

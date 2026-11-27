@@ -1062,8 +1062,9 @@ fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
     let info = CompressedNeighborInfo::new(&matrix, lookup.compressed_alphabet_size as usize);
     let mut next = 0usize;
     for (index, table) in tables.iter().enumerate() {
-        // The words between NCBI's tables (a split query batch, whose chunks have tables
-        // of their own) are added without a test.
+        // The words between NCBI's tables are added without a test (BLASTP leaves the
+        // segments of a split query batch, whose chunks have tables of their own, out of the
+        // call's: `TableWords`).
         lookup.add_location_words(&info, &matrix, query, &locations[next..table.start], |_| {
             true
         });

@@ -162,10 +162,6 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
 use crate::blastinput::seq_range;
 use crate::utils::threading::SearchPool;
 
@@ -629,7 +625,9 @@ fn x_make_room_flat(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the query frames, table and contexts of a block of
 /// `query_records` for exact blastp, as its search builds them (module header: the same calls with
-/// the same inputs), its table on the spare vectors of `XAaSpares`. `None` where the build fails,
+/// the same inputs; `batch_size` is the search's query batch size, whose batches decide the
+/// queries whose words the table holds, `CallTableWords`), its table on the spare vectors of
+/// `XAaSpares`. `None` where the build fails,
 /// refuses or makes no table on the spare's vectors, and for blastp-fast, whose flat table is built
 /// ahead in two parts (`x_flat_ahead_appends`, `x_flat_ahead_table`; item SC2d).
 #[cfg_attr(
@@ -645,14 +643,24 @@ fn x_make_room_flat(
 fn x_build_ahead(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
+    batch_size: u32,
     pool: &SearchPool<'_>,
 ) -> Option<XAheadLookup> {
     if args.lookup_table_type != BlastpLookupTableType::AaLookupTable {
         return None;
     }
     let query_frames = blastp_query_frames(args, query_records);
+    // The block's batches and the queries whose words its table holds, as `call_lookup` makes them
+    // (`CallTableWords`; the same batches as `x_flat_ahead_appends`).
+    let query_lengths: Vec<usize> = query_records
+        .iter()
+        .map(|record| record.seq().len())
+        .collect();
+    let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
+    let words = super::CallTableWords::of(args, &query_batches, &query_lengths, false).ok()?;
     // `blastp_aa_lookup`'s call on the block search's spare vectors.
-    let (table, contexts) = blastp_aa_lookup_ahead(args, &query_frames, x_bp_aa_spares(pool)?)?;
+    let (table, contexts) =
+        blastp_aa_lookup_ahead(args, &query_frames, words.words(), x_bp_aa_spares(pool)?)?;
     Some(XAheadLookup {
         key: x_key(query_records),
         query_frames,
@@ -709,7 +717,7 @@ fn x_flat_ahead_appends(
         .map(|record| record.seq().len())
         .collect();
     let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
-    let (x_flat, query, locations, mut contexts) =
+    let (x_flat, query, mut locations, mut contexts) =
         crate::algorithm::blastp::x_query_blocks::XLookupFlat::lookup_query(
             &query_frames,
             args.word_size,
@@ -718,12 +726,12 @@ fn x_flat_ahead_appends(
             XLookupFor::Ahead,
         );
     let ncbi_tables = super::ncbi_compressed_lookup_tables(
+        args,
         &query_batches,
         &query_lengths,
         &contexts,
-        &locations,
+        &mut locations,
         false,
-        !args.ungapped,
     )
     .ok()?;
     let appends = x_bp_flat_ahead_appends(
@@ -941,7 +949,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
                 return result;
             }
             let (result, built) = x_run_with_build_ahead(
-                move || x_build_ahead(args, next, pool),
+                move || x_build_ahead(args, next, batch_size, pool),
                 |spawn| {
                     // On this thread, when the block's table is ready: the next table's vectors are
                     // made ready here, then its build is spawned.

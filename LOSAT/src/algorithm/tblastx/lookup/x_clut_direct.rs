@@ -1696,8 +1696,9 @@ const X_COUNT_CHUNK: usize = 1 << 20;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop over the
 // segments, see `x_for_each_offset`)
 /// The segments (ranges of `locations`) before, inside and between NCBI's tables, in order, each with
-/// whether it is one of NCBI's tables (the words between tables, a split query batch, are added
-/// without a test of the overflow banks).
+/// whether it is one of NCBI's tables (the words between tables are added without a test of the
+/// overflow banks; BLASTP leaves the segments of a split query batch out of the call's:
+/// `TableWords`).
 fn x_count_ranges(
     tables: &[std::ops::Range<usize>],
     locations: usize,
@@ -1827,7 +1828,7 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
     let max_appends = x_max_appends(backbone_size);
 
     // Count pass, over the segments before, inside and between NCBI's tables (the words between
-    // tables, a split query batch, are added without a test).
+    // tables are added without a test).
     let ranges = x_count_ranges(tables, locations.len());
     // With `appends` (the caller's count), the record is reserved once; an offset has at most one
     // entry of `per_offset`.

@@ -32,7 +32,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 use crate::algorithm::tblastx::lookup::compressed::{BanksFilled, BlastCompressedAaLookupTable};
 use crate::algorithm::tblastx::lookup::{
     x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, BackboneCell16, BlastAaLookupTable,
-    QueryContext, XBpLookup,
+    QueryContext, TableWords, XBpLookup,
 };
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -1612,22 +1612,26 @@ fn blastp_context_lookup_bounds(contexts: &[QueryContext]) -> BlastpContextLooku
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
 // The compressed lookup tables that NCBI builds for the queries of this search, as ranges of
-// `locations` (the lookup segments of all queries, in query order): one for each query batch
+// `locations` (the lookup segments of the queries in query order): one for each query batch
 // (`query_batch_size`: GetQueryBatchSize's 10000 letters, or the environment variable
 // BATCH_SIZE) that NCBI does not split, none for a split batch, and one for each query chunk
 // of a split batch, which is a search of its own here (`search_split_query_batches`,
-// `query_chunk`) whose queries make that one table.
+// `query_chunk`) whose queries make that one table. `locations` keeps the segments of those
+// tables' queries only (`CallTableWords`), which the ranges then cover in order.
 fn ncbi_compressed_lookup_tables(
+    args: &ResolvedBlastpArgs,
     query_batches: &[seq_range::RangedBatch],
     query_lengths: &[usize],
     contexts: &[QueryContext],
-    locations: &[(i32, i32)],
+    locations: &mut Vec<(i32, i32)>,
     query_chunk: bool,
-    splits_queries: bool,
 ) -> Result<Vec<std::ops::Range<usize>>> {
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
+    CallTableWords::of(args, query_batches, query_lengths, false)?
+        .words()
+        .keep_segments(locations, contexts);
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -1635,24 +1639,23 @@ fn ncbi_compressed_lookup_tables(
             locations.partition_point(|&(left, _)| left < context.frame_base)
         })
     };
-    Ok(
-        ncbi_table_batches(query_batches, query_lengths, splits_queries)?
-            .map(|searched| first_segment(searched.start)..first_segment(searched.end))
-            .collect(),
-    )
+    Ok(ncbi_table_batches(args, query_batches, query_lengths)?
+        .map(|searched| first_segment(searched.start)..first_segment(searched.end))
+        .collect())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
 /// The searched queries of each query batch that has a table of its own in
 /// `ncbi_compressed_lookup_tables` (a call of the search, not a query chunk's), in order: a
-/// batch with searched queries that NCBI does not split (an ungapped search splits none,
-/// `search_split_query_batches`).
+/// batch with searched queries that NCBI does not split (`split_steps::splits_batches`: an
+/// ungapped search splits none, `search_split_query_batches`).
 fn ncbi_table_batches<'a>(
+    args: &ResolvedBlastpArgs,
     query_batches: &'a [seq_range::RangedBatch],
     query_lengths: &'a [usize],
-    splits_queries: bool,
 ) -> Result<impl Iterator<Item = std::ops::Range<usize>> + 'a> {
     let sizes = protein_query_split_sizes(10000)?;
+    let splits_queries = split_steps::splits_batches(args);
     Ok(query_batches
         .iter()
         .map(|batch| batch.searched.clone())
@@ -1665,6 +1668,49 @@ fn ncbi_table_batches<'a>(
                 )
                 .is_none()
         }))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
+/// The queries whose words the lookup table of a call holds (`TableWords`), for either table
+/// (`call_setup::call_lookup`; the build of a block's table ahead of the block,
+/// `x_lookup_ahead.rs`; the compressed table's segments, `ncbi_compressed_lookup_tables`): a query
+/// chunk's call (`query_chunk`) all of its queries', its one table; another call those of the
+/// searched queries of each batch that has a table of NCBI's own (`ncbi_table_batches`), all where
+/// no searched batch is split. NCBI builds no table for a batch that it splits and searches only
+/// its chunks, each with its own table (`search_split_query_batches`), whose merged lists replace
+/// the call's lists of the batch's queries: the call's table holds no word of them, so its scan
+/// finds no hit of them. The call keeps their contexts, its set-up (`split_steps::first_batch_setup`,
+/// where a split batch meets the failures of its set-up first) and its scan of the subjects (the
+/// reads and each subject's statistics of all its queries), so every error comes where it came.
+struct CallTableWords(Option<Vec<std::ops::Range<usize>>>);
+
+impl CallTableWords {
+    fn of(
+        args: &ResolvedBlastpArgs,
+        query_batches: &[seq_range::RangedBatch],
+        query_lengths: &[usize],
+        query_chunk: bool,
+    ) -> Result<Self> {
+        if query_chunk || !split_steps::splits_batches(args) {
+            return Ok(Self(None));
+        }
+        let tables: Vec<std::ops::Range<usize>> =
+            ncbi_table_batches(args, query_batches, query_lengths)?.collect();
+        let searched = query_batches
+            .iter()
+            .filter(|batch| !batch.searched.is_empty())
+            .count();
+        Ok(Self((tables.len() < searched).then_some(tables)))
+    }
+
+    /// The queries as the builders take them.
+    fn words(&self) -> TableWords<'_> {
+        match &self.0 {
+            None => TableWords::All,
+            Some(queries) => TableWords::Of(queries),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
@@ -1693,7 +1739,7 @@ fn banks_filled_refusal(
     if query_chunk {
         return split_steps::batch_failure(args, 0, refusal);
     }
-    match ncbi_table_batches(query_batches, query_lengths, !args.ungapped)
+    match ncbi_table_batches(args, query_batches, query_lengths)
         .map(|mut batches| batches.nth(filled.0))
     {
         Ok(Some(searched)) => split_steps::batch_failure(args, searched.start, refusal),
@@ -9384,12 +9430,14 @@ fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     x_chunk: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     // `-word_size 4` (item SC8b): the joint builder of 32-bit indices on the pool's threads.
     if let Some((lookup, contexts)) = crate::algorithm::tblastx::lookup::x_bp_build_wide_lookup(
         query_frames,
+        words,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
         args.scoring.matrix,
         args.word_size,
@@ -9401,6 +9449,7 @@ fn blastp_aa_lookup(
     if x_bplk16() {
         let (built, contexts) = x_bp_build_ncbi_lookup_as(
             query_frames,
+            words,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             false,
             x_bplk16_for(args, x_chunk),
@@ -9416,6 +9465,7 @@ fn blastp_aa_lookup(
     {
         return match x_bp_build_ncbi_lookup_as(
             query_frames,
+            words,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             false,
             false,
@@ -9428,6 +9478,7 @@ fn blastp_aa_lookup(
     }
     let (lookup, contexts) = x_bp_build_ncbi_lookup(
         query_frames,
+        words,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
         false,
     );
@@ -9442,6 +9493,7 @@ fn blastp_aa_lookup(
 fn blastp_aa_lookup_ahead(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     spares: &crate::algorithm::tblastx::lookup::XAaSpares,
 ) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
     // `-word_size 4` (item SC8b): no table ahead; the block builds its own on the pool's threads
@@ -9456,6 +9508,7 @@ fn blastp_aa_lookup_ahead(
         if x_bplk16_for(args, false) {
             let (built, contexts) = spares.x_build_ahead16(
                 query_frames,
+                words,
                 threshold,
                 false,
                 args.scoring.matrix,
@@ -9465,6 +9518,7 @@ fn blastp_aa_lookup_ahead(
         }
         let (lookup, contexts) = spares.x_build_ahead(
             query_frames,
+            words,
             threshold,
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
@@ -9475,6 +9529,7 @@ fn blastp_aa_lookup_ahead(
     }
     let (lookup, contexts) = spares.x_build_ahead(
         query_frames,
+        words,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
@@ -9492,12 +9547,13 @@ fn blastp_aa_lookup_ahead(
 fn blastp_aa_lookup_on_block_spare(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     spare: &crate::algorithm::tblastx::lookup::XAaSpares,
     x_chunk: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
     if !crate::algorithm::tblastx::lookup::x_pair_lut::x_direct_covers(args.word_size) {
-        return blastp_aa_lookup(args, query_frames, x_chunk, pool);
+        return blastp_aa_lookup(args, query_frames, words, x_chunk, pool);
     }
     // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
     if x_bplk16() {
@@ -9505,6 +9561,7 @@ fn blastp_aa_lookup_on_block_spare(
         if x_bplk16_for(args, x_chunk) {
             let (built, contexts) = spare.x_build_on_block_spare16(
                 query_frames,
+                words,
                 threshold,
                 false,
                 args.scoring.matrix,
@@ -9514,6 +9571,7 @@ fn blastp_aa_lookup_on_block_spare(
         }
         let (lookup, contexts) = spare.x_build_on_block_spare(
             query_frames,
+            words,
             threshold,
             &lookup_protein_params_ungapped(args.scoring.matrix),
             false,
@@ -9524,6 +9582,7 @@ fn blastp_aa_lookup_on_block_spare(
     }
     let (lookup, contexts) = spare.x_build_on_block_spare(
         query_frames,
+        words,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
         &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
@@ -9570,25 +9629,26 @@ fn blastp_compressed_lookup(
     // `prepare_blosum62_lookup_query_for_word_size`. EXPERIMENT (LOSAT_X_BPLKPFLAT): they
     // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`); a
     // query chunk takes no spare table vectors.
-    let (x_flat, query, locations, mut contexts) = super::x_query_blocks::XLookupFlat::lookup_query(
-        query_frames,
-        args.word_size,
-        ScoringMatrix::Blosum62,
-        blastp_parallel_pool,
-        x_for,
-    );
+    let (x_flat, query, mut locations, mut contexts) =
+        super::x_query_blocks::XLookupFlat::lookup_query(
+            query_frames,
+            args.word_size,
+            ScoringMatrix::Blosum62,
+            blastp_parallel_pool,
+            x_for,
+        );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1292
-    // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
-    // only bound the overflow cells. With LOSAT_X_BPQBLOCK the queries are a block of
-    // whole batches, and `query_batches` are the block's batches of the whole input, as
-    // ranges of the block's lookup segments.
+    // One table for the query batches that have tables of NCBI's (`ncbi_compressed_lookup_tables`,
+    // which keeps their lookup segments only), which only bound the overflow cells. With
+    // LOSAT_X_BPQBLOCK the queries are a block of whole batches, and `query_batches` are the
+    // block's batches of the whole input, as ranges of the block's lookup segments.
     let ncbi_tables = ncbi_compressed_lookup_tables(
+        args,
         query_batches,
         query_lengths,
         &contexts,
-        &locations,
+        &mut locations,
         query_chunk,
-        !args.ungapped,
     )?;
     // EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): the same table built
     // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
@@ -9645,20 +9705,21 @@ fn blastp_matrix_compressed_lookup(
     x_appends: usize,
 ) -> Result<(BlastpRuntimeLookup, Vec<QueryContext>)> {
     let query_chunk = x_for == super::x_query_blocks::XLookupFor::QueryChunk;
-    let (x_flat, query, locations, mut contexts) = super::x_query_blocks::XLookupFlat::lookup_query(
-        query_frames,
-        args.word_size,
-        args.scoring.matrix,
-        blastp_parallel_pool,
-        x_for,
-    );
+    let (x_flat, query, mut locations, mut contexts) =
+        super::x_query_blocks::XLookupFlat::lookup_query(
+            query_frames,
+            args.word_size,
+            args.scoring.matrix,
+            blastp_parallel_pool,
+            x_for,
+        );
     let ncbi_tables = ncbi_compressed_lookup_tables(
+        args,
         query_batches,
         query_lengths,
         &contexts,
-        &locations,
+        &mut locations,
         query_chunk,
-        !args.ungapped,
     )?;
     let lookup = x_bp_build_compressed_lookup_of(
         args.scoring.matrix,

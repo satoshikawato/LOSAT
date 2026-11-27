@@ -1137,7 +1137,9 @@ fn tables_of_both_widths() -> (
     (usize, i32, i32),
 ) {
     use crate::algorithm::tblastx::lookup::XBpLookup;
-    use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as};
+    use crate::algorithm::tblastx::lookup::{
+        x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, TableWords,
+    };
     use crate::algorithm::tblastx::translation::QueryFrame;
 
     const STANDARD: [u8; 20] = [
@@ -1170,9 +1172,10 @@ fn tables_of_both_widths() -> (
             }]
         })
         .collect();
-    let (wide, _) = x_bp_build_ncbi_lookup(&frames, 11, false);
+    let (wide, _) = x_bp_build_ncbi_lookup(&frames, TableWords::All, 11, false);
     let (XBpLookup::Narrow(narrow), _) = x_bp_build_ncbi_lookup_as(
         &frames,
+        TableWords::All,
         11,
         false,
         true,

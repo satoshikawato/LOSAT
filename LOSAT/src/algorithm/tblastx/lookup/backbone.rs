@@ -7,8 +7,8 @@ use super::super::translation::QueryFrame;
 #[cfg(test)]
 use super::encode_kmer_3;
 use super::{
-    compute_backbone_size, compute_mask, ilog2, pv_set, QueryContext, LOOKUP_ALPHABET_SIZE,
-    LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
+    compute_backbone_size, compute_mask, ilog2, pv_set, QueryContext, TableWords,
+    LOOKUP_ALPHABET_SIZE, LOOKUP_WORD_LENGTH, PV_ARRAY_BTS,
 };
 use crate::config::ScoringMatrix;
 use crate::stats::karlin_calc::{
@@ -2019,13 +2019,15 @@ pub fn build_ncbi_lookup(
 /// `build_ncbi_lookup` (the BLOSUM62 3-letter table of [`build_ncbi_lookup_for_profile`]) for BLASTP:
 /// the table is filled in place from the per-cell counts, in
 /// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
-/// chains of the reference builder are never held.
+/// chains of the reference builder are never held. The table holds the words of the queries of
+/// `words` (a BLASTP call's, `TableWords`).
 pub(crate) fn x_bp_build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup(queries, threshold, check_ideal)
+    x_lut_direct::x_bp_build_lookup(queries, words, threshold, check_ideal)
 }
 
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_ncbi_lookup`] with the width of the table's hits
@@ -2034,13 +2036,22 @@ pub(crate) fn x_bp_build_ncbi_lookup(
 /// of the search's `matrix` and word size (`word_length`: 3, or 2 for `-word_size 2`, item SC3).
 pub(crate) fn x_bp_build_ncbi_lookup_as(
     queries: &[Vec<QueryFrame>],
+    words: TableWords<'_>,
     threshold: i32,
     check_ideal: bool,
     narrow: bool,
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> (x_lut_direct::XBpLookup, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow, matrix, word_length)
+    x_lut_direct::x_bp_build_lookup_as(
+        queries,
+        words,
+        threshold,
+        check_ideal,
+        narrow,
+        matrix,
+        word_length,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360

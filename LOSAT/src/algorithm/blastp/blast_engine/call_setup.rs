@@ -43,8 +43,8 @@ use super::{
     database, prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks,
     split_option_space, x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan,
     x_soft_subject, BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport,
-    BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimFilter,
-    PrelimOnly,
+    BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, CallTableWords,
+    PrelimFilter, PrelimOnly,
 };
 use crate::algorithm::blastp::args::{
     BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs,
@@ -538,18 +538,30 @@ pub(super) fn call_lookup(
         // (`blast_engine/x_lookup_ahead.rs`). EXPERIMENT (LOSAT_X_BPLKREUSE): or, where nothing is
         // built ahead, built here on the vectors of the block before
         // (`x_query_blocks::x_bp_aa_block_spare`).
+        // The table holds the words of the queries of the batches that NCBI does not split
+        // (`CallTableWords`).
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
-            None => match x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
-                Some(spare) => blastp_aa_lookup_on_block_spare(
-                    args,
-                    query_frames,
-                    spare,
-                    query_chunk,
-                    blastp_parallel_pool,
-                ),
-                None => blastp_aa_lookup(args, query_frames, query_chunk, blastp_parallel_pool),
-            },
+            None => {
+                let words = CallTableWords::of(args, &query_batches, query_lengths, query_chunk)?;
+                match x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
+                    Some(spare) => blastp_aa_lookup_on_block_spare(
+                        args,
+                        query_frames,
+                        words.words(),
+                        spare,
+                        query_chunk,
+                        blastp_parallel_pool,
+                    ),
+                    None => blastp_aa_lookup(
+                        args,
+                        query_frames,
+                        words.words(),
+                        query_chunk,
+                        blastp_parallel_pool,
+                    ),
+                }
+            }
         },
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1349-1354
         // `blastp_compressed_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built

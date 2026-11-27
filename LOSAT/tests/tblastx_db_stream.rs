@@ -227,8 +227,9 @@ fn a_report_without_letters_gives_the_columns_of_one_with_them() {
 // MelaMJNV, a block of its own, is checked without its 2-bit data
 // (`common::database::x_check_nucleotide_stores`, `SeqDb::x_nucleotide_check`): only the last
 // 2-bit byte and the ambiguity data. The reports of the batches before the failed one are written
-// with NCBI's errors (an engine error) and not with LOSAT's refusals, whether the reports are
-// written batch by batch (outfmt 7) or after the loop (outfmt 5).
+// with NCBI's errors (an engine error) and with LOSAT's refusals (since line RG series D, D-SO-5;
+// before, a refusal stopped the run before them), whether the reports are written batch by batch
+// (outfmt 7) or after the loop (outfmt 5).
 #[test]
 fn a_damaged_database_fails_the_same_batch_with_the_same_error() {
     let dir = temp_dir("damaged");
@@ -283,12 +284,11 @@ fn a_damaged_database_fails_the_same_batch_with_the_same_error() {
                 Some(error) => {
                     assert_ne!(one.0, Some(0), "{what}: {}", one.2);
                     assert!(one.2.contains(error), "{what}: {}", one.2);
-                    // NCBI's error comes after the first batch's report, LOSAT's refusal stops
-                    // the run before it.
+                    // NCBI's error and LOSAT's refusal come after the first batch's report.
                     let engine = one.0 == Some(3);
                     assert_eq!(engine, error == "Database memory map file error", "{what}");
                     let report = String::from_utf8_lossy(&one.1);
-                    assert_eq!(report.contains("nn all N"), engine, "{what}: {report}");
+                    assert!(report.contains("nn all N"), "{what}: {report}");
                     assert!(!report.contains("mje6k"), "{what}: {report}");
                 }
                 None => {

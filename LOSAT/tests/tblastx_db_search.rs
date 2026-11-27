@@ -368,14 +368,26 @@ fn a_truncated_sequence_file_stops_the_run() {
         record("nn all N", &"N".repeat(60)) + &std::fs::read_to_string(&query).unwrap(),
     )
     .unwrap();
-    let output = losat()
-        .arg("tblastx")
-        .arg("-query")
-        .arg(&two)
-        .args(["-db", &db])
-        .env("BATCH_SIZE", "1")
-        .output()
-        .unwrap();
+    let run = |debug: bool| {
+        let mut command = losat();
+        command
+            .arg("tblastx")
+            .arg("-query")
+            .arg(&two)
+            .args(["-db", &db])
+            .env("BATCH_SIZE", "1");
+        if debug {
+            // The reports kept after the loop (`report_stream::Off::Debug`), one batch at a time.
+            command.env("LOSAT_DEBUG_REPORT_STREAM_TEST", "1");
+        }
+        command.output().unwrap()
+    };
+    let output = run(false);
+    let kept = run(true);
+    assert_eq!(
+        (output.status.code(), &output.stdout, &output.stderr),
+        (kept.status.code(), &kept.stdout, &kept.stderr)
+    );
     assert_eq!(output.status.code(), Some(1));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -576,62 +588,40 @@ fn each_query_batch_is_reported_as_the_loop_takes_it() {
     assert!(String::from_utf8_lossy(&output.stderr)
         .contains("by which NCBI BLAST+'s formatters do not find the sequence"));
     // The first batch two letters long (no valid context: NCBI's warning and a report without
-    // hits), then a batch that LOSAT refuses: in the window that only the second batch's
-    // concatenated query takes past 2^30, and in the read of a database whose sequence file is cut
-    // short (the first batch with a valid context reads it). The first batch's report, the batch's
-    // warning, then the refusal.
+    // hits), then a batch that LOSAT refuses: the window that only the second batch's concatenated
+    // query takes past 2^30. The first batch's report, the batch's warning, then the refusal (a
+    // database that LOSAT cannot read, met by the first batch with a valid context:
+    // `a_truncated_sequence_file_stops_the_run`).
     let window = dir.join("window.fa");
     std::fs::write(
         &window,
         format!(">tiny two letters\nAC\n{}", &text[..second]),
     )
     .unwrap();
-    let unreadable = dir.join("unreadable");
-    std::fs::create_dir_all(&unreadable).unwrap();
-    for entry in std::fs::read_dir(manifest.join("tests/db_search/ids")).unwrap() {
-        let path = entry.unwrap().path();
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        if name.starts_with("nucl_v5.") {
-            let mut bytes = std::fs::read(&path).unwrap();
-            if name.ends_with(".nsq") {
-                bytes.truncate(bytes.len() / 2);
-            }
-            std::fs::write(unreadable.join(&name), bytes).unwrap();
-        }
-    }
     let size = ((1 << 30) - 100).to_string();
-    let cut = unreadable.join("nucl_v5").to_str().unwrap().to_string();
-    for (db, extra, refusal) in [
-        (
+    for outfmt in ["7", "0"] {
+        let output = both(
+            &window,
             "nucl_v5",
-            &["-window_size", size.as_str()][..],
-            format!("a -window_size of {size} "),
-        ),
-        (
-            cut.as_str(),
-            &[][..],
-            "passes the end of the file".to_string(),
-        ),
-    ] {
-        for outfmt in ["7", "0"] {
-            let what = format!("{db} outfmt {outfmt}");
-            let output = both(&window, db, outfmt, extra, &[("BATCH_SIZE", "1")]);
-            assert_eq!(output.status.code(), Some(1), "{what}");
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(stdout.contains("tiny two letters"), "{what}: {stdout}");
-            assert!(!stdout.contains("qn1"), "{what}: {stdout}");
-            let stderr = other_lines(&output.stderr);
-            assert_eq!(stderr.len(), 2, "{what}: {stderr:?}");
-            assert!(
-                stderr[0].starts_with("Warning: [tblastx] Query_1 tiny two letters"),
-                "{what}: {stderr:?}"
-            );
-            assert!(
-                stderr[1].contains(&refusal)
-                    && stderr[1].ends_with("is not supported by LOSAT's TBLASTX"),
-                "{what}: {stderr:?}"
-            );
-        }
+            outfmt,
+            &["-window_size", &size],
+            &[("BATCH_SIZE", "1")],
+        );
+        assert_eq!(output.status.code(), Some(1), "outfmt {outfmt}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("tiny two letters"), "{stdout}");
+        assert!(!stdout.contains("qn1"), "{stdout}");
+        let stderr = other_lines(&output.stderr);
+        assert_eq!(stderr.len(), 2, "{stderr:?}");
+        assert!(
+            stderr[0].starts_with("Warning: [tblastx] Query_1 tiny two letters"),
+            "{stderr:?}"
+        );
+        assert!(
+            stderr[1].contains(&format!("a -window_size of {size} "))
+                && stderr[1].ends_with("is not supported by LOSAT's TBLASTX"),
+            "{stderr:?}"
+        );
     }
     // A search space overflow in a later batch (`aliaskeys/n_nseq1_l62p3` with `alln_q.fna`,
     // `BATCH_SIZE=1`) streams (`off=none`) and writes the exact bytes of the off path (reports of

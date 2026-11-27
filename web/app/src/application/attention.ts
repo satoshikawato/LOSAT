@@ -17,11 +17,10 @@
 import type { StoredResultsCheck } from '../ports/data';
 import type { PagePort, WakeLockHandle } from '../ports/page';
 import type { RunStatus } from '../domain/run';
-import { holdsBlastFormatterInputs, type BlastFormatterDraftState } from './blast-formatter-draft';
 import { isToolRun, type AnyRunView, type AppState } from './coordinator';
 import { holdsInputs, type DraftState } from './draft';
 import { Store } from './store';
-import { holdsToolInputs, type ToolDraftState } from './tool-draft';
+import type { ToolForm } from './tool-draft-core';
 
 export type WakeLockState = 'unsupported' | 'off' | 'requesting' | 'held' | 'failed';
 
@@ -61,10 +60,8 @@ export interface AttentionDeps {
   readonly runs: Store<AppState>;
   /** The search form, whose inputs a reload would lose. */
   readonly draft?: Store<DraftState>;
-  /** The WindowMasker form, whose inputs a reload would lose. */
-  readonly toolDraft?: Store<ToolDraftState>;
-  /** The Format Archive form, whose inputs a reload would lose. */
-  readonly blastFormatterDraft?: Store<BlastFormatterDraftState>;
+  /** The tool tabs' forms (WindowMasker, Format Archive), whose inputs a reload would lose. */
+  readonly tools?: readonly ToolForm[];
   /** A call that the Data worker answers at once (its storage status): whether it still answers. */
   readonly probe: () => Promise<unknown>;
   /** Asks the Data worker whether the stored results of the completed runs are still there (RunStore.checkStoredResults). */
@@ -103,8 +100,7 @@ export class Attention {
     });
     deps.runs.subscribe(() => this.update());
     deps.draft?.subscribe(() => this.updateLeaveGuard());
-    deps.toolDraft?.subscribe(() => this.updateLeaveGuard());
-    deps.blastFormatterDraft?.subscribe(() => this.updateLeaveGuard());
+    for (const tool of deps.tools ?? []) tool.state.subscribe(() => this.updateLeaveGuard());
     deps.page.onVisibilityChange((visible) => (visible ? this.shown() : this.hide()));
     this.update();
   }
@@ -134,14 +130,11 @@ export class Attention {
   /** On while leaving would end a search or lose results or inputs. */
   private updateLeaveGuard(): void {
     const draft = this.deps.draft?.get();
-    const toolDraft = this.deps.toolDraft?.get();
-    const blastFormatterDraft = this.deps.blastFormatterDraft?.get();
     const on =
       this.state.get().busy ||
       this.deps.runs.get().runs.some(holdsResults) ||
       (draft !== undefined && holdsInputs(draft)) ||
-      (toolDraft !== undefined && holdsToolInputs(toolDraft)) ||
-      (blastFormatterDraft !== undefined && holdsBlastFormatterInputs(blastFormatterDraft));
+      (this.deps.tools ?? []).some((tool) => tool.holdsInputs());
     if (on === this.leaveGuard) return;
     this.leaveGuard = on;
     this.deps.page.setLeaveGuard(on);

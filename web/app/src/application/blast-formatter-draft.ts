@@ -1,35 +1,15 @@
-// The Format Archive (`blast_formatter`) form draft (RG-F3p7): independent of queued and
-// completed runs, mirroring ToolDraft's architecture. Re-formats `-outfmt 11` BLAST archives
-// from a local file, pasted ASN.1 text, or a completed `-outfmt 11` search output of this
-// session, with optional run directory files (e.g. a local BLAST database folder for `-db`
-// archives, or `-conffile`).
-import { type DirectoryFile, type ToolDescription } from 'losat/domain';
-import { isUnavailable, type ToolEngine } from 'losat/ports';
+// The Format Archive (`blast_formatter`) form draft (RG-F3p7): independent of queued and completed
+// runs, on the tool drafts' shared core (`ToolDraftCore`: `-xmlhelp`, files of the run, check, submit).
+// What is its own: the archive of `-archive` (a file, pasted ASN.1 text, or the `-outfmt 11` output
+// of a search of this session) and `-outfmt` / `-out`.
+import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
+import { normalizeRunPath } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildBlastFormatterArgv, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
-import {
-  BLAST_FORMATTER_DEFAULT_OUTFMT,
-  blastFormatterOptionParameters,
-  toolPrintsKind,
-} from '../domain/tools';
-import { failureText } from './availability';
-import type { EnqueueAllResult, SessionArchiveEntry, ToolDirectoryFile, ToolRequest } from './coordinator';
-import { Store } from './store';
-
-export interface BlastFormatterRunFile {
-  readonly key: string;
-  readonly name: string;
-  readonly size: number;
-  readonly file: File;
-}
-
-export type BlastFormatterValidationState =
-  | { readonly state: 'idle' }
-  | { readonly state: 'validating' }
-  | { readonly state: 'valid' }
-  | { readonly state: 'invalid'; readonly message: string }
-  | { readonly state: 'unavailable'; readonly message: string };
+import { buildBlastFormatterArgv } from '../domain/tool-argv';
+import { BLAST_FORMATTER_DEFAULT_OUTFMT, blastFormatterOptionParameters, toolPrintsKind } from '../domain/tools';
+import type { SessionArchiveEntry, ToolDirectoryFile, ToolRequest } from './coordinator';
+import { ToolDraftCore, type ToolDraftCoreDeps, type ToolFormState } from './tool-draft-core';
 
 export type ArchiveSourceKind = 'file' | 'paste' | 'session';
 
@@ -39,12 +19,12 @@ export interface ArchivePickedFile {
   readonly size: number;
 }
 
-export interface BlastFormatterDraftState {
+export interface BlastFormatterDraftState extends ToolFormState {
   readonly archiveSource: ArchiveSourceKind;
   readonly archiveFile?: ArchivePickedFile;
   readonly archivePaste: string;
   readonly sessionArchive?: SessionArchiveEntry;
-  /** Output format string (`-outfmt`), e.g. `'8'`, `'9'`, `'12'`, `'6 qseqid sseqid'`, or `'0'`. */
+  /** Output format string (`-outfmt`), e.g. `'8'`, `'9'`, `'12'`, `'6 qseqid sseqid'`. */
   readonly outfmt: string;
   /** Output file name (`-out`), empty or `'-'` for standard output. */
   readonly outName: string;
@@ -52,62 +32,24 @@ export interface BlastFormatterDraftState {
   readonly values: FormValues;
   /** Words typed in "Additional options". */
   readonly extra: string;
-  /** Additional files placed in the run directory (local BLAST database files for `-db` archives, `-conffile`, etc.). */
-  readonly runFiles: readonly BlastFormatterRunFile[];
-  readonly runFilesError?: string;
-  readonly description?: ToolDescription;
-  readonly descriptionError?: string;
-  readonly descriptionUnavailable?: boolean;
-  readonly validation: BlastFormatterValidationState;
-  readonly submitting: boolean;
-  readonly message?: { readonly kind: 'error' | 'info'; readonly text: string };
 }
 
-type StatePatch = { [K in keyof BlastFormatterDraftState]?: BlastFormatterDraftState[K] | undefined };
-
-export interface BlastFormatterDraftDeps {
-  readonly engine: ToolEngine;
-  readonly enqueueToolAll: (requests: readonly ToolRequest[]) => Promise<EnqueueAllResult>;
+export interface BlastFormatterDraftDeps extends ToolDraftCoreDeps {
+  /** Reads the `-outfmt 11` output of a search of this session as the archive file. */
   readonly getSessionArchiveFile: (runId: string, fileName: string) => Promise<File>;
-  readonly isBusy?: () => boolean;
-  readonly debounceMs?: number;
-}
-
-/** True when the Format Archive tab holds user inputs that reloading the page would lose. */
-export function holdsBlastFormatterInputs(state: BlastFormatterDraftState): boolean {
-  return (
-    state.archiveFile !== undefined ||
-    state.archivePaste.trim() !== '' ||
-    state.runFiles.length > 0
-  );
-}
-
-function normalizeRunPath(raw: string): string | undefined {
-  const cleaned = raw.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/+$/, '');
-  if (cleaned === '' || cleaned.includes('\0')) return undefined;
-  const parts = cleaned.split('/').filter((segment) => segment !== '' && segment !== '.');
-  if (parts.length === 0 || parts.some((segment) => segment === '..')) return undefined;
-  return parts.join('/');
-}
-
-function fileRunPath(file: File): string | undefined {
-  const relative = (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath;
-  return normalizeRunPath(relative && relative.trim() !== '' ? relative : file.name);
 }
 
 const PASTED_ARCHIVE_NAME = 'archive.asn';
 
-export class BlastFormatterDraft {
-  readonly state: Store<BlastFormatterDraftState>;
-  private readonly debounceMs: number;
-  private describePending: Promise<void> | undefined;
-  private validateTimer: ReturnType<typeof setTimeout> | undefined;
-  private validateToken = 0;
-  private nextKey = 1;
+/** The archive that `-archive` names, as the run directory holds it; the bytes of a session's archive are read at the run only. */
+type ArchiveInput = { readonly name: string; readonly origin: ToolDirectoryFile['origin'] } & (
+  | { readonly file: Blob }
+  | { readonly runId: string }
+);
 
+export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState> {
   constructor(private readonly deps: BlastFormatterDraftDeps) {
-    this.debounceMs = deps.debounceMs ?? 200;
-    this.state = new Store<BlastFormatterDraftState>({
+    super('blast_formatter', deps, {
       archiveSource: 'file',
       archivePaste: '',
       outfmt: BLAST_FORMATTER_DEFAULT_OUTFMT,
@@ -120,45 +62,7 @@ export class BlastFormatterDraft {
     });
   }
 
-  /** Loads `blast_formatter -xmlhelp` lazily when the Format Archive tab is first opened. */
-  ensureLoaded(): void {
-    const { description, descriptionError } = this.state.get();
-    if (description !== undefined || descriptionError !== undefined || this.describePending !== undefined) return;
-    void this.loadDescription();
-  }
-
-  /** Re-asks the engine for anything that failed with an UnavailableError (`Availability.recheck`). */
-  async askAgain(): Promise<void> {
-    const state = this.state.get();
-    if (state.descriptionUnavailable === true) await this.loadDescription();
-    if (this.state.get().validation.state === 'unavailable') await this.runValidation();
-  }
-
-  private loadDescription(): Promise<void> {
-    const pending = (async () => {
-      try {
-        const description = await this.deps.engine.describeTool('blast_formatter');
-        this.set({
-          description,
-          descriptionError: undefined,
-          descriptionUnavailable: undefined,
-        });
-        this.scheduleValidation();
-      } catch (error) {
-        this.set({
-          descriptionError: error instanceof Error ? error.message : String(error),
-          descriptionUnavailable: isUnavailable(error),
-        });
-      }
-    })();
-    this.describePending = pending;
-    void pending.finally(() => {
-      if (this.describePending === pending) this.describePending = undefined;
-    });
-    return pending;
-  }
-
-  // --- Archive source & output settings ------------------------------------------------------
+  // --- the archive and the output -------------------------------------------------------------
 
   setArchiveSource(source: ArchiveSourceKind): void {
     if (this.state.get().archiveSource === source) return;
@@ -174,14 +78,10 @@ export class BlastFormatterDraft {
     }
     const name = normalizeRunPath(file.name);
     if (name === undefined) {
-      this.set({ message: { kind: 'error', text: `Invalid file name: "${file.name}".` } });
+      this.reportError(`Invalid file name: "${file.name}".`);
       return;
     }
-    this.set({
-      archiveSource: 'file',
-      archiveFile: { file, name, size: file.size },
-      message: undefined,
-    });
+    this.set({ archiveSource: 'file', archiveFile: { file, name, size: file.size }, message: undefined });
     this.scheduleValidation();
   }
 
@@ -195,13 +95,9 @@ export class BlastFormatterDraft {
     this.scheduleValidation();
   }
 
-  /** Called from the `"Format archive…"` shortcut on a completed `-outfmt 11` search output. */
+  /** "Format archive…" on the `-outfmt 11` output of a completed search: that output becomes the archive. */
   useSessionArchive(entry: SessionArchiveEntry): void {
-    this.set({
-      archiveSource: 'session',
-      sessionArchive: entry,
-      message: undefined,
-    });
+    this.set({ archiveSource: 'session', sessionArchive: entry, message: undefined });
     this.ensureLoaded();
     this.scheduleValidation();
   }
@@ -218,9 +114,9 @@ export class BlastFormatterDraft {
 
   setField(flag: string, value: FieldValue): void {
     const next: Record<string, FieldValue> = { ...this.state.get().values };
-    if (value === '' || value === false) delete next[flag];
+    if (value === undefined || value === '' || value === false) delete next[flag];
     else next[flag] = value;
-    this.set({ values: next, message: undefined });
+    this.set({ values: Object.freeze(next), message: undefined });
     this.scheduleValidation();
   }
 
@@ -229,257 +125,112 @@ export class BlastFormatterDraft {
     this.scheduleValidation();
   }
 
+  /** Resets the options of "Formatting options" and Additional options. */
   resetOptions(): void {
     const { values, description } = this.state.get();
-    const optionFlags = new Set(blastFormatterOptionParameters(description).map((param) => param.flag));
     const next: Record<string, FieldValue> = { ...values };
-    for (const flag of optionFlags) delete next[flag];
-    this.set({
-      values: next,
-      extra: '',
-      message: undefined,
-    });
+    for (const param of blastFormatterOptionParameters(description)) delete next[param.flag];
+    this.set({ values: Object.freeze(next), extra: '', message: undefined });
     this.scheduleValidation();
   }
 
-  // --- Run directory files (for local `-db` archives & `-conffile`) --------------------------
+  // --- the command line -----------------------------------------------------------------------
 
-  addRunFiles(files: readonly File[]): void {
-    if (files.length === 0) return;
-    const existing = new Map(this.state.get().runFiles.map((entry) => [entry.name, entry]));
-    let error: string | undefined;
-    for (const file of files) {
-      const name = fileRunPath(file);
-      if (name === undefined) {
-        error = `Invalid file name: "${file.name}".`;
-        continue;
-      }
-      const key = `bf-rf-${this.nextKey++}`;
-      existing.set(name, { key, name, size: file.size, file });
-    }
-    this.set({
-      runFiles: Object.freeze([...existing.values()]),
-      runFilesError: error,
-      message: undefined,
-    });
-    this.scheduleValidation();
-  }
-
-  removeRunFile(key: string): void {
-    this.set({
-      runFiles: Object.freeze(this.state.get().runFiles.filter((entry) => entry.key !== key)),
-      runFilesError: undefined,
-      message: undefined,
-    });
-    this.scheduleValidation();
-  }
-
-  clearRunFiles(): void {
-    this.set({
-      runFiles: Object.freeze([]),
-      runFilesError: undefined,
-      message: undefined,
-    });
-    this.scheduleValidation();
-  }
-
-  // --- Argv preview & validation -------------------------------------------------------------
-
-  archiveNameOf(state: BlastFormatterDraftState = this.state.get()): string | undefined {
-    if (state.archiveSource === 'file') return state.archiveFile?.name;
-    if (state.archiveSource === 'paste') return state.archivePaste.trim() !== '' ? PASTED_ARCHIVE_NAME : undefined;
-    return state.sessionArchive?.name;
-  }
-
-  private extraWordsOf(state: BlastFormatterDraftState): { readonly ok: true; readonly words: readonly string[] } | { readonly ok: false; readonly message: string } {
-    if (state.extra.trim() === '') return { ok: true, words: [] };
+  /** The argv shown beside Run LOSAT; a quote left open in Additional options leaves their words out (the check reports it). */
+  previewArgv(state: BlastFormatterDraftState = this.state.get()): readonly string[] {
+    let extra: readonly string[];
     try {
-      return { ok: true, words: splitOptions(state.extra) };
-    } catch (error) {
-      return { ok: false, message: `Additional options: ${error instanceof Error ? error.message : String(error)}` };
+      extra = this.parseExtra(state);
+    } catch {
+      extra = [];
+    }
+    try {
+      return this.argvOf(state, extra);
+    } catch {
+      return this.argvOf(state, []);
     }
   }
 
-  private argvInputOf(state: BlastFormatterDraftState, archiveName: string | undefined, extra?: readonly string[]) {
-    return {
-      ...(archiveName === undefined ? {} : { archiveName }),
+  holdsInputs(state: BlastFormatterDraftState = this.state.get()): boolean {
+    return state.archiveFile !== undefined || state.archivePaste.trim() !== '' || state.runFiles.length > 0;
+  }
+
+  // --- what the core asks -------------------------------------------------------------------
+
+  protected parseExtra(state: BlastFormatterDraftState): readonly string[] {
+    return splitOptions(state.extra);
+  }
+
+  /**
+   * The argv of the check; none before an archive is chosen, unless the words name `-archive` or
+   * `-rid` themselves or print help or the version (NCBI's error then would be `-rid`'s missing value).
+   */
+  protected validationArgv(state: BlastFormatterDraftState, extra: readonly string[]): readonly string[] | undefined {
+    const argv = this.argvOf(state, extra);
+    if (this.archiveInput(state) !== undefined || toolPrintsKind(argv) !== null) return argv;
+    return argv.some((word) => /^-(?:archive|rid)(?:=|$)/.test(word)) ? argv : undefined;
+  }
+
+  protected override validationInputs(state: BlastFormatterDraftState): readonly DirectoryFile[] {
+    const archive = this.archiveInput(state);
+    // The check does not open -archive: a session's archive stands in by its name.
+    return archive === undefined ? [] : [{ name: archive.name, file: 'file' in archive ? archive.file : new Blob([]) }];
+  }
+
+  protected async buildRequests(state: BlastFormatterDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
+    const argv = this.argvOf(state, extra);
+    const prints = toolPrintsKind(argv);
+    if (prints !== null) {
+      return [{ tool: 'blast_formatter', stage: 'format', argv, directory: this.runDirectoryOf(state, []), prints }];
+    }
+    const archive = this.archiveInput(state);
+    if (archive === undefined) throw new Error(MISSING_ARCHIVE[state.archiveSource]);
+    const file = 'file' in archive ? archive.file : await this.deps.getSessionArchiveFile(archive.runId, archive.name);
+    const directory = this.runDirectoryOf(state, [{ name: archive.name, file, origin: archive.origin }]);
+    return [{ tool: 'blast_formatter', stage: 'format', argv, directory }];
+  }
+
+  // --- internals ----------------------------------------------------------------------------
+
+  private argvOf(state: BlastFormatterDraftState, extra: readonly string[]): readonly string[] {
+    const prints = toolPrintsKind(['blast_formatter', ...extra]);
+    const archive = prints === null ? this.archiveInput(state) : undefined;
+    return buildBlastFormatterArgv({
+      ...(archive === undefined ? {} : { archiveName: archive.name }),
       outfmt: state.outfmt,
       outName: state.outName,
       values: state.values,
       ...(state.description === undefined ? {} : { description: state.description }),
-      ...(extra === undefined ? {} : { extra }),
-    };
-  }
-
-  private buildArgv(state: BlastFormatterDraftState): { readonly ok: true; readonly argv: readonly string[] } | { readonly ok: false; readonly message: string } {
-    const extra = this.extraWordsOf(state);
-    if (!extra.ok) return extra;
-    const prints = toolPrintsKind(['blast_formatter', ...extra.words]);
-    const archiveName = prints !== null ? undefined : this.archiveNameOf(state);
-    try {
-      return { ok: true, argv: buildBlastFormatterArgv(this.argvInputOf(state, archiveName, extra.words)) };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
-    }
-  }
-
-  previewCommandWords(state: BlastFormatterDraftState = this.state.get()): readonly string[] {
-    const built = this.buildArgv(state);
-    if (built.ok) return toolCommandWords(built.argv);
-    return toolCommandWords(buildBlastFormatterArgv(this.argvInputOf(state, this.archiveNameOf(state))));
-  }
-
-  private nextValidateToken(): number {
-    this.validateToken += 1;
-    return this.validateToken;
-  }
-
-  private scheduleValidation(): void {
-    if (this.validateTimer !== undefined) clearTimeout(this.validateTimer);
-    const token = this.nextValidateToken();
-    this.validateTimer = setTimeout(() => {
-      this.validateTimer = undefined;
-      if (token === this.validateToken) void this.runValidation();
-    }, this.debounceMs);
-  }
-
-  private async runValidation(): Promise<void> {
-    const state = this.state.get();
-    const token = this.nextValidateToken();
-    const checked = this.buildArgv(state);
-    if (!checked.ok) {
-      this.set({ validation: { state: 'invalid', message: checked.message } });
-      return;
-    }
-    const prints = toolPrintsKind(checked.argv);
-    // Avoid flashing "Argument rid has no value" before the user has provided an archive.
-    if (prints === null && this.archiveNameOf(state) === undefined && !checked.argv.some((w) => w === '-archive' || w.startsWith('-archive=') || w === '-rid' || w.startsWith('-rid='))) {
-      this.set({ validation: { state: 'idle' } });
-      return;
-    }
-    if (this.deps.isBusy?.() === true) return;
-    this.set({ validation: { state: 'validating' } });
-    const directory: DirectoryFile[] = [];
-    for (const entry of state.runFiles) directory.push({ name: entry.name, file: entry.file });
-    if (state.archiveSource === 'file' && state.archiveFile !== undefined) {
-      directory.push({ name: state.archiveFile.name, file: state.archiveFile.file });
-    } else if (state.archiveSource === 'paste' && state.archivePaste.trim() !== '') {
-      directory.push({ name: PASTED_ARCHIVE_NAME, file: new Blob([state.archivePaste], { type: 'text/plain' }) });
-    } else if (state.archiveSource === 'session' && state.sessionArchive !== undefined) {
-      directory.push({ name: state.sessionArchive.name, file: new Blob([]) });
-    }
-    let nextValidation: BlastFormatterValidationState;
-    try {
-      const verdict = await this.deps.engine.validateTool(checked.argv, { directory });
-      nextValidation = verdict.ok ? { state: 'valid' } : { state: 'invalid', message: verdict.message };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      nextValidation = isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message };
-    }
-    if (token !== this.validateToken) return;
-    this.set({ validation: nextValidation });
-  }
-
-  // --- Submit --------------------------------------------------------------------------------
-
-  private failSubmit(text: string, validation?: BlastFormatterValidationState): EnqueueAllResult {
-    this.set({
-      ...(validation === undefined ? {} : { validation }),
-      message: { kind: 'error', text },
+      extra,
     });
-    return { ok: false, reason: 'argv', message: text };
   }
 
-  async submit(): Promise<EnqueueAllResult> {
-    const state = this.state.get();
-    if (state.submitting) return { ok: false, reason: 'argv', message: 'Submission already in progress.' };
-    this.set({ submitting: true, message: undefined });
-    try {
-      const result = this.buildArgv(state);
-      if (!result.ok) {
-        return this.failSubmit(result.message, { state: 'invalid', message: result.message });
-      }
-      const printed = toolPrintsKind(result.argv);
-      const directory: ToolDirectoryFile[] = [];
-      const seen = new Set<string>();
-
-      if (printed === null) {
-        if (state.archiveSource === 'file') {
-          if (state.archiveFile === undefined) {
-            return this.failSubmit('Choose a BLAST archive file (-outfmt 11), or paste one.');
-          }
-          directory.push({ name: state.archiveFile.name, file: state.archiveFile.file, origin: { kind: 'picked' } });
-          seen.add(state.archiveFile.name);
-        } else if (state.archiveSource === 'paste') {
-          if (state.archivePaste.trim() === '') {
-            return this.failSubmit('Paste a BLAST archive (-outfmt 11), or choose a file.');
-          }
-          directory.push({
-            name: PASTED_ARCHIVE_NAME,
-            file: new Blob([state.archivePaste], { type: 'text/plain' }),
-            origin: { kind: 'pasted' },
-          });
-          seen.add(PASTED_ARCHIVE_NAME);
-        } else {
-          if (state.sessionArchive === undefined) {
-            return this.failSubmit('Choose a completed -outfmt 11 search output from this session, or choose a file.');
-          }
-          const archiveFile = await this.deps.getSessionArchiveFile(state.sessionArchive.runId, state.sessionArchive.name);
-          directory.push({
-            name: state.sessionArchive.name,
-            file: archiveFile,
-            origin: { kind: 'archive', runNumber: state.sessionArchive.runNumber },
-          });
-          seen.add(state.sessionArchive.name);
-        }
-      }
-
-      for (const entry of state.runFiles) {
-        if (seen.has(entry.name)) {
-          return this.failSubmit(`Run directory file "${entry.name}" conflicts with the archive file name.`);
-        }
-        seen.add(entry.name);
-        directory.push({ name: entry.name, file: entry.file, origin: { kind: 'picked' } });
-      }
-
-      const verdict = await this.deps.engine.validateTool(result.argv, {
-        directory: directory.map((entry) => ({ name: entry.name, file: entry.file })),
-      });
-      if (!verdict.ok) {
-        this.set({
-          validation: { state: 'invalid', message: verdict.message },
-          message: { kind: 'error', text: toolValidationSummary(verdict.message) },
-        });
-        return { ok: false, reason: 'argv', message: verdict.message };
-      }
-
-      const request: ToolRequest = {
-        tool: 'blast_formatter',
-        stage: 'format',
-        argv: result.argv,
-        directory,
-        ...(printed === null ? {} : { prints: printed }),
-      };
-      const queued = await this.deps.enqueueToolAll([request]);
-      if (!queued.ok) {
-        this.set({ message: { kind: 'error', text: queued.message } });
-      } else {
-        this.set({ validation: { state: 'valid' }, message: undefined });
-      }
-      return queued;
-    } catch (error) {
-      return this.failSubmit(failureText(error));
-    } finally {
-      this.set({ submitting: false });
+  /** The archive of the source chosen, if there is one. */
+  private archiveInput(state: BlastFormatterDraftState): ArchiveInput | undefined {
+    switch (state.archiveSource) {
+      case 'file':
+        return state.archiveFile === undefined
+          ? undefined
+          : { name: state.archiveFile.name, file: state.archiveFile.file, origin: { kind: 'picked' } };
+      case 'paste':
+        return state.archivePaste.trim() === ''
+          ? undefined
+          : { name: PASTED_ARCHIVE_NAME, file: new Blob([state.archivePaste], { type: 'text/plain' }), origin: { kind: 'pasted' } };
+      case 'session':
+        return state.sessionArchive === undefined
+          ? undefined
+          : {
+              name: state.sessionArchive.name,
+              runId: state.sessionArchive.runId,
+              origin: { kind: 'archive', runNumber: state.sessionArchive.runNumber },
+            };
     }
-  }
-
-  private set(patch: StatePatch): void {
-    const next: Record<string, unknown> = { ...this.state.get() };
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) delete next[key];
-      else next[key] = value;
-    }
-    this.state.set(next as unknown as BlastFormatterDraftState);
   }
 }
+
+/** What Run LOSAT says when the chosen source has no archive yet. */
+const MISSING_ARCHIVE: Readonly<Record<ArchiveSourceKind, string>> = {
+  file: 'Choose an archive file.',
+  paste: 'Paste an archive.',
+  session: 'Choose a search run.',
+};

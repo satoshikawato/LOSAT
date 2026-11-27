@@ -1,9 +1,9 @@
 // End-to-end tests for the Format Archive (`blast_formatter`) main tab (RG-F3p7):
 // -xmlhelp loading, archive file / paste / session -outfmt 11 shortcut ("Format archive…"),
 // local -db archive with run directory folder, byte-for-byte parity against native
-// `losat blast_formatter` across -outfmt 8, 9 (binary), 12 and -out, validateTool refusal of -rid,
-// responsive layout at 1280 px & 390 px (no orphaned `?` help tips, no horizontal overflow),
-// and zero external network requests.
+// `losat blast_formatter` for every -outfmt choice the tab offers (each exits 0 on the engine) and -out,
+// validateTool refusal of -rid, responsive layout at 1280 px & 390 px (no orphaned `?` help tips, no
+// horizontal overflow, also of the Outputs with "Format archive…"), and zero external network requests.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -66,9 +66,16 @@ async function openFormatArchive(page: Page): Promise<void> {
   await expect(page.getByTestId('bf-panel')).toHaveAttribute('data-describe', 'ready');
 }
 
-async function runBfAndWait(page: Page): Promise<void> {
+/** Runs the Format Archive form as run `run` of the session, and waits until it exits 0. */
+async function runBfAndWait(page: Page, run: number): Promise<void> {
   await page.getByTestId('bf-run-losat').click();
-  await expect(page.getByTestId('tool-run-view')).toBeVisible();
+  await waitStatus(page, run, 'completed');
+  await expect(page.getByTestId('tool-run-view')).toHaveAttribute('data-run', String(run));
+}
+
+/** The width by which the page is wider than its window (0 when it fits). */
+async function pageOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
 async function expectTextOutputVisible(page: Page): Promise<void> {
@@ -167,6 +174,10 @@ test('Format Archive tab layout, -xmlhelp options, responsive viewports and -rid
   await page.getByTestId('bf-options-toggle').click();
   await expect(page.getByTestId('bf-parameter-form')).toBeVisible();
 
+  // No search of this session wrote -outfmt 11 yet: the session source shows (0) and cannot be chosen.
+  await expect(page.getByTestId('bf-source-session')).toBeDisabled();
+  await expect(page.getByTestId('bf-session-count')).toHaveText('(0)');
+
   await assertLayoutAndHelpTips(page, DESKTOP_VIEWPORT);
   await maybeShot(page, 'bf-tab-1280.png');
 
@@ -190,15 +201,21 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   const external = trackNet(page);
   await openFormatArchive(page);
 
-  // 1. -subject archive (bn.asn) in outfmt 8, 9 (binary), 12 via file picker.
+  // 1. -subject archive (bn.asn) in every -outfmt that the tab offers (each exits 0), via the file picker.
   const bnPath = join(BF_DIR, 'in/bn.asn');
   await page.getByTestId('bf-archive-file-input').setInputFiles(bnPath);
   await expect(page.getByTestId('bf-archive-chosen')).toContainText('bn.asn');
 
-  for (const outfmt of ['8', '9', '12'] as const) {
+  const offered = await page
+    .getByTestId('bf-outfmt-select')
+    .locator('option')
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter((value) => value !== 'other'));
+  expect(offered.length, 'the -outfmt choices').toBeGreaterThan(0);
+  let run = 0;
+  for (const outfmt of offered) {
     await clickBfTab(page);
     await page.getByTestId('bf-outfmt-select').selectOption(outfmt);
-    await runBfAndWait(page);
+    await runBfAndWait(page, ++run);
     await expect(page.getByTestId('tool-output-download')).toBeVisible();
 
     if (outfmt === '9') {
@@ -252,7 +269,7 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   await expect(page.getByTestId('bf-run-files-list')).toContainText('in/db/s3.nin');
   await page.getByTestId('bf-outfmt-select').selectOption('12');
   await page.getByTestId('bf-out').fill('report.json');
-  await runBfAndWait(page);
+  await runBfAndWait(page, ++run);
   await expect(page.getByTestId('tool-tab-file-0')).toContainText('-out report.json');
   const dbWebBytes = await downloadActiveToolOutput(page);
   const dbNative = runNativeBf(['-archive', 'in/db.asn', '-outfmt', '12'], BF_DIR);
@@ -267,21 +284,27 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   await page.getByTestId('algorithm-parameters-toggle').click();
   await page.getByTestId('param-extra').fill('-outfmt 11');
   await submit(page);
-  await waitStatus(page, 5, 'completed');
+  await waitStatus(page, ++run, 'completed');
   await page.getByTestId('results-view-outputs').click();
   await page.getByTestId('format-custom').click();
   await expect(page.getByTestId('format-archive-action')).toBeVisible();
   const archiveText = await page.getByTestId('result-output').textContent();
   expect(archiveText).toContain('Blast4-archive');
+  // "Format archive…" beside Export fits a phone's width.
+  await maybeShot(page, 'bf-outputs-1280.png', DESKTOP_VIEWPORT);
+  await page.setViewportSize(MOBILE_VIEWPORT);
+  expect(await pageOverflow(page), 'Outputs at 390px').toBeLessThanOrEqual(1);
+  await maybeShot(page, 'bf-outputs-390.png');
+  await resetDesktopViewport(page);
 
   // Click "Format archive…" -> opens Format Archive tab with session archive preselected.
   await page.getByTestId('format-archive-action').click();
   await expectBfPanelVisible(page);
   await expect(page.getByTestId('bf-source-session')).toBeChecked();
-  // Clear previous -out and run files from step 2 so we format the session archive to stdout in outfmt 8.
+  // Clear the -out of step 2 so that the session archive is formatted to the standard output in outfmt 8.
   await page.getByTestId('bf-out').fill('');
   await page.getByTestId('bf-outfmt-select').selectOption('8');
-  await runBfAndWait(page);
+  await runBfAndWait(page, ++run);
   await expectTextOutputVisible(page);
   const roundtripBytes = await downloadActiveToolOutput(page);
   const roundtripNative = runNativeBf(['-archive', '-', '-outfmt', '8'], BF_DIR, Buffer.from(archiveText ?? '', 'utf8'));

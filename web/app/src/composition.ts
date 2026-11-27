@@ -121,7 +121,8 @@ export function createApp(options: AppOptions = {}): App {
     getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
     isBusy: () => coordinator.isBusy(),
   });
-  const availability = new Availability({ draft, toolDraft, blastFormatterDraft, dataWorkerEnded });
+  const tools = [toolDraft, blastFormatterDraft];
+  const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
@@ -141,8 +142,7 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     runs: coordinator.state,
     draft: draft.state,
-    toolDraft: toolDraft.state,
-    blastFormatterDraft: blastFormatterDraft.state,
+    tools,
     probe: () => data.storageInfo(),
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),

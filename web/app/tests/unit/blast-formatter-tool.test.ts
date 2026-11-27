@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseToolDescription } from 'losat/domain';
-import { BlastFormatterDraft, holdsBlastFormatterInputs } from '../../src/application/blast-formatter-draft';
+import type { ToolEngine } from 'losat/ports';
+import { BlastFormatterDraft } from '../../src/application/blast-formatter-draft';
 import type { EnqueueAllResult, ToolRequest } from '../../src/application/coordinator';
 import { buildBlastFormatterArgv, changedBlastFormatterOptionsCount, isCountsOutputFile } from '../../src/domain/tool-argv';
-import { blastFormatterOptionParameters, toolLabel, toolStageLabel } from '../../src/domain/tools';
+import {
+  BLAST_FORMATTER_DEFAULT_OUTFMT,
+  BLAST_FORMATTER_OUTFMT_CHOICES,
+  blastFormatterOptionParameters,
+  toolLabel,
+  toolStageLabel,
+} from '../../src/domain/tools';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
 
@@ -48,6 +55,12 @@ describe('blast_formatter domain helpers', () => {
     ).toEqual(['blast_formatter', '-archive', 'bn.asn', '-max_target_seqs', '5', '-parse_deflines', '-logfile', 'run.log']);
   });
 
+  it('offers the formats that blast_formatter writes, 8 first', () => {
+    // Each PR that makes blast_formatter write another format adds it to the choices; the e2e test runs each on the engine.
+    expect(BLAST_FORMATTER_OUTFMT_CHOICES.map((choice) => choice.value)).toEqual(['8', '9', '12']);
+    expect(BLAST_FORMATTER_DEFAULT_OUTFMT).toBe('8');
+  });
+
   it('counts changed formatting options and identifies labels', () => {
     expect(changedBlastFormatterOptionsCount({}, '', BF_DESC)).toBe(0);
     expect(changedBlastFormatterOptionsCount({ '-max_target_seqs': '10', '-html': true }, '-logfile a.log', BF_DESC)).toBe(3);
@@ -58,8 +71,10 @@ describe('blast_formatter domain helpers', () => {
 });
 
 describe('BlastFormatterDraft', () => {
-  function setup() {
-    const engine = new FakeEngine();
+  function setup(options: { readonly busy?: boolean } = {}) {
+    const fake = new FakeEngine();
+    const validateTool = vi.fn((...args: Parameters<ToolEngine['validateTool']>) => fake.validateTool(args[0]));
+    const engine = { describeTool: (tool: string) => fake.describeTool(tool), validateTool };
     const queued: ToolRequest[] = [];
     const enqueueToolAll = vi.fn(async (requests: readonly ToolRequest[]): Promise<EnqueueAllResult> => {
       queued.push(...requests);
@@ -70,9 +85,10 @@ describe('BlastFormatterDraft', () => {
       engine,
       enqueueToolAll,
       getSessionArchiveFile,
+      isBusy: () => options.busy === true,
       debounceMs: 0,
     });
-    return { engine, draft, queued, enqueueToolAll, getSessionArchiveFile };
+    return { engine, draft, queued, enqueueToolAll, getSessionArchiveFile, validateTool };
   }
 
   async function waitDescribed(draft: BlastFormatterDraft): Promise<void> {
@@ -81,7 +97,7 @@ describe('BlastFormatterDraft', () => {
 
   it('loads -xmlhelp, submits a picked archive file with run directory files, and tracks leave guard', async () => {
     const { draft, queued } = setup();
-    expect(holdsBlastFormatterInputs(draft.state.get())).toBe(false);
+    expect(draft.holdsInputs()).toBe(false);
     draft.ensureLoaded();
     await waitDescribed(draft);
 
@@ -94,7 +110,7 @@ describe('BlastFormatterDraft', () => {
     draft.setOutName('report.json');
     draft.setField('-max_target_seqs', '2');
 
-    expect(holdsBlastFormatterInputs(draft.state.get())).toBe(true);
+    expect(draft.holdsInputs()).toBe(true);
     expect(draft.previewCommandWords()).toEqual([
       'losat',
       'blast_formatter',
@@ -147,5 +163,66 @@ describe('BlastFormatterDraft', () => {
     const bad = await draft.submit();
     expect(bad.ok).toBe(false);
     expect(!bad.ok && bad.message).toMatch(/BLAST_FORMATTER|Choose|Paste/);
+  });
+  it('refuses a second file under a name already in the run directory, as WindowMasker does', async () => {
+    const { draft } = setup();
+    draft.addRunFiles([new File(['a'], 'app.ini')]);
+    draft.addRunFiles([new File(['bb'], 'app.ini')]);
+    expect(draft.state.get().runFiles.map((entry) => entry.name)).toEqual(['app.ini']);
+    expect(draft.state.get().runFilesError).toBe('A file named "app.ini" is already in the run directory.');
+  });
+
+  it('checks the archive and the files of the run as one run directory', async () => {
+    const { draft, validateTool } = setup();
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    draft.setArchiveFile(new File(['Blast4-archive ::= {}'], 'bn.asn'));
+    draft.addRunFiles([new File(['other'], 'bn.asn')]);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('invalid'));
+    expect(draft.state.get().validation).toEqual({
+      state: 'invalid',
+      message: 'A file named "bn.asn" is already in the run directory.',
+    });
+    const res = await draft.submit();
+    expect(res.ok).toBe(false);
+    // The check refused the names before asking the engine; the run directory of a valid form names the archive once.
+    draft.removeRunFile(draft.state.get().runFiles[0]!.key);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    const last = validateTool.mock.calls.at(-1)!;
+    expect(last[0]).toEqual(['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8']);
+    expect(last[1]?.directory?.map((entry) => entry.name)).toEqual(['bn.asn']);
+  });
+
+  it('checks the argv while the engine is busy, as WindowMasker does', async () => {
+    const { draft, validateTool } = setup({ busy: true });
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    draft.setArchivePaste('Blast4-archive ::= {}');
+    draft.setExtra('-max_target_seqs');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('invalid'));
+    expect(validateTool).toHaveBeenCalled();
+    draft.setExtra('');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+  });
+
+  it('shows nothing to check before an archive is chosen, and the CLI\'s -rid refusal once -rid is typed', async () => {
+    const { draft, validateTool } = setup();
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('idle'));
+    expect(validateTool).not.toHaveBeenCalled();
+    draft.setExtra('-rid ABCDEFGH01R');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('invalid'));
+    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-outfmt', '8', '-rid', 'ABCDEFGH01R']);
+  });
+
+  it('reports a quote left open in Additional options once', async () => {
+    const { draft } = setup();
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    draft.setArchivePaste('Blast4-archive ::= {}');
+    draft.setExtra("-logfile 'a.log");
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('invalid'));
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "Additional options: a quote (') is not closed" });
   });
 });

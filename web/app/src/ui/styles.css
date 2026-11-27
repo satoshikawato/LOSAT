@@ -2884,12 +2884,9 @@ pre.range-text {
   margin-top: 6px;
 }
 
-/* Format Archive (blast_formatter) tab and OutputsView "Format archive…" action. */
-.outputs-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
+/* Format Archive (blast_formatter) tab and OutputsView "Format archive…" action, beside Export. */
+.outputs-panel > button + button {
+  margin-left: 8px;
 }
 
 .bf-archive-mode {

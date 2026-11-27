@@ -176,6 +176,15 @@ export interface SessionArchiveEntry {
   readonly name: string;
 }
 
+/** The `-outfmt 11` output of `run` as Format Archive's archive: a completed search whose `-outfmt 11` output was written. */
+export function sessionArchiveOf(run: AnyRunView): SessionArchiveEntry | undefined {
+  if (isToolRun(run) || run.status !== 'completed' || run.result === undefined) return undefined;
+  if (outputNumber(run.snapshot.argv, CUSTOM_OUTPUT) !== 11) return undefined;
+  if (run.result.failed.some((failed) => failed.output === CUSTOM_OUTPUT)) return undefined;
+  const { runId, number, program } = run.snapshot;
+  return { runId, runNumber: number, program, name: `run_${number}_${program}.asn` };
+}
+
 export interface AppState {
   readonly runs: readonly AnyRunView[];
   /** Temporary storage in use, shown without blocking any action (plan §5.6). */
@@ -727,15 +736,8 @@ export class Coordinator {
   sessionOutfmt11Archives(): readonly SessionArchiveEntry[] {
     const entries: SessionArchiveEntry[] = [];
     for (const run of this.state.get().runs) {
-      if (isToolRun(run) || run.status !== 'completed' || run.result === undefined) continue;
-      if (outputNumber(run.snapshot.argv, CUSTOM_OUTPUT) !== 11) continue;
-      if (run.result.failed?.[CUSTOM_OUTPUT] !== undefined) continue;
-      entries.push({
-        runId: run.snapshot.runId,
-        runNumber: run.snapshot.number,
-        program: run.snapshot.program,
-        name: `run_${run.snapshot.number}_${run.snapshot.program}.asn`,
-      });
+      const entry = sessionArchiveOf(run);
+      if (entry !== undefined) entries.push(entry);
     }
     return entries.reverse();
   }

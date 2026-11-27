@@ -94,27 +94,29 @@ export const BLAST_FORMATTER_USAGE_ORDER: readonly string[] = Object.freeze([
   '-parse_deflines',
 ]);
 
-const BF_USAGE_RANK = new Map(BLAST_FORMATTER_USAGE_ORDER.map((flag, index) => [flag, index]));
-
-/** Preset `-outfmt` choices for the Format Archive tab (any other format string can be typed via Other). */
+/**
+ * The `-outfmt` choices of the Format Archive tab: the formats that LOSAT's `blast_formatter` writes
+ * (`docs/manual/src/programs/blast_formatter.md`); "Other / custom format…" takes any other value.
+ * Each PR that makes `blast_formatter` write another format adds it here, and the e2e test runs every
+ * choice on the engine (`tests/e2e/blast-formatter-tool.spec.ts`).
+ */
 export const BLAST_FORMATTER_OUTFMT_CHOICES: readonly { readonly value: string; readonly label: string }[] = Object.freeze(
-  ([8, 9, 12, 0, 5, 6, 7, 10, 15, 16, 17, 20] as const).map((num) => ({
+  ([8, 9, 12] as const).map((num) => ({
     value: String(num),
     label: `${num} — ${FORMAT_NAMES[num]}`,
   })),
 );
 
-/** Default `-outfmt` selected in the Format Archive tab (supported out of the box). */
-export const BLAST_FORMATTER_DEFAULT_OUTFMT = '8';
+/** Default `-outfmt` selected in the Format Archive tab (the first of the choices). */
+export const BLAST_FORMATTER_DEFAULT_OUTFMT = BLAST_FORMATTER_OUTFMT_CHOICES[0]!.value;
 
 /** All group-defined non-hidden options of `blast_formatter` in NCBI `-help` usage order. */
 export function allBlastFormatterParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
   if (description === undefined) return [];
-  const allowed = description.parameters.filter((param) => param.group !== undefined && !param.hidden);
-  return allowed
-    .map((param, index) => ({ param, index, rank: BF_USAGE_RANK.get(param.flag) ?? BLAST_FORMATTER_USAGE_ORDER.length }))
-    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
-    .map((entry) => entry.param);
+  return sortByUsage(
+    description.parameters.filter((param) => param.group !== undefined && !param.hidden),
+    BLAST_FORMATTER_USAGE_ORDER,
+  );
 }
 
 /** Options of `blast_formatter` shown under the collapsible "Formatting options" section. */
@@ -158,7 +160,17 @@ export const WINDOWMASKER_USAGE_ORDER: readonly string[] = Object.freeze([
   '-convert',
 ]);
 
-const USAGE_RANK = new Map(WINDOWMASKER_USAGE_ORDER.map((flag, index) => [flag, index]));
+/** Sorts parameters in a tool's NCBI `-help` usage order (`order`), keeping relative XML order for any option not in it. */
+function sortByUsage(parameters: readonly ToolParameterDescription[], order: readonly string[]): readonly ToolParameterDescription[] {
+  const rank = (flag: string) => {
+    const index = order.indexOf(flag);
+    return index < 0 ? order.length : index;
+  };
+  return parameters
+    .map((param, index) => ({ param, index, rank: rank(param.flag) }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
+    .map((entry) => entry.param);
+}
 
 /** Flags excluded by `stage` according to `-xmlhelp`'s `<dependencies>`. */
 export function stageExcludedFlags(description: ToolDescription, stage: WindowMaskerStage): ReadonlySet<string> {
@@ -171,12 +183,9 @@ export function stageExcludedFlags(description: ToolDescription, stage: WindowMa
   return excluded;
 }
 
-/** Sorts parameters in NCBI `-help` usage order, keeping relative XML order for any new option. */
+/** Sorts windowmasker's parameters in NCBI `-help` usage order, keeping relative XML order for any new option. */
 export function sortToolParameters(parameters: readonly ToolParameterDescription[]): readonly ToolParameterDescription[] {
-  return parameters
-    .map((param, index) => ({ param, index, rank: USAGE_RANK.get(param.flag) ?? WINDOWMASKER_USAGE_ORDER.length }))
-    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
-    .map((entry) => entry.param);
+  return sortByUsage(parameters, WINDOWMASKER_USAGE_ORDER);
 }
 
 type MaybeToolDescription = ToolDescription | undefined;

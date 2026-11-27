@@ -1,10 +1,9 @@
 <script setup lang="ts">
 // The Format Archive (`blast_formatter`) main tab (RG-F3p7):
-// Re-formats `-outfmt 11` BLAST archives from a local file, pasted ASN.1 text, or a completed
-// `-outfmt 11` search output of this session, with optional run directory files (local BLAST
-// database folder for `-db` archives, or `-conffile`), `-outfmt` / `-out` controls, live command
-// preview via ToolRunBar, in-place validateTool refusals, and collapsible "Formatting options"
-// driven by `-xmlhelp`.
+// Formats a BLAST archive (`-outfmt 11`) from a local file, pasted ASN.1 text, or the `-outfmt 11`
+// output of a completed search of this session, with the files of the run (ToolRunFiles: the BLAST
+// database files of a `-db` archive, `-conffile`), `-outfmt` / `-out`, the command beside Run LOSAT
+// (ToolRunBar), validateTool's refusals in place, and "Formatting options" from `-xmlhelp`.
 import { computed, nextTick, ref, watch } from 'vue';
 import type { ArchiveSourceKind, BlastFormatterDraft } from '../application/blast-formatter-draft';
 import type { Coordinator } from '../application/coordinator';
@@ -21,6 +20,7 @@ import HelpTip from './HelpTip.vue';
 import OptionName from './OptionName.vue';
 import ParameterForm from './ParameterForm.vue';
 import ToolRunBar from './ToolRunBar.vue';
+import ToolRunFiles from './ToolRunFiles.vue';
 import { useStore } from './useStore';
 
 const props = defineProps<{
@@ -35,8 +35,6 @@ const appState = useStore(props.coordinator.state);
 const formModel = computed(() => blastFormatterFormModel(props.draft, state.value));
 
 const archiveFileInput = ref<HTMLInputElement | null>(null);
-const runFilesInput = ref<HTMLInputElement | null>(null);
-const runFolderInput = ref<HTMLInputElement | null>(null);
 const customOutfmtInput = ref<HTMLInputElement | null>(null);
 const dragActive = ref(false);
 
@@ -155,11 +153,6 @@ function onSessionChange(event: Event): void {
   props.draft.selectSessionArchive(found);
 }
 
-function onRunFiles(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  if (input.files !== null && input.files.length > 0) props.draft.addRunFiles([...input.files]);
-  input.value = '';
-}
 </script>
 
 <template>
@@ -182,11 +175,12 @@ function onRunFiles(event: Event): void {
                   name="bf-archive-source"
                   :value="src.id"
                   :checked="state.archiveSource === src.id"
+                  :disabled="src.id === 'session' && sessionArchives.length === 0"
                   :data-testid="`bf-source-${src.id}`"
                   @change="draft.setArchiveSource(src.id)"
                 />
                 {{ src.label }}
-                <span v-if="src.id === 'session' && sessionArchives.length > 0" class="muted">({{ sessionArchives.length }})</span>
+                <span v-if="src.id === 'session'" class="muted" data-testid="bf-session-count">({{ sessionArchives.length }})</span>
               </label>
             </div>
             <HelpTip v-if="archiveHelp" id="bf-archive-help" :text="archiveHelp" label="Help for -archive" />
@@ -226,7 +220,7 @@ function onRunFiles(event: Event): void {
                 Remove
               </button>
             </span>
-            <span v-else class="param-hint">Choose or drop a BLAST archive file written with <OptionName name="-outfmt" /> 11</span>
+            <span v-else class="param-hint">Drop a BLAST archive here (<OptionName name="-outfmt" /> 11)</span>
           </div>
         </div>
       </div>
@@ -251,7 +245,6 @@ function onRunFiles(event: Event): void {
         <label class="param-label" for="bf-session-select">Search run</label>
         <div class="param-control">
           <select
-            v-if="sessionArchives.length > 0"
             id="bf-session-select"
             :value="state.sessionArchive?.runId ?? ''"
             data-testid="bf-session-select"
@@ -261,52 +254,12 @@ function onRunFiles(event: Event): void {
               Run {{ entry.runNumber }} · {{ entry.program }} ({{ entry.name }})
             </option>
           </select>
-          <span v-else class="param-hint" data-testid="bf-session-empty">
-            No completed <OptionName name="-outfmt" /> 11 searches in this session yet. Run a search with
-            <code>-outfmt 11</code> in Additional options, or choose an archive file.
-          </span>
         </div>
       </div>
 
-      <div class="param-row" data-testid="bf-run-files">
-        <span class="param-label">Database / run files</span>
-        <div class="param-control wm-run-files-controls">
-          <button type="button" data-testid="bf-open-run-files" @click="runFilesInput?.click()">Open files…</button>
-          <button type="button" data-testid="bf-open-run-folder" @click="runFolderInput?.click()">Open folder…</button>
-          <input
-            ref="runFilesInput"
-            class="visually-hidden"
-            type="file"
-            multiple
-            tabindex="-1"
-            aria-hidden="true"
-            aria-label="Open database or run files"
-            data-testid="bf-run-files-input"
-            @change="onRunFiles"
-          />
-          <input
-            ref="runFolderInput"
-            class="visually-hidden"
-            type="file"
-            multiple
-            webkitdirectory
-            tabindex="-1"
-            aria-hidden="true"
-            aria-label="Open database folder for the run directory"
-            data-testid="bf-run-folder-input"
-            @change="onRunFiles"
-          />
-          <span class="param-hint">Optional: local BLAST database files referenced by a <OptionName name="-db" /> archive, or <OptionName name="-conffile" /></span>
-        </div>
-      </div>
-      <p v-if="state.runFilesError" class="error small" role="alert" data-testid="bf-run-files-error">{{ state.runFilesError }}</p>
-      <ul v-if="state.runFiles.length > 0" class="wm-file-list" data-testid="bf-run-files-list">
-        <li v-for="entry in state.runFiles" :key="entry.key" class="wm-file-item">
-          <code>{{ entry.name }}</code>
-          <span class="muted">({{ formatBytes(entry.size) }})</span>
-          <button type="button" class="link" @click="draft.removeRunFile(entry.key)">Remove</button>
-        </li>
-      </ul>
+      <ToolRunFiles :draft="draft" :files="state.runFiles" :error="state.runFilesError" prefix="bf"
+        >Files opened by name (<OptionName name="-conffile" />, BLAST database files)</ToolRunFiles
+      >
     </fieldset>
 
     <fieldset class="search-block" data-testid="bf-output-block">
@@ -362,7 +315,7 @@ function onRunFiles(event: Event): void {
             @input="draft.setOutName(($event.target as HTMLInputElement).value)"
           />
           <span class="hint-line">
-            <span class="param-hint">Output file name (leave blank or type <code>-</code> for standard output)</span>
+            <span class="param-hint">Output file name (type <code>-</code> for standard output)</span>
             <HelpTip v-if="outHelp" id="bf-out-help" :text="outHelp" label="Help for -out" />
           </span>
         </div>

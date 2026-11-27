@@ -1,12 +1,13 @@
-// Single command-line builder for windowmasker (WW3b DESIGN §2.5, brief §4.4):
-// the same argv array is validated by `validateTool`, run by `runTool`, displayed beside
-// "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are omitted;
-// Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
+// Single command-line builders for the tools (windowmasker: WW3b DESIGN §2.5, brief §4.4;
+// blast_formatter: RG-F3p7): the same argv array is validated by `validateTool`, run by `runTool`,
+// displayed beside "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are
+// omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allStageParameters,
+  BLAST_FORMATTER_BLOCK_FLAGS,
   blastFormatterOptionParameters,
   defaultCountsOutName,
   stageOptionParameters,
@@ -43,8 +44,52 @@ function toolWrittenValue(param: ToolParameterDescription, value: FieldValue | u
 }
 
 /**
+ * Appends the words of the options set in the form: in `ordered`'s order with the defaults left out, or,
+ * before `-xmlhelp` arrives (`ordered` empty), every value set except those of `skip`, so the argv stays faithful.
+ */
+function pushOptionWords(
+  argv: string[],
+  ordered: readonly ToolParameterDescription[],
+  values: FormValues,
+  skip: ReadonlySet<string>,
+): void {
+  if (ordered.length > 0) {
+    for (const param of ordered) {
+      const written = toolWrittenValue(param, values[param.flag]);
+      if (written === true) argv.push(param.flag);
+      else if (typeof written === 'string') argv.push(param.flag, written);
+    }
+    return;
+  }
+  for (const [flag, val] of Object.entries(values)) {
+    if (skip.has(flag)) continue;
+    if (val === true) argv.push(flag);
+    else if (typeof val === 'string' && val.trim() !== '') argv.push(flag, val.trim());
+  }
+}
+
+/** Appends the words of Additional options; throws for `''` and a word with NUL, which the search form refuses too (DW-42, `domain/argv.ts`). */
+function pushExtraWords(argv: string[], extra: readonly string[] | undefined): void {
+  for (const word of extra ?? []) {
+    const unread = word === '' ? "''" : word.includes('\0') ? 'a NUL character' : undefined;
+    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
+    argv.push(word);
+  }
+}
+
+/** The count of the options in `params` that differ from their defaults, plus one for Additional options. */
+function changedOptionsCount(params: readonly ToolParameterDescription[], values: FormValues, extra: string): number {
+  let count = 0;
+  for (const param of params) {
+    if (toolWrittenValue(param, values[param.flag]) !== undefined) count++;
+  }
+  if (extra.trim() !== '') count++;
+  return count;
+}
+
+/**
  * Builds `['windowmasker', stageFlag, ...]` for validation, execution and display.
- * Throws if `extra` contains a word that ABI's NUL-joined argv cannot transmit (`''` or NUL).
+ * Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
  */
 export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly string[] {
   const argv: string[] = ['windowmasker'];
@@ -76,32 +121,14 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
   }
 
   // Remaining block selects (-infmt, -sformat, -outfmt) and WindowMasker options in usage order.
-  const ordered = allStageParameters(description, stage).filter(
-    (param) => param.flag !== '-in' && param.flag !== '-out' && param.flag !== '-ustat',
-  );
-  if (ordered.length > 0) {
-    for (const param of ordered) {
-      const written = toolWrittenValue(param, values[param.flag]);
-      if (written === true) argv.push(param.flag);
-      else if (typeof written === 'string') argv.push(param.flag, written);
-    }
-  } else {
-    // Before `-xmlhelp` arrives, still write any explicitly set values so argv stays faithful.
-    for (const [flag, val] of Object.entries(values)) {
-      if (flag === '-in' || flag === '-out' || flag === '-ustat') continue;
-      if (val === true) argv.push(flag);
-      else if (typeof val === 'string' && val.trim() !== '') argv.push(flag, val.trim());
-    }
-  }
-
-  for (const word of input.extra ?? []) {
-    const unread = word === '' ? "''" : word.includes('\0') ? 'a NUL character' : undefined;
-    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
-    argv.push(word);
-  }
-
+  const ordered = allStageParameters(description, stage).filter((param) => !WINDOWMASKER_NAMED_FLAGS.has(param.flag));
+  pushOptionWords(argv, ordered, values, WINDOWMASKER_NAMED_FLAGS);
+  pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
+
+/** windowmasker's options whose words the builder writes from the blocks (the file names). */
+const WINDOWMASKER_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out', '-ustat']);
 
 export interface BlastFormatterArgvInput {
   /** Archive file name in the run directory (`-archive`), omitted when empty. */
@@ -120,7 +147,7 @@ export interface BlastFormatterArgvInput {
 
 /**
  * Builds `['blast_formatter', ...]` for validation, execution and display.
- * Throws if `extra` contains a word that ABI's NUL-joined argv cannot transmit (`''` or NUL).
+ * Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
  */
 export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonly string[] {
   const argv: string[] = ['blast_formatter'];
@@ -133,27 +160,8 @@ export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonl
   const outName = input.outName?.trim() ?? '';
   if (outName !== '' && outName !== '-') argv.push('-out', outName);
 
-  const ordered = blastFormatterOptionParameters(input.description);
-  if (ordered.length > 0) {
-    for (const param of ordered) {
-      const written = toolWrittenValue(param, input.values[param.flag]);
-      if (written === true) argv.push(param.flag);
-      else if (typeof written === 'string') argv.push(param.flag, written);
-    }
-  } else {
-    for (const [flag, val] of Object.entries(input.values)) {
-      if (flag === '-archive' || flag === '-rid' || flag === '-outfmt' || flag === '-out') continue;
-      if (val === true) argv.push(flag);
-      else if (typeof val === 'string' && val.trim() !== '') argv.push(flag, val.trim());
-    }
-  }
-
-  for (const word of input.extra ?? []) {
-    const unread = word === '' ? "''" : word.includes('\0') ? 'a NUL character' : undefined;
-    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
-    argv.push(word);
-  }
-
+  pushOptionWords(argv, blastFormatterOptionParameters(input.description), input.values, BLAST_FORMATTER_BLOCK_FLAGS);
+  pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
 
@@ -163,12 +171,7 @@ export function changedBlastFormatterOptionsCount(
   extra: string,
   description: ToolDescription | undefined,
 ): number {
-  let count = 0;
-  for (const param of blastFormatterOptionParameters(description)) {
-    if (toolWrittenValue(param, values[param.flag]) !== undefined) count++;
-  }
-  if (extra.trim() !== '') count++;
-  return count;
+  return changedOptionsCount(blastFormatterOptionParameters(description), values, extra);
 }
 
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */
@@ -183,13 +186,8 @@ export function changedToolOptionsCount(
   extra: string,
   description: ToolDescription | undefined,
 ): number {
-  let count = 0;
-  for (const param of stageOptionParameters(description, stage)) {
-    if (WINDOWMASKER_BLOCK_FLAGS.has(param.flag)) continue;
-    if (toolWrittenValue(param, values[param.flag]) !== undefined) count++;
-  }
-  if (extra.trim() !== '') count++;
-  return count;
+  const params = stageOptionParameters(description, stage).filter((param) => !WINDOWMASKER_BLOCK_FLAGS.has(param.flag));
+  return changedOptionsCount(params, values, extra);
 }
 
 /** Normalizes simple relative prefixes (`./foo` -> `foo`) so `-out ./x -logfile x` matches `x`. */

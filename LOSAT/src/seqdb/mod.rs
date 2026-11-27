@@ -64,6 +64,8 @@ pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
+mod blob_cache_tests;
+#[cfg(test)]
 mod damaged_files_tests;
 #[cfg(test)]
 mod mask_tests;
@@ -1262,6 +1264,122 @@ pub struct SeqDb {
     /// The model of NCBI's cache of read header records (`SeqDb::read_header_record`), from the
     /// first read of such a title on.
     header_cache: std::sync::Mutex<HeaderCache>,
+    /// The model of NCBI's cache of the blobs that the formatter's scope released
+    /// (`SeqDb::batch_blobs`).
+    blob_cache: std::sync::Mutex<BlobCache>,
+    /// Whether a batch's prefetch loaded its subjects before that model started
+    /// (`SeqDb::note_unmodelled_prefetch`).
+    unmodelled_prefetch: AtomicBool,
+}
+
+/// The blobs that NCBI's data source keeps after the formatter's scope released them
+/// (`CDataSource::m_Blob_Cache`; `OBJMGR_BLOB_CACHE`, 10 by default), as a query batch's
+/// prefetch meets them ([`SeqDb::batch_blobs`]).
+pub(crate) const RELEASED_BLOBS: usize = 10;
+
+/// Where NCBI's object manager holds a subject's blob when a query batch's prefetch asks for it
+/// ([`SeqDb::batch_blobs`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlobHeld {
+    /// In the data source's cache: the prefetch loads nothing.
+    Held,
+    /// Nowhere: the prefetch loads it.
+    Out,
+    /// Held or not, by an order of NCBI's that LOSAT does not know (a release of more than the
+    /// cache holds; a batch the model did not see).
+    Unsure,
+}
+
+/// The model of NCBI's cache of released blobs ([`SeqDb::batch_blobs`]).
+#[derive(Debug, Default)]
+struct BlobCache {
+    /// The subjects of each batch's release that the cache may still hold, oldest first.
+    releases: std::collections::VecDeque<Release>,
+    /// At most how many blobs of the batches before the model the cache still holds
+    /// (`SeqDb::note_unmodelled_prefetch`; older than any release of `releases`).
+    unmodelled: usize,
+    /// Whether the model started (its first batch).
+    started: bool,
+}
+
+/// The subjects of one batch's release that NCBI's cache of released blobs may still hold
+/// ([`BlobCache`]).
+#[derive(Debug)]
+struct Release {
+    subjects: Vec<u32>,
+    /// At most how many of `subjects` it holds.
+    kept: usize,
+    /// Whether it holds `subjects` all: no release after it pushed out some, which ones LOSAT
+    /// does not know, and none of them was asked again while some may be out.
+    whole: bool,
+}
+
+impl BlobCache {
+    /// [`SeqDb::batch_blobs`]; `unmodelled`: `SeqDb::note_unmodelled_prefetch`.
+    fn batch(&mut self, subjects: &[(u32, bool)], unmodelled: bool) -> Vec<BlobHeld> {
+        if !self.started {
+            self.started = true;
+            self.unmodelled = if unmodelled { RELEASED_BLOBS } else { 0 };
+        }
+        let states = subjects
+            .iter()
+            .map(|&(ordinal, posts)| self.take(ordinal, posts))
+            .collect();
+        self.releases.retain(|release| !release.subjects.is_empty());
+        // The reset releases the batch's subjects, in an order that LOSAT does not know: the
+        // cache drops its oldest while it holds more than it keeps, all of an older release
+        // before any of a later one.
+        self.releases.push_back(Release {
+            subjects: subjects.iter().map(|&(ordinal, _)| ordinal).collect(),
+            kept: subjects.len(),
+            whole: true,
+        });
+        let mut excess = (self.unmodelled + self.releases.iter().map(|r| r.kept).sum::<usize>())
+            .saturating_sub(RELEASED_BLOBS);
+        let dropped = excess.min(self.unmodelled);
+        self.unmodelled -= dropped;
+        excess -= dropped;
+        while excess > 0 {
+            let oldest = self
+                .releases
+                .front_mut()
+                .expect("a release holds the excess");
+            let dropped = excess.min(oldest.kept);
+            oldest.kept -= dropped;
+            oldest.whole = false;
+            excess -= dropped;
+            if oldest.kept == 0 {
+                self.releases.pop_front();
+            }
+        }
+        states
+    }
+
+    /// Where the cache holds the blob of `ordinal`, whose title posts or not (`posts`), as a
+    /// batch's prefetch asks for it; it leaves the cache, locked again.
+    fn take(&mut self, ordinal: u32, posts: bool) -> BlobHeld {
+        let Some(release) = self
+            .releases
+            .iter_mut()
+            .find(|release| release.subjects.contains(&ordinal))
+        else {
+            // A subject whose title posts was never loaded before the model.
+            return if self.unmodelled > 0 && !posts {
+                BlobHeld::Unsure
+            } else {
+                BlobHeld::Out
+            };
+        };
+        release.subjects.retain(|&held| held != ordinal);
+        if release.whole {
+            release.kept -= 1;
+            BlobHeld::Held
+        } else {
+            // Held or not: at most as many as before are still held.
+            release.kept = release.kept.min(release.subjects.len());
+            BlobHeld::Unsure
+        }
+    }
 }
 
 /// NCBI's cache of the header records that a volume read (`CSeqDBVol::m_DeflineCache`): by volume,
@@ -1938,6 +2056,8 @@ impl SeqDb {
             scope_utf8_held: AtomicBool::new(false),
             replaced_titles: AtomicBool::new(false),
             header_cache: Default::default(),
+            blob_cache: Default::default(),
+            unmodelled_prefetch: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -3149,9 +3269,9 @@ impl SeqDb {
         read
     }
 
-    /// The model of NCBI's cache of header records (`read_header_record`) back to a run's start,
-    /// for a search again of batches whose reads NCBI made once (BLASTP's batches before a failed
-    /// one).
+    /// The model of NCBI's cache of header records (`read_header_record`), and of its cache of
+    /// released blobs (`batch_blobs`), back to a run's start, for a search again of batches whose
+    /// reads NCBI made once (BLASTP's batches before a failed one).
     #[cold]
     #[inline(never)]
     pub fn restart_header_reads(&self) {
@@ -3160,6 +3280,12 @@ impl SeqDb {
             .expect("the header cache is not poisoned")
             .0
             .clear();
+        *self
+            .blob_cache
+            .lock()
+            .expect("the blob cache is not poisoned") = BlobCache::default();
+        self.unmodelled_prefetch
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// What NCBI's read of the header record of the sequence at `at` posts for the bytes outside
@@ -3176,6 +3302,66 @@ impl SeqDb {
             .iter()
             .map(|replaced| replaced.post(Some(prefix)))
             .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2318-2347
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2224-2240
+    /// Whether the Bioseq that NCBI loads for the sequence at `at` holds its header written again
+    /// from the set it read (`x_GetFilteredBinaryHeader`: the read changed the set), not the stored
+    /// bytes: a volume after the first makes the tag of each `BL_ORD_ID` id its OID in the database
+    /// (`adjust_ordinal_tags`), so its titles hold `#` for the bytes the read replaced, and a read
+    /// of that header posts nothing. `false` where the record cannot be read (its reader fails
+    /// elsewhere). The filters of a volume ([`SeqDb::filters_header_sets`]) are not asked here.
+    #[cold]
+    #[inline(never)]
+    pub fn rewrites_header_at(&self, at: SeqLocation) -> bool {
+        if self.volume_starts[at.volume] == 0 {
+            return false;
+        }
+        self.volumes[at.volume]
+            .defline_set(at.vol_oid)
+            .is_ok_and(|mut set| {
+                adjust_ordinal_tags(&mut set, self.volume_starts[at.volume]).unwrap_or(false)
+            })
+    }
+
+    /// The slot of NCBI's cache of header records (`read_header_record`) that the record at `at`
+    /// takes: its volume and its slot there.
+    pub fn header_slot(&self, at: SeqLocation) -> (usize, usize) {
+        (at.volume, at.vol_oid as usize % HEADER_CACHE_SLOTS)
+    }
+
+    /// Notes that a query batch's prefetch loaded its subjects before the model of NCBI's cache of
+    /// released blobs started (`batch_blobs`): that cache may hold any sequence whose title does
+    /// not post, which no model saw.
+    pub fn note_unmodelled_prefetch(&self) {
+        self.unmodelled_prefetch
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2326-2369
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:622-648
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2638-2653
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    /// Where NCBI's object manager holds the blob of each of `subjects` (distinct ordinal ids, each
+    /// with whether its title posts: [`SeqDb::title_posts_at`] not empty) when a query batch's
+    /// prefetch asks for it ([`BlobHeld`]); then the batch, as the model sees it: the prefetch
+    /// holds every subject to the reset of the formatter's scope after the batch, which releases
+    /// them all at once into the data source's cache of [`RELEASED_BLOBS`], in an order that comes
+    /// from the addresses of NCBI's objects (`ResetDS`), and the cache drops its oldest while it
+    /// holds more. A subject that the cache held leaves it (`x_SetLock`). The model starts at the
+    /// first batch whose title posts were asked (`replaced_titles`): a subject whose title posts
+    /// was never loaded before it, any other may be held where a batch before prefetched
+    /// (`note_unmodelled_prefetch`). Not for a run that keeps its scope (BLAST XML).
+    pub fn batch_blobs(&self, subjects: &[(u32, bool)]) -> Vec<BlobHeld> {
+        let unmodelled = self
+            .unmodelled_prefetch
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let mut cache = self
+            .blob_cache
+            .lock()
+            .expect("the blob cache is not poisoned");
+        cache.batch(subjects, unmodelled)
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to

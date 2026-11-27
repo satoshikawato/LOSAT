@@ -268,6 +268,8 @@ pub(super) fn write_tblastx_tabular(
     let counts_block = spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field));
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastx);
+    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
+    let reads_defline = spec.reads_defline();
     // The bytes of one comment block or one row, written to the report stream as soon as they
     // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
     let mut buf: Vec<u8> = Vec::new();
@@ -405,6 +407,15 @@ pub(super) fn write_tblastx_tabular(
                             warnings.end_run();
                         }
                     }));
+                }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:839-842
+                // The row's read of the subject's definition line posts for the bytes of its
+                // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
+                // row's lookups.
+                if let (Some(warnings), true) = (warnings.as_deref_mut(), reads_defline) {
+                    if table.reads_title(&subject) {
+                        warnings.title_read(hit.s_idx, &mut *writer)?;
+                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

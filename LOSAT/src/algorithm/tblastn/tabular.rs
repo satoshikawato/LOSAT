@@ -101,6 +101,10 @@ pub(super) struct TabularInputs {
     /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
     /// 18 reports (the organism report takes no links).
     pub is_html: bool,
+    /// `-db`: NCBI's posts of each read of a reported sequence's definition line by a table's
+    /// rows, by rank (`TblastnDatabase::title_decodes`, `QueryWarnings::title_read`); empty where
+    /// no field reads it.
+    pub title_decodes: crate::report::query_warnings::TitleDecodes,
 }
 
 /// One custom tabular report of a run: `render`'s inputs that it reads.
@@ -200,6 +204,8 @@ pub(super) fn write_tblastn_tabular(
     let spec = tab.spec;
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastn);
+    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
+    let reads_defline = spec.reads_defline();
     let needs = spec.needs();
     let nident_alone = nident_alone(spec);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
@@ -463,6 +469,15 @@ pub(super) fn write_tblastn_tabular(
                             warnings.end_run();
                         }
                     }));
+                }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:839-842
+                // The row's read of the subject's definition line posts for the bytes of its
+                // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
+                // row's lookups.
+                if let (Some(warnings), true) = (warnings.as_deref_mut(), reads_defline) {
+                    if table.reads_title(&subject) {
+                        warnings.title_read(oid as u32, &mut *writer)?;
+                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

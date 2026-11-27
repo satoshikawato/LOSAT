@@ -580,6 +580,33 @@ impl TabularSpec {
         ])
     }
 
+    /// Whether NCBI's formatter reads the subject's definition line for each row
+    /// (`CSeqDB::ExtractBlastDefline`, `algorithm::common::database::FormatterTitleReads::Rows`):
+    /// one of the subject's `sall*` ids, taxonomy or title fields, once for the row whatever
+    /// their number. Not the organism report's, which reads its own.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:809-842
+    pub fn reads_defline(&self) -> bool {
+        self.kind != TabularKind::TaxReport
+            && self.has_any(&[
+                SubjectAllSeqIds,
+                SubjectAllGis,
+                SubjectAllAccessions,
+                SubjectTaxId,
+                SubjectSciName,
+                SubjectCommonName,
+                SubjectBlastName,
+                SubjectSuperKingdom,
+                SubjectTaxIds,
+                SubjectSciNames,
+                SubjectCommonNames,
+                SubjectBlastNames,
+                SubjectSuperKingdoms,
+                SubjectTitle,
+                SubjectAllTitles,
+            ])
+    }
+
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts
     /// `num_ident` identities (the engine's count): one of its fields, or `nident` with
     /// identities. Only the block counts the identities on the aligned sequences and sets the
@@ -2222,6 +2249,18 @@ impl<'a> TabularWriter<'a> {
     /// (`TabularNames::row_messages`).
     pub fn sets_subject(&self, subject: &TabularSubject<'_>) -> bool {
         self.spec.failed_stage(subject.lookup).is_none()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-847
+    /// Whether the row of `subject` reads the subject's definition line where its fields ask it
+    /// (`TabularSpec::reads_defline`): unless the subject block stopped before
+    /// `ExtractBlastDefline`, at the load of the subject or its id (`FailedStage::Bioseq`,
+    /// `FailedStage::SubjectId`).
+    pub fn reads_title(&self, subject: &TabularSubject<'_>) -> bool {
+        !matches!(
+            self.spec.failed_stage(subject.lookup),
+            Some(FailedStage::Bioseq | FailedStage::SubjectId)
+        )
     }
 
     /// The exception that ends the run at `program`'s row of `subject` with the engine's

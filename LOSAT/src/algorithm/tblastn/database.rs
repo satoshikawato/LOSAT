@@ -323,6 +323,28 @@ impl TblastnDatabase {
         )
     }
 
+    /// NCBI's posts of each read of a reported subject's definition line by a formatter
+    /// (`shared::title_decodes`), by rank (the key of TBLASTN's report writers), of the subjects of
+    /// the final `hitlists`.
+    pub(super) fn title_decodes(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> crate::report::query_warnings::TitleDecodes {
+        shared::title_decodes(
+            &self.db,
+            hitlists
+                .iter()
+                .flat_map(KappaResultHitList::lists)
+                .filter(|list| !list.hsps.hsps.is_empty())
+                .filter_map(|list| {
+                    let rank = u32::try_from(list.oid).ok()?;
+                    Some((rank, *reported.ordinals.get(rank as usize)?))
+                }),
+            PROGRAM,
+        )
+    }
+
     /// Whether `taxdb.bti` is on the search path, asked once for the run
     /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
     /// (`prefetch_messages`).
@@ -613,13 +635,18 @@ pub(super) struct CallReads<'a> {
     /// Those of the failed batch, by its first query, which its Seq-aligns read before the
     /// failure (`ErrorAfterBatchReports::title_posts`, `write_failed`).
     failed_titled: std::sync::Mutex<Option<(usize, crate::report::diag_log::Posts)>>,
+    /// Whether each batch's prefetch loads its subjects where LOSAT writes the call's reads of
+    /// their titles (`shared::TitleReads::Prefetched`; `titles`).
+    title_prefetch: bool,
 }
 
 impl<'a> CallReads<'a> {
     /// The reads of a call of `database` (`None`: the subjects are records) whose batches
-    /// `batches` makes (each with its searched queries).
+    /// `batches` makes (each with its searched queries), whose reports read the subjects'
+    /// titles as `title_reads` says (`ParsedShown::titles`).
     pub(super) fn of(
         database: Option<&'a TblastnDatabase>,
+        title_reads: shared::TitleReads,
         batches: impl FnOnce() -> Vec<crate::blastinput::seq_range::RangedBatch>,
     ) -> Self {
         let excluded = database.and_then(fetch_excluded);
@@ -637,6 +664,7 @@ impl<'a> CallReads<'a> {
             utf8: shared::CallUtf8::default(),
             titled: Default::default(),
             failed_titled: Default::default(),
+            title_prefetch: title_reads == shared::TitleReads::Prefetched,
         }
     }
 
@@ -729,7 +757,13 @@ impl<'a> CallReads<'a> {
             .filter_map(|list| u32::try_from(list.oid).ok());
         match read {
             Ok(_) => {
-                let posts = shared::batch_title_posts(&database.db, aligned, utf8, PROGRAM)?;
+                let posts = shared::batch_title_posts(
+                    &database.db,
+                    aligned,
+                    utf8,
+                    self.title_prefetch,
+                    PROGRAM,
+                )?;
                 if !posts.is_empty() {
                     self.titled
                         .lock()

@@ -936,6 +936,7 @@ pub(super) fn render(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
             || later.is_some()
+            || !tabular.title_decodes.is_empty()
             || crate::report::query_warnings::report_posts(
                 format.report_format(),
                 tabular.html.is_some(),
@@ -957,7 +958,8 @@ pub(super) fn render(
                     .html_posts
                     .as_deref_mut()
                     .map(|posts| posts as &mut dyn std::io::Write),
-            );
+            )
+            .with_title_decodes(Some(&tabular.title_decodes));
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`query_reads`).
             match first {

@@ -5918,8 +5918,17 @@ fn post_process_hits_and_write(
         // that NCBI's stream replaces (`seqalign::write_query_to`).
         // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
+        // NCBI's posts of each read of a subject's definition line by a table's rows
+        // (`BlastnDatabase::title_decodes`).
+        let title_decodes = match (report.database_reader, output_format.tabular_spec()) {
+            (Some(database), Some(spec)) if spec.reads_defline() => {
+                database.title_decodes(&hit_lists)
+            }
+            _ => Default::default(),
+        };
         let mut format_warnings = (warning_lines.is_some()
             || later.is_some()
+            || !title_decodes.is_empty()
             || crate::report::query_warnings::report_posts(
                 format.report_format(),
                 report.html.is_some(),
@@ -5941,7 +5950,8 @@ fn post_process_hits_and_write(
                     .html_posts
                     .as_deref_mut()
                     .map(|posts| posts as &mut dyn std::io::Write),
-            );
+            )
+            .with_title_decodes(Some(&title_decodes));
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`BlastnReportInputs::query_reads`).
             match first {
@@ -8519,6 +8529,10 @@ fn run_in_pool(
     // sequences that the final hit lists of the batches name (`database::read_titles`).
     let shown = ShownSubjects::new(&args, source);
     let mut titles = database::DatabaseTitles::new();
+    // Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of
+    // their titles (`shared::TitleReads::Prefetched`; `DatabaseTitles::batch_titles`).
+    let title_prefetch = database::parsed_shown(&output_formats).titles
+        == crate::algorithm::common::database::TitleReads::Prefetched;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop cuts the batches.
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`):
@@ -9200,9 +9214,12 @@ fn run_in_pool(
                 }
             }
             let read = (&mut titles, &mut warnings[start]);
-            if let Err(error) =
-                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
-            {
+            if let Err(error) = database.batch_titles(
+                batch.fetched_utf8,
+                &mut batch_hit_lists,
+                read,
+                title_prefetch,
+            ) {
                 let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
                 {
                     Ok(failure) => failure.error,

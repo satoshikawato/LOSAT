@@ -840,3 +840,36 @@ fn request_mark_flushes_report_only_when_writing_diagnostics() {
         "unexpected merged order:\n{text}"
     );
 }
+
+// RG-KB 9b-2: each read of a formatter writes its subject's posts again, after the report up to
+// the read; a subject whose read posts nothing writes nothing.
+#[test]
+fn each_formatter_read_of_a_title_posts_after_the_report_so_far() {
+    let mut titles = TitleDecodes::default();
+    assert!(titles.is_empty());
+    titles.insert(4, b"T4\n".to_vec());
+    titles.insert(9, b"T9a\nT9b\n".to_vec());
+    let before: Vec<Posts> = vec![Posts::of_lines(b"W0\n".to_vec())];
+    let log = Log::default();
+    let (mut report, mut sink) = (log.clone(), log.clone());
+    let mut warnings =
+        QueryWarnings::of_posts(&before, None, &mut sink).with_title_decodes(Some(&titles));
+    assert!(warnings.title_posts(4) && warnings.title_posts(9) && !warnings.title_posts(5));
+    warnings.before_query(0, &mut report).unwrap();
+    warnings.title_read(4, &mut report).unwrap();
+    report.write_all(b"R4\n").unwrap();
+    warnings.title_read(5, &mut report).unwrap();
+    report.write_all(b"R5\n").unwrap();
+    warnings.title_read(4, &mut report).unwrap();
+    report.write_all(b"R4\n").unwrap();
+    warnings.title_read(9, &mut report).unwrap();
+    report.write_all(b"R9\n").unwrap();
+    drop(warnings);
+    let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    assert_eq!(text, "W0\nT4\nR4\nR5\nT4\nR4\nT9a\nT9b\nR9\n");
+    // No table, or an empty one: no read posts.
+    let empty = TitleDecodes::default();
+    let mut sink = Vec::new();
+    let warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_title_decodes(Some(&empty));
+    assert!(!warnings.title_posts(4));
+}

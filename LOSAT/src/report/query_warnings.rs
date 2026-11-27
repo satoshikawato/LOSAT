@@ -35,6 +35,53 @@ pub struct QueryWarnings<'a> {
     /// The report's place among its search's formats (`for_report`), which keeps the first call
     /// of each report's id links (`formatter_registry::InitConfig::call_posts`).
     report: usize,
+    /// NCBI's posts of each read of a reported subject's definition line by the report's
+    /// formatter (`with_title_decodes`, `title_read`).
+    titles: Option<&'a TitleDecodes>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:839-842
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
+/// NCBI's posts of one read of the definition line of each reported database subject whose read
+/// posts (`algorithm::common::database::title_decodes`: a title with a byte outside ' ' ..= '~'),
+/// by the key that the report's writer gives the subject: what each read of a formatter writes to
+/// standard error (`CSeqDB::ExtractBlastDefline` decodes the header again each time), after the
+/// report written before it (the post flushes it).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TitleDecodes(std::collections::HashMap<u32, Vec<u8>>);
+
+impl TitleDecodes {
+    /// Sets the posts `text` of one read of the subject `key`.
+    pub(crate) fn insert(&mut self, key: u32, text: Vec<u8>) {
+        self.0.insert(key, text);
+    }
+
+    /// Whether no subject's read posts.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The posts of one read of the subject `key` (empty where it posts nothing).
+    pub fn of(&self, key: u32) -> &[u8] {
+        self.0.get(&key).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// Writes the posts of one read of the subject `key` to `sink`, after the report written so
+    /// far (`report`, flushed first); nothing where the read posts nothing.
+    pub fn write_read(
+        &self,
+        key: u32,
+        report: &mut dyn Write,
+        sink: &mut dyn Write,
+    ) -> io::Result<()> {
+        let text = self.of(key);
+        if text.is_empty() {
+            return Ok(());
+        }
+        report.flush()?;
+        sink.write_all(text)?;
+        sink.flush()
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -1206,6 +1253,32 @@ impl<'a> QueryWarnings<'a> {
             later: None,
             html_posts: None,
             report: 0,
+            titles: None,
+        }
+    }
+
+    /// These warnings with NCBI's posts of each read of a reported subject's definition line by
+    /// the report's formatter (`TitleDecodes`; `None`, or empty: no read posts), which the
+    /// report's writer writes where it reads the definition line (`title_read`).
+    pub fn with_title_decodes(mut self, titles: Option<&'a TitleDecodes>) -> Self {
+        self.titles = titles.filter(|titles| !titles.is_empty());
+        self
+    }
+
+    /// Whether a read of the definition line of the subject `subject` (the key of the report's
+    /// writer) posts (`with_title_decodes`): a writer that formats into buffers writes them out
+    /// before `title_read` only then.
+    pub fn title_posts(&self, subject: u32) -> bool {
+        self.titles
+            .is_some_and(|titles| !titles.of(subject).is_empty())
+    }
+
+    /// The report's formatter reads the definition line of the subject `subject` (the key of its
+    /// writer, `with_title_decodes`) here, after the report written so far (`report`).
+    pub fn title_read(&mut self, subject: u32, report: &mut dyn Write) -> io::Result<()> {
+        match self.titles {
+            Some(titles) => titles.write_read(subject, report, &mut *self.sink),
+            None => Ok(()),
         }
     }
 

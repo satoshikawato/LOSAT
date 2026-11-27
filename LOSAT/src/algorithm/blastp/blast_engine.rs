@@ -7290,7 +7290,7 @@ fn search(
                 Ok(failure) => failure,
                 Err(other) => return other,
             };
-            let (searched_start, failed_end) = loop {
+            let (searched_start, failed_end, alone) = loop {
                 let (input_start, searched_start) = batches.start_of(failed);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
@@ -7298,9 +7298,7 @@ fn search(
                 let span = batches.searched_span(failed);
                 let failed_end = span.end;
                 if searched_start == 0 {
-                    write_alone(span)?;
-                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-                    break (searched_start, failed_end);
+                    break (searched_start, failed_end, Some(span));
                 }
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
@@ -7318,17 +7316,15 @@ fn search(
                     Some(next_request(span)),
                 )) {
                     Ok(earlier) => (failed, failure) = earlier,
-                    Err(Ok(())) => break (searched_start, failed_end),
+                    Err(Ok(())) => break (searched_start, failed_end, None),
                     Err(other) => return other,
                 }
             };
-            outputs
-                .diagnostics
-                .write_all(&batches.warnings[searched_start])?;
-            write_request_posts(&args, &mut *outputs.diagnostics)?;
             // NCBI's warning of its first read of a UTF8String header, where the failed batch
             // made it (before its failure; a batch before posted its own in its reports), then
-            // the posts of the titles that its Seq-aligns read before the failure.
+            // the posts of the titles that its Seq-aligns read before the failure. Made before
+            // anything of the failed batch is written, as psiblast's later rounds make them
+            // (`psi_round`), so their refusal writes nothing of it.
             let utf8 = database.and_then(|database: &database::BlastpDatabase| {
                 database::Utf8Read::post_in(
                     failure.utf8.as_ref(),
@@ -7341,6 +7337,14 @@ fn search(
                 Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
                 None => Default::default(),
             };
+            if let Some(span) = alone {
+                write_alone(span)?;
+                write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+            }
+            outputs
+                .diagnostics
+                .write_all(&batches.warnings[searched_start])?;
+            write_request_posts(&args, &mut *outputs.diagnostics)?;
             for posts in utf8.iter().chain([&titled]) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
@@ -11414,6 +11418,7 @@ fn run_call(
         let own = format.later_warnings(kept.is_some(), &mut outputs.later_warnings, format_index);
         let mut warnings = (first_lines.is_some()
             || own.is_some()
+            || !prefetched.title_decodes.is_empty()
             || crate::report::query_warnings::report_posts(
                 format.report_format(),
                 args.html.is_some(),
@@ -11436,7 +11441,8 @@ fn run_call(
                     .html_posts
                     .as_deref_mut()
                     .map(|posts| posts as &mut dyn std::io::Write),
-            );
+            )
+            .with_title_decodes(Some(&prefetched.title_decodes));
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,

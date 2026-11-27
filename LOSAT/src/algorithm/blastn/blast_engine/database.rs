@@ -1627,6 +1627,25 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
 }
 
 impl BlastnDatabase {
+    /// NCBI's posts of each read of a reported subject's definition line by a formatter
+    /// (`shared::title_decodes`), by ordinal id (the key of BLASTN's report writers), of the
+    /// subjects of the final `hit_lists`.
+    pub(super) fn title_decodes(
+        &self,
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> crate::report::query_warnings::TitleDecodes {
+        shared::title_decodes(
+            &self.db,
+            hit_lists.iter().flatten().flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                hit_list.hsplist_array[..count]
+                    .iter()
+                    .map(|hsp_list| (hsp_list.oid, hsp_list.oid))
+            }),
+            PROGRAM,
+        )
+    }
+
     /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
     /// (`shared::TaxdbRun::loads_write_texts`).
     pub(super) fn loads_write_texts(&self) -> bool {
@@ -1640,13 +1659,15 @@ impl BlastnDatabase {
     /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
     /// request posts, before its prefetch), also where the read fails after it
     /// (`shared::Utf8Read::of_read`), then NCBI's posts of the titles that its Seq-aligns read
-    /// (`shared::batch_title_posts`, or those before a failed read,
+    /// and, where its prefetch loads the subjects (`prefetch`: `shared::TitleReads::Prefetched`),
+    /// those of the loads (`shared::batch_title_posts`, or those before a failed read,
     /// `blastinput::app::ErrorAfterBatchReports::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
         fetched: Option<crate::seqdb::SeqLocation>,
         hit_lists: &mut [Option<BlastnHitList>],
         (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
+        prefetch: bool,
     ) -> Result<()> {
         let aligned = drop_unaligned(self, hit_lists);
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
@@ -1679,6 +1700,7 @@ impl BlastnDatabase {
             &self.db,
             aligned,
             warning.is_some(),
+            prefetch,
             PROGRAM,
         )?);
         Ok(())

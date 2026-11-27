@@ -898,11 +898,13 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     }
 }
 
-// RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
+// RG-KB 9(b), 9b-2: only NCBI's Seq-aligns read a reported subject's definition line where every
 // format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
 // subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
-// may set), for the five search programs (not psiblast, rpsblast or rpstblastn);
-// the others read it again (`TitleReads::Reports`, LOSAT's refusal).
+// may set), for the five search programs (not psiblast, rpsblast or rpstblastn); a run of one
+// format whose formatter reads it where LOSAT writes NCBI's posts (the tables, SAM, the
+// Seq-annots) and whose batches all prefetch is `TitleReads::Prefetched`; the others read it
+// again (`TitleReads::Reports`, LOSAT's refusal).
 #[test]
 fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
     use crate::report::archive::options::RequestKind;
@@ -914,6 +916,10 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
         RequestKind::Tblastx,
     ] {
         let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied());
+        let prefetched = |as_outfmt: i32| {
+            let format = PrefetchFormat::of(as_outfmt, app);
+            prefetches_subjects(Some(format)) && !prefetch_may_be_off(format)
+        };
         assert_eq!(of(&[11]), TitleReads::SeqAligns, "{app:?}");
         assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
         for outfmts in [
@@ -921,24 +927,33 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
             &[0],
             &[3],
             &[5],
-            &[6],
-            &[7],
-            &[10],
             &[13],
-            &[17],
             &[18],
             &[11, 6],
             &[11, 0],
+            &[6, 6],
+            &[6, 11],
         ] {
             assert_eq!(of(outfmts), TitleReads::Reports, "{app:?} {outfmts:?}");
         }
-        for outfmt in [8, 9, 12] {
-            let expected = if prefetches_subjects(Some(PrefetchFormat::of(outfmt, app))) {
-                TitleReads::Reports
+        // The tables 10 and 20 prefetch as 6 does.
+        for (outfmt, as_outfmt) in [(6, 6), (7, 7), (10, 6), (20, 6), (17, 17)] {
+            let expected = if prefetched(as_outfmt) {
+                TitleReads::Prefetched
             } else {
-                TitleReads::SeqAligns
+                TitleReads::Reports
             };
-            assert_eq!(of(&[outfmt, 11]), expected, "{app:?} {outfmt}");
+            assert_eq!(of(&[outfmt]), expected, "{app:?} {outfmt}");
+        }
+        for outfmt in [8, 9, 12] {
+            let prefetch = prefetches_subjects(Some(PrefetchFormat::of(outfmt, app)));
+            let (alone, with_archive) = match (prefetch, prefetched(outfmt)) {
+                (false, _) => (TitleReads::SeqAligns, TitleReads::SeqAligns),
+                (true, true) => (TitleReads::Prefetched, TitleReads::Reports),
+                (true, false) => (TitleReads::Reports, TitleReads::Reports),
+            };
+            assert_eq!(of(&[outfmt]), alone, "{app:?} {outfmt}");
+            assert_eq!(of(&[outfmt, 11]), with_archive, "{app:?} {outfmt}");
         }
     }
     // psiblast, rpsblast and rpstblastn always stay `TitleReads::Reports`.

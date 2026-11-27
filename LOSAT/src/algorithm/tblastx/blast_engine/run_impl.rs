@@ -2019,6 +2019,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// command line's one `-outfmt`) look up (`TblastxDatabase::tabular_names`); `None`: every
     /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
     pub tabular_names: Option<&'a crate::report::tabular::TabularNames>,
+    /// `-db`, a custom tabular report whose fields read the definition line: NCBI's posts of each
+    /// read of a reported sequence's by a row, by rank (`TblastxDatabase::title_decodes`,
+    /// `QueryWarnings::title_read`).
+    pub title_decodes: &'a crate::report::query_warnings::TitleDecodes,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
     pub archive_spans: &'a [std::ops::Range<usize>],
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
@@ -2659,6 +2663,7 @@ fn write_tblastx_outputs(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         let mut warnings = (warning_lines.is_some()
             || later.is_some()
+            || !run.title_decodes.is_empty()
             || crate::report::query_warnings::report_posts(
                 format.report_format(),
                 args.html_links.is_some(),
@@ -2683,7 +2688,8 @@ fn write_tblastx_outputs(
                     .html_posts
                     .as_deref_mut()
                     .map(|posts| posts as &mut dyn std::io::Write),
-            );
+            )
+            .with_title_decodes(Some(run.title_decodes));
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`TblastxReportRun::query_reads`).
             match first {
@@ -3762,6 +3768,18 @@ fn run_batch_loop(
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
     // The first format, whose prefetch each batch asks (`database::prefetch_format`).
     let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
+    // Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of
+    // their titles (`common::database::TitleReads::Prefetched`, `batch_title_posts`).
+    let title_prefetch = super::super::database::parsed_shown(
+        &outputs
+            .formats
+            .iter()
+            .map(|format| report::output_format(format.outfmt))
+            .collect::<Vec<_>>(),
+        prefetch_format,
+    )
+    .titles
+        == crate::algorithm::common::database::TitleReads::Prefetched;
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the
@@ -4194,6 +4212,7 @@ fn run_batch_loop(
                         &database.db,
                         aligned(),
                         utf8.is_some(),
+                        title_prefetch,
                         "TBLASTX",
                     )?;
                     warnings[start].append(&titled);
@@ -4939,6 +4958,15 @@ impl BatchReports<'_> {
                 .map(|taxdb| taxdb.report_names(self.args.app().ncbi_name())),
             _ => None,
         };
+        // NCBI's posts of each read of a reported sequence's definition line by the rows.
+        let title_decodes = match (&self.subjects, &database, custom_tabular) {
+            (ShownSubjects::Database { database, .. }, Some(shown), Some(spec))
+                if spec.reads_defline() =>
+            {
+                database.title_decodes(shown.reported)
+            }
+            _ => Default::default(),
+        };
         let query_scopes = self.query_scopes.borrow();
         let written = write_tblastx_outputs(
             hits,
@@ -4962,6 +4990,7 @@ impl BatchReports<'_> {
                 xml_taxa: &xml_taxa,
                 tabular_taxonomy: &tabular_taxonomy,
                 tabular_names: tabular_names.as_ref(),
+                title_decodes: &title_decodes,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),

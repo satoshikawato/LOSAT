@@ -1232,10 +1232,11 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// read (the batch's search failed with that error).
 /// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
 /// failed read) is written to `diagnostics` there: after the batch's reader messages and request
-/// posts, before its prefetch; then NCBI's posts of the titles that the batch's Seq-aligns read
-/// (`common::database::batch_title_posts`, or those before a failed read,
-/// `ErrorAfterBatchReports::title_posts`), each one message of the run's BLAST archive (`archive`,
-/// `diag_log::Posts::write`).
+/// posts, before its prefetch; then NCBI's posts of the titles that the batch's Seq-aligns read,
+/// with those of the loads of a prefetch whose reads LOSAT writes
+/// (`common::database::batch_title_posts`, `TitleReads::Prefetched`; or those before a failed
+/// read, `ErrorAfterBatchReports::title_posts`), each one message of the run's BLAST archive
+/// (`archive`, `diag_log::Posts::write`).
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1307,6 +1308,7 @@ pub(super) fn batch_titles(
         &database.db,
         aligned,
         utf8.is_some(),
+        asks.titles == crate::algorithm::common::database::TitleReads::Prefetched,
         database.program,
     )?
     .write(diagnostics, archive)?;

@@ -247,6 +247,9 @@ pub(super) struct ReportedPrefetch {
     /// What the XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for
     /// the writer.
     pub(super) hit_loads: crate::report::db_subject::HitLoads,
+    /// NCBI's posts of each read of a reported subject's definition line by the formatter of a
+    /// run whose reads LOSAT writes (`shared::TitleReads::Prefetched`; `ListedTitles::title_decodes`).
+    pub(super) title_decodes: crate::report::query_warnings::TitleDecodes,
 }
 
 /// Check the reported subjects before any format is written and read each query batch's prefetch
@@ -916,23 +919,40 @@ pub(super) fn prefetch_reported_subjects(
         }
     }
     // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'
-    // (`query_warnings::query_posts` sorts them by the batch's first query, stably).
-    let posts = match (listed_titles.as_ref(), database) {
-        (Some(titles), Some(database)) => titles
-            .title_posts(
-                database,
-                hit_lists,
-                query_batches.iter().map(|batch| &batch.searched),
-            )?
-            .into_iter()
-            .chain(prefetch_posts)
-            .collect(),
-        _ => prefetch_posts,
+    // (`query_warnings::query_posts` sorts them by the batch's first query, stably), with those
+    // of the prefetches' loads where LOSAT writes the run's reads.
+    let prefetched = crate::algorithm::common::database::TitleReads::of_outfmts(
+        args.app.request_kind(),
+        outputs
+            .formats
+            .iter()
+            .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+    ) == crate::algorithm::common::database::TitleReads::Prefetched;
+    let (posts, title_decodes) = match (listed_titles.as_ref(), database) {
+        (Some(titles), Some(database)) => (
+            titles
+                .title_posts(
+                    database,
+                    hit_lists,
+                    query_batches.iter().map(|batch| &batch.searched),
+                    prefetched,
+                )?
+                .into_iter()
+                .chain(prefetch_posts)
+                .collect(),
+            if prefetched {
+                titles.title_decodes(database, hit_lists)
+            } else {
+                Default::default()
+            },
+        ),
+        _ => (prefetch_posts, Default::default()),
     };
     Ok(ReportedPrefetch {
         subject_reads,
         posts,
         hit_loads,
+        title_decodes,
     })
 }
 

@@ -387,6 +387,15 @@ impl ShownSubjects<'_> {
         }
     }
 
+    /// NCBI's posts of each read of a reported sequence's definition line by a custom table's
+    /// rows, by rank (`ReportedSubjects::title_decodes`); `None` for a subject set.
+    pub(crate) fn title_decodes(&self) -> Option<&crate::report::query_warnings::TitleDecodes> {
+        match self {
+            ShownSubjects::Database { reported, .. } => Some(reported.title_decodes()),
+            ShownSubjects::Fasta { .. } => None,
+        }
+    }
+
     /// The texts of the subjects that the query `ordinal`'s report reads one by one, which its
     /// writer places where it reads each (`ReportedSubjects::query_reads`); empty otherwise.
     pub(crate) fn query_reads(&self, ordinal: usize) -> &crate::report::query_warnings::QueryReads {

@@ -1645,3 +1645,51 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         Program::Blastp
     ));
 }
+
+// RG-KB 9b-2 (probe `K/kb/i9b2/probe`, NCBI BLAST+ 2.17.0): a row reads the subject's definition
+// line again, which posts each byte outside ' ' ..= '~' of its title once, only for its `sall*`
+// ids, taxonomy and title fields, whatever their number; not for `sseqid`, `sacc` or `sgi`.
+#[test]
+fn rows_read_the_definition_line_for_their_ids_taxonomy_and_titles() {
+    let spec = |kind: TabularKind, fields: &str| TabularSpec {
+        kind,
+        fields: parse_fields(fields),
+        delimiter: "\t".into(),
+    };
+    for fields in [
+        "std",
+        "qseqid sseqid sacc saccver sgi evalue",
+        "qseqid sstart send slen sseq",
+    ] {
+        assert!(
+            !spec(TabularKind::Tabular, fields).reads_defline(),
+            "{fields}"
+        );
+    }
+    for fields in [
+        "std stitle",
+        "qseqid salltitles",
+        "qseqid sallseqid",
+        "qseqid sallgi",
+        "qseqid sallacc",
+        "qseqid staxid",
+        "qseqid ssciname",
+        "qseqid scomname",
+        "qseqid sblastname",
+        "qseqid sskingdom",
+        "qseqid staxids",
+        "qseqid sscinames",
+        "qseqid scomnames",
+        "qseqid sblastnames",
+        "qseqid sskingdoms",
+        "stitle salltitles staxids",
+    ] {
+        for kind in [TabularKind::Tabular, TabularKind::Commented] {
+            assert!(spec(kind, fields).reads_defline(), "{fields}");
+        }
+        assert!(
+            !spec(TabularKind::TaxReport, fields).reads_defline(),
+            "{fields}"
+        );
+    }
+}

@@ -2178,6 +2178,23 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// NCBI's posts of each read of a reported subject's definition line by a formatter
+    /// (`shared::title_decodes`), by rank (the key of BLASTP's report writers), of the subjects of
+    /// the final `hit_lists`.
+    pub(super) fn title_decodes(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> crate::report::query_warnings::TitleDecodes {
+        shared::title_decodes(
+            database.seqdb(),
+            Self::reported(hit_lists)
+                .into_iter()
+                .map(|rank| (rank as u32, self.listed.ordinals[rank])),
+            self.program,
+        )
+    }
+
     /// Whether the stored title of the subject of rank `rank` held a byte outside `' '..='~'`.
     pub(super) fn has_replaced_title_bytes(&self, rank: usize) -> bool {
         self.replaced_title_bytes[rank]
@@ -2185,13 +2202,16 @@ impl ListedTitles<'_> {
 
     /// NCBI's posts of the titles that each batch of `batches` (the queries of each) reads where
     /// it makes the Seq-aligns of its final hit lists `hit_lists` (`read_titles`' order;
-    /// `shared::batch_title_posts`), each with the batch's first query; none where no reader met
-    /// a title with a byte outside ' ' ..= '~' (`SeqDb::replaced_titles`).
+    /// `shared::batch_title_posts`), and where each batch's prefetch loads its subjects
+    /// (`prefetch`: `shared::TitleReads::Prefetched`) the posts of those loads, each with the
+    /// batch's first query; none where no reader met a title with a byte outside ' ' ..= '~'
+    /// (`SeqDb::replaced_titles`).
     pub(super) fn title_posts<'b>(
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         batches: impl IntoIterator<Item = &'b std::ops::Range<usize>>,
+        prefetch: bool,
     ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
         let db = database.seqdb();
         let mut posts = Vec::new();
@@ -2206,7 +2226,7 @@ impl ListedTitles<'_> {
                 .utf8
                 .as_ref()
                 .is_some_and(|read| batch.contains(&read.query));
-            let batch_posts = shared::batch_title_posts(db, aligned, utf8, self.program)?;
+            let batch_posts = shared::batch_title_posts(db, aligned, utf8, prefetch, self.program)?;
             if !batch_posts.is_empty() {
                 posts.push((batch.start, batch_posts));
             }

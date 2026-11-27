@@ -2008,7 +2008,11 @@ fn search(
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
         let prefetch_format = super::database::prefetch_format(&outputs.formats);
-        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
+        let reads = super::database::CallReads::of(
+            database,
+            super::database::parsed_shown(&outputs.formats).titles,
+            || query_input.batches(batch_size),
+        );
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2821,6 +2825,16 @@ fn search(
             ungapped: args.ungapped,
             html: resolved.html.clone(),
             is_html: args.html,
+            title_decodes: match (&reported, database) {
+                (Some(reported), Some(database))
+                    if tabular_specs
+                        .iter()
+                        .any(crate::report::tabular::TabularSpec::reads_defline) =>
+                {
+                    database.title_decodes(reported, &results)
+                }
+                _ => Default::default(),
+            },
         };
         // The records of a subject set whose ids `-parse_deflines` read, by subject index.
         let records_parsed = if args.parse_deflines && reported.is_none() {

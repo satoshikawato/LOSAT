@@ -115,6 +115,8 @@ pub(crate) fn write_blastn_tabular(
 ) -> Result<()> {
     let spec = tab.spec;
     let needs = spec.needs();
+    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
+    let reads_defline = spec.reads_defline();
     // Whether the rows read their subject (`TabularSpec::subject_fetch`).
     let fetches = spec.subject_fetch(crate::blastinput::app::Program::Blastn)
         != crate::report::tabular::SubjectFetch::Never;
@@ -296,6 +298,19 @@ pub(crate) fn write_blastn_tabular(
                 query_length as i32,
             );
             for hsp in &hsp_list.hsps {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:839-842
+                // The row's read of the subject's definition line posts for the bytes of its
+                // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
+                // row's lookups.
+                if let Some(warnings) = warnings.as_deref_mut().filter(|warnings| {
+                    reads_defline
+                        && warnings.title_posts(hsp_list.oid)
+                        && table.reads_title(&subject)
+                }) {
+                    writer.write_all(&buf)?;
+                    buf.clear();
+                    warnings.title_read(hsp_list.oid, &mut *writer)?;
+                }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
                 if let (Some(names), Some(warnings), true) = (

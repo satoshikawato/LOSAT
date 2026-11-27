@@ -366,6 +366,24 @@ impl TblastxDatabase {
         })
     }
 
+    /// NCBI's posts of each read of a reported sequence's definition line by a formatter
+    /// (`shared::title_decodes`), by rank (the key of TBLASTX's report writers), of the ranks of
+    /// `reported`.
+    pub(crate) fn title_decodes(
+        &self,
+        reported: &ReportedSubjects,
+    ) -> crate::report::query_warnings::TitleDecodes {
+        shared::title_decodes(
+            &self.db,
+            reported
+                .ordinals
+                .iter()
+                .enumerate()
+                .map(|(rank, &ordinal)| (rank as u32, ordinal)),
+            PROGRAM,
+        )
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
     /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence that a
     /// report loads (`ReportedSubjects::loads`), by rank (every rank is made from a hit,

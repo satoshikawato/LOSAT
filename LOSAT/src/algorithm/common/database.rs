@@ -998,7 +998,7 @@ pub(crate) fn failed_batch_title_posts(
             }
         }
     }
-    batch_title_posts(db, title_reads.iter().copied(), utf8_posted, program)
+    batch_title_posts(db, title_reads.iter().copied(), utf8_posted, false, program)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
@@ -4838,12 +4838,9 @@ fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
 // where it makes a batch's Seq-aligns (`GetSeqIDs` of each subject of each query's hit list, through
 // the volume's cache of header records, `SeqDb::read_header_record`; `seq_align_title_posts`), at
 // each load of the subject's Bioseq (the prefetch, or the first read of a formatter: the header
-// again, and the registration of its ids, `CBlastDbDataLoader`), and at each read of the
-// formatters (two at each description line of outfmt 0 to 4 and each of outfmt 18's Seq-aligns
-// that it reads, one at each outfmt 0 alignment heading, outfmt 5, 13 to 16 `Hit` and row of a
-// table with a title, taxonomy or `sall*` field). Probes of line RG-KB 9(b),
-// `K/kb/i9b/agent1/probe` (1,368 cases, 5 programs). LOSAT writes the Seq-aligns' posts; the
-// loads' and the formatters' are not written yet.
+// through that cache, and the registration of its ids, `prefetch_title_posts`), and at each read of
+// the formatters ([`FormatterTitleReads`]). Probes of lines RG-KB 9(b) and 9b-2,
+// `K/kb/i9b/agent1/probe` (1,368 cases, 5 programs) and `K/kb/i9b2/probe`.
 /// What the reports of a run read of a reported database sequence's definition line besides
 /// NCBI's Seq-aligns of its batch ([`check_reported_title`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4854,7 +4851,12 @@ pub(crate) enum TitleReads {
     /// and the application is one of the five search programs (`blastn`, `blastp`, `blastx`,
     /// `tblastn`, `tblastx`; not `psiblast`, `rpsblast` or `rpstblastn`).
     SeqAligns,
-    /// The batches' prefetch, a formatter, `psiblast`, `rpsblast`, or `rpstblastn` reads it too.
+    /// Each batch's prefetch loads the subjects (`PRE_FETCH_SEQS_LIMIT` turns it off for no
+    /// batch: [`prefetch_may_be_off`]; `prefetch_title_posts`), and the run's one format reads the
+    /// definition line where LOSAT writes NCBI's posts of it ([`FormatterTitleReads::written`]).
+    Prefetched,
+    /// A formatter that LOSAT does not write the posts of, a prefetch that may be off, several
+    /// formats, `psiblast`, `rpsblast`, or `rpstblastn` reads it too.
     #[default]
     Reports,
 }
@@ -4882,11 +4884,12 @@ impl TitleReads {
     ///   making Seq-aligns in volume order before `s_CombineSearchSets` merges them and before
     ///   `PruneSeqalign` cuts them to `-max_target_seqs`.
     ///
-    /// None of those extra reads or per-batch/per-volume caches is modelled yet (deferred to 9b-2).
+    /// None of those extra reads or per-batch/per-volume caches is modelled.
     pub(crate) fn of_outfmts(
         app: crate::report::archive::options::RequestKind,
         outfmts: impl IntoIterator<Item = i32>,
     ) -> Self {
+        use crate::blastinput::app::ReportFormat;
         if matches!(
             app,
             crate::report::archive::options::RequestKind::Psiblast
@@ -4895,28 +4898,108 @@ impl TitleReads {
         ) {
             return TitleReads::Reports;
         }
-        let mut outfmts = outfmts.into_iter().peekable();
-        let first = outfmts.peek().copied();
-        let seq_aligns = first.is_some()
-            && outfmts.all(|number| {
-                crate::blastinput::app::ReportFormat::from_number(number)
-                    .is_some_and(crate::blastinput::app::ReportFormat::writes_seqaligns)
-            });
+        let mut outfmts = outfmts.into_iter();
+        let Some(first) = outfmts.next() else {
+            return TitleReads::Reports;
+        };
+        let second = outfmts.next();
+        // `s_IsPrefetchFormat` takes the tables 10 and 20 as 6 (cited at `PrefetchFormat`).
+        let prefetch = PrefetchFormat::of(
+            match ReportFormat::from_number(first) {
+                Some(
+                    ReportFormat::CommaSeparatedValues
+                    | ReportFormat::CommaSeparatedValuesWithHeader,
+                ) => ReportFormat::Tabular as i32,
+                _ => first,
+            },
+            app,
+        );
         // The Seq-annots and the archive are formats that the prefetch takes as they are.
-        if seq_aligns && !prefetches_subjects(first.map(|outfmt| PrefetchFormat::of(outfmt, app))) {
-            TitleReads::SeqAligns
+        let seq_aligns = |number: i32| {
+            ReportFormat::from_number(number).is_some_and(ReportFormat::writes_seqaligns)
+        };
+        if seq_aligns(first)
+            && second.into_iter().chain(outfmts).all(seq_aligns)
+            && !prefetches_subjects(Some(prefetch))
+        {
+            return TitleReads::SeqAligns;
+        }
+        let written = ReportFormat::from_number(first)
+            .is_some_and(|format| FormatterTitleReads::of(format).written());
+        if second.is_none()
+            && written
+            && prefetches_subjects(Some(prefetch))
+            && !prefetch_may_be_off(prefetch)
+        {
+            TitleReads::Prefetched
         } else {
             TitleReads::Reports
         }
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:809-842
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1231-1268
+// Every read of a formatter decodes the header that the subject's Bioseq holds
+// (`CSeqDB::ExtractBlastDefline`), not through the volume's cache: one that holds the stored bytes
+// posts each time (`SeqDb::rewrites_header_at`). Counted by the probes of line RG-KB 9(b) (the
+// 05:31 entry of `K/kb/i9b/agent1/logs/progress.log`) and 9b-2, the same in the five programs,
+// with and without `-html`.
+/// The reads of a reported subject's definition line that NCBI's formatter of one format makes:
+/// the one table of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FormatterTitleReads {
+    /// None: SAM (17), and the formats that write the Seq-aligns as they are (8, 9, 11, 12).
+    None,
+    /// One at each row whose fields read the definition line (`TabularSpec::reads_defline`): the
+    /// tables 6, 7, 10 and 20.
+    Rows,
+    /// Two at each description line, and one at each alignment heading where `headings`: outfmt
+    /// 0 (`headings`), 1 to 4.
+    Pairwise { headings: bool },
+    /// One at each `Hit`: BLAST XML (5), and the XML2 and JSON formats (13 to 16), which read
+    /// all of a query's before its report.
+    Hits,
+    /// Two at each Seq-align of a subject: the organism report (18).
+    Hsps,
+}
+
+impl FormatterTitleReads {
+    /// The reads of the formatter of `format`.
+    pub(crate) fn of(format: crate::blastinput::app::ReportFormat) -> Self {
+        use crate::blastinput::app::ReportFormat::*;
+        match format {
+            Pairwise => FormatterTitleReads::Pairwise { headings: true },
+            QueryAnchoredIdentities
+            | QueryAnchoredNoIdentities
+            | FlatQueryAnchoredIdentities
+            | FlatQueryAnchoredNoIdentities => FormatterTitleReads::Pairwise { headings: false },
+            Xml | Json | Xml2 | JsonS | Xml2S => FormatterTitleReads::Hits,
+            Tabular
+            | TabularWithComments
+            | CommaSeparatedValues
+            | CommaSeparatedValuesWithHeader => FormatterTitleReads::Rows,
+            TaxFormat => FormatterTitleReads::Hsps,
+            AsnText | AsnBinary | ArchiveFormat | JsonSeqalign | Sam => FormatterTitleReads::None,
+        }
+    }
+
+    /// Whether LOSAT writes NCBI's posts of these reads ([`TitleReads::Prefetched`]): the tables'
+    /// rows, and the formats that read nothing.
+    pub(crate) fn written(self) -> bool {
+        matches!(self, FormatterTitleReads::None | FormatterTitleReads::Rows)
+    }
+}
+
 /// LOSAT's refusal of a reported database sequence `ordinal` of `db` whose stored title held a
 /// byte outside ' ' ..= '~' (`replaced_bytes`, `StoredTitle`) where the run's reports read its
-/// definition line besides the Seq-aligns (`reads`, [`TitleReads`]), whose posts LOSAT does not
-/// write yet, or where its volume filters the header records it reads (a seqid or taxid list, of
-/// the search or of an alias, or an OID mask type; `SeqDb::filters_header_sets`): NCBI's traceback
-/// then reads the headers of its fetches too (`check_oid_exclusion`), which LOSAT does not model.
+/// definition line where LOSAT does not write NCBI's posts of it (`reads`, [`TitleReads`]; with
+/// the prefetch, in a database with parsed Seq-ids, whose Seq-align ids NCBI's prefetch orders in
+/// part by the addresses of its objects, or where an environment variable of NCBI's object
+/// manager is set, which changes what it keeps between the batches: `default_object_manager`),
+/// or where its volume filters the header records it reads (a seqid or taxid list, of the search
+/// or of an alias, or an OID mask type; `SeqDb::filters_header_sets`): NCBI's traceback then reads
+/// the headers of its fetches too (`check_oid_exclusion`), which LOSAT does not model.
 pub(crate) fn check_reported_title(
     db: &SeqDb,
     ordinal: u32,
@@ -4928,7 +5011,8 @@ pub(crate) fn check_reported_title(
         && (reads == TitleReads::Reports
             || db
                 .location_of(ordinal)
-                .is_none_or(|at| db.filters_header_sets(at)))
+                .is_none_or(|at| db.filters_header_sets(at))
+            || (reads == TitleReads::Prefetched && !prefetch_title_posts_known(db)))
     {
         bail!(
             "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}",
@@ -4936,6 +5020,14 @@ pub(crate) fn check_reported_title(
         );
     }
     Ok(())
+}
+
+/// Whether LOSAT knows what the loads of NCBI's prefetch of the subjects of `db` post
+/// ([`prefetch_title_posts`]): a database without parsed Seq-ids (whose `gnl|BL_ORD_ID|n` handles
+/// the prefetch orders by their numbers alone), with NCBI's object manager at its defaults.
+#[cold]
+fn prefetch_title_posts_known(db: &SeqDb) -> bool {
+    matches!(db.has_parsed_seqids(), Ok(false)) && default_object_manager()
 }
 
 /// NCBI's posts where it makes the Seq-aligns of a batch's results (`GetSeqIDs` of each subject,
@@ -4960,16 +5052,26 @@ pub(crate) fn seq_align_title_posts(
 }
 
 /// [`seq_align_title_posts`] of a batch whose reads posted NCBI's warning of its first read of a
-/// UTF8String header or not (`utf8_posted`): with both, LOSAT's refusal, which names the first of
+/// UTF8String header or not (`utf8_posted`), followed where the batch's prefetch loads its subjects
+/// (`prefetch`: the run's reads are [`TitleReads::Prefetched`]) by the posts of those loads
+/// ([`prefetch_title_posts`]): with that warning, LOSAT's refusal, which names the first of
 /// `reads` whose title posts (the order of that warning among the Seq-aligns' posts is not
 /// modelled).
 pub(crate) fn batch_title_posts(
     db: &SeqDb,
     reads: impl IntoIterator<Item = u32> + Clone,
     utf8_posted: bool,
+    prefetch: bool,
     program: &str,
 ) -> Result<crate::report::diag_log::Posts> {
-    let posts = seq_align_title_posts(db, reads.clone(), program);
+    let mut posts = seq_align_title_posts(db, reads.clone(), program);
+    if prefetch {
+        if db.replaced_titles() {
+            prefetch_title_posts(db, &mut reads.clone().into_iter(), &mut posts, program)?;
+        } else {
+            db.note_unmodelled_prefetch();
+        }
+    }
     if utf8_posted && !posts.is_empty() {
         let prefix = program.to_ascii_lowercase();
         let posting = reads.into_iter().find(|&ordinal| {
@@ -4982,6 +5084,158 @@ pub(crate) fn batch_title_posts(
         );
     }
     Ok(posts)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:755-772
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1111-1149
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-406
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:259-271
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:58
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:74-110
+// The prefetch loads the batch's Seq-align ids in the order of their Seq-id handles (by packed
+// number: `gnl|BL_ORD_ID|1` to the last OID, then `gnl|BL_ORD_ID|0`; [`prefetch_places`]), each
+// subject once, unless NCBI's data source still holds its blob from a batch before
+// (`SeqDb::batch_blobs`). A load reads the subject's header through its volume's cache (`x_GetOid`'s
+// `GetSeqIDs`, `GetBioseqNoData`: the first of them may read the record, the others find it), then
+// decodes the header that the new Bioseq holds to register its ids (`RegisterIds`), which posts
+// unless the Bioseq holds a header written again (`SeqDb::rewrites_header_at`).
+/// The posts of the loads of a batch's prefetch of the subjects of its Seq-aligns `reads` (as
+/// [`seq_align_title_posts`] takes them), after its Seq-aligns' `posts`. LOSAT's refusal where
+/// what a load that posts does is not known: NCBI's data source may hold its blob or not (a release
+/// of more than it keeps, in an order from the addresses of NCBI's objects), NCBI's order of the
+/// batch's loads is not known ([`MANY_IDS`]), or a subject whose blob it may hold or not takes the
+/// same slot of the header cache as one whose title posts (whether its load reads the record
+/// decides whether the other's finds its own).
+#[cold]
+#[inline(never)]
+fn prefetch_title_posts(
+    db: &SeqDb,
+    reads: &mut dyn Iterator<Item = u32>,
+    posts: &mut crate::report::diag_log::Posts,
+    program: &str,
+) -> Result<()> {
+    use crate::seqdb::BlobHeld;
+    let prefix = program.to_ascii_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    // Each subject once, with its place and what a read of its title posts.
+    let subjects: Vec<(u32, Option<crate::seqdb::SeqLocation>, Vec<Vec<u8>>)> = reads
+        .filter(|&ordinal| seen.insert(ordinal))
+        .map(|ordinal| {
+            let at = db.location_of(ordinal);
+            let texts = at.map_or_else(Vec::new, |at| db.title_posts_at(at, &prefix));
+            (ordinal, at, texts)
+        })
+        .collect();
+    let held = db.batch_blobs(
+        &subjects
+            .iter()
+            .map(|(ordinal, _, texts)| (*ordinal, !texts.is_empty()))
+            .collect::<Vec<_>>(),
+    );
+    let places = prefetch_places(
+        db,
+        &subjects
+            .iter()
+            .map(|&(ordinal, _, _)| (ordinal, None))
+            .collect::<Vec<_>>(),
+    );
+    let refuse = |ordinal: u32, why: &str| -> anyhow::Error {
+        anyhow::anyhow!(
+            "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line), in a query batch whose prefetch LOSAT does not model: {why}; this is not supported by LOSAT's {program}",
+            db.oid(ordinal)
+        )
+    };
+    let slot = |at: Option<crate::seqdb::SeqLocation>| at.map(|at| db.header_slot(at));
+    for (index, (ordinal, at, texts)) in subjects.iter().enumerate() {
+        if texts.is_empty() {
+            continue;
+        }
+        if held[index] == BlobHeld::Unsure {
+            return Err(refuse(*ordinal, "NCBI's data source may still hold its sequence from a batch before, after a release of more sequences than it keeps (10), in an order that comes from the addresses of NCBI's objects"));
+        }
+        if let (BlobHeld::Out, Some(why)) = (held[index], places[index].many) {
+            return Err(refuse(*ordinal, why));
+        }
+        // Whether such a load reads its record decides what the slot holds for this subject's
+        // load, and for its reads in the batches after, held or not.
+        if let Some((other, _)) =
+            subjects
+                .iter()
+                .zip(&held)
+                .find(|((other, at_other, _), state)| {
+                    **state == BlobHeld::Unsure
+                        && *other != *ordinal
+                        && slot(*at_other) == slot(*at)
+                })
+        {
+            return Err(refuse(*ordinal, &format!("NCBI's data source may still hold the sequence {} from a batch before, whose load would read the header record that takes the same slot of the volume's cache", db.oid(other.0))));
+        }
+    }
+    let mut order: Vec<usize> = (0..subjects.len()).collect();
+    order.sort_by_key(|&index| places[index].order);
+    for index in order {
+        let (_, Some(at), texts) = &subjects[index] else {
+            continue;
+        };
+        if held[index] != BlobHeld::Out {
+            continue;
+        }
+        let read = db.read_header_record(*at);
+        if texts.is_empty() {
+            continue;
+        }
+        // An error (`eDiag_Error`), which a BLAST archive saves as one message.
+        if read {
+            for text in texts {
+                posts.post(crate::report::diag_log::ERROR, text.clone());
+            }
+        }
+        if !db.rewrites_header_at(*at) {
+            for text in texts {
+                posts.post(crate::report::diag_log::ERROR, text.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// NCBI's posts of each read of the definition lines of the reported database subjects that a
+/// formatter makes ([`FormatterTitleReads`]): `subjects`, each `(key, ordinal)` (the key that the
+/// report's writer gives it, its ordinal id in `db`), as [`crate::report::query_warnings::TitleDecodes`].
+/// Only those whose read posts (a title with a byte outside ' ' ..= '~', in a Bioseq that holds the
+/// stored header: `SeqDb::rewrites_header_at`); none where no reader met such a title
+/// (`SeqDb::replaced_titles`).
+pub(crate) fn title_decodes(
+    db: &SeqDb,
+    subjects: impl IntoIterator<Item = (u32, u32)>,
+    program: &str,
+) -> crate::report::query_warnings::TitleDecodes {
+    if !db.replaced_titles() {
+        return Default::default();
+    }
+    title_decode_reads(db, &mut subjects.into_iter(), program)
+}
+
+/// [`title_decodes`] of a run whose reader met such a title.
+#[cold]
+#[inline(never)]
+fn title_decode_reads(
+    db: &SeqDb,
+    subjects: &mut dyn Iterator<Item = (u32, u32)>,
+    program: &str,
+) -> crate::report::query_warnings::TitleDecodes {
+    let prefix = program.to_ascii_lowercase();
+    let mut decodes = crate::report::query_warnings::TitleDecodes::default();
+    for (key, ordinal) in subjects {
+        let Some(at) = db.location_of(ordinal) else {
+            continue;
+        };
+        let texts = db.title_posts_at(at, &prefix);
+        if !texts.is_empty() && !db.rewrites_header_at(at) {
+            decodes.insert(key, texts.concat());
+        }
+    }
+    decodes
 }
 
 /// [`seq_align_title_posts`] of a run whose reader met such a title.

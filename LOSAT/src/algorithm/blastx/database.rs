@@ -515,6 +515,9 @@ pub(crate) struct ReportedSubjects {
     /// Whether the batch's reports read only through the prefetch (`reports && !reads && prefetched`),
     /// for `check_handle_loads`'s refusal suffix (`PREFETCH_READS_IT`).
     handle_loads_prefetch_only: bool,
+    /// NCBI's posts of each read of a reported sequence's definition line by a custom table's
+    /// rows, by rank (`shared::title_decodes`; `title_decodes`).
+    title_decodes: crate::report::query_warnings::TitleDecodes,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -1068,6 +1071,19 @@ impl ReportedSubjects {
                     .collect(),
             );
         }
+        // NCBI's posts of each read of a reported sequence's definition line by a table's rows,
+        // by rank (`shared::title_decodes`, `report::query_warnings::ReadCursor::title_read`).
+        if reports && tabular_reads {
+            reported.title_decodes = shared::title_decodes(
+                &database.db,
+                reported
+                    .ordinals
+                    .iter()
+                    .enumerate()
+                    .map(|(rank, &ordinal)| (rank as u32, ordinal)),
+                database.program,
+            );
+        }
         Ok(reported)
     }
 
@@ -1272,6 +1288,12 @@ impl ReportedSubjects {
     /// batch prefetched).
     pub(crate) fn query_fetches(&self, ordinal: usize) -> &[u8] {
         self.query_fetches.get(&ordinal).map_or(&[], Vec::as_slice)
+    }
+
+    /// NCBI's posts of each read of a reported sequence's definition line by a custom table's
+    /// rows, by rank (empty where none posts).
+    pub(crate) fn title_decodes(&self) -> &crate::report::query_warnings::TitleDecodes {
+        &self.title_decodes
     }
 
     /// The texts of the subjects that the query `ordinal`'s report reads one by one, where its

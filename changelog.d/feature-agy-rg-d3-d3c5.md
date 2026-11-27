@@ -3,5 +3,11 @@
   core shared with `blastdbcmd` and search reports (`x_SetFlags`, `x_SetPrefix`, `x_SetSuffix`,
   `x_AdjustProteinTitleSuffix`, `x_SetTitleFromBioSrc`, `x_SetTitleFromProtein`, `NC`/`NM`/`NR`,
   `WGS`/`TSA`/`TLS`, `PDB`, patent, segmented, and map titles, backed by a compact per-TSE feature
-  index that drops raw `Seq-annot` trees immediately). Only `AutoDef` (`AutodefOptions` on an
-  untitled non-TLS, non-RefSeq-contig nucleotide sequence) remains refused (`D3c-6`).
+  index that drops raw `Seq-annot` trees immediately). Feature locations are read as NCBI's
+  object manager reads them: `IsSameBioseq` (`CSeq_id::Match`, the Seq-id handle, then the
+  scope) for the strand, the product and overlaps, the scope's weak matching (an accession
+  without a version, a name, another text alternative) to find a location's Bioseq, and the
+  reverse matching of a Bioseq's own Seq-ids for the features it has. `AutoDef`
+  (`AutodefOptions` on a nucleotide sequence without a title, not TLS and not a RefSeq contig)
+  remains refused (`D3c-6`), and so is a title made from the features where NCBI picks a
+  location's Bioseq by the order of handles in memory.

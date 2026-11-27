@@ -10,9 +10,12 @@
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1177-1253
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-292,1359-1435
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::sync::OnceLock;
+
+use rustc_hash::{FxHashMap, FxHasher};
 
 use super::fasta_source::{post_seq_id_warning, Warn};
 use super::WriteDbError;
@@ -26,9 +29,12 @@ use crate::report::defline::titles::cds_except_is_low_quality;
 use crate::report::defline::{classify_seq_ids_full, generate_defline_core};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::seqid::defline_set::{compare, object_id_number, Sic};
 use crate::seqid::label;
-use crate::seqid::mask_handle::{mask_handle_key, GiimTree, TreeHandle};
-use crate::seqid::model::ParsedSeqId;
+use crate::seqid::mask_handle::{
+    handle_tree, mask_handle_key, textseq_packs, GiimTree, TreeHandle,
+};
+use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId, TextseqId};
 
 /// Cached ASN.1 table member indices for `CDeflineGenerator` descriptor/feature extraction.
 struct DeflineSchema {
@@ -331,21 +337,26 @@ pub(crate) enum HandleKey {
     Giim(i32, usize),
 }
 
-/// Interner mapping `ParsedSeqId` to `HandleKey` (including `Giim` handles) and formatted FASTA.
+/// Index of a Seq-id of the TSE's feature and segment locations in `SeqIdInterner`.
+type IdRef = u32;
+
+/// The Seq-ids of the TSE's feature and segment locations with their `CSeq_id_Handle` keys
+/// (`None` for a Textseq-id with neither accession nor name). One entry per distinct Seq-id; a
+/// `giim` id or one without a key gets an entry per occurrence, since every
+/// `CSeq_id_Handle::GetHandle` call may give it another handle (`mask_handle_key`, `GiimTree`).
 #[derive(Default)]
 pub(crate) struct SeqIdInterner {
     giim: GiimTree,
+    ids: Vec<ParsedSeqId>,
+    keys: Vec<Option<HandleKey>>,
+    by_id: FxHashMap<ParsedSeqId, IdRef>,
+    last: Option<IdRef>,
+    /// The Seq-ids of the location being extracted, in `CSeq_loc_CI` order (kept for reuse).
+    ci: Vec<IdRef>,
 }
 
 impl SeqIdInterner {
-    pub(crate) fn key_and_fasta(&mut self, id: &ParsedSeqId) -> (Option<HandleKey>, Vec<u8>) {
-        let hkey = self.key_only(id);
-        let mut fasta = Vec::new();
-        label::fasta(id, &mut fasta);
-        (hkey, fasta)
-    }
-
-    pub(crate) fn key_only(&mut self, id: &ParsedSeqId) -> Option<HandleKey> {
+    fn key_only(&mut self, id: &ParsedSeqId) -> Option<HandleKey> {
         match mask_handle_key(id) {
             Ok(Some(key)) => Some(HandleKey::Bytes(key)),
             Ok(None) => None,
@@ -368,12 +379,102 @@ impl SeqIdInterner {
         let first = ParsedSeqId::Giim(self.giim.made_from(num, h).clone());
         (h, first)
     }
+
+    /// The entry of `id`, made on its first occurrence (its handle key then taken in the order
+    /// NCBI's object manager takes it while it indexes the TSE).
+    fn intern(&mut self, id: &ParsedSeqId) -> IdRef {
+        if let Some(last) = self.last {
+            let at = last as usize;
+            if matches!(self.keys[at], Some(HandleKey::Bytes(_))) && self.ids[at] == *id {
+                return last;
+            }
+        }
+        if !matches!(id, ParsedSeqId::Giim(_)) {
+            if let Some(&found) = self.by_id.get(id) {
+                self.last = Some(found);
+                return found;
+            }
+        }
+        let key = self.key_only(id);
+        let new = IdRef::try_from(self.ids.len()).expect("fewer than 2^32 Seq-ids in one TSE");
+        if matches!(key, Some(HandleKey::Bytes(_))) {
+            self.by_id.insert(id.clone(), new);
+        }
+        self.ids.push(id.clone());
+        self.keys.push(key);
+        self.last = Some(new);
+        new
+    }
+
+    fn id(&self, r: IdRef) -> &ParsedSeqId {
+        &self.ids[r as usize]
+    }
+
+    fn key(&self, r: IdRef) -> Option<&HandleKey> {
+        self.keys[r as usize].as_ref()
+    }
+
+    /// `CSeq_id::Equals` (`CSeq_loc::GetId` compares every Seq-id with the first so).
+    fn equals(&self, a: IdRef, b: IdRef) -> bool {
+        a == b || self.id(a) == self.id(b)
+    }
+
+    /// `IsSameBioseq` without a scope: `CSeq_id::Match`, or one `CSeq_id_Handle`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-321
+    fn same_free(&self, a: IdRef, b: IdRef) -> bool {
+        let key = self.key(a);
+        (a == b && key.is_some())
+            || compare(self.id(a), self.id(b)) == Sic::Yes
+            || (key.is_some() && key == self.key(b))
+    }
+
+    /// Whether `s_GetId` (or `CSeq_loc::GetId`) without a scope finds one Bioseq for the Seq-ids
+    /// `ids` of a location in `CSeq_loc_CI` order: `IsOneBioseq` with no scope.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-357,385-389
+    fn one_free(&self, ids: &[IdRef]) -> bool {
+        let Some((&first, rest)) = ids.split_first() else {
+            return false;
+        };
+        rest.iter().all(|&x| self.equals(first, x))
+            || rest.iter().all(|&x| self.same_free(first, x))
+    }
+
+    /// `CSeq_loc::GetId` and `s_GetId` of a location whose Seq-ids in `CSeq_loc_CI` order are
+    /// `ids`: the first Seq-id, whether every Seq-id `Equals` it, and the Seq-ids that only the
+    /// scope can find on its Bioseq.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-357
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+    fn loc_ids(&self, ids: &[IdRef]) -> (Option<IdRef>, bool, LocIds) {
+        let Some((&first, rest)) = ids.split_first() else {
+            return (None, false, LocIds::None);
+        };
+        let mut exact = true;
+        let mut scoped: Vec<IdRef> = Vec::new();
+        for &x in rest {
+            exact = exact && self.equals(first, x);
+            if !self.same_free(first, x) {
+                scoped.push(x);
+            }
+        }
+        let form = if scoped.is_empty() {
+            LocIds::Free
+        } else {
+            LocIds::Scoped(Box::new(ScopedIds {
+                strand: 0,
+                ids: scoped.into_boxed_slice(),
+            }))
+        };
+        (Some(first), exact, form)
+    }
 }
 
 /// One interval/whole/point piece of a `Seq-loc`.
 #[derive(Clone, Debug)]
 struct LocPiece {
-    id_key: Option<HandleKey>,
+    id: Option<IdRef>,
     from: u64,
     /// Exclusive upper bound (`to + 1`) when `is_whole` is false.
     to_open: u64,
@@ -382,36 +483,55 @@ struct LocPiece {
     strand: i32,
 }
 
-/// Deferred `s_GetStrand` candidate and top-level `empty` Seq-id keys kept only for complex
-/// locations whose scope-free `IsOneBioseq` check failed; resolved in `build_indices` once
-/// `id_to_bioseq` is populated.
+/// How `s_GetId` finds the Seq-ids of a location on one Bioseq.
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-357
+#[derive(Clone, Debug, Default)]
+enum LocIds {
+    /// The location has no Seq-id (`s_GetId` finds none).
+    #[default]
+    None,
+    /// Every Seq-id `Match`es the first or has its handle: one Bioseq without a scope.
+    Free,
+    /// Some Seq-ids only the scope can find on the first one's Bioseq (`build_indices`).
+    Scoped(Box<ScopedIds>),
+}
+
+/// The Seq-ids of a location that neither `Match` its first Seq-id nor have its handle, and the
+/// `s_GetStrand` that `GetStrand` gives when the scope finds them on its Bioseq.
 #[derive(Clone, Debug)]
-struct DeferredStrand {
+struct ScopedIds {
     strand: i32,
-    empty_ids: Box<[Option<HandleKey>]>,
+    ids: Box<[IdRef]>,
 }
 
 /// Compact representation of a `Seq-loc` extracted during the TSE walk.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CompactLoc {
     pieces: Vec<LocPiece>,
-    /// `sequence::GetStrand` value for `s_GetCdregionLabel` ORF formatting and overlap checks.
+    /// `sequence::GetStrand` with the TSE scope (`s_GetCdregionLabel` ORF strand); set in
+    /// `build_indices` for `LocIds::Scoped`.
     strand: i32,
     /// Whether the top-level `Seq-loc` is `mix` or `packed-int` (`CAnnotObjectType_Less`).
     is_complex: bool,
-    /// Candidate `s_GetStrand` value and any `empty` Seq-id keys kept when pieces or `empty`
-    /// sub-locations name multiple `Seq-id` keys; applied in `build_indices` only when
-    /// `loc_single_bioseq_with_empties` resolves all pieces and `empty` IDs to one Bioseq
-    /// (`IsSameBioseq`).
+    /// Whether every Seq-id `Equals` the first (`CSeq_loc::GetId` is set).
+    exact: bool,
+    /// The first Seq-id in `CSeq_loc_CI` order, `empty` sub-locations included (`s_GetId`).
+    first_id: Option<IdRef>,
+    ids: LocIds,
+}
+
+impl CompactLoc {
+    /// `sequence::GetStrand` without a scope (`s_TestForOverlapEx`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-    deferred_strand: Option<Box<DeferredStrand>>,
-    /// FASTA string of the first Seq-id (for `cannot find sequence` error on missing product).
-    first_id_fasta: Option<Vec<u8>>,
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:481-513,1874-1891
+    fn strand_free(&self) -> i32 {
+        if !self.exact && matches!(self.ids, LocIds::Scoped(_)) {
+            0
+        } else {
+            self.strand
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -597,6 +717,92 @@ pub(crate) struct TseFeatureIndex {
     cds_by_product: HashMap<usize, Vec<usize>>,
     biosrcs_by_bioseq: HashMap<usize, SpanIndex>,
     gene_by_feat_id: HashMap<FeatObjId, Vec<usize>>,
+    /// The number of Bioseqs of the TSE (keys of unresolved Seq-ids in `seq_key` follow them).
+    n_bioseqs: usize,
+    /// Per interned Seq-id: the Bioseq the scope finds for it (`resolve_ids`).
+    bio_of: Vec<Option<u32>>,
+    /// Per interned Seq-id: the Bioseqs whose features include a location on it, as a range of
+    /// `attach_bios` (`attach_start[r]..attach_start[r + 1]`).
+    attach_start: Vec<u32>,
+    attach_bios: Vec<u32>,
+    /// Per interned Seq-id: the first Seq-id with its handle (its key when the scope finds none).
+    unresolved_key: Vec<u32>,
+    /// Whether some Seq-id is found by NCBI's scope in an order LOSAT cannot know (see
+    /// `resolve_ids`); a title that reads the features then is refused.
+    unknowable: bool,
+}
+
+/// The ways NCBI's scope finds a Bioseq for a Seq-id that no Bioseq of the TSE has.
+enum Found {
+    None,
+    One(u32),
+    Unknowable,
+}
+
+/// A Bioseq Seq-id that NCBI's scope finds for another Seq-id (`GetMatchingHandles`): its Bioseq,
+/// its tree and its version (`IsBetterVersion` ranks only within one tree).
+struct Candidate {
+    bio: u32,
+    tree: u8,
+    version: Option<i32>,
+}
+
+/// Bioseq Seq-ids by the upper-case hash of a text field (accession or name), for the lookups of
+/// `resolve_ids`.
+struct FieldIndex<'a> {
+    entries: Vec<(u64, u32, &'a ParsedSeqId)>,
+}
+
+impl<'a> FieldIndex<'a> {
+    fn new(bioseq_ids: &[&'a [ParsedSeqId]], field: fn(&TextseqId) -> Option<&[u8]>) -> Self {
+        let mut entries = Vec::new();
+        for (bio, ids) in bioseq_ids.iter().enumerate() {
+            let bio = u32::try_from(bio).expect("fewer than 2^32 Bioseqs in one TSE");
+            for id in ids.iter() {
+                if let Some(text) = id.textseq().and_then(field) {
+                    entries.push((fold_hash(text), bio, id));
+                }
+            }
+        }
+        entries.sort_unstable_by_key(|e| (e.0, e.1));
+        Self { entries }
+    }
+
+    /// The Bioseq Seq-ids whose field is `text` in any letter case.
+    fn find<'s>(
+        &'s self,
+        text: &'s [u8],
+        field: fn(&TextseqId) -> Option<&[u8]>,
+    ) -> impl Iterator<Item = (u32, &'a ParsedSeqId)> + 's {
+        let hash = fold_hash(text);
+        let start = self.entries.partition_point(|e| e.0 < hash);
+        self.entries[start..]
+            .iter()
+            .take_while(move |e| e.0 == hash)
+            .filter(move |e| {
+                e.2.textseq()
+                    .and_then(field)
+                    .is_some_and(|t| t.eq_ignore_ascii_case(text))
+            })
+            .map(|e| (e.1, e.2))
+    }
+}
+
+fn text_accession(text: &TextseqId) -> Option<&[u8]> {
+    text.accession.as_deref()
+}
+
+fn text_name(text: &TextseqId) -> Option<&[u8]> {
+    text.name.as_deref()
+}
+
+/// A hash of `bytes` in upper case.
+fn fold_hash(bytes: &[u8]) -> u64 {
+    let mut hasher = FxHasher::default();
+    for &c in bytes {
+        hasher.write_u8(c.to_ascii_uppercase());
+    }
+    hasher.finish()
 }
 
 impl TseFeatureIndex {
@@ -823,47 +1029,240 @@ impl TseFeatureIndex {
         }
     }
 
-    /// Resolves `sequence::GetStrand` for multi-`Seq-id` complex locations once `id_to_bioseq`
-    /// is populated, applying the cached `s_GetStrand` value only when all pieces and `empty`
-    /// Seq-ids resolve to one Bioseq (`IsSameBioseq`).
+    /// Finds for every interned Seq-id the Bioseq that NCBI's scope finds (`x_GetSeqMatch`: the
+    /// Bioseq with its handle, else the best of `GetMatchingHandles` with weak matching) and the
+    /// Bioseqs whose features include a location on it (`GetTSESetWithAnnots`: the reverse
+    /// matches of each Bioseq Seq-id in its own tree).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389,481-513
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-    fn resolve_deferred_strands(&mut self) {
-        for i in 0..self.genes.len() {
-            if let Some(def) = self.genes[i].loc.deferred_strand.take() {
-                if self
-                    .loc_single_bioseq_with_empties(&self.genes[i].loc, &def.empty_ids)
-                    .is_some()
-                {
-                    self.genes[i].loc.strand = def.strand;
-                }
-            }
+    /// The scope finds for a text Seq-id X that no Bioseq has, in every text tree: the Bioseq
+    /// Seq-ids Y with the accession of X in any letter case and, when X has a version, that
+    /// version; when X has a name, the Y with that name in any letter case (not when both have an
+    /// accession) and, when X has a release, that release (a `swissprot` Y without one also for
+    /// `reviewed` and `unreviewed`); when X is a `pir` or `prf` accession alone, the Y that are
+    /// that text as a name alone. Of several Bioseqs, `IsBetter` keeps a Y with a version over one
+    /// without and a higher version, within one tree; other ties go by the order of the handles in
+    /// memory, which LOSAT cannot know (`unknowable`), as do a packed `pir` or `prf` X whose name
+    /// match depends on the accessions NCBI has seen before, and a PDB Seq-id where a Bioseq has
+    /// another handle of its molecule and chain (PDB matching is not ported). A `local` Seq-id
+    /// finds the integer of its number string and the reverse, a `general` one the same within
+    /// its database.
+    ///
+    /// A feature location on a text Seq-id X is under a Bioseq Seq-id Y of the tree of X with its
+    /// accession in any letter case when X has no version or the version of Y; on another Seq-id,
+    /// under the Bioseq with its handle.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_mapper.cpp:186-211,301-311
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1245-1295,1355-1394,1438-1510
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1564-1625,1845-1890,2034-2058
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2696-2760,3467-3481,3552-3622
+    /// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1019-1056
+    fn resolve_ids(&mut self, bioseq_ids: &[&[ParsedSeqId]]) {
+        self.n_bioseqs = bioseq_ids.len();
+        let n = self.interner.ids.len();
+        if n == 0 {
+            return;
         }
-        for i in 0..self.cds.len() {
-            if let Some(def) = self.cds[i].loc.deferred_strand.take() {
-                if self
-                    .loc_single_bioseq_with_empties(&self.cds[i].loc, &def.empty_ids)
-                    .is_some()
-                {
-                    self.cds[i].loc.strand = def.strand;
+        let accessions = FieldIndex::new(bioseq_ids, text_accession);
+        let mut names: Option<FieldIndex<'_>> = None;
+        let mut pdb_keys: Option<FxHashMap<PdbKey, Vec<Option<HandleKey>>>> = None;
+        let mut bio_of = Vec::with_capacity(n);
+        let mut attach_start = Vec::with_capacity(n + 1);
+        let mut attach_bios = Vec::with_capacity(n);
+        let mut first_with_key: FxHashMap<&HandleKey, u32> = FxHashMap::default();
+        let mut unresolved_key = Vec::with_capacity(n);
+        let mut unknowable = false;
+        let mut cands: Vec<Candidate> = Vec::new();
+        let bio_with_id = |id: &ParsedSeqId| match mask_handle_key(id) {
+            Ok(Some(key)) => self
+                .id_to_bioseq
+                .get(&HandleKey::Bytes(key))
+                .map(|&b| b as u32),
+            _ => None,
+        };
+        for (r, id) in self.interner.ids.iter().enumerate() {
+            let r32 = r as u32;
+            let key = self.interner.keys[r].as_ref();
+            let own = key
+                .and_then(|k| self.id_to_bioseq.get(k))
+                .map(|&b| b as u32);
+            unresolved_key.push(match key {
+                Some(k) => *first_with_key.entry(k).or_insert(r32),
+                None => r32,
+            });
+            let start = attach_bios.len();
+            attach_start.push(start as u32);
+            attach_bios.extend(own);
+            cands.clear();
+            let found = match id {
+                ParsedSeqId::Local(tag) => own.or_else(|| {
+                    let other = match tag {
+                        ObjectId::Id(number) => ObjectId::Str(number.to_string().into_bytes()),
+                        ObjectId::Str(_) => {
+                            ObjectId::Id(object_id_number(tag).and_then(|v| i32::try_from(v).ok())?)
+                        }
+                    };
+                    bio_with_id(&ParsedSeqId::Local(other))
+                }),
+                ParsedSeqId::General(dbtag) => own.or_else(|| {
+                    let other = match &dbtag.tag {
+                        ObjectId::Id(number) if *number >= 0 => {
+                            ObjectId::Str(number.to_string().into_bytes())
+                        }
+                        ObjectId::Id(_) => return None,
+                        ObjectId::Str(text) => ObjectId::Id(canonical_non_negative(text)?),
+                    };
+                    bio_with_id(&ParsedSeqId::General(Dbtag {
+                        db: dbtag.db.clone(),
+                        tag: other,
+                    }))
+                }),
+                ParsedSeqId::Pdb(pdb) => {
+                    let keys = pdb_keys.get_or_insert_with(|| pdb_key_index(bioseq_ids));
+                    if keys
+                        .get(&pdb_key(pdb))
+                        .is_some_and(|handles| handles.iter().any(|h| h.as_ref() != key))
+                    {
+                        unknowable = true;
+                    }
+                    own
                 }
-            }
+                _ => match id.textseq() {
+                    None => own,
+                    Some(text) => {
+                        let tree = handle_tree(id);
+                        if let Some(acc) = text.accession.as_deref() {
+                            for (bio, y) in accessions.find(acc, text_accession) {
+                                let y_text = y.textseq().expect("a text Seq-id");
+                                if text.version.is_some() && text.version != y_text.version {
+                                    continue;
+                                }
+                                let y_tree = handle_tree(y);
+                                if y_tree == tree && !attach_bios[start..].contains(&bio) {
+                                    attach_bios.push(bio);
+                                }
+                                cands.push(Candidate {
+                                    bio,
+                                    tree: y_tree,
+                                    version: y_text.version,
+                                });
+                            }
+                        }
+                        if own.is_some() {
+                            own
+                        } else {
+                            if let Some(name) = text.name.as_deref() {
+                                let names = names
+                                    .get_or_insert_with(|| FieldIndex::new(bioseq_ids, text_name));
+                                for (bio, y) in names.find(name, text_name) {
+                                    let y_text = y.textseq().expect("a text Seq-id");
+                                    if text.accession.is_some() && y_text.accession.is_some() {
+                                        continue;
+                                    }
+                                    if let Some(rel) = &text.release {
+                                        let default_swissprot = y_text.release.is_none()
+                                            && matches!(y, ParsedSeqId::Swissprot(_))
+                                            && matches!(
+                                                rel.as_slice(),
+                                                b"reviewed" | b"unreviewed"
+                                            );
+                                        if !default_swissprot
+                                            && y_text.release.as_ref() != Some(rel)
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    cands.push(Candidate {
+                                        bio,
+                                        tree: handle_tree(y),
+                                        version: y_text.version,
+                                    });
+                                }
+                            }
+                            if let (
+                                ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_),
+                                Some(acc),
+                                None,
+                                None,
+                                None,
+                            ) = (id, &text.accession, text.version, &text.name, &text.release)
+                            {
+                                let names = names
+                                    .get_or_insert_with(|| FieldIndex::new(bioseq_ids, text_name));
+                                let before = cands.len();
+                                for (bio, y) in names.find(acc, text_name) {
+                                    let y_text = y.textseq().expect("a text Seq-id");
+                                    if y_text.accession.is_none()
+                                        && y_text.version.is_none()
+                                        && y_text.release.is_none()
+                                    {
+                                        cands.push(Candidate {
+                                            bio,
+                                            tree: handle_tree(y),
+                                            version: None,
+                                        });
+                                    }
+                                }
+                                if cands.len() > before && textseq_packs(text) {
+                                    unknowable = true;
+                                }
+                            }
+                            match pick_candidate(&cands) {
+                                Found::None => None,
+                                Found::One(bio) => Some(bio),
+                                Found::Unknowable => {
+                                    unknowable = true;
+                                    None
+                                }
+                            }
+                        }
+                    }
+                },
+            };
+            bio_of.push(found);
         }
-        for i in 0..self.biosrcs.len() {
-            if let Some(def) = self.biosrcs[i].loc.deferred_strand.take() {
-                if self
-                    .loc_single_bioseq_with_empties(&self.biosrcs[i].loc, &def.empty_ids)
-                    .is_some()
-                {
-                    self.biosrcs[i].loc.strand = def.strand;
-                }
-            }
+        attach_start.push(attach_bios.len() as u32);
+        self.bio_of = bio_of;
+        self.attach_start = attach_start;
+        self.attach_bios = attach_bios;
+        self.unresolved_key = unresolved_key;
+        self.unknowable = unknowable;
+    }
+
+    /// The Bioseqs whose features include a location on the interned Seq-id `r`.
+    fn attached(&self, r: IdRef) -> &[u32] {
+        let r = r as usize;
+        &self.attach_bios[self.attach_start[r] as usize..self.attach_start[r + 1] as usize]
+    }
+
+    /// The Bioseq the scope finds for the interned Seq-id `r`.
+    fn bio_of(&self, r: IdRef) -> Option<usize> {
+        self.bio_of[r as usize].map(|b| b as usize)
+    }
+
+    /// The key of the sequence of the interned Seq-id `r` in `TestForOverlap64`'s ranges
+    /// (`s_GetSynHandle`): its Bioseq, or after the Bioseqs its handle where the scope finds none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:985-1003
+    fn seq_key(&self, r: IdRef) -> usize {
+        match self.bio_of(r) {
+            Some(bio) => bio,
+            None => self.n_bioseqs + self.unresolved_key[r as usize] as usize,
         }
     }
 
-    /// Finalizes inverted indices once all Bioseq IDs are mapped in `id_to_bioseq`.
-    pub(crate) fn build_indices(&mut self) {
+    /// `IsSameBioseq` and `GetId` with the TSE scope.
+    fn scope(&self) -> Scope<'_> {
+        Scope {
+            interner: &self.interner,
+            bio_of: &self.bio_of,
+        }
+    }
+
+    /// Finalizes inverted indices once all Bioseq IDs are mapped in `id_to_bioseq`; `bioseq_ids`
+    /// are the Seq-ids of each Bioseq of the TSE in order.
+    pub(crate) fn build_indices(&mut self, bioseq_ids: &[&[ParsedSeqId]]) {
+        self.resolve_ids(bioseq_ids);
         if self.prots.is_empty()
             && self.genes.is_empty()
             && self.cds.is_empty()
@@ -871,11 +1270,20 @@ impl TseFeatureIndex {
         {
             return;
         }
-        self.resolve_deferred_strands();
+        let scope = Scope {
+            interner: &self.interner,
+            bio_of: &self.bio_of,
+        };
+        let locs = self.genes.iter_mut().map(|g| &mut g.loc);
+        let locs = locs.chain(self.cds.iter_mut().map(|c| &mut c.loc));
+        for loc in locs.chain(self.biosrcs.iter_mut().map(|b| &mut b.loc)) {
+            scope.apply_strand(loc);
+        }
         for (idx, feat) in self.prots.iter().enumerate() {
             index_loc_bioseqs(
                 &feat.loc,
-                &self.id_to_bioseq,
+                &self.attach_start,
+                &self.attach_bios,
                 &mut self.prots_by_bioseq,
                 idx,
             );
@@ -888,7 +1296,13 @@ impl TseFeatureIndex {
                     .or_default()
                     .push(idx);
             }
-            index_loc_bioseqs(&feat.loc, &self.id_to_bioseq, &mut raw_genes, idx);
+            index_loc_bioseqs(
+                &feat.loc,
+                &self.attach_start,
+                &self.attach_bios,
+                &mut raw_genes,
+                idx,
+            );
         }
         for (bi, ids) in raw_genes {
             let entries = ids
@@ -909,14 +1323,32 @@ impl TseFeatureIndex {
                 .insert(bi, SpanIndex::from_spans(entries));
         }
         for (idx, feat) in self.cds.iter().enumerate() {
-            index_loc_bioseqs(&feat.loc, &self.id_to_bioseq, &mut self.cds_by_bioseq, idx);
+            index_loc_bioseqs(
+                &feat.loc,
+                &self.attach_start,
+                &self.attach_bios,
+                &mut self.cds_by_bioseq,
+                idx,
+            );
             if let Some(prod) = &feat.product {
-                index_loc_bioseqs(prod, &self.id_to_bioseq, &mut self.cds_by_product, idx);
+                index_loc_bioseqs(
+                    prod,
+                    &self.attach_start,
+                    &self.attach_bios,
+                    &mut self.cds_by_product,
+                    idx,
+                );
             }
         }
         let mut raw_biosrcs: HashMap<usize, Vec<usize>> = HashMap::new();
         for (idx, feat) in self.biosrcs.iter().enumerate() {
-            index_loc_bioseqs(&feat.loc, &self.id_to_bioseq, &mut raw_biosrcs, idx);
+            index_loc_bioseqs(
+                &feat.loc,
+                &self.attach_start,
+                &self.attach_bios,
+                &mut raw_biosrcs,
+                idx,
+            );
         }
         for (bi, ids) in raw_biosrcs {
             let entries = ids
@@ -939,16 +1371,14 @@ impl TseFeatureIndex {
     }
 
     /// Resolves the ordered list of Bioseq indices targeted by `bio_idx` (itself, plus any
-    /// segment Bioseqs when `repr == seg`).
+    /// segment Bioseqs when `repr == seg`, found through the scope).
     fn target_bioseqs(&self, bio_idx: usize) -> Vec<usize> {
         let mut out = vec![bio_idx];
         if let Some(seg_loc) = self.bioseq_seg_locs.get(&bio_idx) {
             for p in &seg_loc.pieces {
-                if let Some(key) = &p.id_key {
-                    if let Some(&seg_bio) = self.id_to_bioseq.get(key) {
-                        if !out.contains(&seg_bio) {
-                            out.push(seg_bio);
-                        }
+                if let Some(seg_bio) = p.id.and_then(|r| self.bio_of(r)) {
+                    if !out.contains(&seg_bio) {
+                        out.push(seg_bio);
                     }
                 }
             }
@@ -956,15 +1386,14 @@ impl TseFeatureIndex {
         out
     }
 
+    /// `sequence::GetLength`: a `whole` piece has the length of the Bioseq the scope finds.
     fn loc_length(&self, loc: &CompactLoc) -> u64 {
         let mut total = 0u64;
         for p in &loc.pieces {
             if p.is_whole {
-                if let Some(len) = p
-                    .id_key
-                    .as_ref()
-                    .and_then(|k| self.id_to_bioseq.get(k))
-                    .and_then(|&bi| self.bioseq_lengths.get(bi).copied().flatten())
+                if let Some(len) =
+                    p.id.and_then(|r| self.bio_of(r))
+                        .and_then(|bi| self.bioseq_lengths.get(bi).copied().flatten())
                 {
                     total = total.saturating_add(len);
                 }
@@ -975,13 +1404,19 @@ impl TseFeatureIndex {
         total
     }
 
-    fn loc_total_range_on(&self, loc: &CompactLoc, bio_idx: usize) -> Option<(u64, u64)> {
+    /// The total range on Bioseq `bio_idx` of the pieces of `loc` whose Seq-id `on` takes.
+    fn loc_total_range_by(
+        &self,
+        loc: &CompactLoc,
+        bio_idx: usize,
+        on: impl Fn(IdRef) -> bool,
+    ) -> Option<(u64, u64)> {
         let mut min_from = u64::MAX;
         let mut max_to = 0u64;
         let mut any = false;
         for p in &loc.pieces {
-            let Some(key) = &p.id_key else { continue };
-            if self.id_to_bioseq.get(key).copied() != Some(bio_idx) {
+            let Some(r) = p.id else { continue };
+            if !on(r) {
                 continue;
             }
             let (from, to_open) = if p.is_whole {
@@ -1002,65 +1437,52 @@ impl TseFeatureIndex {
         any.then_some((min_from, max_to))
     }
 
-    fn loc_single_bioseq(&self, loc: &CompactLoc) -> Option<usize> {
-        let mut bio = None;
-        for p in &loc.pieces {
-            let key = p.id_key.as_ref()?;
-            let &bi = self.id_to_bioseq.get(key)?;
-            match bio {
-                None => bio = Some(bi),
-                Some(prev) if prev != bi => return None,
-                _ => {}
-            }
-        }
-        bio
+    /// The total range of a feature location `loc` among the features of Bioseq `bio_idx`
+    /// (`CFeat_CI`): its pieces under that Bioseq's Seq-ids.
+    fn loc_total_range_on(&self, loc: &CompactLoc, bio_idx: usize) -> Option<(u64, u64)> {
+        self.loc_total_range_by(loc, bio_idx, |r| {
+            self.attached(r).contains(&(bio_idx as u32))
+        })
     }
 
-    /// Scope-aware `IsOneBioseq` check over `loc.pieces` and top-level `empty` Seq-id keys
-    /// (`s_GetId` walks `CSeq_loc_CI` with `eEmpty_Allow` and checks `IsSameBioseq`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:1447-1462
-    fn loc_single_bioseq_with_empties(
-        &self,
-        loc: &CompactLoc,
-        empty_ids: &[Option<HandleKey>],
-    ) -> Option<usize> {
-        let bio = self.loc_single_bioseq(loc)?;
-        for e in empty_ids {
-            let key = e.as_ref()?;
-            let &bi = self.id_to_bioseq.get(key)?;
-            if bi != bio {
-                return None;
-            }
-        }
-        Some(bio)
+    /// The total range of `loc` on Bioseq `bio_idx` as the scope finds its pieces' Seq-ids.
+    fn loc_total_range_found(&self, loc: &CompactLoc, bio_idx: usize) -> Option<(u64, u64)> {
+        self.loc_total_range_by(loc, bio_idx, |r| self.bio_of(r) == Some(bio_idx))
     }
 
-    fn loc_ranges_by_rev(&self, loc: &CompactLoc) -> Vec<(usize, bool, u64, u64)> {
+    /// The ranges of `loc` by sequence (`seq_key`) and orientation for `TestForOverlap64`; all on
+    /// one sequence when `single` (`s_TestForOverlapEx` keys both locations with the first
+    /// location's Seq-id when both have one).
+    fn loc_ranges_by_rev(&self, loc: &CompactLoc, single: bool) -> Vec<(usize, bool, u64, u64)> {
         let mut out = Vec::with_capacity(loc.pieces.len());
         for p in &loc.pieces {
-            let Some(key) = &p.id_key else { continue };
-            let Some(&bi) = self.id_to_bioseq.get(key) else {
-                continue;
-            };
+            let Some(r) = p.id else { continue };
             let (from, to_open) = if p.is_whole {
-                let len = self.bioseq_lengths.get(bi).copied().flatten().unwrap_or(0);
+                let len = self
+                    .bio_of(r)
+                    .and_then(|bi| self.bioseq_lengths.get(bi).copied().flatten())
+                    .unwrap_or(0);
                 (0, len)
             } else {
                 (p.from, p.to_open)
             };
-            out.push((bi, is_reverse_strand(p.strand), from, to_open));
+            let key = if single { 0 } else { self.seq_key(r) };
+            out.push((key, is_reverse_strand(p.strand), from, to_open));
         }
         out
+    }
+
+    /// The first range of `loc` on a Bioseq the scope finds, and that Bioseq.
+    fn first_found_bio(&self, ranges: &[(usize, bool, u64, u64)]) -> Option<usize> {
+        ranges.iter().map(|r| r.0).find(|&key| key < self.n_bioseqs)
     }
 
     /// `s_SeqLocToTotalRangesInfoMapByStrand`: collapses consecutive same-Bioseq, same-orientation,
     /// properly-ordered pieces into total ranges per `(bio_idx, is_reverse)`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1385-1476
-    fn total_ranges_by_rev(&self, loc: &CompactLoc) -> Vec<(usize, bool, u64, u64)> {
-        let pieces = self.loc_ranges_by_rev(loc);
+    fn total_ranges_by_rev(&self, loc: &CompactLoc, single: bool) -> Vec<(usize, bool, u64, u64)> {
+        let pieces = self.loc_ranges_by_rev(loc, single);
         if pieces.is_empty() {
             return Vec::new();
         }
@@ -1092,16 +1514,26 @@ impl TseFeatureIndex {
         out
     }
 
-    /// Single-Bioseq strand shortcut of `s_TestForOverlapEx`.
+    /// The start of `s_TestForOverlapEx`: `None` (no overlap) when both locations have one Seq-id
+    /// (`CSeq_loc::GetId`) that `IsSameBioseq` with the scope tells apart, or when they are on one
+    /// sequence and their strands (`GetStrand` without a scope) cannot overlap; else whether both
+    /// have one Seq-id (one sequence).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1874-1891
-    fn single_seq_strand_incompatible(&self, outer: &CompactLoc, inner: &CompactLoc) -> bool {
-        let single_seq =
-            self.loc_single_bioseq(outer).is_some() && self.loc_single_bioseq(inner).is_some();
-        single_seq
-            && !test_strands(outer.strand, inner.strand)
-            && outer.strand != 255
-            && inner.strand != 255
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1831-1891
+    fn overlap_start(&self, outer: &CompactLoc, inner: &CompactLoc) -> Option<bool> {
+        let single = outer.exact && inner.exact;
+        if single {
+            if let (Some(a), Some(b)) = (outer.first_id, inner.first_id) {
+                if !self.scope().same(a, b) {
+                    return None;
+                }
+            }
+        }
+        let (s1, s2) = (outer.strand_free(), inner.strand_free());
+        if single && !test_strands(s1, s2) && s1 != 255 && s2 != 255 {
+            return None;
+        }
+        Some(single)
     }
 
     /// `TestForOverlap64` under `eOverlap_Subset` (also used by `eOverlap_SubsetRev` after
@@ -1109,11 +1541,9 @@ impl TseFeatureIndex {
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1535-1589,1874-1909
     fn test_for_overlap_subset(&self, outer: &CompactLoc, inner: &CompactLoc) -> Option<u64> {
-        if self.single_seq_strand_incompatible(outer, inner) {
-            return None;
-        }
-        let o_ranges = self.loc_ranges_by_rev(outer);
-        let i_ranges = self.loc_ranges_by_rev(inner);
+        let single = self.overlap_start(outer, inner)?;
+        let o_ranges = self.loc_ranges_by_rev(outer, single);
+        let i_ranges = self.loc_ranges_by_rev(inner, single);
         if !ranges_contain_all(&o_ranges, &i_ranges) {
             return None;
         }
@@ -1126,18 +1556,16 @@ impl TseFeatureIndex {
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:1036-1150,1655-1755,1874-1902
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:1144-1189
     fn test_for_overlap_contained(&self, outer: &CompactLoc, inner: &CompactLoc) -> Option<u64> {
-        if self.single_seq_strand_incompatible(outer, inner) {
-            return None;
-        }
-        let o_tot = self.total_ranges_by_rev(outer);
-        let i_tot = self.total_ranges_by_rev(inner);
+        let single = self.overlap_start(outer, inner)?;
+        let o_tot = self.total_ranges_by_rev(outer, single);
+        let i_tot = self.total_ranges_by_rev(inner, single);
         if !ranges_contain_all(&o_tot, &i_tot) {
             return None;
         }
         // `Compare` with `fCompareOverlapping` requires `eContains` or `eSame`: every individual
         // interval of `inner` must be contained in some interval of `outer` on the same Bioseq.
-        let o_int = self.loc_ranges_by_rev(outer);
-        let i_int = self.loc_ranges_by_rev(inner);
+        let o_int = self.loc_ranges_by_rev(outer, false);
+        let i_int = self.loc_ranges_by_rev(inner, false);
         for &(bi, _, from, to_open) in &i_int {
             let contained = o_int
                 .iter()
@@ -1151,7 +1579,7 @@ impl TseFeatureIndex {
 
     fn sorted_bioseq_intervals(&self, loc: &CompactLoc) -> Vec<(usize, u64, u64)> {
         let mut out: Vec<(usize, u64, u64)> = self
-            .loc_ranges_by_rev(loc)
+            .loc_ranges_by_rev(loc, false)
             .into_iter()
             .map(|(bi, _, from, to)| (bi, from, to))
             .collect();
@@ -1181,12 +1609,11 @@ impl TseFeatureIndex {
             return false;
         }
         for p in &cds_loc.pieces {
-            let Some(key) = &p.id_key else { continue };
-            let Some(&bi) = self.id_to_bioseq.get(key) else {
+            let Some(bi) = p.id.and_then(|r| self.bio_of(r)) else {
                 continue;
             };
             if let (Some((cf, ct)), Some((gf, gt))) = (
-                self.loc_total_range_on(cds_loc, bi),
+                self.loc_total_range_found(cds_loc, bi),
                 self.loc_total_range_on(cand_loc, bi),
             ) {
                 if gf < ct && cf < gt {
@@ -1197,7 +1624,8 @@ impl TseFeatureIndex {
         false
     }
 
-    /// `s_GetCdregionLabel` + `feature::GetLabel` (`fFGL_Content`) for a `Cdregion` feature.
+    /// `s_GetCdregionLabel` + `feature::GetLabel` (`fFGL_Content`) for a `Cdregion` feature: the
+    /// product's protein name comes from the Bioseq the scope finds for `GetId(product, scope)`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:139-247,710-776
     fn cdregion_content_label(&self, cds: &CdsFeature, warn: Warn<'_>) -> Vec<u8> {
@@ -1206,27 +1634,25 @@ impl TseFeatureIndex {
             tlabel.extend_from_slice(prot_lbl);
         } else {
             let mut found_from_product = false;
-            if let Some(prod) = &cds.product {
-                if let Some(key) = prod.pieces.first().and_then(|p| p.id_key.as_ref()) {
-                    if let Some(&prod_bio) = self.id_to_bioseq.get(key) {
-                        if let Some(prot_ids) = self.prots_by_bioseq.get(&prod_bio) {
-                            let mut sorted = prot_ids.clone();
-                            sorted.sort_by_key(|&pi| {
-                                let f = &self.prots[pi];
-                                let (from, to_open) =
-                                    self.loc_total_range_on(&f.loc, prod_bio).unwrap_or((0, 0));
-                                (from, std::cmp::Reverse(to_open), f.seq_order)
-                            });
-                            if let Some(&first_pi) = sorted.first() {
-                                tlabel.extend_from_slice(&self.prots[first_pi].get_label());
-                                found_from_product = true;
-                            }
+            if let Some(id) = cds.product.as_ref().and_then(|p| self.scope().loc_id(p)) {
+                if let Some(prod_bio) = self.bio_of(id) {
+                    if let Some(prot_ids) = self.prots_by_bioseq.get(&prod_bio) {
+                        let mut sorted = prot_ids.clone();
+                        sorted.sort_by_key(|&pi| {
+                            let f = &self.prots[pi];
+                            let (from, to_open) =
+                                self.loc_total_range_on(&f.loc, prod_bio).unwrap_or((0, 0));
+                            (from, std::cmp::Reverse(to_open), f.seq_order)
+                        });
+                        if let Some(&first_pi) = sorted.first() {
+                            tlabel.extend_from_slice(&self.prots[first_pi].get_label());
+                            found_from_product = true;
                         }
-                    } else if let Some(fasta) = &prod.first_id_fasta {
-                        let mut msg = b"Error: [makeblastdb] cannot find sequence: ".to_vec();
-                        msg.extend_from_slice(fasta);
-                        warn(&msg);
                     }
+                } else {
+                    let mut msg = b"Error: [makeblastdb] cannot find sequence: ".to_vec();
+                    label::fasta(self.interner.id(id), &mut msg);
+                    warn(&msg);
                 }
             }
             if !found_from_product {
@@ -1279,8 +1705,8 @@ impl TseFeatureIndex {
                 }
             }
         }
-        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
-        let cds_bio = cds_ranges.first().map(|r| r.0)?;
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc, false);
+        let cds_bio = self.first_found_bio(&cds_ranges)?;
         let gene_index = self.genes_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
         let cds_sflag = handle_range_strands_flag(&cds.loc);
@@ -1291,19 +1717,20 @@ impl TseFeatureIndex {
             if (cds_sflag & handle_range_strands_flag(&g.loc)) == 0 {
                 return;
             }
-            let (neg_quality, diff) =
-                if let Some(d) = self.test_for_overlap_subset(&g.loc, &cds.loc) {
-                    (0i8, d)
-                } else if cds.trans_splicing && cds.loc.strand == 255 && g.loc.strand != 255 {
-                    let pstrand = if g.loc.strand == 0 { 1 } else { g.loc.strand };
-                    let forced = force_loc_strand(&cds.loc, pstrand);
-                    let Some(d) = self.test_for_overlap_subset(&g.loc, &forced) else {
-                        return;
-                    };
-                    (1i8, d)
-                } else {
+            let (neg_quality, diff) = if let Some(d) =
+                self.test_for_overlap_subset(&g.loc, &cds.loc)
+            {
+                (0i8, d)
+            } else if cds.trans_splicing && cds.loc.strand_free() == 255 && g.loc.strand != 255 {
+                let pstrand = if g.loc.strand == 0 { 1 } else { g.loc.strand };
+                let forced = force_loc_strand(&cds.loc, pstrand);
+                let Some(d) = self.test_for_overlap_subset(&g.loc, &forced) else {
                     return;
                 };
+                (1i8, d)
+            } else {
+                return;
+            };
             let (g_from, g_to) = self.loc_total_range_on(&g.loc, cds_bio).unwrap_or((0, 0));
             let tie = gene_annot_tie_key(g);
             let is_better = match &best {
@@ -1326,8 +1753,8 @@ impl TseFeatureIndex {
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:908-943,964-974,1092,1158-1205
     /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2700-2735
     fn best_biosrc_for_cds(&self, cds: &CdsFeature) -> Option<&BiosrcFeature> {
-        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
-        let cds_bio = cds_ranges.first().map(|r| r.0)?;
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc, false);
+        let cds_bio = self.first_found_bio(&cds_ranges)?;
         let src_index = self.biosrcs_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
 
@@ -1371,8 +1798,8 @@ impl TseFeatureIndex {
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:908-943,958-962,1144-1205
     /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:1054-1183,1375-1386,2737-2740
     fn best_contained_gene(&self, cds: &CdsFeature) -> Option<&GeneFeature> {
-        let cds_ranges = self.loc_ranges_by_rev(&cds.loc);
-        let cds_bio = cds_ranges.first().map(|r| r.0)?;
+        let cds_ranges = self.loc_ranges_by_rev(&cds.loc, false);
+        let cds_bio = self.first_found_bio(&cds_ranges)?;
         let gene_index = self.genes_by_bioseq.get(&cds_bio)?;
         let (cds_from, cds_to) = ranges_span_on(&cds_ranges, cds_bio)?;
         let cds_sflag = handle_range_strands_flag(&cds.loc);
@@ -1571,8 +1998,9 @@ fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
         pieces,
         strand,
         is_complex: loc.is_complex,
-        deferred_strand: None,
-        first_id_fasta: loc.first_id_fasta.clone(),
+        exact: loc.exact,
+        first_id: loc.first_id,
+        ids: loc.ids.clone(),
     }
 }
 
@@ -1594,8 +2022,9 @@ fn force_loc_strand(loc: &CompactLoc, strand: i32) -> CompactLoc {
         pieces,
         strand,
         is_complex: loc.is_complex,
-        deferred_strand: None,
-        first_id_fasta: loc.first_id_fasta.clone(),
+        exact: loc.exact,
+        first_id: loc.first_id,
+        ids: loc.ids.clone(),
     }
 }
 
@@ -1689,19 +2118,22 @@ fn ranges_span_on(ranges: &[(usize, bool, u64, u64)], bio_idx: usize) -> Option<
     any.then_some((min_from, max_to))
 }
 
+/// Adds feature `feat_idx` to `map` under every Bioseq whose features include a piece of `loc`
+/// (`TseFeatureIndex::attached`; `empty` sub-locations add none).
 fn index_loc_bioseqs(
     loc: &CompactLoc,
-    id_to_bioseq: &HashMap<HandleKey, usize>,
+    attach_start: &[u32],
+    attach_bios: &[u32],
     map: &mut HashMap<usize, Vec<usize>>,
     feat_idx: usize,
 ) {
-    let mut added = Vec::new();
     for p in &loc.pieces {
-        let Some(key) = &p.id_key else { continue };
-        if let Some(&bi) = id_to_bioseq.get(key) {
-            if !added.contains(&bi) {
-                added.push(bi);
-                map.entry(bi).or_default().push(feat_idx);
+        let Some(r) = p.id else { continue };
+        let r = r as usize;
+        for &bio in &attach_bios[attach_start[r] as usize..attach_start[r + 1] as usize] {
+            let list = map.entry(bio as usize).or_default();
+            if list.last() != Some(&feat_idx) {
+                list.push(feat_idx);
             }
         }
     }
@@ -1821,163 +2253,373 @@ fn extract_qual_comment_fallback(feat: &Value) -> Vec<u8> {
     out
 }
 
-/// Extracts a `CompactLoc` iteratively from a `Seq-loc` `Value`.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,300-513
-fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
-    let s = dschema();
-    let mut out = CompactLoc {
-        is_complex: matches!(as_choice(root), Some((c, _)) if c == s.seqloc_mix || c == s.seqloc_packed_int),
-        ..CompactLoc::default()
-    };
+/// `IsSameBioseq` and `GetId` with the TSE scope (`TseFeatureIndex::resolve_ids`).
+struct Scope<'a> {
+    interner: &'a SeqIdInterner,
+    bio_of: &'a [Option<u32>],
+}
 
-    let mut stack = Vec::new();
-    let mut mix_child_one_id = Vec::new();
-    let mut top_empties = Vec::new();
-    let mut child_empties = Vec::new();
-    if let Some((choice, inner)) = as_choice(root) {
-        if choice == s.seqloc_mix {
-            if let Some(items) = as_list(inner) {
-                mix_child_one_id.reserve(items.len());
-                for item in items {
-                    let start = out.pieces.len();
-                    child_empties.clear();
-                    extract_loc_pieces(item, interner, &mut out, &mut stack, &mut child_empties);
-                    mix_child_one_id.push(pieces_and_empties_are_one_id(
-                        &out.pieces[start..],
-                        &child_empties,
-                    ));
-                    top_empties.append(&mut child_empties);
-                }
-            }
-        } else {
-            extract_loc_pieces(root, interner, &mut out, &mut stack, &mut top_empties);
+impl Scope<'_> {
+    /// `IsSameBioseq` with a scope: `CSeq_id::Match`, one handle, or one Bioseq that the scope
+    /// finds for both.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-321
+    /// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1880-1893
+    fn same(&self, a: IdRef, b: IdRef) -> bool {
+        self.interner.same_free(a, b)
+            || self.bio_of[a as usize].is_some_and(|bio| self.bio_of[b as usize] == Some(bio))
+    }
+
+    /// `GetId(loc, scope)`: the first Seq-id of `loc` when `s_GetId` finds every Seq-id on its
+    /// Bioseq.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-370
+    fn loc_id(&self, loc: &CompactLoc) -> Option<IdRef> {
+        let first = loc.first_id?;
+        match &loc.ids {
+            LocIds::None => None,
+            LocIds::Free => Some(first),
+            LocIds::Scoped(scoped) => scoped
+                .ids
+                .iter()
+                .all(|&x| self.same(first, x))
+                .then_some(first),
         }
     }
-    let child_flags = (!mix_child_one_id.is_empty()).then_some(mix_child_one_id.as_slice());
-    out.strand = compute_top_strand(root, &out.pieces, &top_empties, child_flags);
-    out.deferred_strand = deferred_top_strand(root, &out.pieces, top_empties, child_flags);
+
+    /// `GetStrand` with the scope for a location that is on one Bioseq only through the scope:
+    /// `s_GetStrand` when `IsOneBioseq` holds.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:385-389,481-513
+    fn apply_strand(&self, loc: &mut CompactLoc) {
+        if let LocIds::Scoped(scoped) = &loc.ids {
+            if !loc.exact && self.loc_id(loc).is_some() {
+                loc.strand = scoped.strand;
+            }
+        }
+    }
+}
+
+/// The Bioseq that `x_GetSeqMatch` keeps among the Bioseq Seq-ids `cands` that the scope finds
+/// for a Seq-id (`IsBetter`: within one tree, a version over none and a higher version).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1564-1572
+fn pick_candidate(cands: &[Candidate]) -> Found {
+    let Some(first) = cands.first() else {
+        return Found::None;
+    };
+    if cands.iter().all(|c| c.bio == first.bio) {
+        return Found::One(first.bio);
+    }
+    if cands.iter().any(|c| c.tree != first.tree) {
+        return Found::Unknowable;
+    }
+    let best = cands.iter().map(|c| c.version).max().flatten();
+    let mut tops = cands.iter().filter(|c| c.version == best);
+    let top = tops.next().map(|c| c.bio);
+    match top {
+        Some(bio) if best.is_some() && tops.all(|c| c.bio == bio) => Found::One(bio),
+        _ => Found::Unknowable,
+    }
+}
+
+/// `NStr::StringToNonNegativeInt` of `text` when `NStr::IntToString` gives `text` back.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2750-2758
+fn canonical_non_negative(text: &[u8]) -> Option<i32> {
+    if text.is_empty()
+        || !text.iter().all(u8::is_ascii_digit)
+        || (text.len() > 1 && text[0] == b'0')
+    {
+        return None;
+    }
+    std::str::from_utf8(text).ok()?.parse::<i32>().ok()
+}
+
+/// A PDB Seq-id's molecule in upper case and its chain (`x_IdToStrKey`, a superset of the keys
+/// NCBI's PDB tree matches by).
+type PdbKey = (Vec<u8>, Option<Vec<u8>>);
+
+fn pdb_key(pdb: &crate::seqid::model::PdbSeqId) -> PdbKey {
+    let chain = pdb
+        .chain_id
+        .clone()
+        .or_else(|| pdb.chain.map(|c| vec![c as u8]));
+    (pdb.mol.to_ascii_uppercase(), chain)
+}
+
+/// The handle keys of the Bioseq PDB Seq-ids by `pdb_key`.
+fn pdb_key_index(bioseq_ids: &[&[ParsedSeqId]]) -> FxHashMap<PdbKey, Vec<Option<HandleKey>>> {
+    let mut out: FxHashMap<PdbKey, Vec<Option<HandleKey>>> = FxHashMap::default();
+    for id in bioseq_ids.iter().flat_map(|ids| ids.iter()) {
+        if let ParsedSeqId::Pdb(pdb) = id {
+            let key = mask_handle_key(id).ok().flatten().map(HandleKey::Bytes);
+            out.entry(pdb_key(pdb)).or_default().push(key);
+        }
+    }
     out
 }
 
-fn extract_loc_pieces<'a>(
-    root: &'a Value,
-    interner: &mut SeqIdInterner,
-    out: &mut CompactLoc,
-    stack: &mut Vec<&'a Value>,
-    empties: &mut Vec<Option<HandleKey>>,
-) {
-    let s = dschema();
-    stack.clear();
-    stack.push(root);
-    while let Some(loc) = stack.pop() {
-        let Some((choice, inner)) = as_choice(loc) else {
-            continue;
-        };
-        if choice == s.seqloc_empty {
-            if let Value::SeqId(sid) = inner {
-                empties.push(interner.key_only(sid));
-            }
-        } else if choice == s.seqloc_whole {
-            if let Value::SeqId(sid) = inner {
-                let (key, fasta) = interner.key_and_fasta(sid);
-                if out.first_id_fasta.is_none() {
-                    out.first_id_fasta = Some(fasta);
-                }
-                out.pieces.push(LocPiece {
-                    id_key: key,
-                    from: 0,
-                    to_open: 0,
-                    is_whole: true,
-                    strand: 0,
-                });
-            }
-        } else if choice == s.seqloc_int {
-            push_seq_int(inner, interner, out);
-        } else if choice == s.seqloc_packed_int {
-            if let Some(ints) = as_list(inner) {
-                for iv in ints {
-                    push_seq_int(iv, interner, out);
-                }
-            }
-        } else if choice == s.seqloc_pnt {
-            push_seq_pnt(inner, interner, out);
-        } else if choice == s.seqloc_packed_pnt {
-            let strand = match inner.member(s.packed_pnt_strand) {
-                Some(Value::Enum(v)) => *v,
-                _ => 0,
-            };
-            let key = match inner.member(s.packed_pnt_id) {
-                Some(Value::SeqId(sid)) => {
-                    let (k, fasta) = interner.key_and_fasta(sid);
-                    if out.first_id_fasta.is_none() {
-                        out.first_id_fasta = Some(fasta);
-                    }
-                    k
-                }
-                _ => None,
-            };
-            if let Some(pts) = inner.member(s.packed_pnt_points) {
-                match pts {
-                    Value::List(items) => {
-                        for p in items {
-                            if let Value::Int(pt) = p {
-                                let pos = *pt as u64;
-                                out.pieces.push(LocPiece {
-                                    id_key: key.clone(),
-                                    from: pos,
-                                    to_open: pos.saturating_add(1),
-                                    is_whole: false,
-                                    strand,
-                                });
-                            }
-                        }
-                    }
-                    Value::Ints(items) => {
-                        for &pt in items {
-                            let pos = pt as u64;
-                            out.pieces.push(LocPiece {
-                                id_key: key.clone(),
-                                from: pos,
-                                to_open: pos.saturating_add(1),
-                                is_whole: false,
-                                strand,
-                            });
-                        }
-                    }
-                    Value::Int4s(items) => {
-                        for &pt in items {
-                            let pos = pt as u64;
-                            out.pieces.push(LocPiece {
-                                id_key: key.clone(),
-                                from: pos,
-                                to_open: pos.saturating_add(1),
-                                is_whole: false,
-                                strand,
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        } else if choice == s.seqloc_mix || choice == s.seqloc_equiv {
-            if let Some(items) = as_list(inner) {
-                for item in items.iter().rev() {
-                    stack.push(item);
-                }
-            }
-        } else if choice == s.seqloc_bond {
-            if let Some(a) = inner.member(s.seqbond_a) {
-                push_seq_pnt(a, interner, out);
-            }
-            if let Some(b) = inner.member(s.seqbond_b) {
-                push_seq_pnt(b, interner, out);
-            }
+/// What `GetStrand` without a scope gives a sub-location, as `s_GetStrand` of a `mix` folds it.
+enum NodeStrand {
+    /// `null` and `empty` (skipped by the fold).
+    Skip,
+    /// The strand, whatever the Seq-ids (`int`, `pnt`, `packed-pnt`, `whole`, `equiv`, ...).
+    Direct(i32),
+    /// `s_GetStrand` of a `packed-int` or `bond`, given only when it is on one Bioseq.
+    OneBioseq(i32),
+}
+
+/// The `s_GetStrand` fold of a `mix` (or of a `packed-int`): `other` once two strands disagree.
+#[derive(Clone, Copy, Default)]
+struct StrandFold {
+    strand: i32,
+    set: bool,
+    other: bool,
+    /// An `equiv`, whose `s_GetStrand` is unknown whatever its parts.
+    sink: bool,
+}
+
+impl StrandFold {
+    fn add(&mut self, istrand: i32) {
+        if !self.sink
+            && !self.other
+            && !advance_strand_state(&mut self.strand, &mut self.set, istrand)
+        {
+            self.other = true;
+        }
+    }
+
+    fn value(&self) -> i32 {
+        if self.sink {
+            0
+        } else if self.other {
+            255
+        } else {
+            self.strand
         }
     }
 }
 
-fn push_seq_int(iv: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) {
+/// Extracts a `CompactLoc` from a `Seq-loc` `Value`: its pieces, its Seq-ids in `CSeq_loc_CI`
+/// order (`empty` sub-locations included, `null` skipped; `CSeq_loc::GetId`, `s_GetId`) and
+/// `sequence::GetStrand`, whose `s_GetStrand` gives a nested `packed-int`, `mix` or `bond` its
+/// strand only when it is on one Bioseq without a scope (`GetStrand` with no scope); the top
+/// level asks the scope in `build_indices` when only the scope can tell.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-513
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
+    let s = dschema();
+    let mut out = CompactLoc::default();
+    let Some((choice, inner)) = as_choice(root) else {
+        return out;
+    };
+    out.is_complex = choice == s.seqloc_mix || choice == s.seqloc_packed_int;
+    let mut ci = std::mem::take(&mut interner.ci);
+    ci.clear();
+    let node = if choice == s.seqloc_mix || choice == s.seqloc_equiv {
+        NodeStrand::OneBioseq(extract_nested(root, interner, &mut out.pieces, &mut ci))
+    } else {
+        visit_flat(choice, inner, interner, &mut out.pieces, &mut ci)
+    };
+    let (first_id, exact, ids) = interner.loc_ids(&ci);
+    interner.ci = ci;
+    out.first_id = first_id;
+    out.exact = exact;
+    out.strand = match node {
+        NodeStrand::Skip => 0,
+        NodeStrand::Direct(strand) => strand,
+        NodeStrand::OneBioseq(strand) => match &ids {
+            LocIds::None => 0,
+            LocIds::Free => strand,
+            LocIds::Scoped(_) if exact => strand,
+            LocIds::Scoped(_) => 0,
+        },
+    };
+    out.ids = match ids {
+        LocIds::Scoped(mut scoped) => {
+            if let NodeStrand::OneBioseq(strand) = node {
+                scoped.strand = strand;
+            }
+            LocIds::Scoped(scoped)
+        }
+        other => other,
+    };
+    out
+}
+
+/// Walks a `mix` or `equiv` location depth first in `CSeq_loc_CI` order, adding its pieces and
+/// Seq-ids, and returns its `s_GetStrand`.
+fn extract_nested(
+    root: &Value,
+    interner: &mut SeqIdInterner,
+    pieces: &mut Vec<LocPiece>,
+    ci: &mut Vec<IdRef>,
+) -> i32 {
+    enum Frame<'a> {
+        Visit(&'a Value),
+        /// The end of a `mix` or `equiv` whose Seq-ids start at `ci[start]`.
+        Close {
+            start: usize,
+        },
+    }
+    let s = dschema();
+    let mut frames = vec![Frame::Visit(root)];
+    let mut folds: Vec<StrandFold> = Vec::new();
+    let mut top = 0;
+    while let Some(frame) = frames.pop() {
+        let value = match frame {
+            Frame::Visit(loc) => match as_choice(loc) {
+                Some((c, inner)) if c == s.seqloc_mix || c == s.seqloc_equiv => {
+                    frames.push(Frame::Close { start: ci.len() });
+                    folds.push(StrandFold {
+                        sink: c == s.seqloc_equiv,
+                        ..StrandFold::default()
+                    });
+                    if let Some(items) = as_list(inner) {
+                        frames.extend(items.iter().rev().map(Frame::Visit));
+                    }
+                    continue;
+                }
+                Some((c, inner)) => {
+                    let start = ci.len();
+                    match visit_flat(c, inner, interner, pieces, ci) {
+                        NodeStrand::Skip => continue,
+                        NodeStrand::Direct(strand) => strand,
+                        NodeStrand::OneBioseq(strand) => {
+                            if interner.one_free(&ci[start..]) {
+                                strand
+                            } else {
+                                0
+                            }
+                        }
+                    }
+                }
+                None => 0,
+            },
+            Frame::Close { start } => {
+                let fold = folds.pop().expect("an open mix or equiv");
+                if folds.is_empty() {
+                    top = fold.value();
+                    continue;
+                }
+                if fold.sink || !interner.one_free(&ci[start..]) {
+                    0
+                } else {
+                    fold.value()
+                }
+            }
+        };
+        if let Some(parent) = folds.last_mut() {
+            parent.add(value);
+        }
+    }
+    top
+}
+
+/// Adds the pieces and Seq-ids of a location with no nested locations and returns what
+/// `GetStrand` gives it.
+fn visit_flat(
+    choice: usize,
+    inner: &Value,
+    interner: &mut SeqIdInterner,
+    pieces: &mut Vec<LocPiece>,
+    ci: &mut Vec<IdRef>,
+) -> NodeStrand {
+    let s = dschema();
+    if choice == s.seqloc_empty {
+        if let Value::SeqId(sid) = inner {
+            ci.push(interner.intern(sid));
+        }
+        NodeStrand::Skip
+    } else if choice == s.seqloc_null {
+        NodeStrand::Skip
+    } else if choice == s.seqloc_whole {
+        if let Value::SeqId(sid) = inner {
+            let r = interner.intern(sid);
+            ci.push(r);
+            pieces.push(LocPiece {
+                id: Some(r),
+                from: 0,
+                to_open: 0,
+                is_whole: true,
+                strand: 0,
+            });
+        }
+        NodeStrand::Direct(3) // eNa_strand_both
+    } else if choice == s.seqloc_int {
+        NodeStrand::Direct(push_seq_int(inner, interner, pieces, ci))
+    } else if choice == s.seqloc_pnt {
+        NodeStrand::Direct(push_seq_pnt(inner, interner, pieces, ci))
+    } else if choice == s.seqloc_packed_int {
+        let mut fold = StrandFold::default();
+        if let Some(ints) = as_list(inner) {
+            for iv in ints {
+                fold.add(push_seq_int(iv, interner, pieces, ci));
+            }
+        }
+        NodeStrand::OneBioseq(fold.value())
+    } else if choice == s.seqloc_packed_pnt {
+        let strand = match inner.member(s.packed_pnt_strand) {
+            Some(Value::Enum(v)) => *v,
+            _ => 0,
+        };
+        let id = match inner.member(s.packed_pnt_id) {
+            Some(Value::SeqId(sid)) => Some(interner.intern(sid)),
+            _ => None,
+        };
+        let mut push = |pos: u64| {
+            if let Some(r) = id {
+                ci.push(r);
+            }
+            pieces.push(LocPiece {
+                id,
+                from: pos,
+                to_open: pos.saturating_add(1),
+                is_whole: false,
+                strand,
+            });
+        };
+        match inner.member(s.packed_pnt_points) {
+            Some(Value::List(items)) => {
+                for p in items {
+                    if let Value::Int(pt) = p {
+                        push(*pt as u64);
+                    }
+                }
+            }
+            Some(Value::Ints(items)) => items.iter().for_each(|&pt| push(pt as u64)),
+            Some(Value::Int4s(items)) => items.iter().for_each(|&pt| push(pt as u64)),
+            _ => {}
+        }
+        NodeStrand::Direct(strand)
+    } else if choice == s.seqloc_bond {
+        let mut a_strand = inner
+            .member(s.seqbond_a)
+            .map_or(0, |a| push_seq_pnt(a, interner, pieces, ci));
+        let mut b_strand = inner
+            .member(s.seqbond_b)
+            .map_or(0, |b| push_seq_pnt(b, interner, pieces, ci));
+        if a_strand == 0 && b_strand != 0 {
+            a_strand = b_strand;
+        } else if a_strand != 0 && b_strand == 0 {
+            b_strand = a_strand;
+        }
+        NodeStrand::OneBioseq(if a_strand != b_strand { 255 } else { a_strand })
+    } else {
+        NodeStrand::Direct(0)
+    }
+}
+
+/// Adds a `Seq-interval` piece and returns its strand.
+fn push_seq_int(
+    iv: &Value,
+    interner: &mut SeqIdInterner,
+    pieces: &mut Vec<LocPiece>,
+    ci: &mut Vec<IdRef>,
+) -> i32 {
     let s = dschema();
     let from = match iv.member(s.seqint_from) {
         Some(Value::Int(v)) => *v as u64,
@@ -1991,26 +2633,28 @@ fn push_seq_int(iv: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) 
         Some(Value::Enum(v)) => *v,
         _ => 0,
     };
-    let key = match iv.member(s.seqint_id) {
-        Some(Value::SeqId(sid)) => {
-            let (k, fasta) = interner.key_and_fasta(sid);
-            if out.first_id_fasta.is_none() {
-                out.first_id_fasta = Some(fasta);
-            }
-            k
-        }
+    let id = match iv.member(s.seqint_id) {
+        Some(Value::SeqId(sid)) => Some(interner.intern(sid)),
         _ => None,
     };
-    out.pieces.push(LocPiece {
-        id_key: key,
+    ci.extend(id);
+    pieces.push(LocPiece {
+        id,
         from,
         to_open: to.saturating_add(1),
         is_whole: false,
         strand,
     });
+    strand
 }
 
-fn push_seq_pnt(pt: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) {
+/// Adds a `Seq-point` piece and returns its strand.
+fn push_seq_pnt(
+    pt: &Value,
+    interner: &mut SeqIdInterner,
+    pieces: &mut Vec<LocPiece>,
+    ci: &mut Vec<IdRef>,
+) -> i32 {
     let s = dschema();
     let pos = match pt.member(s.seqpnt_point) {
         Some(Value::Int(v)) => *v as u64,
@@ -2020,258 +2664,19 @@ fn push_seq_pnt(pt: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) 
         Some(Value::Enum(v)) => *v,
         _ => 0,
     };
-    let key = match pt.member(s.seqpnt_id) {
-        Some(Value::SeqId(sid)) => {
-            let (k, fasta) = interner.key_and_fasta(sid);
-            if out.first_id_fasta.is_none() {
-                out.first_id_fasta = Some(fasta);
-            }
-            k
-        }
+    let id = match pt.member(s.seqpnt_id) {
+        Some(Value::SeqId(sid)) => Some(interner.intern(sid)),
         _ => None,
     };
-    out.pieces.push(LocPiece {
-        id_key: key,
+    ci.extend(id);
+    pieces.push(LocPiece {
+        id,
         from: pos,
         to_open: pos.saturating_add(1),
         is_whole: false,
         strand,
     });
-}
-
-/// `sequence::GetStrand` + `s_GetStrand` for ORF CDS labels and `TestForOverlap64`.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-fn compute_top_strand(
-    loc: &Value,
-    pieces: &[LocPiece],
-    empties: &[Option<HandleKey>],
-    mix_child_one_id: Option<&[bool]>,
-) -> i32 {
-    let s = dschema();
-    let Some((choice, inner)) = as_choice(loc) else {
-        return 0;
-    };
-    if choice == s.seqloc_int {
-        return match inner.member(s.seqint_strand) {
-            Some(Value::Enum(v)) => *v,
-            _ => 0,
-        };
-    }
-    if choice == s.seqloc_whole {
-        return 3; // eNa_strand_both
-    }
-    if choice == s.seqloc_pnt {
-        return match inner.member(s.seqpnt_strand) {
-            Some(Value::Enum(v)) => *v,
-            _ => 0,
-        };
-    }
-    if choice == s.seqloc_packed_pnt {
-        return match inner.member(s.packed_pnt_strand) {
-            Some(Value::Enum(v)) => *v,
-            _ => 0,
-        };
-    }
-    // `GetStrand` checks `IsOneBioseq` before calling `s_GetStrand`.
-    if !pieces_and_empties_are_one_id(pieces, empties) {
-        return 0;
-    }
-    eval_s_get_strand(loc, mix_child_one_id)
-}
-
-/// Candidate `s_GetStrand` for multi-`Seq-id` complex locations (`packed-int`, `mix`, `bond`)
-/// whose `IsOneBioseq` check requires `id_to_bioseq` synonym resolution in `build_indices`.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-389,450-513
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-fn deferred_top_strand(
-    loc: &Value,
-    pieces: &[LocPiece],
-    empties: Vec<Option<HandleKey>>,
-    mix_child_one_id: Option<&[bool]>,
-) -> Option<Box<DeferredStrand>> {
-    let s = dschema();
-    let (choice, _) = as_choice(loc)?;
-    if choice == s.seqloc_int
-        || choice == s.seqloc_whole
-        || choice == s.seqloc_pnt
-        || choice == s.seqloc_packed_pnt
-        || pieces_and_empties_are_one_id(pieces, &empties)
-        || pieces.is_empty()
-    {
-        return None;
-    }
-    let st = eval_s_get_strand(loc, mix_child_one_id);
-    (st != 0).then(|| {
-        Box::new(DeferredStrand {
-            strand: st,
-            empty_ids: empties.into_boxed_slice(),
-        })
-    })
-}
-
-/// Scope-free `IsOneBioseq` check over a subtree's extracted pieces and `empty` IDs.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
-fn pieces_and_empties_are_one_id(pieces: &[LocPiece], empties: &[Option<HandleKey>]) -> bool {
-    let mut first: Option<&HandleKey> = None;
-    for p in pieces {
-        let Some(k) = p.id_key.as_ref() else {
-            return false;
-        };
-        match first {
-            None => first = Some(k),
-            Some(prev) if prev != k => return false,
-            _ => {}
-        }
-    }
-    for e in empties {
-        let Some(k) = e.as_ref() else {
-            return false;
-        };
-        match first {
-            None => first = Some(k),
-            Some(prev) if prev != k => return false,
-            _ => {}
-        }
-    }
-    first.is_some()
-}
-
-/// Iterative evaluation of `s_GetStrand` (`seq_loc_util.cpp:393-477`).
-///
-/// When `mix_child_one_id` is provided, direct children of the top-level `mix` (depth 1) that are
-/// complex (`packed-int`, `mix`, `bond`) must pass the scope-free `IsOneBioseq` check because
-/// `s_GetStrand` invokes `GetStrand` on each child without a `CScope` (`seq_loc_util.cpp:458,504`).
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
-fn eval_s_get_strand(root: &Value, mix_child_one_id: Option<&[bool]>) -> i32 {
-    let s = dschema();
-    let mut stack: Vec<(&[Value], usize, i32, bool)> = Vec::new();
-    let mut cur = root;
-    loop {
-        let child_multi_id = stack.len() == 1
-            && mix_child_one_id
-                .and_then(|flags| flags.get(stack[0].1 - 1).copied())
-                .is_some_and(|one| !one);
-        let result = match as_choice(cur) {
-            Some((c, inner)) if c == s.seqloc_int => match inner.member(s.seqint_strand) {
-                Some(Value::Enum(v)) => *v,
-                _ => 0,
-            },
-            Some((c, _)) if c == s.seqloc_whole => 3,
-            Some((c, inner)) if c == s.seqloc_pnt => match inner.member(s.seqpnt_strand) {
-                Some(Value::Enum(v)) => *v,
-                _ => 0,
-            },
-            Some((c, inner)) if c == s.seqloc_packed_pnt => {
-                match inner.member(s.packed_pnt_strand) {
-                    Some(Value::Enum(v)) => *v,
-                    _ => 0,
-                }
-            }
-            Some((c, inner)) if c == s.seqloc_bond => {
-                if child_multi_id {
-                    0
-                } else {
-                    let mut a_strand = inner
-                        .member(s.seqbond_a)
-                        .and_then(|a| a.member(s.seqpnt_strand))
-                        .and_then(|v| match v {
-                            Value::Enum(x) => Some(*x),
-                            _ => None,
-                        })
-                        .unwrap_or(0);
-                    let mut b_strand = inner
-                        .member(s.seqbond_b)
-                        .and_then(|b| b.member(s.seqpnt_strand))
-                        .and_then(|v| match v {
-                            Value::Enum(x) => Some(*x),
-                            _ => None,
-                        })
-                        .unwrap_or(0);
-                    if a_strand == 0 && b_strand != 0 {
-                        a_strand = b_strand;
-                    } else if a_strand != 0 && b_strand == 0 {
-                        b_strand = a_strand;
-                    }
-                    if a_strand != b_strand {
-                        255
-                    } else {
-                        a_strand
-                    }
-                }
-            }
-            Some((c, inner)) if c == s.seqloc_packed_int => {
-                if child_multi_id {
-                    0
-                } else {
-                    let mut strand = 0i32;
-                    let mut strand_set = false;
-                    if let Some(ints) = as_list(inner) {
-                        for iv in ints {
-                            let istrand = match iv.member(s.seqint_strand) {
-                                Some(Value::Enum(x)) => *x,
-                                _ => 0,
-                            };
-                            if !advance_strand_state(&mut strand, &mut strand_set, istrand) {
-                                strand = 255;
-                                break;
-                            }
-                        }
-                    }
-                    strand
-                }
-            }
-            Some((c, inner)) if c == s.seqloc_mix => {
-                if !child_multi_id {
-                    if let Some(items) = as_list(inner) {
-                        if let Some((next_idx, next_val)) = next_non_empty_mix_item(items, 0, s) {
-                            stack.push((items, next_idx + 1, 0, false));
-                            cur = next_val;
-                            continue;
-                        }
-                    }
-                }
-                0
-            }
-            _ => 0,
-        };
-
-        let mut val = result;
-        loop {
-            let Some((items, next_idx, mut strand, mut strand_set)) = stack.pop() else {
-                return val;
-            };
-            if !advance_strand_state(&mut strand, &mut strand_set, val) {
-                val = 255;
-                continue;
-            }
-            if let Some((idx, next_val)) = next_non_empty_mix_item(items, next_idx, s) {
-                stack.push((items, idx + 1, strand, strand_set));
-                cur = next_val;
-                break;
-            }
-            val = strand;
-        }
-    }
-}
-
-fn next_non_empty_mix_item<'a>(
-    items: &'a [Value],
-    start: usize,
-    s: &DeflineSchema,
-) -> Option<(usize, &'a Value)> {
-    for (offset, item) in items[start..].iter().enumerate() {
-        if matches!(as_choice(item), Some((c, _)) if c == s.seqloc_null || c == s.seqloc_empty) {
-            continue;
-        }
-        return Some((start + offset, item));
-    }
-    None
+    strand
 }
 
 /// Exact `s_GetStrand` state transition (`seq_loc_util.cpp:435-446, 459-470`).
@@ -2392,10 +2797,13 @@ struct BioseqFeatureView<'a, 'w> {
     index: &'a TseFeatureIndex,
     bio_idx: usize,
     warn: RefCell<Warn<'w>>,
+    /// Whether the title read the features (`TseFeatureIndex::unknowable`).
+    consulted: Cell<bool>,
 }
 
 impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     fn has_biosrc_clone_feature(&self) -> bool {
+        self.consulted.set(true);
         for bi in self.index.target_bioseqs(self.bio_idx) {
             if let Some(ids) = self.index.biosrcs_by_bioseq.get(&bi) {
                 if ids.iter_ids().any(|si| self.index.biosrcs[si].has_clone) {
@@ -2407,6 +2815,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn nm_single_gene_and_cds(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut gene_idx = None;
         let mut gene_count = 0usize;
@@ -2448,6 +2857,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn nr_first_gene_label(&self) -> Option<Vec<u8>> {
+        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -2471,6 +2881,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn longest_protein(&self) -> Option<ProteinFeatInfo> {
+        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -2514,6 +2925,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn cds_for_product(&self) -> Option<CdsForProductInfo> {
+        self.consulted.set(true);
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let gene = cds
@@ -2530,6 +2942,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn source_taxname_via_cds(&self) -> Option<Vec<u8>> {
+        self.consulted.set(true);
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let src = self.index.best_biosrc_for_cds(cds)?;
@@ -2537,12 +2950,12 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn segseq_info_via_cds(&self) -> Option<SegSeqCdsInfo> {
+        self.consulted.set(true);
         let seg_loc = self.index.bioseq_seg_locs.get(&self.bio_idx)?;
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
         for p in &seg_loc.pieces {
-            let Some(key) = &p.id_key else { continue };
-            let Some(&bi) = self.index.id_to_bioseq.get(key) else {
+            let Some(bi) = p.id.and_then(|r| self.index.bio_of(r)) else {
                 continue;
             };
             if let Some(ids) = self.index.cds_by_bioseq.get(&bi) {
@@ -2657,11 +3070,12 @@ pub(crate) fn generate_asn_bioseq_title(
         inp.delta_gap_count = count_seq_map_gaps(inst, repr, length);
     }
 
-    // D3c-6 boundary: refuse only when NCBI's `GenerateDefline` actually enters `CAutoDef`
-    // (create_defline.cpp:3974-3991).
-    let main_empty_after_trim =
-        inp.reconstruct || trim_end_slice(inp.main_title, b".,;~ ").is_empty();
-    if main_empty_after_trim && inp.is_na && has_autodef && !inp.is_tls && !inp.is_nz {
+    // D3c-6 boundary: refuse only when NCBI's `GenerateDefline` enters `CAutoDef`: with no
+    // title (or none kept for unfinished HTGS); trimming the trailing punctuation never empties
+    // a title, as it keeps a title made only of it.
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3952-3991
+    let main_title_empty = inp.reconstruct || inp.main_title.is_empty();
+    if main_title_empty && inp.is_na && has_autodef && !inp.is_tls && !inp.is_nz {
         return Err(WriteDbError::Unsupported(
             "AutoDef title generation is not supported by LOSAT's makeblastdb".to_string(),
         ));
@@ -2671,6 +3085,7 @@ pub(crate) fn generate_asn_bioseq_title(
         index,
         bio_idx,
         warn: RefCell::new(warn),
+        consulted: Cell::new(false),
     };
 
     let defline = generate_defline_core(&inp, Some(&view)).map_err(|_| {
@@ -2685,6 +3100,16 @@ pub(crate) fn generate_asn_bioseq_title(
             "Unable to guess the source string encoding",
         ))
     })?;
+
+    if index.unknowable && view.consulted.get() {
+        return Err(WriteDbError::Unsupported(
+            "a title made from the features of an entry with a location Seq-id whose Bioseq \
+             NCBI's object manager picks by the order of Seq-id handles in memory or by the \
+             Seq-ids it read before (two Bioseqs that match it alike, a pir or prf accession \
+             alone, a PDB Seq-id) is not supported by LOSAT's makeblastdb"
+                .to_string(),
+        ));
+    }
 
     if defline.reads_past_end {
         return Err(WriteDbError::Unsupported(
@@ -3050,11 +3475,4 @@ fn scan_biosource_for_mag_and_kingdom<'a>(
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
-}
-
-fn trim_end_slice<'a>(bytes: &'a [u8], chars: &[u8]) -> &'a [u8] {
-    match bytes.iter().rposition(|b| !chars.contains(b)) {
-        Some(pos) => &bytes[..=pos],
-        None => bytes,
-    }
 }

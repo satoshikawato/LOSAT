@@ -745,7 +745,7 @@ fn object_id_match(a: &ObjectId, b: &ObjectId) -> bool {
 /// (`ncbi_str::string_to_int8` with no flags: no spaces, and the string ends at a 0 byte;
 /// `NoThrow` gives 0 with `errno` set for an error, which is `e_Str`), without a `+` or leading
 /// zeros; a 0 only as the whole string.
-fn object_id_number(tag: &ObjectId) -> Option<i64> {
+pub(crate) fn object_id_number(tag: &ObjectId) -> Option<i64> {
     match tag {
         ObjectId::Id(id) => Some(i64::from(*id)),
         ObjectId::Str(text) => {

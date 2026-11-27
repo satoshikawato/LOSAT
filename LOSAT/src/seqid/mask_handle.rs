@@ -354,7 +354,7 @@ fn restore_case(to: &mut [&mut Vec<u8>], from: &[&Vec<u8>]) {
 
 /// Whether a Textseq-id packs (`FindOrCreate`, seq_id_tree.cpp:1165-1185): an accession only that
 /// `ParseAcc` takes.
-fn textseq_packs(text: &TextseqId) -> bool {
+pub(crate) fn textseq_packs(text: &TextseqId) -> bool {
     text.name.is_none()
         && text.release.is_none()
         && text
@@ -365,7 +365,7 @@ fn textseq_packs(text: &TextseqId) -> bool {
 
 /// The handle's tree (`CSeq_id_Which_Tree::Initialize`, seq_id_tree.cpp:244-275): the alternative,
 /// with GenBank, EMBL and DDBJ in the GenBank tree.
-fn handle_tree(id: &ParsedSeqId) -> u8 {
+pub(crate) fn handle_tree(id: &ParsedSeqId) -> u8 {
     match id {
         ParsedSeqId::Embl(_) | ParsedSeqId::Ddbj(_) => {
             ParsedSeqId::Genbank(TextseqId::default()).alternative()

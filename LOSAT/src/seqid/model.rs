@@ -14,7 +14,7 @@
 //! (`seqid::ber`).
 
 /// `Object-id`: the tag of a local id and of a `Dbtag`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObjectId {
     /// `id INTEGER`.
     Id(i32),
@@ -23,7 +23,7 @@ pub enum ObjectId {
 }
 
 /// `Dbtag`: the database name and the tag of a `general` id (`gnl|db|tag`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Dbtag {
     pub db: Vec<u8>,
     pub tag: ObjectId,
@@ -31,7 +31,7 @@ pub struct Dbtag {
 
 /// `Textseq-id`: the accession-based ids (`gb`, `emb`, `pir`, `sp`, `ref`, `dbj`, `prf`, `tpg`,
 /// `tpe`, `tpd`, `gpp`, `nat`).
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TextseqId {
     pub name: Option<Vec<u8>>,
     pub accession: Option<Vec<u8>>,
@@ -40,7 +40,7 @@ pub struct TextseqId {
 }
 
 /// `Giimport-id`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GiimportId {
     pub id: i32,
     pub db: Option<Vec<u8>>,
@@ -48,7 +48,7 @@ pub struct GiimportId {
 }
 
 /// The `id` CHOICE of `Id-pat`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PatentNumber {
     /// `number VisibleString`: the patent document number.
     Number(Vec<u8>),
@@ -57,7 +57,7 @@ pub enum PatentNumber {
 }
 
 /// `Id-pat`: the patent citation of a `patent` id.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IdPat {
     pub country: Vec<u8>,
     pub id: PatentNumber,
@@ -65,7 +65,7 @@ pub struct IdPat {
 }
 
 /// `Patent-seq-id`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PatentSeqId {
     /// The number of the sequence in the patent.
     pub seqid: i32,
@@ -73,7 +73,7 @@ pub struct PatentSeqId {
 }
 
 /// `Date-std`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DateStd {
     pub year: i32,
     pub month: Option<i32>,
@@ -85,14 +85,14 @@ pub struct DateStd {
 }
 
 /// `Date`: the release date of a `pdb` id.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Date {
     Str(Vec<u8>),
     Std(DateStd),
 }
 
 /// `PDB-seq-id`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PdbSeqId {
     /// `PDB-mol-id`: the molecule name.
     pub mol: Vec<u8>,
@@ -118,7 +118,7 @@ impl PdbSeqId {
 /// BLAST database built with `-parse_seqids` holds (`seqid::defline_set::BlastDefline::ids`).
 /// Ordered by its alternatives and members (`Ord`) for the sets that hold equal ids once
 /// (psiblast's inclusion sets, `algorithm::psiblast::rounds::SetKey`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ParsedSeqId {
     Local(ObjectId),
     Gibbsq(i32),

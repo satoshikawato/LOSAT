@@ -357,7 +357,8 @@ impl SeqEntrySource {
         let mut features = TseFeatureIndex::default();
         collect_tree(root, is_set, &mut sets, &mut bioseqs, &mut features)?;
         check_duplicate_bioseq_ids(&bioseqs, &mut features)?;
-        features.build_indices();
+        let bioseq_ids: Vec<&[ParsedSeqId]> = bioseqs.iter().map(|b| b.ids.as_slice()).collect();
+        features.build_indices(&bioseq_ids);
         Ok(Self {
             sets,
             bioseqs: bioseqs.into_iter().map(Some).collect(),

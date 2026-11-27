@@ -48,7 +48,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the program `deltablast`, and `makeprofiledb -dbtype cobalt`;
-- `blast_formatter` output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML;
+- `blast_formatter` output formats other than `8`, `9` and `12`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `13` to `16`.
 

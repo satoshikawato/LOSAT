@@ -1,19 +1,20 @@
-//! The objects of a serial stream read one after another (`CObjectIStreamAsn` over an `istream`),
-//! and the choice of the stream's encoding that NCBI's readers of a stream make before they read
-//! (`CFormatGuess`'s `Format` of the stream): blast_formatter's `-archive` (Blast4-archive objects until the
-//! end of the data, `CRemoteBlast::LoadFromArchive`) and the search strategy of
-//! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
-//! `ExtractBlast4Request`).
+//! The objects of a serial stream read one after another (`CObjectIStreamAsn`,
+//! `CObjectIStreamAsnBinary`, `CObjectIStreamXml` over an `istream`), and the choice of the
+//! stream's encoding that NCBI's readers of a stream make before they read (`CFormatGuess`'s
+//! `Format` of the stream): blast_formatter's `-archive` (Blast4-archive objects until the end of
+//! the data, `CRemoteBlast::LoadFromArchive`) and the search strategy of `-import_search_strategy`
+//! (one Blast4-get-search-strategy-reply, or else one Blast4-request, `ExtractBlast4Request`).
 //!
-//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); the text is read by the
-//! generic reader of the type table (`read::ObjectStream`) on a stream read in blocks
-//! (`StreamSource`), so one object at a time is in memory. Binary ASN.1 and XML are recognised and
-//! left to their callers, which take the input from [`Guessed::into_parts`].
+//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); text, binary ASN.1 and
+//! XML are read by the generic reader of the type table (`read::ObjectStream`) on a stream read
+//! in blocks (`StreamSource`), so one object at a time is in memory.
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
 use super::read::ObjectStream;
+use super::read_xml::{XmlInput, XmlStyle};
 use crate::ncbi_exception::NcbiException;
+use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{Names, TextInput};
 use crate::report::serial::asn_text_reader::StreamSource;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
@@ -23,11 +24,11 @@ use crate::utils::format_guess::{Format, FormatGuess, Stop};
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Encoding {
-    /// `eTextASN`: read by [`ObjectStream`].
+    /// `eTextASN`: read by [`ObjectStream::text`].
     Text,
-    /// `eBinaryASN`: recognised; the caller reads it (`read::ObjectStream::binary`) or refuses it.
+    /// `eBinaryASN`: read by [`ObjectStream::binary`].
     Binary,
-    /// `eXml`: recognised; LOSAT has no XML reader of the table's types yet.
+    /// `eXml`: read by [`ObjectStream::xml`].
     Xml,
     /// Any other answer (`eUnknown`, `eJSON`, another format): the caller's invalid input.
     Other,
@@ -90,10 +91,29 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 }
 
 impl<R: IoRead> Guessed<R> {
+    /// The block-buffered source from where the guess left the stream.
+    fn into_source(self) -> StreamSource<R> {
+        StreamSource::new(self.input, &self.taken[self.start..])
+    }
+
     /// The text reader of the stream (a new `CObjectIStreamAsn` of the file), from where the
     /// guess left it, whose refusals call the text by `names`.
     pub(crate) fn into_text(self, names: Names) -> TextStream<R> {
-        text_stream(self.input, &self.taken[self.start..], names)
+        ObjectStream::text(self.into_source(), names)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:802-804
+    /// The binary reader of the stream (a new `CObjectIStreamAsnBinary` of the file), from where
+    /// the guess left it, whose refusals call the input by `names`.
+    pub(crate) fn into_binary(self, names: Names) -> BinaryStream<R> {
+        ObjectStream::binary(self.into_source(), names)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:810-812
+    /// The XML reader of the stream (a new `CObjectIStreamXml` of `style`), from where the guess
+    /// left it, whose refusals call the input by `names`.
+    pub(crate) fn into_xml(self, style: XmlStyle, names: Names) -> XmlStream<R> {
+        ObjectStream::xml(self.into_source(), style, names)
     }
 
     /// The stream from where the guess left it: the bytes the guess took from there, and the
@@ -108,6 +128,12 @@ impl<R: IoRead> Guessed<R> {
 /// stream (`read::ObjectStream`), as NCBI keeps one object stream (its buffer goes on from one
 /// object to the next).
 pub(crate) type TextStream<R> = ObjectStream<TextInput<StreamSource<R>>>;
+
+/// The objects of an ASN.1 binary stream read in blocks, one at a time (`CObjectIStreamAsnBinary`).
+pub(crate) type BinaryStream<R> = ObjectStream<BerReader<StreamSource<R>>>;
+
+/// The objects of an XML stream read in blocks, one at a time (`CObjectIStreamXml`).
+pub(crate) type XmlStream<R> = ObjectStream<XmlInput<StreamSource<R>>>;
 
 /// The objects of `input`, whose first bytes `first` were already taken from it, which LOSAT's
 /// refusals call by `names`.

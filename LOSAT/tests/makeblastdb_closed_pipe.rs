@@ -275,7 +275,8 @@ fn a_reader_gone_before_the_sequences_leaves_the_volume_empty() {
         assert!(output.stderr.is_empty(), "{name}: {:?}", output.stderr);
         let p = dir.0.join("p");
         let Some(volume) = volume else {
-            assert!(!p.exists(), "{name}");
+            // The output directory, which the build makes before its first line, and nothing in it.
+            assert_eq!(std::fs::read_dir(&p).unwrap().count(), 0, "{name}");
             continue;
         };
         for file in volume {

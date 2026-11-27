@@ -1,15 +1,18 @@
 // The parts of a tool tab's form draft that do not depend on the tool (WindowMasker's `ToolDraft`,
-// Format Archive's `BlastFormatterDraft`; RG-F3p7 review R1 #3): the tool's `-xmlhelp`, the files of
-// the run (refusing a second file under a name already there), the check of the argv by
+// Format Archive's `BlastFormatterDraft`, makeblastdb's `MakeblastdbDraft`; RG-F3p7 review R1 #3): the
+// tool's `-xmlhelp`, the files of the run (refusing a second file under a name already there; a file
+// chosen for an option, which the option then names), the check of the argv by
 // `validateTool` (debounced, one at a time, an older answer dropped; it runs while the engine is busy,
 // behind the run), the run directory (one builder for the check and the run), and the submit that
 // waits for the check before it queues the runs on the shared Coordinator queue. A tool supplies its
 // inputs and its argv through the abstract members.
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
-import { duplicateRunFileMessage, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
-import { toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
-import type { ToolId } from '../domain/tools';
+import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
+import type { FieldValue } from '../domain/parameters';
+import type { ToolFileOrigin } from '../domain/run';
+import { fileListNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
 import type { SubmitResult, Validation } from './draft';
@@ -22,8 +25,10 @@ export interface ToolExtraFile {
   readonly name: string;
   readonly size: number;
   readonly file: File;
-  /** Option flag that picked this file via `Choose file…` (`-ids`, `-exclude_ids`), if any. */
+  /** Option flag that picked this file via `Choose file…` (`-ids`, `-exclude_ids`, `-mask_data`), if any. */
   readonly flag?: string;
+  /** Where the file came from, for Run details (`made by run N`); a file that the user opened when absent. */
+  readonly origin?: ToolFileOrigin;
 }
 
 /** The state that every tool draft holds. */
@@ -118,6 +123,12 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   /** What else changes when files are added to the run directory (WindowMasker's `-in` name). */
   protected runFilesAdded?(state: S, runFiles: readonly ToolExtraFile[]): StatePatch<S>;
 
+  /** The value of an option of the form (of the stage shown, for WindowMasker). */
+  protected abstract optionValue(state: S, flag: string): FieldValue | undefined;
+
+  /** Sets an option of the form; an empty value or `false` leaves it out. */
+  abstract setField(flag: string, value: FieldValue): void;
+
   // --- the tool's description ---------------------------------------------------------------
 
   /** Loads the tool's `-xmlhelp` once, when its tab is first opened. */
@@ -181,15 +192,70 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     this.scheduleValidation();
   }
 
+  /** Removes a file of the run; a file chosen for an option (`-ids`) also leaves the option (its name leaves a list's). */
   removeRunFile(key: string): void {
     const state = this.state.get();
-    if (!state.runFiles.some((entry) => entry.key === key)) return;
+    const target = state.runFiles.find((entry) => entry.key === key);
+    if (target === undefined) return;
     this.patch({
       runFiles: Object.freeze(state.runFiles.filter((entry) => entry.key !== key)),
       runFilesError: undefined,
       message: undefined,
     });
     this.scheduleValidation();
+    if (target.flag === undefined) return;
+    const value = this.optionValue(state, target.flag);
+    if (TOOL_FILE_LIST_FLAGS.has(target.flag)) {
+      const names = fileListNames(value);
+      if (names.includes(target.name)) this.setField(target.flag, names.filter((name) => name !== target.name).join(','));
+    } else if (value === target.name) {
+      this.setField(target.flag, '');
+    }
+  }
+
+  /**
+   * Attaches a file chosen for a file-typed option (`-ids`, `-taxid_map`) and puts it in Files of the run under its
+   * name (or `options.name`), which the option then names; undefined lets the option's files go. A file chosen again
+   * replaces the option's file, except for an option that lists files (`-mask_data`, `TOOL_FILE_LIST_FLAGS`), whose list
+   * it joins (the same file twice is one).
+   */
+  setOptionFile(flag: string, file: File | undefined, options: { readonly name?: string; readonly origin?: ToolFileOrigin } = {}): void {
+    const state = this.state.get();
+    if (file === undefined) {
+      this.patch({ runFiles: Object.freeze(state.runFiles.filter((entry) => entry.flag !== flag)), runFilesError: undefined });
+      this.setField(flag, '');
+      return;
+    }
+    const given = options.name ?? file.name;
+    const name = normalizeRunPath(given);
+    if (name === undefined) {
+      this.patch({ runFilesError: `Invalid file name: "${given}".` });
+      return;
+    }
+    const list = TOOL_FILE_LIST_FLAGS.has(flag);
+    const kept = list ? state.runFiles : state.runFiles.filter((entry) => entry.flag !== flag);
+    const names = list ? fileListNames(this.optionValue(state, flag)) : [];
+    const value = list ? [...names.filter((entry) => entry !== name), name].join(',') : name;
+    const existing = kept.find((entry) => entry.name === name);
+    if (existing !== undefined) {
+      if (list && existing.flag === flag && sameRunFile(name, existing.file, file)) {
+        this.patch({ runFilesError: undefined });
+        this.setField(flag, value);
+        return;
+      }
+      this.patch({ runFilesError: duplicateRunFileMessage(name) });
+      return;
+    }
+    const entry: ToolExtraFile = {
+      key: `rf-${this.nextKey++}`,
+      name,
+      size: file.size,
+      file,
+      flag,
+      ...(options.origin === undefined ? {} : { origin: options.origin }),
+    };
+    this.patch({ runFiles: Object.freeze([...kept, entry]), runFilesError: undefined });
+    this.setField(flag, value);
   }
 
   // --- the command line, the check and the submit --------------------------------------------
@@ -319,7 +385,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   /** The run directory of a run: `inputs` and the files of the run, as picked files. */
   protected runDirectoryOf(state: S, inputs: readonly ToolDirectoryFile[]): readonly ToolDirectoryFile[] {
-    return this.runDirectory(state, inputs, (entry) => ({ name: entry.name, file: entry.file, origin: { kind: 'picked' } }));
+    return this.runDirectory(state, inputs, (entry) => ({ name: entry.name, file: entry.file, origin: entry.origin ?? { kind: 'picked' } }));
   }
 
   protected scheduleValidation(): void {
@@ -413,6 +479,18 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 /** A change of the common state as a change of a tool draft's state (whose type extends it). */
 function common<S extends ToolFormState>(change: StatePatch<ToolFormState>): StatePatch<S> {
   return change as StatePatch<S>;
+}
+
+/** Whether two files under one name are one file (the same File, or a second pick of one file), as the run directory takes them. */
+function sameRunFile(name: string, a: File, b: File): boolean {
+  const builder = new RunDirectoryBuilder();
+  builder.add(name, a);
+  try {
+    builder.add(name, b);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The key of a check: its argv and the names of its run directory. */

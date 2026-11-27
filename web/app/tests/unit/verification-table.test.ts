@@ -15,6 +15,7 @@ import {
   type OptionGrammar,
 } from '../../src/domain/verification';
 import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from '../../src/infra/fake/makeblastdb-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
@@ -116,6 +117,7 @@ describe('verification table', () => {
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv',
       'LOSAT/tests/windowmasker/cases.tsv',
       'LOSAT/tests/blast_formatter/cases.tsv',
+      'LOSAT/tests/dropin_corpus_manifest.tsv',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -222,6 +224,37 @@ describe('verification table', () => {
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8', '-line_length', '40'],
     ]) {
       const badge = bfBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('outside');
+      expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+    }
+  });
+
+  it("generates makeblastdb option sets from the drop-in ledger's byte-frozen rows and grades runs (line WW, WW4b2)", () => {
+    const mk = table.tools?.makeblastdb;
+    expect(mk).toBeDefined();
+    expect([...mk!.optionSets]).toEqual([...mk!.optionSets].sort());
+    for (const key of mk!.optionSets) expect(key).not.toMatch(/"-(in|out|logfile)"/);
+
+    const mkGrammar = toolOptionGrammar(parseToolDescription(MAKEBLASTDB_XMLHELP_DOC.xml));
+    const mkBadge = (argv: readonly string[]) =>
+      toolVerificationBadge({ tool: 'makeblastdb', argv, runtimePath: 'serial', grammar: mkGrammar }, table);
+    for (const argv of [
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-out', 'mydb'],
+      ['makeblastdb', '-in', 'a.fa b.fa', '-dbtype', 'nucl', '-parse_seqids', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-taxid_map', 'map.txt', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-title', 'my genome', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '5'],
+    ]) {
+      const badge = mkBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+    for (const argv of [
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-max_file_sz', '1MB'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'seg.asnb'],
+    ]) {
+      const badge = mkBadge(argv);
       expect(badge.level, argv.join(' ')).toBe('outside');
       expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
     }

@@ -39,11 +39,18 @@ import { toolOptionValue } from '../../domain/tool-argv';
 import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
 import DESCRIBE from './describe.json';
 import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from './makeblastdb-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
 const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
 const BLAST_FORMATTER_XMLHELP: string = BLAST_FORMATTER_XMLHELP_DOC.xml;
+const MAKEBLASTDB_XMLHELP: string = MAKEBLASTDB_XMLHELP_DOC.xml;
+const TOOL_XMLHELP: Readonly<Record<string, string>> = {
+  windowmasker: WINDOWMASKER_XMLHELP,
+  blast_formatter: BLAST_FORMATTER_XMLHELP,
+  makeblastdb: MAKEBLASTDB_XMLHELP,
+};
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -55,8 +62,7 @@ export interface FakeEngineOptions {
 export class FakeEngine implements EngineGateway, ToolEngine {
   private readonly cancelled = new Set<string>();
   private readonly phaseDelayMs: number;
-  private windowMaskerDescription: ToolDescription | undefined;
-  private blastFormatterDescription: ToolDescription | undefined;
+  private readonly toolDescriptions = new Map<string, ToolDescription>();
 
   constructor(options: FakeEngineOptions = {}) {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
@@ -75,20 +81,19 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   async describeTool(tool: string): Promise<ToolDescription> {
-    if (tool === 'windowmasker') {
-      this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
-      return this.windowMaskerDescription;
+    const xml = TOOL_XMLHELP[tool];
+    if (xml === undefined) throw new Error(`unknown tool: ${tool}`);
+    let description = this.toolDescriptions.get(tool);
+    if (description === undefined) {
+      description = parseToolDescription(xml);
+      this.toolDescriptions.set(tool, description);
     }
-    if (tool === 'blast_formatter') {
-      this.blastFormatterDescription ??= parseToolDescription(BLAST_FORMATTER_XMLHELP);
-      return this.blastFormatterDescription;
-    }
-    throw new Error(`unknown tool: ${tool}`);
+    return description;
   }
 
   async validateTool(argv: readonly string[]): Promise<ToolValidation> {
     const tool = argv[0];
-    if (tool !== 'windowmasker' && tool !== 'blast_formatter') return { ok: false, message: `unknown tool: ${tool}` };
+    if (tool === undefined || TOOL_XMLHELP[tool] === undefined) return { ok: false, message: `unknown tool: ${tool}` };
     const description = await this.describeTool(tool);
     const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
     const seen = new Set<string>();
@@ -96,7 +101,9 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
-      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
+      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!) || (tool === 'makeblastdb' && flag === '-help-full')) {
+        return { ok: true };
+      }
       const param = byFlag.get(flag!);
       const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
@@ -135,6 +142,9 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     }
     if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    if (tool === 'makeblastdb' && !seen.has('-dbtype')) {
+      return { ok: false, message: "Command line argument error: Argument \"dbtype\". Mandatory value is missing:  `String, `nucl', `prot'" };
     }
     if (tool === 'blast_formatter') {
       if (seen.has('-rid') && seen.has('-archive')) {
@@ -192,10 +202,10 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const toolName = argv[0] ?? 'windowmasker';
     const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
     if (words.includes('-xmlhelp')) {
-      await writeStdout(toolName === 'blast_formatter' ? BLAST_FORMATTER_XMLHELP : WINDOWMASKER_XMLHELP);
+      await writeStdout(TOOL_XMLHELP[toolName] ?? WINDOWMASKER_XMLHELP);
       return finish(0);
     }
-    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
+    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w) || (toolName === 'makeblastdb' && w === '-help-full'))) {
       await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
@@ -226,6 +236,16 @@ export class FakeEngine implements EngineGateway, ToolEngine {
 
     await pause();
     checkAborted();
+
+    if (toolName === 'makeblastdb') {
+      // The volume's three files under `-out` (or the first name of `-in`), each the marker: no database is made.
+      const db = outName ?? (toolOptionValue(argv, '-in') ?? 'db').split(' ')[0]!.replace(/^"|"$/g, '');
+      const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
+      for (const ext of ['hr', 'in', 'sq']) await writeFile(`${db}.${letter}${ext}`, [bodyText]);
+      if (logName !== undefined) await writeFile(logName, [logText]);
+      await writeStdout(`\n\nBuilding a new DB, current time: (${FAKE_MARKER})\nNew DB name:   ${db}\n`);
+      return finish(0);
+    }
 
     const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
     if (sameOutAndLog) {

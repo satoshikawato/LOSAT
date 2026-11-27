@@ -31,7 +31,9 @@ const WINDOWMASKER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/windowmask
 const WINDOWMASKER_CASES_PATH = 'LOSAT/tests/windowmasker/cases.tsv';
 const BLAST_FORMATTER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/blast_formatter-xmlhelp.json', import.meta.url));
 const BLAST_FORMATTER_CASES_PATH = 'LOSAT/tests/blast_formatter/cases.tsv';
-const TOOL_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json', '-dryrun']);
+const MAKEBLASTDB_XMLHELP = fileURLToPath(new URL('../src/infra/fake/makeblastdb-xmlhelp.json', import.meta.url));
+const DROPIN_MANIFEST_PATH = 'LOSAT/tests/dropin_corpus_manifest.tsv';
+const TOOL_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json', '-help-full', '-dryrun']);
 
 type Program = (typeof PROGRAMS)[number];
 type Source = VerificationTable['sources'][number];
@@ -89,6 +91,8 @@ export function generateVerificationTable(repository: string): VerificationTable
   sources.push(wm.source);
   const bf = casesToolVerification(repository, 'blast_formatter', BLAST_FORMATTER_XMLHELP, BLAST_FORMATTER_CASES_PATH, 'LOSAT/tests/blast_formatter/ncbi');
   sources.push(bf.source);
+  const mk = manifestToolVerification(repository, 'makeblastdb', MAKEBLASTDB_XMLHELP, DROPIN_MANIFEST_PATH);
+  sources.push(mk.source);
 
   const browsers = browserVerification(readTable(readFileSync(join(repository, 'docs/web/verification_cells.tsv'), 'utf8')));
   const programs: Partial<Dictionary<ProgramVerification>> = {};
@@ -105,6 +109,7 @@ export function generateVerificationTable(repository: string): VerificationTable
     tools: {
       windowmasker: { optionSets: wm.optionSets },
       blast_formatter: { optionSets: bf.optionSets },
+      makeblastdb: { optionSets: mk.optionSets },
     },
   };
 }
@@ -121,11 +126,6 @@ function casesToolVerification(
   casesPath: string,
   ncbiRelDir: string,
 ): { readonly source: Source; readonly optionSets: readonly string[] } {
-  const xmlDoc = JSON.parse(readFileSync(xmlhelpPath, 'utf8')) as { xml: string };
-  const description = parseToolDescription(xmlDoc.xml);
-  const baseGrammar = toolOptionGrammar(description);
-  const knownFlags = new Set(['-logfile', '-conffile', ...description.parameters.map((param) => param.flag)]);
-
   const casesBytes = readFileSync(join(repository, casesPath));
   const cases = new Map<string, string>();
   for (const line of casesBytes.toString('utf8').split(/\r?\n/)) {
@@ -136,13 +136,61 @@ function casesToolVerification(
   }
 
   const ncbiDir = join(repository, ncbiRelDir);
-  const keys = new Set<string>();
-  let accepted = 0;
-
+  const commands: string[] = [];
   for (const [name, args] of cases) {
     if (name.startsWith('refused_')) continue;
     const rcPath = join(ncbiDir, `${name}.rc`);
     if (!existsSync(rcPath) || readFileSync(rcPath, 'utf8').trim() !== '0') continue;
+    commands.push(args);
+  }
+  const sets = toolOptionSets(tool, xmlhelpPath, commands);
+  return {
+    source: { path: casesPath, sha256: createHash('sha256').update(casesBytes).digest('hex'), optionSets: sets.accepted },
+    optionSets: sets.optionSets,
+  };
+}
+
+/**
+ * Generates a CLI tool's option sets from the drop-in line's frozen ledger (`dropin_corpus_manifest.tsv`, line WW
+ * WW4b2: makeblastdb has no `cases.tsv`): the rows of `<tool> ...` whose outputs and files NCBI BLAST+ froze byte for
+ * byte (`check` bytes) with exit status 0 and no standard input.
+ */
+function manifestToolVerification(
+  repository: string,
+  tool: 'makeblastdb',
+  xmlhelpPath: string,
+  manifestPath: string,
+): { readonly source: Source; readonly optionSets: readonly string[] } {
+  const bytes = readFileSync(join(repository, manifestPath));
+  const commands: string[] = [];
+  for (const row of readTable(bytes.toString('utf8'))) {
+    const command = row['command'] ?? '';
+    if (!command.startsWith(`${tool} `) || row['check'] !== 'bytes' || row['rc'] !== '0' || (row['stdin'] ?? '') !== '') continue;
+    commands.push(command.slice(tool.length + 1));
+  }
+  const sets = toolOptionSets(tool, xmlhelpPath, commands);
+  return {
+    source: { path: manifestPath, sha256: createHash('sha256').update(bytes).digest('hex'), optionSets: sets.accepted },
+    optionSets: sets.optionSets,
+  };
+}
+
+/**
+ * The option sets of a tool's command lines (the words after the tool's name): shell-word quoting, skipping
+ * environment variables, stdin, help, `-dryrun` and flags that the tool's `-xmlhelp` does not list.
+ */
+function toolOptionSets(
+  tool: string,
+  xmlhelpPath: string,
+  commands: Iterable<string>,
+): { readonly accepted: number; readonly optionSets: readonly string[] } {
+  const xmlDoc = JSON.parse(readFileSync(xmlhelpPath, 'utf8')) as { xml: string };
+  const description = parseToolDescription(xmlDoc.xml);
+  const baseGrammar = toolOptionGrammar(description);
+  const knownFlags = new Set(['-logfile', '-conffile', ...description.parameters.map((param) => param.flag)]);
+  const keys = new Set<string>();
+  let accepted = 0;
+  for (const args of commands) {
     const parsed = parseShellWords(args);
     if (parsed === undefined || parsed.stdin !== undefined) continue;
     const words = parsed.words;
@@ -163,15 +211,7 @@ function casesToolVerification(
     keys.add(key);
     accepted++;
   }
-
-  return {
-    source: {
-      path: casesPath,
-      sha256: createHash('sha256').update(casesBytes).digest('hex'),
-      optionSets: accepted,
-    },
-    optionSets: [...keys].sort(),
-  };
+  return { accepted, optionSets: [...keys].sort() };
 }
 
 /** Splits `cases.tsv` shell words with single/double quotes and `< file` stdin (matching `masker_fixtures.rs`). */

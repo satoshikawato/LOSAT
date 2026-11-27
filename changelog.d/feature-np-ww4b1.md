@@ -8,8 +8,7 @@
   directory is: the files that the run makes or changes are kept in the Engine worker's memory and come
   to the run's file sinks (or `files`) by name when it ends, and the user's files are never changed. The
   engine's local time is the browser's time zone (a POSIX `TZ` rule in its environment), so the dates
-  in a database are the user's local time, as on the command line. LOSAT Web's form does not offer
-  makeblastdb yet.
+  in a database are the user's local time, as on the command line.
 - `makeblastdb` on WASI (the Web engine): two `-gi_mask_name` values that name one GI-mask file
   (`m` and `./m`, or a folder through a symbolic link) are refused as on the command line, instead of
   writing both masks into one file; names are resolved through symbolic links as `realpath(3)` does

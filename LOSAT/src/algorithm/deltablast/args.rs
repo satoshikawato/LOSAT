@@ -337,8 +337,8 @@ impl DeltablastArgs {
     /// The domain search's arguments: rpsblast's defaults (NCBI's RPS-BLAST options handle) on the
     /// database `rpsdb`, whose E-value is the domain inclusion threshold, and the query's
     /// lower-case masking (the domain search reads the query that round 1 reads). deltablast's
-    /// other options are not the domain search's (`CBlastOptionsFactory::Create(eRPSBlast)`), but
-    /// the process's environment is, with the OLD_FSC of `-searchsp`. A threshold of 0
+    /// other options are not the domain search's (NCBI makes a new RPS-BLAST options handle for
+    /// it), but the process's environment is, with the OLD_FSC of `-searchsp`. A threshold of 0
     /// or less keeps the E-value 10 here: NCBI's options error comes after the domain database is
     /// opened (`blastp::blast_engine::delta_hooks`).
     fn domain_search_args(rpsdb: &OsStr, ethresh: f64, lcase_masking: bool) -> Result<BlastpArgs> {

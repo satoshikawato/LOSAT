@@ -269,6 +269,8 @@ export interface ToolOutputEntry {
   readonly option?: string;
   /** True for the `-out` file of `-mk_counts` and `-convert` (offered to BLASTN and Mask). */
   readonly isCounts?: true;
+  /** True for the output that holds the masking information of a run that writes it (`writesMaskData`; offered to makeblastdb's `-mask_data`). */
+  readonly isMaskData?: true;
 }
 
 export interface ToolRunSnapshot {
@@ -281,6 +283,8 @@ export interface ToolRunSnapshot {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryEntry[];
   readonly prints?: PrintedKind;
+  /** The run writes masking information (`-outfmt maskinfo_*`; `domain/tool-argv.ts` `writesMaskData`). */
+  readonly writesMaskData?: true;
   readonly queuedAt: number;
   readonly group?: RunGroup;
 }

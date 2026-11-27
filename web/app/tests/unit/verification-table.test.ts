@@ -15,6 +15,9 @@ import {
   type OptionGrammar,
 } from '../../src/domain/verification';
 import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
+import CONVERT2BLASTMASK_XMLHELP_DOC from '../../src/infra/fake/convert2blastmask-xmlhelp.json';
+import DUSTMASKER_XMLHELP_DOC from '../../src/infra/fake/dustmasker-xmlhelp.json';
+import SEGMASKER_XMLHELP_DOC from '../../src/infra/fake/segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
@@ -116,6 +119,9 @@ describe('verification table', () => {
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv',
       'LOSAT/tests/windowmasker/cases.tsv',
       'LOSAT/tests/blast_formatter/cases.tsv',
+      'LOSAT/tests/dustmasker/cases.tsv',
+      'LOSAT/tests/segmasker/cases.tsv',
+      'LOSAT/tests/convert2blastmask/cases.tsv',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -225,5 +231,28 @@ describe('verification table', () => {
       expect(badge.level, argv.join(' ')).toBe('outside');
       expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
     }
+  });
+
+  it('generates the option sets of the Masking tools from cases.tsv, the default option set included', () => {
+    const grade = (tool: 'dustmasker' | 'segmasker' | 'convert2blastmask', xml: string, argv: readonly string[]) =>
+      toolVerificationBadge({ tool, argv, runtimePath: 'serial', grammar: toolOptionGrammar(parseToolDescription(xml)) }, table);
+    for (const tool of ['dustmasker', 'segmasker', 'convert2blastmask'] as const) {
+      const sets = table.tools?.[tool]?.optionSets;
+      expect(sets, tool).toBeDefined();
+      expect([...sets!]).toEqual([...sets!].sort());
+      for (const key of sets!) expect(key, tool).not.toMatch(/"-(in|out|logfile)"/);
+    }
+    // A run with no option besides -in and -out is the tool's default option set, which cases.tsv compares (basic_int).
+    expect(table.tools?.dustmasker?.optionSets).toContain('[]');
+    for (const argv of [
+      ['dustmasker', '-in', 'input.fa'],
+      ['dustmasker', '-in', 'input.fa', '-out', 'masked.txt', '-outfmt', 'interval'],
+    ]) {
+      const badge = grade('dustmasker', DUSTMASKER_XMLHELP_DOC.xml, argv);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+    expect(grade('segmasker', SEGMASKER_XMLHELP_DOC.xml, ['segmasker', '-in', 'input.fa', '-window', '9999']).level).toBe('outside');
+    expect(grade('convert2blastmask', CONVERT2BLASTMASK_XMLHELP_DOC.xml, ['convert2blastmask', '-in', 'input.fa']).level).toBe('outside');
   });
 });

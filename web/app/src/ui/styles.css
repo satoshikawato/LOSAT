@@ -2629,6 +2629,15 @@ pre.range-text {
   color: var(--fg);
 }
 
+/* The Masking tab's tool tabs (WW4c) in one row: "convert2blastmask" is wider than a third of the
+   row at 390 px and passed its tab's border, so each tab starts from its name's width and the
+   tabs share the room left. */
+@media (max-width: 800px) {
+  .ms-panel .program-tab {
+    flex-basis: auto;
+  }
+}
+
 .wm-counts-pick .file-name {
   display: inline-flex;
   flex-wrap: wrap;

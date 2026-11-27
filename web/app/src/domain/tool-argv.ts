@@ -1,18 +1,23 @@
 // Single command-line builders for the tools (windowmasker: WW3b DESIGN §2.5, brief §4.4;
-// blast_formatter: RG-F3p7): the same argv array is validated by `validateTool`, run by `runTool`,
+// blast_formatter: RG-F3p7; dustmasker, segmasker, convert2blastmask: WW4c): the same argv array is
+// validated by `validateTool`, run by `runTool`,
 // displayed beside "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
+  allMaskingParameters,
   allStageParameters,
   BLAST_FORMATTER_BLOCK_FLAGS,
   blastFormatterOptionParameters,
   defaultCountsOutName,
+  isMaskingTool,
+  maskingOptionParameters,
   stageOptionParameters,
   toToolParameterField,
   WINDOWMASKER_BLOCK_FLAGS,
+  type MaskingTool,
   type ToolId,
   type ToolStage,
   type WindowMaskerStage,
@@ -172,6 +177,76 @@ export function changedBlastFormatterOptionsCount(
   description: ToolDescription | undefined,
 ): number {
   return changedOptionsCount(blastFormatterOptionParameters(description), values, extra);
+}
+
+export interface MaskingArgvInput {
+  readonly tool: MaskingTool;
+  /** Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), omitted when empty. */
+  readonly inputName?: string;
+  /** Value for `-out`, omitted when empty or `'-'` (standard output, the command line's default). */
+  readonly outName?: string;
+  /** Option values keyed by `-flag` (`-infmt`, `-outfmt`, the required options and the tool's options). */
+  readonly values: FormValues;
+  /** Parsed `-xmlhelp` description (provides defaults and usage order). */
+  readonly description?: ToolDescription;
+  /** Extra words parsed from "Additional options" (`splitOptions`). */
+  readonly extra?: readonly string[];
+}
+
+/** The words that the Masking builder writes from the blocks (the file names). */
+const MASKING_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out']);
+
+/**
+ * Builds `['dustmasker' | 'segmasker' | 'convert2blastmask', '-in', …, '-out', …, options…]` for
+ * validation, execution and display: the options in NCBI `-help` usage order with their defaults
+ * left out. Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
+ */
+export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
+  const argv: string[] = [input.tool];
+  const inputName = input.inputName?.trim() ?? '';
+  if (inputName !== '') argv.push('-in', inputName);
+  const outName = input.outName?.trim() ?? '';
+  if (outName !== '' && outName !== '-') argv.push('-out', outName);
+  const ordered = allMaskingParameters(input.description, input.tool).filter((param) => !MASKING_NAMED_FLAGS.has(param.flag));
+  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS);
+  pushExtraWords(argv, input.extra);
+  return Object.freeze(argv);
+}
+
+/** Count of changed options inside the collapsible "<Tool> options" section of the Masking tab (plus Additional options). */
+export function changedMaskingOptionsCount(
+  tool: MaskingTool,
+  values: FormValues,
+  extra: string,
+  description: ToolDescription | undefined,
+): number {
+  return changedOptionsCount(maskingOptionParameters(description, tool), values, extra);
+}
+
+/** The `-outfmt` values of masking information: what makeblastdb's `-mask_data` reads. */
+export const MASK_DATA_OUTFMTS: ReadonlySet<string> = new Set(['maskinfo_asn1_bin', 'maskinfo_asn1_text', 'maskinfo_xml']);
+
+/**
+ * Whether a run writes masking information (one rule for every masker, WW4c): a run of windowmasker's
+ * Mask stage (`-ustat`), dustmasker, segmasker or convert2blastmask whose effective `-outfmt` (the
+ * argv's value, else the `-xmlhelp` default: convert2blastmask's is `maskinfo_asn1_text`) is one of
+ * `MASK_DATA_OUTFMTS`.
+ */
+export function writesMaskData(tool: ToolId, stage: ToolStage, argv: readonly string[], description: ToolDescription | undefined): boolean {
+  if (!isMaskingTool(tool) && !(tool === 'windowmasker' && stage === 'mask')) return false;
+  const outfmt = toolOptionValue(argv, '-outfmt') ?? description?.parameters.find((param) => param.flag === '-outfmt')?.defaultValue;
+  return outfmt !== undefined && MASK_DATA_OUTFMTS.has(outfmt.trim());
+}
+
+/** Of a run that writes masking information, whether its standard output holds it: the argv names no `-out` file. */
+export function maskDataOnStdout(argv: readonly string[]): boolean {
+  return namedOutPath(argv) === undefined;
+}
+
+/** Of a run that writes masking information, whether the file `fileName` holds it: the argv's `-out` file. */
+export function isMaskDataFile(argv: readonly string[], fileName: string): boolean {
+  const out = namedOutPath(argv);
+  return out !== undefined && out === normalizeRelName(fileName);
 }
 
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */

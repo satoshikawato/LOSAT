@@ -37,12 +37,12 @@ async function press(page: Page, key: string, chosen: string): Promise<void> {
   expect(await focused(page)).toBe(chosen);
 }
 
-const MAIN = ['tab-search', 'tab-results', 'tab-windowmasker', 'tab-blast-formatter'];
+const MAIN = ['tab-search', 'tab-results', 'tab-windowmasker', 'tab-masking', 'tab-blast-formatter'];
 const VIEWS = ['results-view-hits', 'pane-dotplot', 'results-view-details', 'results-view-outputs'];
 const FORMATS = ['format-0', 'format-6', 'format-7'];
 const PROTEIN = 'MKLVVLAAGGHHKLMKLVVLAAGGHHKLMSTNPKPQRKTKRNTNRRPQDVKFPGG';
 
-test('Search, Results, WindowMasker and Format Archive, the results views and the output formats are tabs that the arrow keys reach', async ({ page }) => {
+test('Search, Results, WindowMasker, Masking and Format Archive, the results views and the output formats are tabs that the arrow keys reach', async ({ page }) => {
   await openSearch(page);
   await expectTabs(page, 'Main', MAIN, 'tab-search');
   await page.getByTestId('tab-search').focus();
@@ -52,6 +52,9 @@ test('Search, Results, WindowMasker and Format Archive, the results views and th
   await press(page, 'ArrowRight', 'tab-windowmasker');
   await expectTabs(page, 'Main', MAIN, 'tab-windowmasker');
   await expect(page.getByTestId('wm-panel')).toBeVisible();
+  await press(page, 'ArrowRight', 'tab-masking');
+  await expectTabs(page, 'Main', MAIN, 'tab-masking');
+  await expect(page.getByTestId('ms-panel')).toBeVisible();
   await press(page, 'ArrowRight', 'tab-blast-formatter');
   await expectTabs(page, 'Main', MAIN, 'tab-blast-formatter');
   await expect(page.getByTestId('bf-panel')).toBeVisible();

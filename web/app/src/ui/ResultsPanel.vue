@@ -11,6 +11,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'v
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionArchiveEntry, type SessionCountsEntry } from '../application/coordinator';
 import type { CountsLoader } from '../application/counts';
+import type { MaskDataEntry } from '../application/mask-data-handover';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
@@ -18,7 +19,7 @@ import { fromText, inputLabel, leavesOut, readDifferenceText } from '../domain/i
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal, runInputRecords } from '../domain/run';
-import { toolLabel, toolStageLabel } from '../domain/tools';
+import { toolLabel, toolRunTitle, toolStageLabel } from '../domain/tools';
 import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -44,13 +45,24 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[]; counts?: CountsLoader | undefined }>();
-/** "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts"). */
+const props = defineProps<{
+  coordinator: Coordinator;
+  results: ResultsBrowser;
+  runs: readonly AnyRunView[];
+  counts?: CountsLoader | undefined;
+  /** Whether a masking-information output can be handed to makeblastdb (MaskDataHandover.available). */
+  maskDataAvailable?: boolean | undefined;
+}>();
+/**
+ * "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts",
+ * "Use as -mask_data in makeblastdb").
+ */
 const emit = defineEmits<{
   search: [];
   'use-in-blastn': [file: File];
   'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
+  'use-mask-data': [entry: MaskDataEntry];
   'format-archive': [entry: SessionArchiveEntry];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
@@ -319,11 +331,7 @@ async function toAlignments(id: HspId): Promise<void> {
           <template v-if="selectedTool">
             <dt>Tool</dt>
             <dd class="results-program">
-              <span data-testid="results-program">{{
-                selectedTool.snapshot.tool === 'windowmasker'
-                  ? `${toolLabel(selectedTool.snapshot.tool)} · ${toolStageLabel(selectedTool.snapshot.tool, selectedTool.snapshot.stage)}`
-                  : `${toolLabel(selectedTool.snapshot.tool)} (blast_formatter)`
-              }}</span>
+              <span data-testid="results-program">{{ toolRunTitle(selectedTool.snapshot.tool, selectedTool.snapshot.stage) }}</span>
               <VerificationBadge v-if="state.toolBadge" :badge="state.toolBadge" compact @details="toolSection = 'details'" />
             </dd>
             <dt>Options</dt>
@@ -470,9 +478,11 @@ async function toAlignments(id: HspId): Promise<void> {
         :counts="counts"
         :badge="state.toolBadge"
         :takes-value="state.grammar?.takesValue"
+        :mask-data-available="maskDataAvailable"
         @use-in-blastn="emit('use-in-blastn', $event)"
         @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"
         @mask-with-counts="emit('mask-with-counts', $event)"
+        @use-mask-data="emit('use-mask-data', $event)"
       />
 
       <template v-if="state.phase === 'ready' && loaded">

@@ -19,18 +19,21 @@ import {
   type OptionGrammar,
   type ProgramVerification,
   type ToolOptionGrammar,
+  type ToolVerification,
   type VerificationTable,
 } from '../src/domain/verification.ts';
+import type { ToolId } from '../src/domain/tools.ts';
 
 const VIRTUAL_ID = 'virtual:losat-verification';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const NCBI_VERSION = '2.17.0';
 const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
 const DESCRIBE = fileURLToPath(new URL('../src/infra/fake/describe.json', import.meta.url));
-const WINDOWMASKER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/windowmasker-xmlhelp.json', import.meta.url));
-const WINDOWMASKER_CASES_PATH = 'LOSAT/tests/windowmasker/cases.tsv';
-const BLAST_FORMATTER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/blast_formatter-xmlhelp.json', import.meta.url));
-const BLAST_FORMATTER_CASES_PATH = 'LOSAT/tests/blast_formatter/cases.tsv';
+/**
+ * The CLI tools of the Web whose runs are graded from their `LOSAT/tests/<tool>/cases.tsv` and NCBI-frozen
+ * `ncbi/<name>.rc` files, read with the FakeEngine's `<tool>-xmlhelp.json`.
+ */
+const CASES_TOOLS = ['windowmasker', 'blast_formatter', 'dustmasker', 'segmasker', 'convert2blastmask'] as const satisfies readonly ToolId[];
 const TOOL_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json', '-dryrun']);
 
 type Program = (typeof PROGRAMS)[number];
@@ -85,10 +88,12 @@ export function generateVerificationTable(repository: string): VerificationTable
     sources.push({ path, sha256: createHash('sha256').update(bytes).digest('hex'), optionSets: accepted });
   }
 
-  const wm = casesToolVerification(repository, 'windowmasker', WINDOWMASKER_XMLHELP, WINDOWMASKER_CASES_PATH, 'LOSAT/tests/windowmasker/ncbi');
-  sources.push(wm.source);
-  const bf = casesToolVerification(repository, 'blast_formatter', BLAST_FORMATTER_XMLHELP, BLAST_FORMATTER_CASES_PATH, 'LOSAT/tests/blast_formatter/ncbi');
-  sources.push(bf.source);
+  const tools: Partial<Record<ToolId, ToolVerification>> = {};
+  for (const tool of CASES_TOOLS) {
+    const graded = casesToolVerification(repository, tool);
+    sources.push(graded.source);
+    tools[tool] = { optionSets: graded.optionSets };
+  }
 
   const browsers = browserVerification(readTable(readFileSync(join(repository, 'docs/web/verification_cells.tsv'), 'utf8')));
   const programs: Partial<Dictionary<ProgramVerification>> = {};
@@ -98,29 +103,21 @@ export function generateVerificationTable(repository: string): VerificationTable
     const browser = browsers.get(program);
     programs[program] = browser === undefined ? { optionSets } : { optionSets, browser };
   }
-  return {
-    ncbi: NCBI_VERSION,
-    sources,
-    programs,
-    tools: {
-      windowmasker: { optionSets: wm.optionSets },
-      blast_formatter: { optionSets: bf.optionSets },
-    },
-  };
+  return { ncbi: NCBI_VERSION, sources, programs, tools };
 }
 
 /**
- * Generates a CLI tool's option sets from `casesPath` (`cases.tsv`) and its NCBI-frozen
+ * Generates a CLI tool's option sets from `LOSAT/tests/<tool>/cases.tsv` and its NCBI-frozen
  * `ncbi/<name>.rc` files (matching `masker_fixtures.rs`: last row per name wins,
  * shell-word quoting, skipping non-zero exits, environment variables, stdin, help and `-dryrun`).
  */
 function casesToolVerification(
   repository: string,
-  tool: 'windowmasker' | 'blast_formatter',
-  xmlhelpPath: string,
-  casesPath: string,
-  ncbiRelDir: string,
+  tool: (typeof CASES_TOOLS)[number],
 ): { readonly source: Source; readonly optionSets: readonly string[] } {
+  const xmlhelpPath = fileURLToPath(new URL(`../src/infra/fake/${tool}-xmlhelp.json`, import.meta.url));
+  const casesPath = `LOSAT/tests/${tool}/cases.tsv`;
+  const ncbiRelDir = `LOSAT/tests/${tool}/ncbi`;
   const xmlDoc = JSON.parse(readFileSync(xmlhelpPath, 'utf8')) as { xml: string };
   const description = parseToolDescription(xmlDoc.xml);
   const baseGrammar = toolOptionGrammar(description);

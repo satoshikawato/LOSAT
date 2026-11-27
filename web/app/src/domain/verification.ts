@@ -45,7 +45,7 @@ export interface VerificationTable {
   /** The records the table was generated from, with their SHA-256. */
   readonly sources: readonly { readonly path: string; readonly sha256: string; readonly optionSets: number }[];
   readonly programs: Readonly<Partial<Record<ProgramId, ProgramVerification>>>;
-  /** CLI tools besides BLAST searches (windowmasker). */
+  /** CLI tools besides BLAST searches (windowmasker, blast_formatter, dustmasker, segmasker, convert2blastmask). */
   readonly tools?: Readonly<Partial<Record<ToolId, ToolVerification>>>;
 }
 
@@ -144,7 +144,7 @@ export function toolOptionKey(words: readonly string[], grammar: ToolOptionGramm
     }
     pairs.push([flag, normalized]);
   }
-  if (pairs.length === 0) return undefined;
+  // No option besides the inputs and outputs is the tool's default option set (`dustmasker -in a.fa`), a set of its own.
   pairs.sort(([fa, va], [fb, vb]) => (fa < fb ? -1 : fa > fb ? 1 : va < vb ? -1 : va > vb ? 1 : 0));
   return JSON.stringify(pairs);
 }

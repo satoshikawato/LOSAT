@@ -56,7 +56,7 @@ import {
   type ToolRunRecord,
   type ToolRunSnapshot,
 } from '../domain/run';
-import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
+import { isCountsOutputFile, isMaskDataFile, maskDataOnStdout, toolFileOptionLabel } from '../domain/tool-argv';
 import { toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -134,6 +134,8 @@ export interface ToolRequest {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
+  /** The run writes masking information (the draft's `writesMaskData`): its output that holds it is marked `isMaskData`. */
+  readonly writesMaskData?: true;
   /** OPFS-backed inflated session file tokens read by this run (directly or inside combined_input.fa). */
   readonly sessionTokens?: readonly string[];
 }
@@ -203,7 +205,7 @@ export interface CoordinatorDeps {
   readonly dataWorkerEnded?: Promise<Error>;
   /** Runtime path and build identifier recorded on completed/failed tool runs. */
   readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
-  /** Shared holder tracker for inflated session files used by WindowMasker tool runs. */
+  /** Shared holder tracker for inflated session files used by WindowMasker and Masking tool runs. */
   readonly sessionFiles?: SessionFiles;
   /**
    * The taxonomy IDs' locks on saved counts: a run that reads a saved copy holds its ID's lock in shared mode from
@@ -347,6 +349,7 @@ export class Coordinator {
           ),
         ),
         ...(request.prints === undefined ? {} : { prints: request.prints }),
+        ...(request.writesMaskData === true ? { writesMaskData: true as const } : {}),
         queuedAt,
         ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: requests.length }) }),
       }),
@@ -1094,7 +1097,14 @@ export class Coordinator {
         void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
         throw error;
       });
-      const stdout: ToolOutputEntry = Object.freeze({ key: 'stdout', name: 'stdout', size: summary.stdoutSize });
+      // The output that holds a run's masking information: its -out file, or its standard output without one.
+      const maskData = snapshot.writesMaskData === true;
+      const stdout: ToolOutputEntry = Object.freeze({
+        key: 'stdout',
+        name: 'stdout',
+        size: summary.stdoutSize,
+        ...(maskData && maskDataOnStdout(snapshot.argv) ? { isMaskData: true as const } : {}),
+      });
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
         const option = toolFileOptionLabel(snapshot.argv, file.name);
@@ -1105,6 +1115,7 @@ export class Coordinator {
           size: file.size,
           ...(option === undefined ? {} : { option }),
           ...(counts ? { isCounts: true as const } : {}),
+          ...(maskData && isMaskDataFile(snapshot.argv, file.name) ? { isMaskData: true as const } : {}),
         });
       });
       this.updateTool(runId, {

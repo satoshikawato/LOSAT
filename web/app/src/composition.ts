@@ -11,6 +11,8 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
+import { MaskDataHandover } from './application/mask-data-handover';
+import { MaskingDraft } from './application/masking-draft';
 import { ResultsBrowser } from './application/results';
 import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
@@ -33,6 +35,13 @@ export interface App {
   readonly draft: SearchDraft;
   /** The WindowMasker job being edited on the WindowMasker tab. */
   readonly toolDraft: ToolDraft;
+  /** The dustmasker, segmasker or convert2blastmask job being edited on the Masking tab (WW4c). */
+  readonly maskingDraft: MaskingDraft;
+  /**
+   * Where "Use as -mask_data in makeblastdb" hands a masking-information output (WW4c): the makeblastdb
+   * form, once there is one on this page; without a target the Results tab does not offer it.
+   */
+  readonly maskData: MaskDataHandover;
   /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
   readonly blastFormatterDraft: BlastFormatterDraft;
   /** The Example sets that load into the draft (line WF-2). */
@@ -115,13 +124,21 @@ export function createApp(options: AppOptions = {}): App {
     readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
     sessionFiles,
   });
+  const maskingDraft = new MaskingDraft({
+    engine,
+    data,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+    sessionFiles,
+  });
+  const maskData = new MaskDataHandover();
   const blastFormatterDraft = new BlastFormatterDraft({
     engine,
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
     isBusy: () => coordinator.isBusy(),
   });
-  const tools = [toolDraft, blastFormatterDraft];
+  const tools = [toolDraft, maskingDraft, blastFormatterDraft];
   const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
@@ -147,5 +164,18 @@ export function createApp(options: AppOptions = {}): App {
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, toolDraft, blastFormatterDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
+  return {
+    coordinator,
+    draft,
+    toolDraft,
+    maskingDraft,
+    maskData,
+    blastFormatterDraft,
+    examples,
+    counts,
+    results,
+    attention,
+    availability,
+    usesFakeEngine: ENGINE_ASSETS === null,
+  };
 }

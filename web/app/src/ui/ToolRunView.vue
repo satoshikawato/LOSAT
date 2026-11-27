@@ -4,14 +4,16 @@
 // Outputs preview at most 512 KiB so large counts/FASTA outputs never grow page JS heap;
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
-// "Mask with these counts".
+// "Mask with these counts"; the output that holds a run's masking information (`isMaskData`) offers
+// "Use as -mask_data in makeblastdb" while the hand-over has a target (WW4c).
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue';
 import { activeSavedCountsTaxid, savedTabCopyOf, type CountsLoader, type SavedTabCopy } from '../application/counts';
 import type { Coordinator, SessionCountsEntry, ToolRunView } from '../application/coordinator';
+import type { MaskDataEntry } from '../application/mask-data-handover';
 import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
 import { toolCommandWords } from '../domain/tool-argv';
-import { decodeUtf8Preview, toolLabel, toolStageLabel } from '../domain/tools';
+import { decodeUtf8Preview, toolRunTitle } from '../domain/tools';
 import type { Badge } from '../domain/verification';
 import type { CountsCopy } from '../ports/counts';
 import { announce } from './announcer';
@@ -31,12 +33,15 @@ const props = defineProps<{
   counts?: CountsLoader | undefined;
   badge?: Badge | undefined;
   takesValue?: ((flag: string) => boolean) | undefined;
+  /** Whether a masking-information output can be handed to makeblastdb (MaskDataHandover.available). */
+  maskDataAvailable?: boolean | undefined;
 }>();
 
 const emit = defineEmits<{
   'use-in-blastn': [file: File];
   'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
+  'use-mask-data': [entry: MaskDataEntry];
 }>();
 
 const countsState = props.counts === undefined ? undefined : useStore(props.counts.state);
@@ -291,11 +296,20 @@ function maskWithCounts(): void {
   });
 }
 
+function useMaskData(): void {
+  const tab = activeTab.value;
+  if (tab === undefined) return;
+  emit('use-mask-data', {
+    runId: props.run.snapshot.runId,
+    runNumber: props.run.snapshot.number,
+    key: tab.key,
+    name: tab.entry.name,
+    size: tab.entry.size,
+  });
+}
+
 const command = computed(() => toolCommandWords(props.run.snapshot.argv));
-const toolHeading = computed(() => {
-  const { tool, stage } = props.run.snapshot;
-  return tool === 'windowmasker' ? `${toolLabel(tool)} · ${toolStageLabel(tool, stage)}` : `${toolLabel(tool)} (blast_formatter)`;
-});
+const toolHeading = computed(() => toolRunTitle(props.run.snapshot.tool, props.run.snapshot.stage));
 const duration = computed(() => {
   const { startedAt, endedAt } = props.run.record;
   return startedAt !== undefined && endedAt !== undefined ? formatDuration(endedAt - startedAt) : '';
@@ -420,6 +434,15 @@ function originText(origin: ToolFileOrigin): string {
                 </button>
               </span>
             </template>
+            <button
+              v-if="activeTab.entry.isMaskData && run.status === 'completed' && maskDataAvailable"
+              type="button"
+              class="primary-action"
+              data-testid="tool-use-mask-data"
+              @click="useMaskData"
+            >
+              Use as -mask_data in makeblastdb
+            </button>
           </div>
           <p v-if="saveError" class="results-message error" role="alert" data-testid="tool-save-error">
             {{ saveError }}

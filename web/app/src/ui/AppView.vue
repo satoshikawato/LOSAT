@@ -7,12 +7,15 @@ import type { Coordinator, SessionArchiveEntry, SessionCountsEntry } from '../ap
 import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
+import type { MaskDataEntry, MaskDataHandover } from '../application/mask-data-handover';
+import type { MaskingDraft } from '../application/masking-draft';
 import type { ResultsBrowser } from '../application/results';
 import type { ToolDraft } from '../application/tool-draft';
 import { useStore } from './useStore';
 import FormatArchivePanel from './FormatArchivePanel.vue';
 import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
+import MaskingPanel from './MaskingPanel.vue';
 import { holdWhilePressed } from './press-hold';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
@@ -27,6 +30,8 @@ const props = defineProps<{
   coordinator: Coordinator;
   draft: SearchDraft;
   toolDraft: ToolDraft;
+  maskingDraft: MaskingDraft;
+  maskData: MaskDataHandover;
   blastFormatterDraft: BlastFormatterDraft;
   examples: ExampleLoader;
   counts: CountsLoader;
@@ -53,6 +58,7 @@ const navigation = tabNavigation(window.history);
 const forms = {
   search: { scroll: 0, focus: null as Element | null },
   windowmasker: { scroll: 0, focus: null as Element | null },
+  masking: { scroll: 0, focus: null as Element | null },
   blast_formatter: { scroll: 0, focus: null as Element | null },
 };
 function leave(): void {
@@ -74,6 +80,8 @@ watchEffect(() => {
   if (shown.value === 'windowmasker') {
     props.toolDraft.ensureLoaded();
     props.counts.refreshList();
+  } else if (shown.value === 'masking') {
+    props.maskingDraft.ensureLoaded();
   } else if (shown.value === 'blast_formatter') {
     props.blastFormatterDraft.ensureLoaded();
   }
@@ -81,12 +89,13 @@ watchEffect(() => {
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
-/** Search, Results, WindowMasker, and Format Archive: tabs, each with its panel (WA2-AX-12). */
+/** Search, Results, WindowMasker, Masking and Format Archive: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
   { value: 'search', label: 'Search', testid: 'tab-search', id: `${ids}-search-tab`, panel: `${ids}-search` },
   { value: 'results', label: 'Results', testid: 'tab-results', id: `${ids}-results-tab`, panel: `${ids}-results` },
   { value: 'windowmasker', label: 'WindowMasker', testid: 'tab-windowmasker', id: `${ids}-wm-tab`, panel: `${ids}-wm` },
+  { value: 'masking', label: 'Masking', testid: 'tab-masking', id: `${ids}-ms-tab`, panel: `${ids}-ms` },
   { value: 'blast_formatter', label: 'Format Archive', testid: 'tab-blast-formatter', id: `${ids}-bf-tab`, panel: `${ids}-bf` },
 ] as const;
 useRunAnnouncements(state, useStore(props.results.state));
@@ -153,6 +162,14 @@ async function maskWithCounts(entry: SessionCountsEntry): Promise<void> {
   tab.value = 'windowmasker';
   await nextTick();
   window.scrollTo(0, 0);
+}
+
+/**
+ * "Use as -mask_data in makeblastdb" on a masking-information output: hands it to the makeblastdb form
+ * (MaskDataHandover; the Results tab offers it only while the hand-over has a target).
+ */
+function useMaskData(entry: MaskDataEntry): void {
+  props.maskData.use(entry);
 }
 
 /** "Format archive…" on a completed `-outfmt 11` search output: opens it in Format Archive. */
@@ -284,7 +301,9 @@ onUnmounted(() => {
         @search="showSearch"
         @use-in-blastn="useCountsInBlastn"
         @use-taxid-in-blastn="useTaxidInBlastn"
+        :mask-data-available="maskData.available()"
         @mask-with-counts="maskWithCounts"
+        @use-mask-data="useMaskData"
         @format-archive="formatArchiveFromRun"
       />
       <WindowMaskerPanel
@@ -297,11 +316,19 @@ onUnmounted(() => {
         :counts="counts"
         @submitted="openResults"
       />
-      <FormatArchivePanel
-        v-show="tab === 'blast_formatter'"
+      <MaskingPanel
+        v-show="tab === 'masking'"
         :id="MAIN_TABS[3].panel"
         role="tabpanel"
         :aria-labelledby="MAIN_TABS[3].id"
+        :draft="maskingDraft"
+        @submitted="openResults"
+      />
+      <FormatArchivePanel
+        v-show="tab === 'blast_formatter'"
+        :id="MAIN_TABS[4].panel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[4].id"
         :draft="blastFormatterDraft"
         :coordinator="coordinator"
         @submitted="openResults"

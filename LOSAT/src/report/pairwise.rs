@@ -4821,7 +4821,10 @@ fn write_description_row_start<W: Write>(
             // its definition line twice before the line, each read posting for the bytes of its
             // title that NCBI replaces (`common::database::FormatterTitleReads::Pairwise`).
             if !label.caught {
-                place(super::query_warnings::ReportPlace::Titles(rank.0, 2), writer)?;
+                place(
+                    super::query_warnings::ReportPlace::Titles(rank.0, 2),
+                    writer,
+                )?;
             }
             label.write_cut(writer)?;
             write!(writer, "  {bits:<max_score$}")
@@ -4883,12 +4886,11 @@ impl<'a> HtmlRows<'a> {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494-498
         // The two reads of the subject's definition line (`write_description_row_start`) come
         // before and after the id link's reads of the registry (`GetIDUrl`).
-        let title_read = |place: super::query_warnings::ReportHook<'_, W>, writer: &mut W| {
-            match label.caught {
+        let title_read =
+            |place: super::query_warnings::ReportHook<'_, W>, writer: &mut W| match label.caught {
                 false => place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer),
                 true => Ok(()),
-            }
-        };
+            };
         title_read(&mut *place, writer)?;
         let mut posts = Vec::new();
         let links = self

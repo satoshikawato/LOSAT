@@ -1572,6 +1572,27 @@ fn filter_final_hitlists(
     Ok(())
 }
 
+/// Cuts the values of the searched queries that the reports read (`results`, the lengths and
+/// cutoffs of their contexts, their ungapped Karlin-Altschul blocks, `validity`, `skipped`) at
+/// `at`, the first query of the batch that ends the run: a batch that a database file failed or
+/// whose prefetch stops, or whose loads NCBI crashes in (`search`). That batch is not reported,
+/// nor are the batches after it.
+fn cut_queries<R, K>(
+    at: usize,
+    results: &mut Vec<R>,
+    lengths: &mut LocalSubjectParameters,
+    ungapped_karlin: &mut Vec<K>,
+    validity: &mut Vec<bool>,
+    skipped: &mut Vec<bool>,
+) {
+    results.truncate(at);
+    lengths.lengths.truncate(at);
+    lengths.cutoffs.truncate(at);
+    ungapped_karlin.truncate(at);
+    validity.truncate(at);
+    skipped.truncate(at);
+}
+
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options, the
 /// reading of the subjects and the steps before the prolog (`before_prolog`): LOSAT's
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
@@ -2351,12 +2372,14 @@ fn search(
         // A batch that a database file failed is not reported, nor are the batches after it.
         let queries = match &failed {
             Some((range, _)) => {
-                results.truncate(range.start);
-                lengths.lengths.truncate(range.start);
-                lengths.cutoffs.truncate(range.start);
-                ungapped_karlin.truncate(range.start);
-                query_validity.truncate(range.start);
-                query_batch_skipped.truncate(range.start);
+                cut_queries(
+                    range.start,
+                    &mut results,
+                    &mut lengths,
+                    &mut ungapped_karlin,
+                    &mut query_validity,
+                    &mut query_batch_skipped,
+                );
                 &queries[..range.start]
             }
             None => queries,
@@ -2449,7 +2472,7 @@ fn search(
             .collect();
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
-        let batch_spans: Vec<std::ops::Range<usize>> = query_input
+        let mut batch_spans: Vec<std::ops::Range<usize>> = query_input
             .batches(batch_size)
             .into_iter()
             .map(|batch| batch.searched)
@@ -2526,7 +2549,8 @@ fn search(
         // their own lookups (`shared::RowLookups::Taxids`). They are read here, after the refusals of
         // the reported subjects and before any format is written, so a refusal (a taxonomy
         // database or a taxid that LOSAT cannot read as NCBI does) comes before any byte, as
-        // those refusals do; without `taxdb.bti` nothing is read. A failed batch is not reported
+        // those refusals do, but a lookup where NCBI crashes, which ends the run at its batch
+        // (`load_stop`); without `taxdb.bti` nothing is read. A failed batch is not reported
         // and prefetches nothing (`failed`, a header file or the sequence file that NCBI cannot
         // read during the batch's search).
         // Which rows of the first format read the subjects' Bioseqs where a batch's prefetch is off
@@ -2539,6 +2563,8 @@ fn search(
             .map_or(SubjectFetch::Every, |spec| {
                 spec.subject_fetch(crate::blastinput::app::Program::Tblastn)
             });
+        // The batch whose loads NCBI crashes in, and LOSAT's refusal of it (below).
+        let mut load_stop: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         if let (Some(reported), Some(database)) = (&reported, database) {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
             // Outfmt 10 and 20 prefetch as the tabular 6 and 7 do (a name of the taxonomy
@@ -2596,149 +2622,193 @@ fn search(
                                  stop_on_throw| {
                     database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)
                 };
-                for span in &batch_spans {
-                    // No batch after the run's end is prefetched, nor read one by one.
-                    if !reaches(span.start) {
-                        break;
-                    }
-                    reads.reach(span);
-                    let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP of a gapped search, one for each
-                    // subject of an ungapped one (`database::seq_aligns_of`).
-                    let seq_aligns = super::database::seq_aligns_of(hitlists, resolved.gapped);
-                    // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-                    // (`shared::prefetch_off`), each query's report fetches the subjects it
-                    // shows, after the query's own warnings, where the first format's rows read
-                    // their Bioseqs (`TabularSpec::subject_fetch`; for `nident` alone the rows
-                    // with identities, `database::reads_subject`). NCBI looks the taxonomy up
-                    // only where it fetches a subject: in such a report, or in the prefetch of a
-                    // batch with Seq-aligns (one without them loads no id, below). Every batch's
-                    // lookups are made here before any report is written, so the run's refusal
-                    // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
-                    // only there: a later batch that fetches still refuses before any byte.
-                    // The reports load the batch's subjects one by one where its prefetch is off
-                    // or fails at a subject whose lookup throws on the id (the one answer,
-                    // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts
-                    // (below), then the texts of the reads of the loads that it did not make
-                    // (review 1 of line DBID pf7, H1).
-                    let one_by_one = reported.prefetch.loads_one_by_one(span.start);
-                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
-                    // A batch without Seq-aligns prefetches no sequence.
-                    if !crate::algorithm::common::database::prefetch_off(
-                        prefetch_format,
-                        seq_aligns,
-                    ) && seq_aligns > 0
-                    {
-                        if has_nullb
-                            && super::nullb_report::hitlists_have_empty_subject_row_db(hitlists)
+                // The batch whose loads the loop makes: its refusal where NCBI crashes ends the
+                // run there, after the reports of the batches before (`shared::batch_loads_error`,
+                // `load_stop`).
+                let loading = std::cell::Cell::new(0..0);
+                if let Err(error) = (|| -> Result<()> {
+                    for span in &batch_spans {
+                        loading.set(span.clone());
+                        // No batch after the run's end is prefetched, nor read one by one.
+                        if !reaches(span.start) {
+                            break;
+                        }
+                        reads.reach(span);
+                        let hitlists = &results[span.clone()];
+                        // The batch's Seq-aligns, one for each HSP of a gapped search, one for each
+                        // subject of an ungapped one (`database::seq_aligns_of`).
+                        let seq_aligns = super::database::seq_aligns_of(hitlists, resolved.gapped);
+                        // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                        // (`shared::prefetch_off`), each query's report fetches the subjects it
+                        // shows, after the query's own warnings, where the first format's rows read
+                        // their Bioseqs (`TabularSpec::subject_fetch`; for `nident` alone the rows
+                        // with identities, `database::reads_subject`). NCBI looks the taxonomy up
+                        // only where it fetches a subject: in such a report, or in the prefetch of a
+                        // batch with Seq-aligns (one without them loads no id, below). Every batch's
+                        // lookups are made here before any report is written, so the run's refusal
+                        // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
+                        // only there: a later batch that fetches still refuses before any byte.
+                        // The reports load the batch's subjects one by one where its prefetch is off
+                        // or fails at a subject whose lookup throws on the id (the one answer,
+                        // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts
+                        // (below), then the texts of the reads of the loads that it did not make
+                        // (review 1 of line DBID pf7, H1).
+                        let one_by_one = reported.prefetch.loads_one_by_one(span.start);
+                        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                        // A batch without Seq-aligns prefetches no sequence.
+                        if !crate::algorithm::common::database::prefetch_off(
+                            prefetch_format,
+                            seq_aligns,
+                        ) && seq_aligns > 0
                         {
-                            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679,778-786
-                            // `s_ExtractSeqidsAndRanges` calls `GetSeqRange` on row 1 before
-                            // `LoadSequencesToScope`, throwing `Row is empty` and posting the
-                            // prefetch warning without loading any subject.
-                            prefetch_posts.push((
-                                span.start,
-                                crate::report::diag_log::Posts::of_lines(
-                                    crate::algorithm::common::database::prefetch_warning("tblastn"),
-                                ),
-                            ));
-                        } else if taxdb_found || database.parsed_seqids() {
-                            let prefetched = |query: usize| {
-                                prefetch_posts
-                                    .iter()
-                                    .find(|(first, _)| *first == query)
-                                    .map(|(_, posts)| posts)
-                            };
-                            let xml_before =
-                                xml_cuts.reports_before(subject_reads.queries(), &prefetched);
-                            let scope = || batch_scope(span);
-                            // The batches before (`results`): what NCBI's data loader loaded for them
-                            // (`super::database::LoadedBefore`), read only where this batch stops; a call
-                            // of the library's batches after the first (`api::run_batches`) has those of
-                            // the calls before unrecorded.
-                            let messages = database.batch_prefetch(
-                                reported,
-                                super::database::LoadedBefore {
-                                    hits: &results[..span.start],
-                                    spans: &batch_spans,
-                                    format: prefetch_format,
-                                    rows: first_rows,
-                                    cuts: xml_cuts,
-                                },
-                                hitlists,
-                                &crate::algorithm::common::database::PrefetchQueries::new(
-                                    span.start, &scope,
-                                )
-                                .after_xml_reports(xml_before.as_ref())
-                                .where_reports_unchanged_by_load_throws(
-                                    crate::report::db_subject::unchanged_by_load_throws_outfmts(
-                                        outputs.formats.iter().map(|format| format.outfmt),
-                                        crate::blastinput::app::Program::Tblastn,
-                                        crate::report::archive::options::RequestKind::Tblastn,
-                                    ),
-                                ),
-                            )?;
-                            // The rows of a batch whose reports load one by one open it with each
-                            // query's reads (below).
-                            if !one_by_one {
-                                rows_open(hitlists, false)?;
-                            }
-                            // After the reader's messages of the batch, in its first query
-                            // (`query_warnings::query_posts`).
-                            if !messages.is_empty() {
-                                prefetch_posts.push((span.start, messages));
-                            }
-                        }
-                    }
-                    if one_by_one {
-                        // No fetch writes without `taxdb.bti` or such a lookup.
-                        if !taxdb_found && !database.scope_utf8_seen() {
-                            database.reset_scope();
-                            continue;
-                        }
-                        let rows = first_rows;
-                        for (query, hitlist) in span.clone().zip(hitlists) {
-                            if !reaches(query) {
-                                break;
-                            }
-                            let shown = std::slice::from_ref(hitlist);
-                            if hitlist
-                                .lists()
-                                .iter()
-                                .any(|list| super::database::reads_subject(list, rows))
+                            if has_nullb
+                                && super::nullb_report::hitlists_have_empty_subject_row_db(hitlists)
                             {
-                                // The first format writes the texts where it reads each subject
-                                // (`places_subject_reads`), else before the report.
-                                if places_reads {
-                                    let joins_copies = first_report.is_some_and(
-                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
-                                    );
-                                    subject_reads.set(
-                                        query,
-                                        database.subject_read_texts(
-                                            reported,
-                                            shown,
-                                            rows,
-                                            row_lookups,
-                                            pairwise,
-                                            (joins_copies, ends_on_throw),
-                                        )?,
-                                    );
-                                } else {
-                                    let messages =
-                                        database.prefetch_messages(reported, shown, rows)?;
-                                    query_warning_lines[query].extend(messages);
+                                // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679,778-786
+                                // `s_ExtractSeqidsAndRanges` calls `GetSeqRange` on row 1 before
+                                // `LoadSequencesToScope`, throwing `Row is empty` and posting the
+                                // prefetch warning without loading any subject.
+                                prefetch_posts.push((
+                                    span.start,
+                                    crate::report::diag_log::Posts::of_lines(
+                                        crate::algorithm::common::database::prefetch_warning(
+                                            "tblastn",
+                                        ),
+                                    ),
+                                ));
+                            } else if taxdb_found || database.parsed_seqids() {
+                                let prefetched = |query: usize| {
+                                    prefetch_posts
+                                        .iter()
+                                        .find(|(first, _)| *first == query)
+                                        .map(|(_, posts)| posts)
+                                };
+                                let xml_before =
+                                    xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                                let scope = || batch_scope(span);
+                                // The batches before (`results`): what NCBI's data loader loaded for them
+                                // (`super::database::LoadedBefore`), read only where this batch stops; a call
+                                // of the library's batches after the first (`api::run_batches`) has those of
+                                // the calls before unrecorded.
+                                let messages = database.batch_prefetch(
+                                    reported,
+                                    super::database::LoadedBefore {
+                                        hits: &results[..span.start],
+                                        spans: &batch_spans,
+                                        format: prefetch_format,
+                                        rows: first_rows,
+                                        cuts: xml_cuts,
+                                    },
+                                    hitlists,
+                                    &crate::algorithm::common::database::PrefetchQueries::new(
+                                        span.start, &scope,
+                                    )
+                                    .after_xml_reports(xml_before.as_ref())
+                                    .where_reports_unchanged_by_load_throws(
+                                        crate::report::db_subject::unchanged_by_load_throws_outfmts(
+                                            outputs.formats.iter().map(|format| format.outfmt),
+                                            crate::blastinput::app::Program::Tblastn,
+                                            crate::report::archive::options::RequestKind::Tblastn,
+                                        ),
+                                    ),
+                                )?;
+                                // The rows of a batch whose reports load one by one open it with each
+                                // query's reads (below).
+                                if !one_by_one {
+                                    rows_open(hitlists, false)?;
+                                }
+                                // After the reader's messages of the batch, in its first query
+                                // (`query_warnings::query_posts`).
+                                if !messages.is_empty() {
+                                    prefetch_posts.push((span.start, messages));
                                 }
                             }
-                            rows_open(shown, ends_on_throw)?;
                         }
+                        if one_by_one {
+                            // No fetch writes without `taxdb.bti` or such a lookup.
+                            if !taxdb_found && !database.scope_utf8_seen() {
+                                database.reset_scope();
+                                continue;
+                            }
+                            let rows = first_rows;
+                            for (query, hitlist) in span.clone().zip(hitlists) {
+                                if !reaches(query) {
+                                    break;
+                                }
+                                let shown = std::slice::from_ref(hitlist);
+                                if hitlist
+                                    .lists()
+                                    .iter()
+                                    .any(|list| super::database::reads_subject(list, rows))
+                                {
+                                    // The first format writes the texts where it reads each subject
+                                    // (`places_subject_reads`), else before the report.
+                                    if places_reads {
+                                        let joins_copies = first_report.is_some_and(
+                                            crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                        );
+                                        subject_reads.set(
+                                            query,
+                                            database.subject_read_texts(
+                                                reported,
+                                                shown,
+                                                rows,
+                                                row_lookups,
+                                                pairwise,
+                                                (joins_copies, ends_on_throw),
+                                            )?,
+                                        );
+                                    } else {
+                                        let messages =
+                                            database.prefetch_messages(reported, shown, rows)?;
+                                        query_warning_lines[query].extend(messages);
+                                    }
+                                }
+                                rows_open(shown, ends_on_throw)?;
+                            }
+                        }
+                        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                        database.reset_scope();
                     }
-                    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
-                    database.reset_scope();
+                    Ok(())
+                })() {
+                    let span = loading.take();
+                    let error =
+                        crate::algorithm::common::database::batch_loads_error(span.start, error);
+                    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                        Ok(failure) => load_stop = Some((span, failure.error)),
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
+        // A batch whose loads NCBI crashes in ends the run there, as a batch that a database file
+        // failed (`failed`): it is not reported, nor are the batches after it, whose prefetch
+        // NCBI never reaches; its prefetch posts follow its reading messages (below).
+        let (queries, prefetch_stop, mut stop_posts) = match load_stop {
+            Some((span, error)) => {
+                let at = span.start;
+                cut_queries(
+                    at,
+                    &mut results,
+                    &mut lengths,
+                    &mut ungapped_karlin,
+                    &mut query_validity,
+                    &mut query_batch_skipped,
+                );
+                query_warning_lines.truncate(at);
+                later_lines.truncate(at);
+                batch_spans.retain(|batch| batch.end <= at);
+                failed = Some((span, error));
+                let (before, after) = prefetch_posts
+                    .into_iter()
+                    .partition(|(first, _)| *first < at);
+                prefetch_posts = before;
+                (&queries[..at], None, after)
+            }
+            None => (queries, prefetch_stop, Vec::new()),
+        };
         // The stopping batch's prefetch, after those of the batches before: NCBI's error, or
         // LOSAT's refusal before any byte.
         if let (Some((span, subjects)), Some(database)) = (prefetch_stop, database) {
@@ -2977,6 +3047,9 @@ fn search(
                 strategy.write_posts(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             reads.write_failed(&range, &mut *outputs.diagnostics, args.archive.as_ref())?;
+            for (_, posts) in stop_posts.drain(..) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
             return Err(error);
         }
     }

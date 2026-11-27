@@ -249,6 +249,12 @@ pub enum SeqDbError {
     /// writer's catch of any exception, `writedb::alias_file`) takes it for NCBI's failure
     /// ([`SeqDbError::ncbi_throws`]).
     NcbiThrows { path: PathBuf, message: String },
+    /// A lookup that reads a record of an empty `taxdb.btd` (`taxdb::TaxDb::lookup`), which NCBI
+    /// BLAST+ maps as a null pointer and crashes reading: LOSAT's refusal in the words of an
+    /// `Unsupported` database. The variant, not the text, says that NCBI crashes there, so that a
+    /// search program refuses the lookup of a query batch's loads where NCBI's run ends, after
+    /// the reports of the batches before (`algorithm::common::database::batch_loads_error`).
+    TaxdbNullMap { path: PathBuf, message: String },
     /// A `CSeqDBException` of the code `eMemoryMappingFailure` whose message is NCBI's (an OID
     /// list file of an alias file's `OIDLIST` that is not a file, `oid_list::OidListError`; the
     /// GI-mask data file of a volume that is not found, `gi_mask::GiMaskFiles::open`): a
@@ -307,6 +313,7 @@ impl std::fmt::Display for SeqDbError {
                 write!(f, "{}: {MIXED_VERSIONS}", path.display())
             }
             SeqDbError::Unsupported { path, message }
+            | SeqDbError::TaxdbNullMap { path, message }
             | SeqDbError::NcbiThrows { path, message } => {
                 if path.as_os_str().is_empty() {
                     write!(f, "unsupported database: {message}")
@@ -382,6 +389,10 @@ impl SeqDbError {
                 message: message.clone(),
             },
             SeqDbError::NcbiCrashes { path, message } => SeqDbError::NcbiCrashes {
+                path: path.clone(),
+                message: message.clone(),
+            },
+            SeqDbError::TaxdbNullMap { path, message } => SeqDbError::TaxdbNullMap {
                 path: path.clone(),
                 message: message.clone(),
             },
@@ -576,6 +587,7 @@ impl SeqDbError {
             | SeqDbError::Read { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
+            | SeqDbError::TaxdbNullMap { .. }
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::NcbiThrows { .. }
             | SeqDbError::Range(_)

@@ -271,7 +271,7 @@ fn empty_data_file_is_refused_only_where_a_record_is_read() {
     // NCBI: segmentation fault.
     assert!(matches!(
         db.names(9606, &mut messages),
-        Err(SeqDbError::Unsupported { .. })
+        Err(SeqDbError::TaxdbNullMap { .. })
     ));
     // NCBI: not found; and the offset error of the last entry.
     assert_eq!(names_of(&db, 777), (None, vec![]));

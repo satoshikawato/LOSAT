@@ -2549,7 +2549,7 @@ fn a_sequential_run_follows_the_volume_cache_at_every_read() {
     // record, of 9606 (OID 2), faults.
     assert!(matches!(
         reads(Some(&variant("btd_empty")), 1),
-        Err(SeqDbError::Unsupported { .. })
+        Err(SeqDbError::TaxdbNullMap { .. })
     ));
     // A database without the offset error whose record of 99990 (OIDs 4, 6, 7, 9) reaches
     // past NCBI's mapping of taxdb.btd (to the next entry's offset, 5000): NCBI reads memory
@@ -2631,7 +2631,7 @@ fn the_search_and_the_readers_refuse_a_null_mapping_whose_last_lookup_faults() {
     for oid in 0..db.num_seqs() {
         let set = db.defline_set(oid).unwrap();
         if let Err(error) = readers.bioseq_texts(&db, oid, &set, None) {
-            assert!(matches!(error, SeqDbError::Unsupported { .. }), "{error}");
+            assert!(matches!(error, SeqDbError::TaxdbNullMap { .. }), "{error}");
             first_refused = Some(oid);
             break;
         }

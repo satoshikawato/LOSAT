@@ -255,6 +255,7 @@ fn is_refusal(error: &SeqDbError) -> bool {
         SeqDbError::NcbiCrashes { .. }
             | SeqDbError::NcbiThrows { .. }
             | SeqDbError::Unsupported { .. }
+            | SeqDbError::TaxdbNullMap { .. }
     )
 }
 

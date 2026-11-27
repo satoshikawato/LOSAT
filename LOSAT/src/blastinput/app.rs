@@ -125,7 +125,9 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// `-use_sw_tback` redo whose batch's last redone match fails, `Traceback failed`) or LOSAT's
 /// refusal of a step where NCBI crashes, does not finish or stops (exit 1: a fetch of a header
 /// that cannot be read under a negative seqid list, a Smith-Waterman redo without end, a query
-/// chunk split again or without a query, a compressed table that fills NCBI's overflow banks).
+/// chunk split again or without a query, a compressed table that fills NCBI's overflow banks, a
+/// lookup of a batch's loads that reads a record of an empty `taxdb.btd`,
+/// `common::database::batch_loads_error`).
 /// The batch loop that meets it writes those reports (for the first batch, the prologs), then the
 /// failing batch's reader messages and search strategy posts, then NCBI's warning of `utf8` where
 /// the run has not posted it, and returns the error it holds, its message unchanged: TBLASTX's

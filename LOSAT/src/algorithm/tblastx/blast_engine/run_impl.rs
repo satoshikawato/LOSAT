@@ -3,6 +3,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::common::database::batch_loads_error;
 use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::algorithm::tblastx::database::DatabaseTitles;
@@ -4340,13 +4341,14 @@ fn run_batch_loop(
             // there (the reports after the loop, the error paths that write the reports of the
             // batches before). Without `taxdb.bti` nothing is read. A refusal (a taxonomy
             // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
-            // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
+            // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do,
+            // but where NCBI crashes (below).
             // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning
             // after those messages (`database::batch_prefetch`), with or without `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            // A lookup that fails on a file stops the run in the prefetch
-            // (`shared::batch_prefetch`): after the reports of the batches before and this
-            // batch's reader messages, as a header file that NCBI cannot read.
+            // A lookup that fails on a file stops the run in the prefetch (`shared::batch_prefetch`),
+            // and a load where NCBI crashes in the batch's loads (`shared::batch_loads_error`): after
+            // the reports of the batches before and this batch's reader messages.
             macro_rules! prefetch_failed {
                 ($error:expr) => {{
                     match $error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
@@ -4361,203 +4363,209 @@ fn run_batch_loop(
                 }};
             }
             if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
-                // The batch's Seq-aligns (`database::seq_aligns_of`).
-                let seq_aligns = super::super::database::seq_aligns_of(ordered);
-                // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-                // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
-                // after the query's own warnings (`query_fetches`, added after them below), where
-                // the first format's rows read their Bioseqs (`rows`; for `nident` alone the rows
-                // of HSPs with the engine's identities, counted from the batch's stores, which a
-                // report with `nident` reads above). NCBI looks the taxonomy up only where it
-                // fetches a subject: in such a report, or in the prefetch of a batch with
-                // Seq-aligns (one without them loads no id, `BlastFormatter_PreFetchSequenceData`).
-                // The run's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`)
-                // is asked only there: the report stream is off for a run with that refusal
-                // (`report_stream::Off::TaxonomyCache`), so every report is then written after
-                // the loop and a later batch that fetches still refuses before any report (outfmt
-                // 0's prolog is written before the search).
-                // The reports load the batch's subjects one by one where its prefetch is off or
-                // fails at a subject whose lookup throws on the id (the one answer,
-                // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts,
-                // then the texts of the reads of the loads that it did not make (review 1 of line
-                // DBID pf7, H1).
-                let batch_read = super::super::database::batches_prefetch(
-                    prefetch_format,
-                    (ordered, &reports.titles.borrow()),
-                    end - start,
-                    &[],
-                )
-                .report_read(0, 0);
-                if !crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns)
-                    && !ordered.is_empty()
-                {
-                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
-                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
-                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
-                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
-                    // The record that the report shows (`query_batch::xml_shown_of`).
-                    let shown_scopes = query_scopes.borrow();
-                    let xml_cut = |query: usize| {
-                        let shown = crate::blastinput::query_batch::xml_shown_of(
-                            shown_scopes.as_ref().map(|s| s.numbered_from(0)),
-                            query,
+                if let Err(error) = (|| -> Result<()> {
+                    // The batch's Seq-aligns (`database::seq_aligns_of`).
+                    let seq_aligns = super::super::database::seq_aligns_of(ordered);
+                    // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
+                    // (`shared::prefetch_off`), each query's report fetches the subjects it shows,
+                    // after the query's own warnings (`query_fetches`, added after them below), where
+                    // the first format's rows read their Bioseqs (`rows`; for `nident` alone the rows
+                    // of HSPs with the engine's identities, counted from the batch's stores, which a
+                    // report with `nident` reads above). NCBI looks the taxonomy up only where it
+                    // fetches a subject: in such a report, or in the prefetch of a batch with
+                    // Seq-aligns (one without them loads no id, `BlastFormatter_PreFetchSequenceData`).
+                    // The run's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`)
+                    // is asked only there: the report stream is off for a run with that refusal
+                    // (`report_stream::Off::TaxonomyCache`), so every report is then written after
+                    // the loop and a later batch that fetches still refuses before any report (outfmt
+                    // 0's prolog is written before the search).
+                    // The reports load the batch's subjects one by one where its prefetch is off or
+                    // fails at a subject whose lookup throws on the id (the one answer,
+                    // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts,
+                    // then the texts of the reads of the loads that it did not make (review 1 of line
+                    // DBID pf7, H1).
+                    let batch_read = super::super::database::batches_prefetch(
+                        prefetch_format,
+                        (ordered, &reports.titles.borrow()),
+                        end - start,
+                        &[],
+                    )
+                    .report_read(0, 0);
+                    if !crate::algorithm::common::database::prefetch_off(
+                        prefetch_format,
+                        seq_aligns,
+                    ) && !ordered.is_empty()
+                    {
+                        // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                        // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                        // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                        // the texts that the cut reports left (`shared::XmlReportsBefore`).
+                        // The record that the report shows (`query_batch::xml_shown_of`).
+                        let shown_scopes = query_scopes.borrow();
+                        let xml_cut = |query: usize| {
+                            let shown = crate::blastinput::query_batch::xml_shown_of(
+                                shown_scopes.as_ref().map(|s| s.numbered_from(0)),
+                                query,
+                            );
+                            query_records.get(shown).is_some_and(|record| {
+                                crate::report::blast_xml::names::iteration_cut_before_hits(
+                                    record.local_id.as_bytes(),
+                                    record.warning_id(),
+                                    record.believed(),
+                                    &record.title,
+                                    false,
+                                )
+                            })
+                        };
+                        let reads = reports.reads.borrow();
+                        // The posts before each query's report: those of the prefetch of the batch
+                        // it begins (`warnings`, the batches before this one).
+                        let prefetched = |query: usize| warnings.get(query);
+                        let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                            first_report == Some(crate::blastinput::app::ReportFormat::Xml),
+                            &xml_cut,
                         );
-                        query_records.get(shown).is_some_and(|record| {
-                            crate::report::blast_xml::names::iteration_cut_before_hits(
-                                record.local_id.as_bytes(),
-                                record.warning_id(),
-                                record.believed(),
-                                &record.title,
-                                false,
+                        let xml_before = xml_cuts.reports_before(&reads, &prefetched);
+                        let scope = || batch_scope(input_start..input_end);
+                        let prefetch = super::super::database::batch_prefetch(
+                            (database, &run_loads),
+                            super::super::database::LoadedBefore {
+                                hits: &done.hits,
+                                spans: &done.spans,
+                                format: prefetch_format,
+                                rows,
+                                cuts: xml_cuts,
+                            },
+                            ordered,
+                            &reports.titles.borrow(),
+                            &crate::algorithm::common::database::PrefetchQueries::new(
+                                start, &scope,
                             )
-                        })
-                    };
-                    let reads = reports.reads.borrow();
-                    // The posts before each query's report: those of the prefetch of the batch
-                    // it begins (`warnings`, the batches before this one).
-                    let prefetched = |query: usize| warnings.get(query);
-                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
-                        first_report == Some(crate::blastinput::app::ReportFormat::Xml),
-                        &xml_cut,
-                    );
-                    let xml_before = xml_cuts.reports_before(&reads, &prefetched);
-                    let scope = || batch_scope(input_start..input_end);
-                    let prefetch = super::super::database::batch_prefetch(
-                        (database, &run_loads),
-                        super::super::database::LoadedBefore {
-                            hits: &done.hits,
-                            spans: &done.spans,
-                            format: prefetch_format,
-                            rows,
-                            cuts: xml_cuts,
-                        },
-                        ordered,
-                        &reports.titles.borrow(),
-                        &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                             .after_xml_reports(xml_before.as_ref())
                             .where_reports_unchanged_by_load_throws(
                                 reports_unchanged_by_load_throws,
                             ),
-                    );
-                    drop(reads);
-                    let messages = match prefetch {
-                        Ok(messages) => messages,
-                        Err(error) => prefetch_failed!(error),
-                    };
-                    // The rows of a batch whose reports load one by one open it with each
-                    // query's reads (below).
-                    if !batch_read.one_by_one {
-                        super::super::database::open_for_rows(
-                            database,
-                            row_lookups,
-                            ordered.iter(),
-                            &reports.titles.borrow(),
-                        )?;
-                    }
-                    warnings[start].append(&messages);
-                }
-                if batch_read.one_by_one {
-                    // Without `taxdb.bti` the reports' fetches look nothing up, but a lookup that
-                    // reads a UTF8String header posts a warning (`load_read_texts`).
-                    if taxdb_found || database.db.scope_utf8_seen() {
-                        debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
-                        let stores = reports.stores.borrow();
-                        for query in 0..(end - start) as u32 {
-                            let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
-                            let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
-                            let query_letters = query_records[start + query as usize].seq();
-                            let identities = |hsp: &TblastxHsp| {
-                                super::super::database::hit_identities(
-                                    &stores,
-                                    hsp,
-                                    query_letters,
-                                    &query_code,
-                                    &db_code,
-                                )
-                            };
-                            // The first HSP of each subject whose row reads it, in report order (a
-                            // subject's HSPs follow each other): the engine's identities are counted
-                            // only for `nident` alone, until one of the subject's rows reads it.
-                            // Not a subject that no report reaches after one whose load throws
-                            // (`HitLoads::reached`; `database::report_loads`, after the reports
-                            // before it).
-                            let loads = super::super::database::report_loads(
-                                (database, &run_loads),
-                                &ordered[from..to],
-                                &reports.titles.borrow(),
-                                (pairwise, start, batch_read.prefetch_fails),
-                                identities,
-                            );
-                            let shown: Vec<&TblastxHsp> = match rows {
-                                SubjectFetch::Every => ordered[from..to]
-                                    .iter()
-                                    .filter(|hsp| loads.reached(hsp.hit.s_idx as usize))
-                                    .collect(),
-                                SubjectFetch::Never => Vec::new(),
-                                SubjectFetch::WithIdentities => {
-                                    let mut read = std::collections::HashSet::new();
-                                    ordered[from..to]
-                                        .iter()
-                                        .filter(|hsp| {
-                                            loads.reached(hsp.hit.s_idx as usize)
-                                                && !read.contains(&hsp.hit.s_idx)
-                                                && identities(hsp) > 0
-                                                && read.insert(hsp.hit.s_idx)
-                                        })
-                                        .collect()
-                                }
-                            };
-                            // The first format writes the texts where it reads each subject
-                            // (`ReportFormat::places_subject_reads`), else before the
-                            // report.
-                            query_fetches.push(if shown.is_empty() {
-                                Vec::new()
-                            } else if places_reads {
-                                let titles = reports.titles.borrow();
-                                let ordinals = super::super::database::read_ordinals(
-                                    &shown,
-                                    &ordered[from..to],
-                                    &titles,
-                                    pairwise.filter(|_| pairwise_first),
-                                    &loads,
-                                    first_report.is_some_and(
-                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
-                                    ),
-                                );
-                                let texts = super::super::database::subject_read_texts(
-                                    database,
-                                    ordinals,
-                                    &titles,
-                                    row_lookups,
-                                )?;
-                                drop(titles);
-                                let mut reads = reports.reads.borrow_mut();
-                                let index = start + query as usize;
-                                if reads.len() <= index {
-                                    reads.resize_with(index + 1, Vec::new);
-                                }
-                                reads[index] = texts;
-                                Vec::new()
-                            } else {
-                                super::super::database::prefetch_messages(
-                                    database,
-                                    shown,
-                                    &reports.titles.borrow(),
-                                )?
-                            });
-                            // Only a row whose subject a report loads looks a name up: a row
-                            // whose load throws keeps the names of the rows before (review 1 of
-                            // line DBID pfoff-2, H1).
+                        );
+                        drop(reads);
+                        let messages = prefetch?;
+                        // The rows of a batch whose reports load one by one open it with each
+                        // query's reads (below).
+                        if !batch_read.one_by_one {
                             super::super::database::open_for_rows(
                                 database,
                                 row_lookups,
-                                ordered[from..to]
-                                    .iter()
-                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize)),
+                                ordered.iter(),
                                 &reports.titles.borrow(),
                             )?;
                         }
+                        warnings[start].append(&messages);
                     }
+                    if batch_read.one_by_one {
+                        // Without `taxdb.bti` the reports' fetches look nothing up, but a lookup that
+                        // reads a UTF8String header posts a warning (`load_read_texts`).
+                        if taxdb_found || database.db.scope_utf8_seen() {
+                            debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
+                            let stores = reports.stores.borrow();
+                            for query in 0..(end - start) as u32 {
+                                let from = ordered.partition_point(|hsp| hsp.hit.q_idx < query);
+                                let to = ordered.partition_point(|hsp| hsp.hit.q_idx <= query);
+                                let query_letters = query_records[start + query as usize].seq();
+                                let identities = |hsp: &TblastxHsp| {
+                                    super::super::database::hit_identities(
+                                        &stores,
+                                        hsp,
+                                        query_letters,
+                                        &query_code,
+                                        &db_code,
+                                    )
+                                };
+                                // The first HSP of each subject whose row reads it, in report order (a
+                                // subject's HSPs follow each other): the engine's identities are counted
+                                // only for `nident` alone, until one of the subject's rows reads it.
+                                // Not a subject that no report reaches after one whose load throws
+                                // (`HitLoads::reached`; `database::report_loads`, after the reports
+                                // before it).
+                                let loads = super::super::database::report_loads(
+                                    (database, &run_loads),
+                                    &ordered[from..to],
+                                    &reports.titles.borrow(),
+                                    (pairwise, start, batch_read.prefetch_fails),
+                                    identities,
+                                );
+                                let shown: Vec<&TblastxHsp> = match rows {
+                                    SubjectFetch::Every => ordered[from..to]
+                                        .iter()
+                                        .filter(|hsp| loads.reached(hsp.hit.s_idx as usize))
+                                        .collect(),
+                                    SubjectFetch::Never => Vec::new(),
+                                    SubjectFetch::WithIdentities => {
+                                        let mut read = std::collections::HashSet::new();
+                                        ordered[from..to]
+                                            .iter()
+                                            .filter(|hsp| {
+                                                loads.reached(hsp.hit.s_idx as usize)
+                                                    && !read.contains(&hsp.hit.s_idx)
+                                                    && identities(hsp) > 0
+                                                    && read.insert(hsp.hit.s_idx)
+                                            })
+                                            .collect()
+                                    }
+                                };
+                                // The first format writes the texts where it reads each subject
+                                // (`ReportFormat::places_subject_reads`), else before the
+                                // report.
+                                query_fetches.push(if shown.is_empty() {
+                                    Vec::new()
+                                } else if places_reads {
+                                    let titles = reports.titles.borrow();
+                                    let ordinals = super::super::database::read_ordinals(
+                                        &shown,
+                                        &ordered[from..to],
+                                        &titles,
+                                        pairwise.filter(|_| pairwise_first),
+                                        &loads,
+                                        first_report.is_some_and(
+                                            crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                        ),
+                                    );
+                                    let texts = super::super::database::subject_read_texts(
+                                        database,
+                                        ordinals,
+                                        &titles,
+                                        row_lookups,
+                                    )?;
+                                    drop(titles);
+                                    let mut reads = reports.reads.borrow_mut();
+                                    let index = start + query as usize;
+                                    if reads.len() <= index {
+                                        reads.resize_with(index + 1, Vec::new);
+                                    }
+                                    reads[index] = texts;
+                                    Vec::new()
+                                } else {
+                                    super::super::database::prefetch_messages(
+                                        database,
+                                        shown,
+                                        &reports.titles.borrow(),
+                                    )?
+                                });
+                                // Only a row whose subject a report loads looks a name up: a row
+                                // whose load throws keeps the names of the rows before (review 1 of
+                                // line DBID pfoff-2, H1).
+                                super::super::database::open_for_rows(
+                                    database,
+                                    row_lookups,
+                                    ordered[from..to]
+                                        .iter()
+                                        .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize)),
+                                    &reports.titles.borrow(),
+                                )?;
+                            }
+                        }
+                    }
+                    Ok(())
+                })() {
+                    prefetch_failed!(batch_loads_error(start, error))
                 }
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314

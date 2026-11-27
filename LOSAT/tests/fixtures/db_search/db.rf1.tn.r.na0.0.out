@@ -1,0 +1,51 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb n3p; multidb n3u
+           2 sequences; 735 total letters
+
+
+
+Query= pfo_r a query whose report shows pf3p's hit
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XM_810001.1 Unknown                                                   123     2e-41
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.135    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27117
+
+
+  Database: multidb n3p
+    Posted date:  Nov 27, 2026  3:18 PM
+  Number of letters in database: 450
+  Number of sequences in database:  1
+
+  Database: multidb n3u
+    Posted date:  Nov 27, 2026  3:18 PM
+  Number of letters in database: 285
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

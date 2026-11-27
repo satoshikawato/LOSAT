@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only | --pfoff3-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only | --pfoff3-only | --rf1-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -160,6 +160,14 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   `XP_810001.1` where its batch's prefetch is off (`BATCH_SIZE=1 PRE_FETCH_SEQS_LIMIT=1`), then `bsub`'s letters, whose
   batch has one Seq-align, so its prefetch is on and loads `bsub` (with `BLASTDB=btd_empty` NCBI crashes there): NCBI
   never gets there. `make_multidb.py --pfoff3-only MAKEBLASTDB` builds only these.
+- `n3p`, `n3u` and the queries `rf1_*.faa`, `rf1_*.fna` (line DBID rf-1, 2026-11-27; the rows db.rf1.*): `n3p` and `n3u`
+  are `pf3p` and `pf3u` back-translated (one codon for each residue, `RF1_CODONS`), nucleotide, with the same options;
+  `rf1_q0.faa` / `rf1_q0.fna` hold `q0_nohit`, which hits nothing; `rf1_q0e` adds `bsub`'s letters (back-translated in
+  the `.fna`), whose batch's prefetch loads `bsub` (taxid 9606), and `rf1_e.faa` holds those letters alone (psiblast
+  searches each query alone: its first query); `rf1_r` holds `pfo_qe.faa`'s `pfo_r` (back-translated
+  in the `.fna`), whose report shows `pf3p`'s hit, and `rf1_re` adds `bsub`'s letters. With `BLASTDB=btd_empty` (an
+  empty taxdb.btd) NCBI crashes at the load of `bsub`, after the reports of the batches before (with `BATCH_SIZE=1`,
+  those of `q0_nohit` or `pfo_r`). `make_multidb.py --rf1-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -742,6 +750,52 @@ def make_pfoff3(binary):
         f.write("".join(records))
 
 
+# One codon for each residue, of the back-translations of `make_rf1`.
+RF1_CODONS = {"A": "GCT", "C": "TGT", "D": "GAT", "E": "GAA", "F": "TTT", "G": "GGT", "H": "CAT", "I": "ATT", "K": "AAA",
+              "L": "CTG", "M": "ATG", "N": "AAT", "P": "CCG", "Q": "CAA", "R": "CGT", "S": "TCT", "T": "ACC", "V": "GTT",
+              "W": "TGG", "Y": "TAT"}
+
+
+def make_rf1(binary):
+    """Builds n3p and n3u from pf3p.fa and pf3u.fa (`make_pfoff3`) and writes the rf1 queries (line DBID rf-1)."""
+    def letters(path, index=0):
+        return "".join(line.strip() for line in read_fasta_path(os.path.join(HERE, path))[index][1])
+
+    def back(protein):
+        return "".join(RF1_CODONS[residue] for residue in protein)
+
+    def write(name, records):
+        with open(os.path.join(HERE, name), "w") as f:
+            for header, sequence in records:
+                f.write(header + "\n")
+                for at in range(0, len(sequence), 60):
+                    f.write(sequence[at:at + 60] + "\n")
+
+    copies, weak, query = letters("pf3p.fa"), letters("pf3u.fa"), letters("pfo_qe.faa")
+    for name, header, protein, options in (
+            ("n3p", ">ref|XM_810001.1| rf-1 pf3p's letters back-translated", copies, ["-parse_seqids"]),
+            ("n3u", ">bsubn rf-1 pf3u's bsub back-translated, a subject with a taxid", weak, ["-taxid", "9606"])):
+        write(name + ".fa", [(header, back(protein))])
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", "nucl", "-out", name, *options, "-blastdb_version", "5",
+                    "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + ".njs"))
+    q0_protein = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQQIAAALE"
+    q0_nucleotide = ("ATGCGTACGTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAG"
+                     "CTAGCTAGCTAGCTAGCTAGCTAG")
+    q0 = ">q0_nohit a query without hits"
+    e = ">pfo_e bsub's letters, a later batch whose prefetch loads bsub"
+    r = ">pfo_r a query whose report shows pf3p's hit"
+    write("rf1_q0.faa", [(q0, q0_protein)])
+    write("rf1_q0e.faa", [(q0, q0_protein), (e, weak)])
+    write("rf1_e.faa", [(e, weak)])
+    write("rf1_r.faa", [(r, query)])
+    write("rf1_re.faa", [(r, query), (e, weak)])
+    write("rf1_q0.fna", [(q0, q0_nucleotide)])
+    write("rf1_q0e.fna", [(q0, q0_nucleotide), (e, back(weak))])
+    write("rf1_r.fna", [(r, back(query))])
+    write("rf1_re.fna", [(r, back(query)), (e, back(weak))])
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -819,6 +873,8 @@ if __name__ == "__main__":
         make_pfoff2(sys.argv[2])
     elif sys.argv[1] == "--pfoff3-only":
         make_pfoff3(sys.argv[2])
+    elif sys.argv[1] == "--rf1-only":
+        make_rf1(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -836,3 +892,4 @@ if __name__ == "__main__":
         make_pfoff(sys.argv[1])
         make_pfoff2(sys.argv[1])
         make_pfoff3(sys.argv[1])
+        make_rf1(sys.argv[1])

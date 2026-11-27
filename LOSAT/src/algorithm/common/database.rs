@@ -7240,6 +7240,9 @@ pub(crate) struct TaxonomyRefusal {
     /// does not open (`SeqDbError::TaxdbThrows`): NCBI's load throws there, which its prefetch
     /// catches ([`batch_prefetch`]) and its reports do not read as LOSAT does.
     load_throws: bool,
+    /// The refusal is of a lookup that reads a record of an empty `taxdb.btd`
+    /// (`SeqDbError::TaxdbNullMap`), where NCBI crashes ([`batch_loads_error`]).
+    ncbi_crashes: bool,
 }
 
 impl TaxonomyRefusal {
@@ -7250,6 +7253,37 @@ impl TaxonomyRefusal {
             .downcast_ref::<TaxonomyRefusal>()
             .is_some_and(|refusal| refusal.load_throws)
     }
+
+    /// Whether `error` is the refusal of a lookup where NCBI crashes
+    /// ([`TaxonomyRefusal::ncbi_crashes`]), which fails the query batch whose loads make it after
+    /// the reports of the batches before ([`batch_loads_error`]); a run that holds its BLAST XML,
+    /// XML2 or JSON document writes what it holds of those batches (BLASTX,
+    /// `blast_xml::drops_held_document`). Any other refusal comes before the run's first byte.
+    pub(crate) fn fails_its_batch(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<TaxonomyRefusal>()
+            .is_some_and(|refusal| refusal.ncbi_crashes)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:259-277
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-790
+/// The error `error` of the loads of the query batch whose first query is `query` (in the
+/// numbering of the search call that makes them: its prefetch, and where that is off or fails its
+/// reports' reads of the subjects one by one and the lookups of their rows), as every search
+/// program's batch loop takes it. LOSAT's refusal of a lookup that reads a record of an empty
+/// `taxdb.btd` ([`TaxonomyRefusal::ncbi_crashes`]) is of a step where NCBI crashes: NCBI's
+/// mapping of the file is a null pointer, and its run ends at that load, after it wrote the reports
+/// of the batches before. So the refusal fails that batch
+/// (`blastinput::app::ErrorAfterBatchReports`, as NCBI's own error of a lookup of the batch's
+/// prefetch does, [`prefetch_stop`]): the prologs, the reports of the batches before without the
+/// epilog, then the refusal, in every program and format (line DBID rf-1, DECISIONS 62 (22), the
+/// Owner's form of 2026-11-16 for line RG's Q-X2c). Any other error is returned as it is.
+pub(crate) fn batch_loads_error(query: usize, error: anyhow::Error) -> anyhow::Error {
+    if TaxonomyRefusal::fails_its_batch(&error) {
+        return ErrorAfterBatchReports::of_batch(query, error).into();
+    }
+    error
 }
 
 impl std::fmt::Display for TaxonomyRefusal {
@@ -7284,14 +7318,17 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
                  file readable, or move it off the BLASTDB path"
             ),
             load_throws: true,
+            ncbi_crashes: false,
         });
     }
-    let refused = matches!(error, SeqDbError::Unsupported { .. });
+    let ncbi_crashes = matches!(error, SeqDbError::TaxdbNullMap { .. });
+    let refused = ncbi_crashes || matches!(error, SeqDbError::Unsupported { .. });
     let error = database_error(error, program);
     if refused {
         anyhow::Error::new(TaxonomyRefusal {
             text: format!("{error:#}"),
             load_throws: false,
+            ncbi_crashes,
         })
     } else {
         error
@@ -7727,7 +7764,9 @@ pub(crate) fn tabular_names<'t>(
 /// so a run that fetches none is not refused: TBLASTN, and TBLASTX, whose report stream is off
 /// for a run with this refusal, make every batch's lookups before any report, and BLASTN's
 /// report stream writes a later batch's refusal after the reports of the batches before, as
-/// its other refusals of a batch's reported subjects (`x_rpt_stream`). The caller writes the
+/// its other refusals of a batch's reported subjects (`x_rpt_stream`); a lookup that reads a
+/// record of an empty `taxdb.btd`, where NCBI crashes, fails its batch after the reports of the
+/// batches before in every program ([`batch_loads_error`]). The caller writes the
 /// text after the reader's messages of the batch and before the warnings of its first query,
 /// where NCBI's prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search
 /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused as in
@@ -8796,6 +8835,7 @@ impl XmlReportsBefore<'_> {
             anyhow::Error::new(TaxonomyRefusal {
                 text: refusal.to_string(),
                 load_throws: false,
+                ncbi_crashes: false,
             })
         })?;
         Ok((!left.is_empty()).then_some(left))
@@ -8951,7 +8991,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             fails = true;
             Vec::new()
         }
-        reads => reads?,
+        reads => reads.map_err(|error| batch_loads_error(queries.error_query, error))?,
     };
     if let Some(stop) = &failed_lookup {
         // NCBI's warning of a UTF8String header before the failure is not a text of the
@@ -9916,7 +9956,7 @@ fn prefetch_stop(
         });
         match read {
             Ok(reads) => reads,
-            Err(error) => return error,
+            Err(error) => return batch_loads_error(queries.error_query, error),
         }
     };
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1440-1466

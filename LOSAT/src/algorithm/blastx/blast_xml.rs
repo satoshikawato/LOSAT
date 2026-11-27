@@ -97,11 +97,11 @@ impl std::error::Error for XmlRefusal {}
 impl XmlRefusal {
     /// The error of the taxonomy lookups of outfmt 15 and 16 (`ReportedSubjects::for_batch`): a
     /// [`TaxonomyRefusal`] becomes a refusal that carries its message (it drops what the run
-    /// holds); any other error, such as a header or taxonomy file that cannot be read, is
-    /// returned as it is, so that the run writes what it holds, as NCBI writes what it has
-    /// before a reader error.
+    /// holds), but one where NCBI crashes (`TaxonomyRefusal::fails_its_batch`); any other error,
+    /// such as a header or taxonomy file that cannot be read, is returned as it is, so that the
+    /// run writes what it holds, as NCBI writes what it has before a reader error.
     pub(super) fn of_taxonomy(error: anyhow::Error) -> anyhow::Error {
-        if error.is::<TaxonomyRefusal>() {
+        if error.is::<TaxonomyRefusal>() && !TaxonomyRefusal::fails_its_batch(&error) {
             XmlRefusal(format!("{error:#}")).into()
         } else {
             error
@@ -128,14 +128,16 @@ impl XmlRefusal {
 /// JSON document drops what it holds, so that the refusal follows no byte: a title NCBI crashes
 /// on (`XmlRefusal`), the database counts of the reports that NCBI's sums overflow
 /// (`ReportSumRefusal`), a reported database sequence with parsed Seq-ids
-/// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`). After any other
-/// error the run writes what it holds, the bytes of the batches before it, as the run without a
-/// hold does (the command line's `HeldOutput`; a library call's `HeldFormats`).
+/// (`ParsedRefusal`), or a taxonomy database name or record (`TaxonomyRefusal`), but a lookup
+/// where NCBI crashes, which fails its batch after the reports of the batches before
+/// (`TaxonomyRefusal::fails_its_batch`, line DBID rf-1). After any other error the run writes
+/// what it holds, the bytes of the batches before it, as the run without a hold does (the
+/// command line's `HeldOutput`; a library call's `HeldFormats`).
 pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
     error.is::<XmlRefusal>()
         || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
-        || error.is::<TaxonomyRefusal>()
+        || (error.is::<TaxonomyRefusal>() && !TaxonomyRefusal::fails_its_batch(error))
 }
 
 fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {

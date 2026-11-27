@@ -898,6 +898,70 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:259-277
+/// A lookup that reads a record of an empty taxdb.btd (NCBI maps it as a null pointer and
+/// crashes there) fails the query batch whose loads make it, after the reports of the batches
+/// before (`batch_loads_error`, line DBID rf-1), in the words of LOSAT's refusal of the database;
+/// a record past the mapping of a file that is not empty (NCBI's bytes depend on its memory map),
+/// a file that throws, and any other error are returned as they are.
+#[test]
+fn a_lookup_of_a_null_mapped_record_fails_its_batch_after_the_reports_before() {
+    let path = std::path::PathBuf::from("/d/taxdb.btd");
+    let message = "the taxonomy record of taxid 9606 (bytes 0..9) reaches past the mapped end of \
+                   the file (0 bytes); NCBI BLAST+ reads unmapped memory (it maps the empty file \
+                   as a null pointer)";
+    let crash = taxdb_error(
+        SeqDbError::TaxdbNullMap {
+            path: path.clone(),
+            message: message.to_owned(),
+        },
+        "TBLASTN",
+    );
+    let words = format!("{crash:#}");
+    let unsupported = taxdb_error(
+        SeqDbError::Unsupported {
+            path: path.clone(),
+            message: message.to_owned(),
+        },
+        "TBLASTN",
+    );
+    // The words of the refusal are the database refusal's.
+    assert_eq!(words, format!("{unsupported:#}"));
+    let failed = batch_loads_error(3, crash);
+    let failure = failed
+        .downcast_ref::<ErrorAfterBatchReports>()
+        .expect("the failure of the batch");
+    assert_eq!(failure.query, Some(3));
+    assert!(failure.error.is::<TaxonomyRefusal>());
+    assert_eq!(format!("{failed:#}"), words);
+    // NCBI's mapping of a file that is not empty: refused before the run's first byte.
+    let past = batch_loads_error(3, unsupported);
+    assert!(past.is::<TaxonomyRefusal>(), "{past:#}");
+    let throws = batch_loads_error(
+        3,
+        taxdb_error(
+            SeqDbError::TaxdbThrows {
+                path: path.clone(),
+                reason: "Permission denied".to_owned(),
+                exception: Box::new(crate::ncbi_exception::NcbiException::new(
+                    crate::ncbi_exception::ThrowSite {
+                        file: "src/corelib/ncbifile.cpp",
+                        line: 5945,
+                        kind: "CFileException::eMemoryMap",
+                        function: Some("ncbi::CMemoryFileMap::x_Open"),
+                    },
+                    "CMemoryFile: Cannot memory map file '/d/taxdb.btd':Permission denied",
+                )),
+            },
+            "TBLASTN",
+        ),
+    );
+    assert!(TaxonomyRefusal::of_load_that_throws(&throws));
+    let other = batch_loads_error(3, anyhow::anyhow!("another error"));
+    assert!(!other.is::<ErrorAfterBatchReports>());
+    assert_eq!(other.to_string(), "another error");
+}
+
 // RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
 // format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
 // subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process

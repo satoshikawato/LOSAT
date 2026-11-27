@@ -42,7 +42,7 @@
 //! page memory that does not belong to the file, whose bytes, or whether NCBI
 //! faults reading them, depend on NCBI's memory map. Only an empty `taxdb.btd`
 //! faults for certain (NCBI maps it as a null pointer): a lookup that reads a
-//! record of it is refused with [`SeqDbError::Unsupported`]. A record past the
+//! record of it is refused with [`SeqDbError::TaxdbNullMap`]. A record past the
 //! mapping of a file that is not empty gives NCBI's result where its bytes lie
 //! inside the mapping: the names before the record's third tab when that tab is
 //! inside, the kingdom never ([`TaxNames::super_kingdom`]); where no third tab
@@ -477,7 +477,7 @@ impl TaxDb {
         let len = files.data.len();
         if len == 0 {
             // NCBI maps an empty file as a null pointer: it faults reading the record.
-            return Err(SeqDbError::Unsupported {
+            return Err(SeqDbError::TaxdbNullMap {
                 path: files.data.path().to_path_buf(),
                 message: format!(
                     "the taxonomy record of taxid {tax_id} (bytes {begin}..{end}) reaches past \

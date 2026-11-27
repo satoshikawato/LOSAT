@@ -9544,7 +9544,11 @@ fn run_in_pool(
                     }
                     Ok(posts)
                 });
-                Some(prefetch)
+                // A refusal where NCBI crashes in the batch's loads fails the batch
+                // (`shared::batch_loads_error`).
+                Some(prefetch.map_err(|error| {
+                    crate::algorithm::common::database::batch_loads_error(start, error)
+                }))
             } else {
                 None
             };

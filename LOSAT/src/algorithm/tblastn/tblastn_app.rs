@@ -2837,7 +2837,7 @@ fn search(
                         )
                     }) =>
                 {
-                    database.title_decodes(reported, &results)
+                    database.title_decodes(reported)
                 }
                 _ => Default::default(),
             },

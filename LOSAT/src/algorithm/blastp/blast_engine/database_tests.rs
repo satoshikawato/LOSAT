@@ -1874,7 +1874,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .title_posts(&database, &hit_lists, [&(0..1)], true)
         .unwrap()
         .is_empty());
-    let decodes = titles.title_decodes(&database, &hit_lists);
+    let decodes = titles.title_decodes(&database);
     assert_eq!(decodes.of(1), post);
     assert!(decodes.of(0).is_empty());
     drop(database);

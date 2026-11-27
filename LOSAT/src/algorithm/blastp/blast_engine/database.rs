@@ -2169,21 +2169,13 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// NCBI's posts of each read of a reported subject's definition line by a formatter
-    /// (`shared::title_decodes`), by rank (the key of BLASTP's report writers), of the subjects of
-    /// the final `hit_lists`.
+    /// NCBI's posts of each read of a listed subject's definition line by a formatter
+    /// (`shared::title_decodes`), by rank (the key of BLASTP's report writers).
     pub(super) fn title_decodes(
         &self,
         database: &BlastpDatabase,
-        hit_lists: &[Option<BlastpHitList>],
     ) -> crate::report::query_warnings::TitleDecodes {
-        shared::title_decodes(
-            database.seqdb(),
-            Self::reported(hit_lists)
-                .into_iter()
-                .map(|rank| (rank as u32, self.listed.ordinals[rank])),
-            self.program,
-        )
+        shared::title_decodes(database.seqdb(), &self.listed.ordinals, self.program)
     }
 
     /// Whether the stored title of the subject of rank `rank` held a byte outside `' '..='~'`.

@@ -941,7 +941,7 @@ pub(super) fn prefetch_reported_subjects(
                 .chain(prefetch_posts)
                 .collect(),
             if prefetched {
-                titles.title_decodes(database, hit_lists)
+                titles.title_decodes(database)
             } else {
                 Default::default()
             },

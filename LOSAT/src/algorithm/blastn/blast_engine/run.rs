@@ -5711,8 +5711,8 @@ fn post_process_hits_and_write(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         // NCBI's posts of each read of a subject's definition line by a table's rows or the
         // pairwise report (`BlastnDatabase::title_decodes`).
-        let title_decodes = match report.database_reader {
-            Some(database)
+        let title_decodes = match report.database_reader.zip(report.database_ordinals) {
+            Some((database, ordinals))
                 if crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
                     format.report_format(),
                     output_format
@@ -5720,7 +5720,7 @@ fn post_process_hits_and_write(
                         .is_some_and(crate::report::tabular::TabularSpec::reads_defline),
                 ) =>
             {
-                database.title_decodes(&hit_lists)
+                database.title_decodes(ordinals)
             }
             _ => Default::default(),
         };

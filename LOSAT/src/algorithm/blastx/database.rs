@@ -1075,15 +1075,8 @@ impl ReportedSubjects {
         // the pairwise report, by rank (`shared::title_decodes`,
         // `report::query_warnings::ReadCursor::title_read`, `QueryWarnings::title_read`).
         if reports && (tabular_reads || pairwise) {
-            reported.title_decodes = shared::title_decodes(
-                &database.db,
-                reported
-                    .ordinals
-                    .iter()
-                    .enumerate()
-                    .map(|(rank, &ordinal)| (rank as u32, ordinal)),
-                database.program,
-            );
+            reported.title_decodes =
+                shared::title_decodes(&database.db, &reported.ordinals, database.program);
         }
         Ok(reported)
     }

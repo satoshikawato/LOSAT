@@ -373,15 +373,7 @@ impl TblastxDatabase {
         &self,
         reported: &ReportedSubjects,
     ) -> crate::report::query_warnings::TitleDecodes {
-        shared::title_decodes(
-            &self.db,
-            reported
-                .ordinals
-                .iter()
-                .enumerate()
-                .map(|(rank, &ordinal)| (rank as u32, ordinal)),
-            PROGRAM,
-        )
+        shared::title_decodes(&self.db, &reported.ordinals, PROGRAM)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851

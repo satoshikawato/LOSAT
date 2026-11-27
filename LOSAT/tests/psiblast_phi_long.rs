@@ -225,13 +225,10 @@ fn phi_pattern_on_subjects_over_5_000_000_residues_and_with_sum_statistics_match
                 .args(["-num_threads", &threads.to_string()])
                 .output()
                 .expect("run losat psiblast");
-            // NCBI's warning that `-subject` searches with one thread.
+            // Nothing on the standard error: LOSAT searches `-subject` with the threads asked for
+            // and writes no line of NCBI's that it ignores them (docs/manual/src/differences.md).
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let warned = target[0] == "-subject"
-                && threads > 1
-                && stderr
-                    .ends_with("'num_threads' is currently ignored when 'subject' is specified.\n");
-            if !output.status.success() || !(stderr.is_empty() || warned) {
+            if !output.status.success() || !stderr.is_empty() {
                 failed.push(format!(
                     "{label} t{threads}: status {:?}, stderr {stderr:?}",
                     output.status.code(),
@@ -262,7 +259,7 @@ fn phi_pattern_on_subjects_over_5_000_000_residues_and_with_sum_statistics_match
     let stderr = String::from_utf8_lossy(&output.stderr);
     if output.status.code() != Some(3)
         || !output.stdout.is_empty()
-        || !stderr.ends_with("engine error: Program type 'phiblastp' not supported\n")
+        || stderr != "LOSAT engine error: Program type 'phiblastp' not supported\n"
     {
         failed.push(format!(
             "outfmt 8: status {:?}, {} bytes, stderr {stderr:?}",

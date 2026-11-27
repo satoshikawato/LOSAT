@@ -1093,6 +1093,69 @@ def tool() -> list[dict]:
             ("d19.t2_blastdb_missing", "-mk_counts -infmt blastdb -in db/none -logfile db/none.nal", "refusal"),
             ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True)):
         add(f"validate.{case_id}", words, failure, kind="validate")
+
+    # blast_formatter (`losat_web2_tool` and `losat_web2_validate`; line RG-F3p7):
+    # -subject archives, local -db archives (with in/db/s3.* in /work), multi-object archives,
+    # -out / -logfile / shared files, help/version, errors and LOSAT Web refusals.
+    bf_tests = REPO / "LOSAT/tests/blast_formatter"
+    bf_files: dict[str, str] = {}
+    for name in ("bn.asn", "db.asn", "batch.asn", "empty.asn", "cut2.asn", "garbage.asn", "warn.asn", "nodb.asn"):
+        bf_files[f"in/{name}"] = str(bf_tests / "in" / name)
+    for db_file in sorted((bf_tests / "in/db").iterdir()):
+        if db_file.is_file():
+            bf_files[f"in/db/{db_file.name}"] = str(db_file)
+
+    def add_bf(case_id: str, words: str, failure: bool | str = False, kind: str = "run") -> None:
+        row = {"program": "blast_formatter", "tool": kind, "argv": shlex.split(words), "cwd": str(bf_tests),
+               "files": bf_files, "cases": [f"tool.bf.{case_id}"], "frozen": {}}
+        if failure:
+            row["expect"] = failure if isinstance(failure, str) else "failure"
+        rows.append(row)
+
+    for outfmt in ("8", "9", "12"):
+        add_bf(f"subject.of{outfmt}.stdout", f"-archive in/bn.asn -outfmt {outfmt}")
+        add_bf(f"subject.of{outfmt}.file", f"-archive in/bn.asn -outfmt {outfmt} -out out.dat")
+        add_bf(f"db.of{outfmt}.stdout", f"-archive in/db.asn -outfmt {outfmt}")
+        add_bf(f"db.of{outfmt}.file", f"-archive in/db.asn -outfmt {outfmt} -out out.dat")
+    add_bf("batch.of8.stdout", "-archive in/batch.asn -outfmt 8")
+    add_bf("db.mts2", "-archive in/db.asn -outfmt 8 -max_target_seqs 2")
+    add_bf("db.na0", "-archive in/db.asn -outfmt 8 -num_alignments 0")
+    add_bf("warn.mts2", "-archive in/warn.asn -outfmt 8 -max_target_seqs 2")
+    add_bf("logfile.file", "-archive in/bn.asn -outfmt 8 -out out.asn -logfile run.log")
+    add_bf("shared.logfile", "-archive in/bn.asn -outfmt 8 -out shared.asn -logfile shared.asn")
+    for word in ("-h", "-help", "-xmlhelp", "-version", "-version-full"):
+        add_bf(f"print{word}", word)
+    # Errors and refusals.
+    add_bf("error.no_args", "", failure=True)
+    add_bf("error.rid_empty", "-rid ''", failure=True)
+    add_bf("error.rid_refused", "-rid ABCDEFGH01R", failure=True)
+    add_bf("error.rid_archive", "-rid ABCDEFGH01R -archive in/bn.asn", failure=True)
+    add_bf("error.of6_refused", "-archive in/bn.asn -outfmt 6", failure=True)
+    add_bf("error.missing_archive", "-archive in/no_such.asn -outfmt 8", failure=True)
+    add_bf("error.empty_archive", "-archive in/empty.asn -outfmt 8", failure=True)
+    add_bf("error.cut_archive", "-archive in/cut2.asn -outfmt 8", failure=True)
+    add_bf("trailing_garbage", "-archive in/garbage.asn -outfmt 8")
+    add_bf("error.missing_db", "-archive in/nodb.asn -outfmt 8", failure=True)
+    add_bf("refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", failure="refusal")
+    add_bf("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", failure="refusal")
+    add_bf("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", failure="refusal")
+    # validate
+    for case_id, words, failure in (
+            ("subject", "-archive in/bn.asn -outfmt 8", False),
+            ("db", "-archive in/db.asn -outfmt 12 -out report.json", False),
+            ("help", "-h", False),
+            ("xmlhelp", "-xmlhelp", False),
+            ("version", "-version", False),
+            ("no_args", "", True),
+            ("rid_empty", "-rid ''", True),
+            ("rid_refused", "-rid ABCDEFGH01R", True),
+            ("rid_archive", "-rid X -archive in/bn.asn", True),
+            ("unknown_opt", "-archive in/bn.asn -nosuchopt", True),
+            ("late_of6", "-archive in/bn.asn -outfmt 6", "late_failure"),
+            ("refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", "refusal"),
+            ("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", "refusal"),
+            ("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", "refusal")):
+        add_bf(f"validate.{case_id}", words, failure, kind="validate")
     return rows
 
 

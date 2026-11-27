@@ -1,10 +1,10 @@
-// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2):
-// windowmasker's three stages (-mk_counts, -ustat, -convert), its option filter driven by
-// `-xmlhelp` exclusions, its mapping into ParameterField / ParameterDescription, and output
-// file naming. Nothing here lists windowmasker's option defaults, value lists or ranges: all
-// of those come from `ToolEngine.describeTool('windowmasker')`.
+// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2, RG-F3p7):
+// windowmasker's three stages (-mk_counts, -ustat, -convert), blast_formatter (-archive),
+// their option filters driven by `-xmlhelp`, mapping into ParameterField / ParameterDescription,
+// and output file naming. Nothing here lists option defaults, value lists or ranges: all
+// of those come from `ToolEngine.describeTool(...)`.
 import type { PrintedKind, ToolDescription, ToolParameterDescription } from 'losat/domain';
-import { exportPrefix } from './output-format';
+import { exportPrefix, FORMAT_NAMES } from './output-format';
 import type { ParameterField } from './programs';
 
 /** Structural mirror of `ParameterDescription` so the domain layer stays independent of `ports`. */
@@ -16,9 +16,22 @@ export interface ToolEngineOption {
   readonly choices?: readonly string[];
 }
 
-export type ToolId = 'windowmasker';
+export type ToolId = 'windowmasker' | 'blast_formatter';
 
 export type WindowMaskerStage = 'mk_counts' | 'mask' | 'convert';
+
+export type ToolStage = WindowMaskerStage | 'format';
+
+/** Human-readable tool label for Results selector and Run details. */
+export function toolLabel(tool: ToolId): string {
+  return tool === 'windowmasker' ? 'WindowMasker' : 'Format Archive';
+}
+
+/** Stage label for Results selector and Run details. */
+export function toolStageLabel(tool: ToolId, stage: ToolStage): string {
+  if (tool === 'blast_formatter') return 'blast_formatter';
+  return windowMaskerStageById(stage as WindowMaskerStage).label;
+}
 
 export interface ToolStageDescriptor {
   readonly id: WindowMaskerStage;
@@ -60,7 +73,54 @@ export const WINDOWMASKER_FILE_STRING_FLAGS: ReadonlySet<string> = new Set(['-us
 
 /** Help and version flags, entered via Additional options. */
 export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-xmlhelp']);
-export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version-full', '-version-full-xml', '-version-full-json']);
+export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version', '-version-full', '-version-full-xml', '-version-full-json']);
+
+/** Options placed in the Archive and Output blocks of Format Archive rather than "Formatting options". */
+export const BLAST_FORMATTER_BLOCK_FLAGS: ReadonlySet<string> = new Set(['-archive', '-rid', '-outfmt', '-out']);
+
+/** NCBI `-help` usage order for blast_formatter's options (excluding `-rid`, which LOSAT omits from `-xmlhelp` and refuses). */
+export const BLAST_FORMATTER_USAGE_ORDER: readonly string[] = Object.freeze([
+  '-archive',
+  '-outfmt',
+  '-show_gis',
+  '-num_descriptions',
+  '-num_alignments',
+  '-line_length',
+  '-html',
+  '-sorthits',
+  '-sorthsps',
+  '-max_target_seqs',
+  '-out',
+  '-parse_deflines',
+]);
+
+const BF_USAGE_RANK = new Map(BLAST_FORMATTER_USAGE_ORDER.map((flag, index) => [flag, index]));
+
+/** Preset `-outfmt` choices for the Format Archive tab (any other format string can be typed via Other). */
+export const BLAST_FORMATTER_OUTFMT_CHOICES: readonly { readonly value: string; readonly label: string }[] = Object.freeze(
+  ([8, 9, 12, 0, 5, 6, 7, 10, 15, 16, 17, 20] as const).map((num) => ({
+    value: String(num),
+    label: `${num} — ${FORMAT_NAMES[num]}`,
+  })),
+);
+
+/** Default `-outfmt` selected in the Format Archive tab (supported out of the box). */
+export const BLAST_FORMATTER_DEFAULT_OUTFMT = '8';
+
+/** All group-defined non-hidden options of `blast_formatter` in NCBI `-help` usage order. */
+export function allBlastFormatterParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
+  if (description === undefined) return [];
+  const allowed = description.parameters.filter((param) => param.group !== undefined && !param.hidden);
+  return allowed
+    .map((param, index) => ({ param, index, rank: BF_USAGE_RANK.get(param.flag) ?? BLAST_FORMATTER_USAGE_ORDER.length }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
+    .map((entry) => entry.param);
+}
+
+/** Options of `blast_formatter` shown under the collapsible "Formatting options" section. */
+export function blastFormatterOptionParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
+  return allBlastFormatterParameters(description).filter((param) => !BLAST_FORMATTER_BLOCK_FLAGS.has(param.flag));
+}
 
 /** NCBI `-help` usage order for windowmasker's options; any unknown future option sorts after these in XML order. */
 export const WINDOWMASKER_USAGE_ORDER: readonly string[] = Object.freeze([
@@ -237,7 +297,7 @@ export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */
 export function toolOutputFileName(
-  run: { readonly number: number; readonly tool: ToolId; readonly stage: WindowMaskerStage; readonly queuedAt: number },
+  run: { readonly number: number; readonly tool: ToolId; readonly stage: ToolStage; readonly queuedAt: number },
   name: string,
 ): string {
   const safe = name.replace(/\/+$/, '').replaceAll('/', '_');

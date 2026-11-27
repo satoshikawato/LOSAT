@@ -7,10 +7,13 @@ import { splitOptions } from './argv';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allStageParameters,
+  blastFormatterOptionParameters,
   defaultCountsOutName,
   stageOptionParameters,
   toToolParameterField,
   WINDOWMASKER_BLOCK_FLAGS,
+  type ToolId,
+  type ToolStage,
   type WindowMaskerStage,
 } from './tools';
 
@@ -100,6 +103,74 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
   return Object.freeze(argv);
 }
 
+export interface BlastFormatterArgvInput {
+  /** Archive file name in the run directory (`-archive`), omitted when empty. */
+  readonly archiveName?: string;
+  /** Output format string (`-outfmt`), omitted when empty or NCBI's default `'0'`. */
+  readonly outfmt?: string;
+  /** Output file name (`-out`), omitted when empty or `'-'` (standard output). */
+  readonly outName?: string;
+  /** Formatting option values keyed by `-flag` (`-max_target_seqs`, `-parse_deflines`, etc.). */
+  readonly values: FormValues;
+  /** Parsed `-xmlhelp` description (provides defaults and usage order). */
+  readonly description?: ToolDescription;
+  /** Extra words parsed from "Additional options" (`splitOptions`). */
+  readonly extra?: readonly string[];
+}
+
+/**
+ * Builds `['blast_formatter', ...]` for validation, execution and display.
+ * Throws if `extra` contains a word that ABI's NUL-joined argv cannot transmit (`''` or NUL).
+ */
+export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonly string[] {
+  const argv: string[] = ['blast_formatter'];
+  const archiveName = input.archiveName?.trim() ?? '';
+  if (archiveName !== '') argv.push('-archive', archiveName);
+
+  const outfmt = input.outfmt?.trim() ?? '';
+  if (outfmt !== '' && outfmt !== '0') argv.push('-outfmt', outfmt);
+
+  const outName = input.outName?.trim() ?? '';
+  if (outName !== '' && outName !== '-') argv.push('-out', outName);
+
+  const ordered = blastFormatterOptionParameters(input.description);
+  if (ordered.length > 0) {
+    for (const param of ordered) {
+      const written = toolWrittenValue(param, input.values[param.flag]);
+      if (written === true) argv.push(param.flag);
+      else if (typeof written === 'string') argv.push(param.flag, written);
+    }
+  } else {
+    for (const [flag, val] of Object.entries(input.values)) {
+      if (flag === '-archive' || flag === '-rid' || flag === '-outfmt' || flag === '-out') continue;
+      if (val === true) argv.push(flag);
+      else if (typeof val === 'string' && val.trim() !== '') argv.push(flag, val.trim());
+    }
+  }
+
+  for (const word of input.extra ?? []) {
+    const unread = word === '' ? "''" : word.includes('\0') ? 'a NUL character' : undefined;
+    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
+    argv.push(word);
+  }
+
+  return Object.freeze(argv);
+}
+
+/** Count of changed options inside the collapsible "Formatting options" section (plus Additional options). */
+export function changedBlastFormatterOptionsCount(
+  values: FormValues,
+  extra: string,
+  description: ToolDescription | undefined,
+): number {
+  let count = 0;
+  for (const param of blastFormatterOptionParameters(description)) {
+    if (toolWrittenValue(param, values[param.flag]) !== undefined) count++;
+  }
+  if (extra.trim() !== '') count++;
+  return count;
+}
+
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */
 export function toolCommandWords(argv: readonly string[]): readonly string[] {
   return ['losat', ...argv];
@@ -159,9 +230,9 @@ export function toolFileOptionLabel(argv: readonly string[], fileName: string): 
   return undefined;
 }
 
-/** Whether `fileName` is the counts output file of `-mk_counts` or `-convert` (eligible for "Use in BLASTN" / "Mask with these counts"). */
-export function isCountsOutputFile(stage: WindowMaskerStage, argv: readonly string[], fileName: string): boolean {
-  if (stage !== 'mk_counts' && stage !== 'convert') return false;
+/** Whether `fileName` is the counts output file of WindowMasker `-mk_counts` or `-convert` (eligible for "Use in BLASTN" / "Mask with these counts"). */
+export function isCountsOutputFile(stage: ToolStage, argv: readonly string[], fileName: string, tool: ToolId = 'windowmasker'): boolean {
+  if (tool !== 'windowmasker' || (stage !== 'mk_counts' && stage !== 'convert')) return false;
   return namedOutPath(argv) === normalizeRelName(fileName);
 }
 

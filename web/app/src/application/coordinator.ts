@@ -11,6 +11,7 @@
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
 import {
+  CUSTOM_OUTPUT,
   WINDOW_MASKER_FLAG,
   WINDOW_MASKER_TAXID_FLAG,
   type DirectoryFile,
@@ -38,7 +39,7 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, runTask } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { inputFileName, outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
+import { inputFileName, outputFileName, outputMediaType, outputNumber, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import {
   isTerminal,
   isToolSnapshot,
@@ -55,7 +56,7 @@ import {
   type ToolRunSnapshot,
 } from '../domain/run';
 import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
-import { toolOutputFileName, type ToolId, type WindowMaskerStage } from '../domain/tools';
+import { toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -125,7 +126,7 @@ export interface ToolDirectoryFile {
 
 export interface ToolRequest {
   readonly tool: ToolId;
-  readonly stage: WindowMaskerStage;
+  readonly stage: ToolStage;
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
@@ -161,6 +162,14 @@ export interface SessionCountsEntry {
   readonly key: string;
   readonly name: string;
   readonly size: number;
+}
+
+/** A completed `-outfmt 11` BLAST archive output from this session, offered to Format Archive (`blast_formatter`). */
+export interface SessionArchiveEntry {
+  readonly runId: string;
+  readonly runNumber: number;
+  readonly program: ProgramId;
+  readonly name: string;
 }
 
 export interface AppState {
@@ -696,6 +705,31 @@ export class Coordinator {
     return entries.reverse();
   }
 
+  /** Completed `-outfmt 11` search outputs from this session, newest first, for Format Archive. */
+  sessionOutfmt11Archives(): readonly SessionArchiveEntry[] {
+    const entries: SessionArchiveEntry[] = [];
+    for (const run of this.state.get().runs) {
+      if (isToolRun(run) || run.status !== 'completed' || run.result === undefined) continue;
+      if (outputNumber(run.snapshot.argv, CUSTOM_OUTPUT) !== 11) continue;
+      if (run.result.failed?.[CUSTOM_OUTPUT] !== undefined) continue;
+      entries.push({
+        runId: run.snapshot.runId,
+        runNumber: run.snapshot.number,
+        program: run.snapshot.program,
+        name: `run_${run.snapshot.number}_${run.snapshot.program}.asn`,
+      });
+    }
+    return entries.reverse();
+  }
+
+  /** Reads one compatibility output of a completed search run as a `File` (e.g. `-outfmt 11` archive for `blast_formatter`). */
+  async getOutputFile(runId: string, output: RunOutput, fileName: string): Promise<File> {
+    const view = this.findSearch(runId);
+    if (view?.result === undefined) throw new Error('run has no outputs');
+    const bytes = await this.deps.data.readOutput(runId, output);
+    return new File([bytes.slice()], fileName, { type: outputMediaType(view.snapshot.argv, output) });
+  }
+
   /**
    * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
    * changes do not reach), the run's input, and their SHA-256.
@@ -1044,7 +1078,7 @@ export class Coordinator {
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
         const option = toolFileOptionLabel(snapshot.argv, file.name);
-        const counts = isCountsOutputFile(snapshot.stage, snapshot.argv, file.name);
+        const counts = isCountsOutputFile(snapshot.stage, snapshot.argv, file.name, snapshot.tool);
         return Object.freeze({
           key: file.key,
           name: file.name,

@@ -65,9 +65,9 @@ losat blastn -query query.fna -subject subject.fna -outfmt 11 -out results.asn
 losat blast_formatter -archive results.asn -outfmt 8 -out results.seqalign.asn
 ```
 
-## Library and Python
+## Library, Python, and LOSAT Web
 
-The library API runs it as `losat::api::run_blast_formatter(argv, input, output, diagnostics)`, like `run_convert2blastmask`. In Python: `pylosat.blast_formatter(*words, input=b"")` returns a `ToolOutput`, like `pylosat.convert2blastmask`. See [Using LOSAT as a library](../library.md).
+The library API runs it as `losat::api::run_blast_formatter(argv, input, output, diagnostics)`, like `run_convert2blastmask`. In Python: `pylosat.blast_formatter(*words, input=b"")` returns a `ToolOutput`, like `pylosat.convert2blastmask` (with `input` serving `-archive -`). In the browser, the `losat` npm package runs `blast_formatter` through `engine.runTool(['blast_formatter', ...], { directory })` (supporting both `-subject` archives and local `-db` archives whose database files are provided in `directory`), and LOSAT Web exposes it in the **Format Archive** tab (and via `"Format archive…"` on completed `-outfmt 11` search outputs). See [Using LOSAT as a library](../library.md) and [LOSAT Web](../web.md).
 
 ## See also
 

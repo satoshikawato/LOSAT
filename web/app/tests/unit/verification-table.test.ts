@@ -14,6 +14,7 @@ import {
   toolVerificationBadge,
   type OptionGrammar,
 } from '../../src/domain/verification';
+import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
@@ -114,6 +115,7 @@ describe('verification table', () => {
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastn.tsv',
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv',
       'LOSAT/tests/windowmasker/cases.tsv',
+      'LOSAT/tests/blast_formatter/cases.tsv',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -189,5 +191,37 @@ describe('verification table', () => {
       table,
     );
     expect(dev).toMatchObject({ level: 'development', label: 'Development build' });
+  });
+
+  it('generates blast_formatter option sets from cases.tsv and grades runs as Supported or Not yet supported', () => {
+    const bf = table.tools?.blast_formatter;
+    expect(bf).toBeDefined();
+    expect(bf!.optionSets.length).toBeGreaterThanOrEqual(3);
+    expect([...bf!.optionSets]).toEqual([...bf!.optionSets].sort());
+    for (const key of bf!.optionSets) {
+      expect(key).not.toMatch(/"-(archive|out|logfile)"/);
+    }
+
+    const bfGrammar = toolOptionGrammar(parseToolDescription(BLAST_FORMATTER_XMLHELP_DOC.xml));
+    for (const argv of [
+      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8'],
+      ['blast_formatter', '-archive', 'db.asn', '-outfmt', '9', '-out', 'out.asnb'],
+      ['blast_formatter', '-archive', 'db.asn', '-outfmt', '12', '-logfile', 'run.log'],
+      ['blast_formatter', '-archive', 'db.asn', '-outfmt', '8', '-max_target_seqs', '2'],
+      ['blast_formatter', '-archive', 'db.asn', '-outfmt', '8', '-parse_deflines'],
+    ]) {
+      const badge = toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+
+    for (const argv of [
+      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '6'],
+      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8', '-line_length', '40'],
+    ]) {
+      const badge = toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
+      expect(badge.level, argv.join(' ')).toBe('outside');
+      expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+    }
   });
 });

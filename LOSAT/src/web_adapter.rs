@@ -86,6 +86,12 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::windowmasker::read_files(words)
 }
 
+/// The input file names that a `blast_formatter` run with `words` opens for reading
+/// (`blast_formatter::read_files`): `(for_logfile, for_out)`.
+pub fn blast_formatter_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::blast_formatter::read_files(words)
+}
+
 /// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
 /// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
 /// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
@@ -411,19 +417,28 @@ pub fn run_windowmasker(
     crate::windowmasker::run_in(&words, run_files, input, out, err)
 }
 
-/// Checks the words of a `windowmasker` run as `run_windowmasker` runs them, up to where the tool
-/// reads its input or opens a file: the application start (which reads the registry files of the
-/// run's working directory, `.ncbirc`, the file of `-conffile`, as the command line does), the
-/// arguments (NCBI's reader and its checks), LOSAT's settings and the checks of the mode before its
-/// files (`-mk_counts` with `-ids` and `-exclude_ids`, or with `-infmt seqids`; `-convert -in -`)
-/// (LOSAT Web's validation of a tool's words, `losat_web2_validate`; line NP WW3a, D-WW3-7 and
-/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
-/// its standard error, then the file of `-logfile` where the argv has one, without the last line
-/// end.
-pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
+/// Runs `blast_formatter` with `words` (the command line after `blast_formatter`), its written
+/// files going to `files`, `input` as its standard input, `out` as its standard output and `err`
+/// as its standard error; the exit status (`blast_formatter::run_in`).
+pub fn run_blast_formatter(
+    words: &[&str],
+    files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::blast_formatter::run_in(&words, files, input, out, err)
+}
+
+/// Runs a tool's `check_in` with a `FileReceiver` capturing `-logfile` bytes and carrying
+/// `(read, out_read)` so self-referencing `-logfile`/`-out` names are refused.
+fn check_tool_in(
+    words: &[&str],
+    read_files: fn(&[OsString]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>),
+    check_in: fn(&[OsString], &RunFiles, &mut dyn std::io::Write, &mut dyn std::io::Write) -> i32,
+) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
-    /// The file of `-logfile`, kept for the message, carrying the tool's read input names so
-    /// `-logfile` and `-out` naming a missing input that the CLI reads back are refused.
     struct Log {
         bytes: Mutex<Vec<u8>>,
         read: Vec<Vec<u8>>,
@@ -447,7 +462,7 @@ pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
         }
     }
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-    let (read, out_read) = crate::windowmasker::read_files(&words);
+    let (read, out_read) = read_files(&words);
     let log = Arc::new(Log {
         bytes: Mutex::new(Vec::new()),
         read,
@@ -455,8 +470,7 @@ pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     });
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let status =
-        crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
+    let status = check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
     if status == 0 {
         return Ok(());
     }
@@ -470,6 +484,30 @@ pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
         err.pop();
     }
     Err(String::from_utf8_lossy(&err).into_owned())
+}
+
+/// Checks `words` (the command line after `windowmasker`) as the command line reads them before
+/// `windowmasker` reads its input or opens a file (`windowmasker::check_in`; line NP WW3a,
+/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
+/// its standard error, then the file of `-logfile` where the argv has one, without the last line
+/// end.
+pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
+    check_tool_in(
+        words,
+        crate::windowmasker::read_files,
+        crate::windowmasker::check_in,
+    )
+}
+
+/// Checks `words` (the command line after `blast_formatter`) as the command line reads them before
+/// `blast_formatter` opens `-archive` (`blast_formatter::check_in`). `Err` with what the command
+/// line writes for the words that it refuses, without the last line end.
+pub fn check_blast_formatter(words: &[&str]) -> Result<(), String> {
+    check_tool_in(
+        words,
+        crate::blast_formatter::read_files,
+        crate::blast_formatter::check_in,
+    )
 }
 
 // The checks of the options alone, without the inputs (the `validate` of ABI v2), and BLASTN's

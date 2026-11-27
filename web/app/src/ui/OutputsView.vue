@@ -9,12 +9,12 @@
 // version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
-import type { Coordinator, RunView } from '../application/coordinator';
+import type { Coordinator, RunView, SessionArchiveEntry } from '../application/coordinator';
 import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
 import { commandWords } from '../domain/argv';
 import { fromText } from '../domain/input-parts';
-import { isBinaryOutput, outfmtOf } from '../domain/output-format';
+import { isBinaryOutput, outfmtOf, outputNumber } from '../domain/output-format';
 import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
 import PlaceWords from './PlaceWords.vue';
@@ -30,6 +30,7 @@ import { useStore } from './useStore';
  * (line WQA's sweep, D15, 2026-11-20), where the results page shows its `-logfile` file and warnings apart (`files` false).
  */
 const props = withDefaults(defineProps<{ coordinator: Coordinator; run: RunView; files?: boolean }>(), { files: true });
+const emit = defineEmits<{ 'format-archive': [entry: SessionArchiveEntry] }>();
 /** The tab of the run's files, after the formats. */
 const FILES = 'run-files';
 /** The tab of the text that the run printed in place of a search, its one output. */
@@ -98,6 +99,25 @@ const tabs = computed(() => [
         },
       ]),
 ]);
+/** Whether this output is a completed `-outfmt 11` BLAST archive that can be opened in Format Archive. */
+const canFormatArchive = computed(
+  () =>
+    props.run.status === 'completed' &&
+    format.value === CUSTOM_OUTPUT &&
+    outputNumber(props.run.snapshot.argv, format.value) === 11 &&
+    notWritten.value === undefined,
+);
+
+function openInFormatArchive(): void {
+  const { runId, number, program } = props.run.snapshot;
+  emit('format-archive', {
+    runId,
+    runNumber: number,
+    program,
+    name: `run_${number}_${program}.asn`,
+  });
+}
+
 const reader = new OutputReader(props.coordinator);
 /**
  * The query and subject that are files of LOSAT's (pasted text, several files, records left out): the command names them, and the
@@ -157,9 +177,20 @@ watch(
       />
       <!-- Next to Export, whose failure it also tells; where the text would be when the text could not be read. -->
       <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
-      <button data-testid="export-output" @click="reader.export(run, format)">
-        Export outfmt {{ outfmtOf(run.snapshot.argv, format) }}
-      </button>
+      <div class="outputs-actions">
+        <button data-testid="export-output" @click="reader.export(run, format)">
+          Export outfmt {{ outfmtOf(run.snapshot.argv, format) }}
+        </button>
+        <button
+          v-if="canFormatArchive"
+          type="button"
+          class="primary-action"
+          data-testid="format-archive-action"
+          @click="openInFormatArchive"
+        >
+          Format archive…
+        </button>
+      </div>
     </div>
   </div>
 </template>

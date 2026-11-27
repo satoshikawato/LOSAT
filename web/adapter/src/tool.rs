@@ -1,12 +1,17 @@
 //! The runs of the command line's tools besides the searches (`losat_web2_tool`, docs/web/abi_v2.md
-//! §4, §5; line NP WW3a, 2026-11-22): `windowmasker`, with the command line's words, in the run's
-//! working directory (`run::enter_run_directory`), whose files it reads by name as the command line
-//! reads them in its directory. Its standard input is the null device (empty), its standard output
-//! goes to stream 11 and its standard error to stream 3, and the files that it writes
-//! (`-out FILE`, `-logfile FILE`) to stream 12, each as it is written, so that no output is held
-//! whole (D-WW3-6: human counts are 724 MB, a genome masked as FASTA 3.1 GB): each write at its
-//! offset, as the system writes a file that a run opens twice (`-out x -logfile x`, D-WW3-9); then
-//! its exit status goes to stream 2 (`{"status":N}`).
+//! §4, §5; line NP WW3a, 2026-11-22; line NP WW4b1, 2026-11-27): `windowmasker` and `makeblastdb`,
+//! with the command line's words, in the run's working directory (`run::enter_run_directory`), whose
+//! files they read by name as the command line reads them in its directory. Standard input is the
+//! null device (empty), standard output goes to stream 11 and standard error to stream 3, then the
+//! exit status goes to stream 2 (`{"status":N}`).
+//!
+//! `windowmasker` writes its files (`-out FILE`, `-logfile FILE`) to stream 12, each as it is
+//! written, so that no output is held whole (D-WW3-6: human counts are 724 MB, a genome masked as
+//! FASTA 3.1 GB): each write at its offset, as the system writes a file that a run opens twice
+//! (`-out x -logfile x`, D-WW3-9). `makeblastdb` writes, reads back, renames and removes the files of
+//! its database in the run's working directory through the file system, as on the command line
+//! (D-WW4b-1): the host gives a tool run a working directory that it can write (abi_v2.md §3), and
+//! hands the files that the run left there to its caller when the run ends.
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -19,16 +24,24 @@ use crate::emit::{
     STREAM_DIAGNOSTICS, STREAM_PRINTED, STREAM_RESPONSE, STREAM_TOOL_FILES,
 };
 
-/// The tools that a tool run runs: `windowmasker`.
-pub const TOOLS: &[&str] = &["windowmasker"];
+/// The tools that a tool run runs: `windowmasker` and `makeblastdb`.
+pub const TOOLS: &[&str] = &["windowmasker", "makeblastdb"];
+
+/// A tool that a tool run runs (`TOOLS`).
+#[derive(Clone, Copy)]
+enum ToolKind {
+    WindowMasker,
+    Makeblastdb,
+}
 
 /// The tool `words[0]` and its words after the name; `Err` for a name that is not a tool that
 /// LOSAT Web runs: another program of the command line (`PROGRAMS`: a search, which
 /// `losat_web2_run` runs, or a tool that LOSAT Web does not run yet), or no program.
-fn tool<'a>(words: &'a [&'a str]) -> Result<&'a [&'a str], String> {
+fn tool<'a>(words: &'a [&'a str]) -> Result<(ToolKind, &'a [&'a str]), String> {
     let (name, arguments) = words.split_first().unwrap_or((&"", &[]));
     match *name {
-        "windowmasker" => Ok(arguments),
+        "windowmasker" => Ok((ToolKind::WindowMasker, arguments)),
+        "makeblastdb" => Ok((ToolKind::Makeblastdb, arguments)),
         other if PROGRAMS.contains(&other) => {
             Err(format!("{other} is not available in the browser (ABI v2)"))
         }
@@ -40,15 +53,23 @@ fn tool<'a>(words: &'a [&'a str]) -> Result<&'a [&'a str], String> {
 /// emits its streams: 11, 3 and 12 as the tool writes them, then the exit status on 2. `Err` for a
 /// name that is not a tool that LOSAT Web runs; nothing is emitted then.
 pub fn run(words: &[&str]) -> Result<(), String> {
-    let arguments = tool(words)?;
+    let (kind, arguments) = tool(words)?;
     let mut out = StreamWriter::new(STREAM_PRINTED);
-    let status = losat::web_adapter::run_windowmasker(
-        arguments,
-        &RunFiles::Receiver(Arc::new(ToolFiles::for_args(arguments))),
-        &mut io::empty(),
-        &mut out,
-        &mut Diagnostics,
-    );
+    let status = match kind {
+        ToolKind::WindowMasker => losat::web_adapter::run_windowmasker(
+            arguments,
+            &RunFiles::Receiver(Arc::new(ToolFiles::for_args(arguments))),
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+        ToolKind::Makeblastdb => losat::web_adapter::run_makeblastdb(
+            arguments,
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+    };
     out.finish();
     emit(
         STREAM_RESPONSE,
@@ -59,11 +80,15 @@ pub fn run(words: &[&str]) -> Result<(), String> {
 
 /// Checks the words of a tool run as the command line reads them before its tool reads its input
 /// or opens a file (`losat_web2_validate` of a tool's argv, docs/web/abi_v2.md §4; line NP WW3a,
-/// D-WW3-7 and D-WW3-10): `Err` with the command line's error (`web_adapter::check_windowmasker`,
-/// which reads the registry files of the run's working directory), or for a name that is not a
-/// tool that LOSAT Web runs. Emits nothing.
+/// D-WW3-7 and D-WW3-10; D-WW4b-3): `Err` with the command line's error (`web_adapter::check_windowmasker`,
+/// `web_adapter::check_makeblastdb`, which read the registry files of the run's working directory
+/// and write no file), or for a name that is not a tool that LOSAT Web runs. Emits nothing.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    losat::web_adapter::check_windowmasker(tool(words)?)
+    let (kind, arguments) = tool(words)?;
+    match kind {
+        ToolKind::WindowMasker => losat::web_adapter::check_windowmasker(arguments),
+        ToolKind::Makeblastdb => losat::web_adapter::check_makeblastdb(arguments),
+    }
 }
 
 /// The standard error of a tool run: stream 3, each write as it comes (the tool's diagnostics, a

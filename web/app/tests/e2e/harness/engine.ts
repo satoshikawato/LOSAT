@@ -647,6 +647,119 @@ export async function databaseSearches(list: readonly DatabaseSearch[], picked?:
   return results;
 }
 
+/** A run of makeblastdb through the package (line NP WW4b1, 2026-11-27), then a search of the database it made. */
+export interface MakeblastdbCase {
+  readonly id: string;
+  /** `makeblastdb` and the command line's words. */
+  readonly argv: readonly string[];
+  /** The run directory's files: each its name in the run's directory and its path under LOSAT/ (the server's bytes). */
+  readonly files: ReadonlyArray<readonly [string, string]>;
+  /** The run's input from the files of this `<input type=file>` (their names in the run's directory), read from the disk. */
+  readonly picked?: string;
+  /** Without the files' bytes in the result: their sizes and SHA-256 only (a measurement of a large database). */
+  readonly digestsOnly?: boolean;
+  /** A search of the database that the run made (the run's files as `EngineRunRequest.files`), on one thread. */
+  readonly search?: { readonly program: ProgramId; readonly argv: readonly string[]; readonly query: string };
+}
+
+export interface MakeblastdbFile {
+  readonly name: string;
+  readonly size: number;
+  readonly sha256: string;
+  /** The bytes, base64. */
+  readonly base64?: string;
+}
+
+export interface MakeblastdbResult {
+  readonly id: string;
+  /** The time zone of the page's `Intl` (Playwright's `timezoneId`). */
+  readonly zone: string;
+  readonly status?: number;
+  /** The standard output and error, base64. */
+  readonly stdout?: string;
+  readonly stderr?: string;
+  /** The files of the run, as `runTool` gave them (by name). */
+  readonly files?: readonly MakeblastdbFile[];
+  /** Milliseconds of `runTool`. */
+  readonly toolMs?: number;
+  /** The search of the made database: its stored outfmt 0 and 6 (base64), and the engine's memory before it (the tool run's high-water mark). */
+  readonly search?: { readonly out0?: string; readonly out6?: string; readonly error?: string; readonly runtime?: RuntimeInfo };
+  readonly error?: string;
+}
+
+function base64Of(bytes: Uint8Array): string {
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(binary);
+}
+
+/**
+ * Runs makeblastdb on the package's WasmEngine (`runTool`) with the case's files as the run's directory, collects what the run
+ * wrote (its standard output, standard error and the files it left, as Blobs), and searches the database that it made through
+ * the package's `-db` path (the made files as `EngineRunRequest.files`, the query indexed by the Data worker as in
+ * `databaseSearches`). In order, through one EngineGateway.
+ */
+export async function makeblastdbRuns(list: readonly MakeblastdbCase[]): Promise<MakeblastdbResult[]> {
+  if (ENGINE_ASSETS === null) throw new Error('the harness was built without the engine (LOSAT_WEB_REACTORS)');
+  const data = startDataWorker();
+  const engine = new WasmEngine({ assets: ENGINE_ASSETS, control: data });
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const results: MakeblastdbResult[] = [];
+  for (const [i, run] of list.entries()) {
+    try {
+      const picked = run.picked === undefined ? [] : [...(document.querySelector<HTMLInputElement>(run.picked)?.files ?? [])];
+      const directory = await Promise.all(
+        run.files.map(async ([name, path]) => ({
+          name,
+          file: picked.find((file) => file.name === name.slice(name.lastIndexOf('/') + 1)) ?? (await fetchFile({ url: `/__files/LOSAT/${path}`, name })),
+        })),
+      );
+      const started = performance.now();
+      const done = await engine.runTool(run.argv, { directory });
+      const toolMs = performance.now() - started;
+      const files: MakeblastdbFile[] = [];
+      for (const { name, file } of done.files) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        files.push({ name, size: bytes.length, sha256: await sha256Hex(bytes), ...(run.digestsOnly === true ? {} : { base64: base64Of(bytes) }) });
+      }
+      let search: MakeblastdbResult['search'];
+      if (run.search !== undefined) {
+        const runId = `makeblastdb-${i}`;
+        try {
+          const query = await fetchFile({ url: `/__files/LOSAT/${run.search.query}`, name: run.search.query });
+          const source = await data.addSource(query);
+          const revision = await data.indexSource(source.sourceId, { program: run.search.program, role: 'query', dataLoaders: true, parseDeflines: false });
+          const input = await data.buildRunInput([revision.revisionId]);
+          const engineInput: EngineInput = { bytes: input.bytes, sha256: input.sha256, revisionIds: [revision.revisionId], records: input.records };
+          const output = await data.openRun(runId);
+          const runtime = await engine.run({ runId, argv: run.search.argv, query: engineInput, files: done.files, requestedThreads: 1 }, output, () => undefined);
+          await data.commitRun(runId);
+          search = { out0: base64Of(await data.readOutput(runId, 0)), out6: base64Of(await data.readOutput(runId, 6)), runtime };
+          await data.deleteRun(runId);
+        } catch (error) {
+          await data.discardRun(runId).catch(() => undefined);
+          search = { error: String(error) };
+        }
+      }
+      results.push({
+        id: run.id,
+        zone,
+        status: done.status,
+        stdout: base64Of(new Uint8Array(await done.stdout.arrayBuffer())),
+        stderr: base64Of(new Uint8Array(await done.stderr.arrayBuffer())),
+        files,
+        toolMs,
+        ...(search === undefined ? {} : { search }),
+      });
+    } catch (error) {
+      results.push({ id: run.id, zone, error: String(error) });
+    }
+    const last = results[results.length - 1]!;
+    console.log(`${last.error === undefined ? 'done' : `failed (${last.error})`} makeblastdb ${run.id}: ${Math.round(last.toolMs ?? 0)} ms, ${last.files?.length ?? 0} files`);
+  }
+  return results;
+}
+
 /** The engine-input contract against the real EngineGateway and Engine worker. */
 export async function engineInput(env: {
   readonly argv: readonly string[];

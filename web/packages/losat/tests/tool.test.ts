@@ -378,8 +378,8 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
 }
 
 describe('ReactorAbi.tool and validateTool', () => {
-  it('speaks ABI version 16 and the module check wants losat_web2_tool', () => {
-    expect(ABI_VERSION).toBe(16);
+  it('speaks ABI version 17 and the module check wants losat_web2_tool', () => {
+    expect(ABI_VERSION).toBe(17);
     expect(ABI_EXPORTS).toContain('losat_web2_tool');
   });
 

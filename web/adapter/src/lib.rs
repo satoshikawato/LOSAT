@@ -73,7 +73,12 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 16 since adding `psiblast` (single- and
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 17 since `losat_web2_tool` and
+/// `losat_web2_validate` run and check `makeblastdb`, which writes, reads back, renames and removes
+/// the files of its database in the run's working directory through the file system: the host gives
+/// a tool run a working directory that it can write and hands the files that the run left there to
+/// its caller, and gives the engine `TZ` in its environment, the zone of the dates that makeblastdb
+/// writes (line NP WW4b1, D-WW4b-1 to D-WW4b-3, 2026-11-27); 16 since adding `psiblast` (single- and
 /// multi-round, `-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`,
 /// `-save_pssm_after_last_round`) and `tblastn -in_pssm` (file queries with `query_handle = 0`,
 /// PSSM output files on stream 8, *start* fields `query_file`, `out_pssm`, `out_ascii_pssm`,
@@ -109,7 +114,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    16
+    17
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -167,7 +172,7 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 }
 
 /// Checks the argv as the CLI does before it reads its inputs (`run::validate`; for a tool's argv,
-/// `windowmasker`, `tool::validate`, which emits nothing) and emits the *validation* JSON on stream
+/// `windowmasker` and `makeblastdb`, `tool::validate`, which emits nothing) and emits the *validation* JSON on stream
 /// 2: whether the run reads its inputs with NCBI's data loaders on and, when the argv parses,
 /// whether `-parse_deflines` is active (`{"data_loaders":true,"parse_deflines":false}`, or
 /// `{"data_loaders":true}` when the argv does not parse; docs/web/abi_v2.md §9). It is emitted
@@ -508,11 +513,12 @@ pub unsafe extern "C" fn losat_web2_run(
     })
 }
 
-/// Runs a tool of the command line with its words, `argv[0]` its name (`windowmasker`; the other
-/// programs fail with `<name> is not available in the browser (ABI v2)`), in the run's working
-/// directory, with no standard input: its standard output on stream 11 and its standard error on
-/// stream 3 as they are written, each file that it writes on stream 12 as it is written (also when
-/// the run fails), then its exit status on stream 2 as `{"status":N}` (docs/web/abi_v2.md §4, §5,
+/// Runs a tool of the command line with its words, `argv[0]` its name (`windowmasker`,
+/// `makeblastdb`; the other programs fail with `<name> is not available in the browser (ABI v2)`),
+/// in the run's working directory, with no standard input: its standard output on stream 11 and its
+/// standard error on stream 3 as they are written, each file that `windowmasker` writes on stream 12
+/// as it is written (also when the run fails; `makeblastdb` writes its files in the run's working
+/// directory), then its exit status on stream 2 as `{"status":N}` (docs/web/abi_v2.md §3, §4, §5,
 /// §9; `tool.rs`). Returns 0 for every exit status; -1 only for an argv that is not UTF-8 or a name
 /// that is not a tool of LOSAT Web.
 ///

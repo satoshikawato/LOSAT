@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 16, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 17, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes (or `-in_pssm`/`-in_msa` files in the run directory). It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 16 |
+| 0.2.0 | 0.2.0 | 17 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -330,6 +330,44 @@ again.", and the next run starts a new worker.
 `[tool, '-xmlhelp']` (on the control reactor when `reactorControl` provides it, else through `runTool`) and parsing the
 XML with `parseToolDescription`. `parseToolDescription(xml)` is also exported from `losat` and `losat/domain` and needs
 no `DOMParser`, so it works in workers and in Node.
+
+## Running makeblastdb
+
+`engine.runTool(['makeblastdb', ...words], options)` runs the command line's `makeblastdb` (`losat makeblastdb`, with every
+option: nucleotide and protein, BLAST database versions 4 and 5, `-parse_seqids`, `-hash_index`, volumes of `-max_file_sz`,
+`-mask_data`, `-gi_mask`, `-taxid`, `-taxid_map`, `-input_type` fasta, blastdb, asn1_txt and asn1_bin, gzip input, `-logfile`,
+help and version) on the files of `options.directory`, and writes the same bytes as the command line. The run's directory
+is the command line's working directory, and it is writable for a tool's run: the database's files go into it as the
+command line writes them, the run reads them back, renames and removes files (a run that replaces a database of
+`directory` removes the old volumes), and makes the folders of `-out sub/dir/db`. What it writes is kept in the Engine
+worker's memory, and the user's files (the Blobs of `directory`) are never changed. When the run has ended, the files that
+it made or changed and that are still there come to `sinks.onFile`, or to `files` as Blobs, in the byte order of their
+names: a file that the run removed never arrives, nor does a file of `directory` that it left as it was. The standard
+input is empty (`-in -` reads no sequence, as the command line with `< /dev/null`).
+
+The dates that the database holds (the index files' "Nov 27, 2026  12:23 AM", an alias file's "Alias file created", the
+mask column's and the report's dates) are the user's local time, as on the user's machine: the host gives the engine the
+browser's time zone (`Intl`) as a POSIX `TZ` rule of the current year, with its summer time.
+
+```ts
+import { WasmEngine } from 'losat';
+
+declare const engine: WasmEngine; // as in "Use"
+declare const proteins: File; // a FASTA file, from a file picker
+
+const argv = ['makeblastdb', '-in', 'proteins.faa', '-dbtype', 'prot', '-parse_seqids', '-out', 'proteins'];
+const directory = [{ name: 'proteins.faa', file: proteins }];
+const { status, stdout, stderr, files } = await engine.runTool(argv, { directory });
+if (status !== 0) throw new Error(await stderr.text());
+console.log(await stdout.text()); // "Building a new DB, current time: ..." and the counts, as the command line prints them
+// files: proteins.pdb, proteins.phr, proteins.pin, ... (a Blob each, by name). Each is a `DirectoryFile`, so a search
+// of `-db proteins` takes them as they are (`EngineRunRequest.files`, in "Databases"), as does another tool's `directory`.
+```
+
+`engine.validateTool(argv, { directory })` makes the command line's checks of the words that come before its run starts:
+an option that is not known, a missing `-dbtype`, a `-dbtype` that is not `nucl` or `prot`, and the registry files of the
+directory. The errors that the command line reports once it has started (a missing `-in`, a mask file that cannot be read)
+are the run's: `runTool` returns them as the command line does.
 
 ## License
 

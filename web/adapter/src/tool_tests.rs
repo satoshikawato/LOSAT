@@ -1022,3 +1022,291 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
     assert!(frames(&calls).is_empty(), "fa_list nosub: no log file");
     let _ = std::fs::remove_dir_all(&list_dir);
 }
+
+/// The files of `folder` (its regular files, by their names), taken out of it.
+fn taken(folder: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(folder).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            files.insert(name, std::fs::read(&path).unwrap());
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+    files
+}
+
+/// The minute of makeblastdb's report (`Building a new DB, current time: 11/27/2026 13:55:02`),
+/// which its dates (the index's, the metadata's) are in.
+/// The report of a makeblastdb run without what changes from one run to the next: the seconds of
+/// its time ("Building a new DB, current time: ...") and the time it took ("added N sequences in
+/// T seconds.").
+fn report_masked(report: &[u8]) -> String {
+    let text = String::from_utf8_lossy(report);
+    let mut masked = String::new();
+    for line in text.split_inclusive('\n') {
+        if line.starts_with("Building a new DB, current time: ") {
+            let end = line.trim_end_matches('\n');
+            masked.push_str(&end[..end.len().saturating_sub(2)]);
+            masked.push_str("##");
+            masked.push_str(&line[end.len()..]);
+        } else if let (Some(at), Some(to)) = (line.find(" sequences in "), line.rfind(" seconds."))
+        {
+            masked.push_str(&line[..at + " sequences in ".len()]);
+            masked.push('#');
+            masked.push_str(&line[to..]);
+        } else {
+            masked.push_str(line);
+        }
+    }
+    masked
+}
+
+fn report_minute(report: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(report);
+    text.lines()
+        .find_map(|line| line.strip_prefix("Building a new DB, current time: "))
+        .map(|time| time.as_bytes()[..time.len().saturating_sub(3)].to_vec())
+        .unwrap_or_default()
+}
+
+/// A makeblastdb tool run (D-WW4b-1) builds the database in the run's working directory as the
+/// library's run of the same words on the disk does: the same files and bytes, the same standard
+/// output (stream 11) and standard error (stream 3), the exit status 0 on stream 2 last, no frame
+/// of stream 12; protein of version 5 with `-parse_seqids` and `-hash_index`, nucleotide of
+/// version 4, and several volumes (`-max_file_sz`, an alias file). The two runs are made in one
+/// minute (the dates of the files; again where the minute changed between them).
+#[test]
+fn a_makeblastdb_run_builds_the_command_line_s_database() {
+    emitted();
+    let folder = folder("makeblastdb");
+    for case in [
+        &[
+            "-in",
+            "prot.faa",
+            "-dbtype",
+            "prot",
+            "-parse_seqids",
+            "-hash_index",
+        ][..],
+        &[
+            "-in",
+            "nucl.fna",
+            "-dbtype",
+            "nucl",
+            "-blastdb_version",
+            "4",
+        ],
+        &[
+            "-in",
+            "nucl.fna",
+            "-dbtype",
+            "nucl",
+            "-max_file_sz",
+            "1000",
+            "-parse_seqids",
+        ],
+        &["-in", "prot.faa", "-dbtype", "prot", "-out", "sub/db"],
+    ] {
+        let words: Vec<String> = case
+            .iter()
+            .enumerate()
+            .map(
+                |(at, word)| match at.checked_sub(1).map(|before| case[before]) {
+                    Some("-in") => fixture(&format!("seqdb/{word}")),
+                    Some("-out") => folder.join(word).to_str().unwrap().to_string(),
+                    _ => (*word).to_string(),
+                },
+            )
+            .chain(
+                (!case.contains(&"-out"))
+                    .then(|| {
+                        [
+                            "-out".to_string(),
+                            folder.join("db").to_str().unwrap().to_string(),
+                        ]
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
+            .collect();
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        let place = if case.contains(&"-out") {
+            folder.join("sub")
+        } else {
+            folder.clone()
+        };
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+            losat::api::run_makeblastdb(&words, &mut io::empty(), &mut stdout, &mut stderr)
+                .unwrap();
+            let library = taken(&place);
+            run(&[&["makeblastdb"][..], &words].concat()).unwrap();
+            let calls = emitted();
+            let tool = taken(&place);
+            let printed = joined(&calls, STREAM_PRINTED);
+            if report_minute(&printed) != report_minute(&stdout) && attempts < 2 {
+                continue;
+            }
+            assert_eq!(
+                calls.last().unwrap(),
+                &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+                "{case:?}"
+            );
+            assert!(frames(&calls).is_empty(), "{case:?}: no frame of stream 12");
+            assert!(!library.is_empty(), "{case:?}");
+            assert_eq!(
+                library.keys().collect::<Vec<_>>(),
+                tool.keys().collect::<Vec<_>>(),
+                "{case:?}"
+            );
+            for (name, bytes) in &library {
+                assert!(tool[name] == *bytes, "{case:?}: the bytes of {name}");
+            }
+            assert_eq!(
+                report_masked(&printed),
+                report_masked(&stdout),
+                "{case:?}: stream 11"
+            );
+            assert_eq!(
+                joined(&calls, STREAM_DIAGNOSTICS),
+                stderr,
+                "{case:?}: stream 3"
+            );
+            break;
+        }
+    }
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// A makeblastdb tool run prints and fails as the command line: the help and NCBI's XML of
+/// `-xmlhelp` on stream 11 with the exit status 0, the version, an argument error of NCBI's reader
+/// (no `-dbtype`: its usage and error on stream 3, the exit status 1), an input that is missing
+/// and mask data that is not mask data (an options error, 1; observed with the command line,
+/// 2026-11-27), as the library's run of the same words writes them.
+#[test]
+fn a_makeblastdb_run_prints_and_fails_as_the_command_line() {
+    emitted();
+    let folder = folder("makeblastdb-fail");
+    let out = folder.join("db");
+    let out = out.to_str().unwrap();
+    let prot = fixture("seqdb/prot.faa");
+    let missing = folder.join("missing.faa");
+    let missing = missing.to_str().unwrap();
+    let garbage = folder.join("garbage.asnb");
+    std::fs::write(&garbage, b"not mask data\n").unwrap();
+    let garbage = garbage.to_str().unwrap();
+    for (words, status) in [
+        (&["-h"][..], 0),
+        (&["-help"], 0),
+        (&["-version"], 0),
+        (&["-in", &prot, "-out", out], 1),
+        (&["-in", missing, "-dbtype", "prot", "-out", out], 1),
+        (
+            &[
+                "-in",
+                &prot,
+                "-dbtype",
+                "prot",
+                "-out",
+                out,
+                "-mask_data",
+                garbage,
+            ],
+            1,
+        ),
+    ] {
+        run(&[&["makeblastdb"][..], words].concat()).unwrap();
+        let calls = emitted();
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let result = losat::api::run_makeblastdb(words, &mut io::empty(), &mut stdout, &mut stderr);
+        assert_eq!(result.is_ok(), status == 0, "{words:?}: {result:?}");
+        assert_eq!(
+            calls.last().unwrap(),
+            &(
+                STREAM_RESPONSE,
+                format!("{{\"status\":{status}}}").into_bytes()
+            ),
+            "{words:?}: {}",
+            String::from_utf8_lossy(&stderr)
+        );
+        assert_eq!(joined(&calls, STREAM_PRINTED), stdout, "{words:?}");
+        assert_eq!(joined(&calls, STREAM_DIAGNOSTICS), stderr, "{words:?}");
+        let _ = taken(&folder);
+        std::fs::write(folder.join("garbage.asnb"), b"not mask data\n").unwrap();
+    }
+    run(&["makeblastdb", "-xmlhelp"]).unwrap();
+    let calls = emitted();
+    let xml = joined(&calls, STREAM_PRINTED);
+    assert!(
+        xml.starts_with(b"<?xml"),
+        "{}",
+        String::from_utf8_lossy(&xml)
+    );
+    assert!(String::from_utf8_lossy(&xml).contains("makeblastdb"));
+    assert_eq!(
+        calls.last().unwrap(),
+        &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+    );
+    // The library refuses -xmlhelp, whose XML only the command line and LOSAT Web write.
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    assert!(
+        losat::api::run_makeblastdb(&["-xmlhelp"], &mut io::empty(), &mut stdout, &mut stderr)
+            .is_err()
+    );
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// The check of a makeblastdb argv (D-WW4b-3): what the library's run checks before the build
+/// passes (a missing input, which the build reads, too), the others are refused with the
+/// library's standard error, without the last line end; nothing is emitted and no file is made,
+/// the file of `-logfile` included, whose text follows the standard error in the message.
+#[test]
+fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
+    emitted();
+    let folder = folder("makeblastdb-check");
+    let out = folder.join("db");
+    let out = out.to_str().unwrap();
+    let log = folder.join("run.log");
+    let log = log.to_str().unwrap();
+    let prot = fixture("seqdb/prot.faa");
+    for passed in [
+        &["-in", &prot, "-dbtype", "prot", "-out", out][..],
+        &["-in", "missing.faa", "-dbtype", "prot", "-out", out],
+        &[
+            "-in", &prot, "-dbtype", "prot", "-out", out, "-logfile", log,
+        ],
+        &["-h"],
+        &["-xmlhelp"],
+        &["-version"],
+    ] {
+        let words = [&["makeblastdb"][..], passed].concat();
+        assert_eq!(validate(&words), Ok(()), "{passed:?}");
+    }
+    for refused in [
+        &["-in", &prot, "-out", out][..],
+        &["-in", &prot, "-dbtype", "prot", "-nosuchoption"],
+        &["-in", &prot, "-dbtype", "nope"],
+        &["-in", &prot, "-out", out, "-logfile", log],
+    ] {
+        let words = [&["makeblastdb"][..], refused].concat();
+        let error = validate(&words).unwrap_err();
+        assert!(!error.ends_with('\n'), "{refused:?}");
+        assert!(taken(&folder).is_empty(), "{refused:?}: no file");
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let failed =
+            losat::api::run_makeblastdb(refused, &mut io::empty(), &mut stdout, &mut stderr);
+        assert!(failed.is_err(), "{refused:?}");
+        let mut written = stderr.clone();
+        if refused.contains(&"-logfile") {
+            written.extend_from_slice(&std::fs::read(log).unwrap());
+        }
+        assert_eq!(format!("{error}\n").as_bytes(), written, "{refused:?}");
+        let _ = taken(&folder);
+    }
+    assert!(emitted().is_empty());
+    std::fs::remove_dir_all(&folder).unwrap();
+}

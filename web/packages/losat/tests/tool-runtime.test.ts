@@ -2,8 +2,11 @@
 // `EngineRuntime.tool` that the worker calls (the run's directory opened and let go, the retained input released, a second run
 // on the same instance), the worker's check of a tool's words with the run's directory (`EngineRuntime.validateTool`, which
 // reads `-conffile`), and the command line's answer for `-in <folder>` (the open of a folder succeeds, its read fails with
-// EISDIR). Runs with LOSAT_WEB_REACTORS (the folder of web/adapter/tools/build_reactors.py's output); these rows read no
-// frame of stream 12, so the reactors of an earlier frame layout serve as well. The directory reads a file's bytes through
+// EISDIR). Runs with LOSAT_WEB_REACTORS (the folder of web/adapter/tools/build_reactors.py's output); the windowmasker rows read
+// no frame of stream 12, so the reactors of an earlier frame layout serve as well. The makeblastdb rows (ABI version 17, line
+// NP WW4b1, 2026-11-27) need reactors of version 17: makeblastdb writes its database into the run's writable directory, and the
+// files that the run left there come after the run as frames, by name; a database given in the directory is replaced as the
+// command line replaces it, and the directory goes back to nothing after the run. The directory reads a file's bytes through
 // the `FileReaderSync` that a worker has, which Node lacks: the test gives it Blobs that carry their bytes.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,6 +41,7 @@ const memoryFile = (name: string, contents: Uint8Array | string): DirectoryFile 
 });
 
 const fixture = (path: string) => new Uint8Array(readFileSync(join(LOSAT, 'tests/winmask', path)));
+const corpus = (path: string) => new Uint8Array(readFileSync(join(LOSAT, 'tests/dropin_corpus', path)));
 const NO_LINKS: MainLinks = {
   link: () => {
     throw new Error('unused');
@@ -51,6 +55,28 @@ function posts(): ToolPosts & { stdout: Uint8Array[]; stderr: Uint8Array[]; fram
   return { ...posted, chunk: (stream, bytes) => posted[stream].push(bytes), file: (frame) => posted.frames.push(frame) };
 }
 const joined = (chunks: Uint8Array[]) => Buffer.concat(chunks);
+
+/**
+ * The files of a run's frames, in the order of their begin frames: each file's bytes as its frames wrote them, and whether
+ * its frames came in the form that the overlay's files come in (begin, bytes from offset 0 one after another, end).
+ */
+function filesOf(frames: readonly ToolFrame[]): Array<{ name: string; bytes: Buffer; inOrder: boolean }> {
+  const files = new Map<number, { name: string; chunks: Uint8Array[]; length: number; inOrder: boolean; ended: boolean }>();
+  for (const frame of frames) {
+    if (frame.kind === 'begin') {
+      files.set(frame.number, { name: frame.name, chunks: [], length: 0, inOrder: true, ended: false });
+      continue;
+    }
+    const file = files.get(frame.number)!;
+    if (frame.kind === 'bytes') {
+      if (frame.offset !== file.length || file.ended) file.inOrder = false;
+      file.chunks.push(frame.bytes);
+      file.length += frame.bytes.length;
+    } else if (frame.kind === 'end') file.ended = true;
+    else file.inOrder = false;
+  }
+  return [...files.values()].map((file) => ({ name: file.name, bytes: joined(file.chunks), inOrder: file.inOrder && file.ended }));
+}
 
 describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on the built serial reactor', () => {
   let module: WebAssembly.Module;
@@ -143,6 +169,55 @@ describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on
     const done = await worker.tool(toolOf(['windowmasker', '-ustat', 'counts/dm_u2.obinary', '-in', 'fa'], files), run);
     expect(done.status).toBe(3);
     expect(joined(run.stderr).toString()).toContain("Application's execution failed: basic_filebuf::xsgetn error reading the file: Is a directory");
+  });
+
+  it('runs makeblastdb in the writable directory: its database comes after the run, by name, and the input does not', async () => {
+    const worker = runtime();
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-parse_seqids', '-out', 'dbs/db'], [memoryFile('ns.fna', corpus('ns.fna'))]), run);
+    expect(done.status).toBe(0);
+    expect(joined(run.stdout).toString()).toMatch(/^\n\nBuilding a new DB, current time: \d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d\n/);
+    expect(joined(run.stderr).length).toBe(0);
+    const files = filesOf(run.frames);
+    // `-parse_seqids` of version 5: the ten files of the command line, in the folder that the run made.
+    expect(files.map((file) => file.name)).toEqual(['ndb', 'nhr', 'nin', 'njs', 'nog', 'nos', 'not', 'nsq', 'ntf', 'nto'].map((extension) => `dbs/db.${extension}`));
+    expect(files.every((file) => file.inOrder && file.bytes.length > 0)).toBe(true);
+    expect(files.find((file) => file.name === 'dbs/db.nin')!.bytes.subarray(0, 4)).toEqual(Buffer.from([0, 0, 0, 5]));
+    // A second run without the files: the run's directory went back to nothing, so the database of the first one is not there.
+    const after = posts();
+    const again = await worker.tool(toolOf(['makeblastdb', '-in', 'dbs/db', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy']), after);
+    expect(again.status).not.toBe(0);
+    expect(after.frames).toEqual([]);
+  });
+
+  it('replaces a database of the directory as the command line does: the old files it removed never come, and a log is appended to', async () => {
+    const worker = runtime();
+    // An older database of the same name made with `-parse_seqids` (its .nog and .nos), and a log of an earlier run.
+    const older = ['ndb', 'nhr', 'nin', 'njs', 'nog', 'nos', 'not', 'nsq', 'ntf', 'nto'].map((extension) => memoryFile(`db.${extension}`, corpus(`ndbp.${extension}`)));
+    const log = memoryFile('mk.log', 'an earlier run\n');
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', 'mk.log'], [memoryFile('ns.fna', corpus('ns.fna')), ...older, log]), run);
+    expect(done.status).toBe(0);
+    const files = filesOf(run.frames);
+    // The new database has no .nog and .nos: the run removed the old ones, which do not come.
+    expect(files.map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto', 'mk.log']);
+    const logged = files.find((file) => file.name === 'mk.log')!.bytes.toString();
+    expect(logged.startsWith('an earlier run\n\n\nBuilding a new DB, current time: ')).toBe(true);
+    // The given files are the user's: their Blobs are as they were.
+    expect(Buffer.from((log.file as MemoryBlob).data).toString()).toBe('an earlier run\n');
+    expect(Buffer.from((older[4]!.file as MemoryBlob).data).equals(Buffer.from(corpus('ndbp.nog')))).toBe(true);
+  });
+
+  it("checks makeblastdb's words before its run: the argument reader's errors, and a valid argv whose input is missing", async () => {
+    const worker = runtime();
+    expect(await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl']))).toEqual({ ok: true });
+    const refused = await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna']));
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.message).toContain('dbtype');
+    // The check wrote nothing: a run of the same words in an empty directory leaves no file.
+    const run = posts();
+    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']), run)).status).not.toBe(0);
+    expect(filesOf(run.frames).map((file) => file.name)).toEqual(['v.log']);
   });
 });
 

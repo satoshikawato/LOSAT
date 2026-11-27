@@ -1315,7 +1315,7 @@ fn csr_on_pool(
     chunk: usize,
     x_offsets: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, PlaceAhead, Poison, SpinBarrier};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1501,6 +1501,14 @@ fn csr_on_pool(
                         pop,
                     );
                 }
+                let place = |r: usize, index: u32| {
+                    let p = sb.get(r) - 1;
+                    sb.set(r, p);
+                    qb.set(p as usize, index);
+                };
+                // Each word's cursor `starts[r]` prefetched, the word placed `PLACE_AHEAD` words
+                // later; the chunk's words are all placed before the barrier after it.
+                let mut ahead = PlaceAhead::new();
                 for c in 0..chunks {
                     let (s0, s1) = span(c, o);
                     fill.read::<false, false>(o, s0, s1);
@@ -1508,10 +1516,14 @@ fn csr_on_pool(
                     for a in 0..parts {
                         for e in fill.subrange(a, o) {
                             let r = rank(e.value);
-                            let p = sb.get(r) - 1;
-                            sb.set(r, p);
-                            qb.set(p as usize, e.index);
+                            if let Some((r, index)) = ahead.push(sb.ptr.wrapping_add(r), r, e.index)
+                            {
+                                place(r, index);
+                            }
                         }
+                    }
+                    for (r, index) in ahead.drain() {
+                        place(r, index);
                     }
                     if c + 1 < chunks {
                         bar.wait();
@@ -1618,23 +1630,37 @@ fn csr_on_pool(
                     pv_array_bts,
                 );
             }
+            // The cursor of a word of `cell`: `offsets[cell + 1]` (reading order) or
+            // `offsets[cell]` (newest first).
+            let shift = usize::from(ascending);
+            let place = |i: usize, index: u32| {
+                if ascending {
+                    let cursor = ob.ptr.add(i);
+                    qb.set(*cursor as usize, index);
+                    *cursor += 1;
+                } else {
+                    let p = ob.get(i) - 1;
+                    ob.set(i, p);
+                    qb.set(p as usize, index);
+                }
+            };
+            // Each word's cursor prefetched, the word placed `PLACE_AHEAD` words later; the
+            // chunk's words are all placed before the barrier after it.
+            let mut ahead = PlaceAhead::new();
             for c in 0..chunks {
                 let (s0, s1) = span(c, o);
                 fill.read::<false, false>(o, s0, s1);
                 bar.wait();
                 for a in 0..parts {
                     for e in fill.subrange(a, o) {
-                        let cell = e.value as usize;
-                        if ascending {
-                            let cursor = ob.ptr.add(cell + 1);
-                            qb.set(*cursor as usize, e.index);
-                            *cursor += 1;
-                        } else {
-                            let p = ob.get(cell) - 1;
-                            ob.set(cell, p);
-                            qb.set(p as usize, e.index);
+                        let i = e.value as usize + shift;
+                        if let Some((i, index)) = ahead.push(ob.ptr.wrapping_add(i), i, e.index) {
+                            place(i, index);
                         }
                     }
+                }
+                for (i, index) in ahead.drain() {
+                    place(i, index);
                 }
                 if c + 1 < chunks {
                     bar.wait();

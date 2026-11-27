@@ -751,6 +751,58 @@ pub(crate) fn prefetch<T>(p: *const T) {
     let _ = p;
 }
 
+/// How many words a CSR build's place pass reads ahead of the word it places (`PlaceAhead`): the
+/// distance of the count passes.
+pub(super) const PLACE_AHEAD: usize = 16;
+
+/// No NCBI counterpart (memory order only): the words a CSR build's place pass has read but not yet
+/// placed (`build`, `x_bn_csr::serial` and `x_mb_lookup_once`'s builds on a pool). The cursor of a
+/// word (the element of `offsets` or of a packed head's `starts` that its place is taken from) is
+/// prefetched where the word is read, and the word is placed `PLACE_AHEAD` words later, as the
+/// count passes count, so the misses on the cursors overlap instead of coming one after another.
+/// The words are placed in the order they were read, so each cursor moves as it does when every
+/// word is placed where it is read, and every place is the same.
+pub(super) struct PlaceAhead {
+    held: [(usize, u32); PLACE_AHEAD],
+    seen: usize,
+}
+
+impl PlaceAhead {
+    #[inline(always)]
+    pub(super) fn new() -> Self {
+        Self {
+            held: [(0, 0); PLACE_AHEAD],
+            seen: 0,
+        }
+    }
+
+    /// Takes the word whose cursor is element `i`, at `cursor` (prefetched here), and whose value
+    /// is `value`; returns the word read `PLACE_AHEAD` words before it, which the caller places now.
+    #[inline(always)]
+    pub(super) fn push<T>(
+        &mut self,
+        cursor: *const T,
+        i: usize,
+        value: u32,
+    ) -> Option<(usize, u32)> {
+        prefetch(cursor);
+        let slot = self.seen % PLACE_AHEAD;
+        let due = (self.seen >= PLACE_AHEAD).then(|| self.held[slot]);
+        self.held[slot] = (i, value);
+        self.seen += 1;
+        due
+    }
+
+    /// The words still held, in the order they were read, for the caller to place; the ring is
+    /// empty after them.
+    #[inline(always)]
+    pub(super) fn drain(&mut self) -> impl Iterator<Item = (usize, u32)> + '_ {
+        let end = self.seen;
+        self.seen = 0;
+        (end.saturating_sub(PLACE_AHEAD)..end).map(move |k| self.held[k % PLACE_AHEAD])
+    }
+}
+
 /// No NCBI counterpart (scheduling only): bring the line of `s[i]` toward the core ahead of its
 /// use (`Ring`): a prefetch on x86_64; on wasm32, which has no prefetch instruction, a load of
 /// the element whose value is dropped (nothing when `i` is out of range), so the loads of a group
@@ -902,7 +954,8 @@ pub(super) fn count_build(csr: &Csr, on_pool: bool) {
 
 /// The serial build (module comment): the count pass (each word's `offsets` element prefetched
 /// and counted 16 words later), the sum pass with the presence bits and helper counters into
-/// `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the place pass.
+/// `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the place pass (each word's
+/// cursor prefetched and the word placed 16 words later, `PlaceAhead`).
 pub(super) fn build(
     words: &DiscWords<'_>,
     cells: usize,
@@ -966,7 +1019,7 @@ pub(super) fn build(
     // a kept `qs` needs no zeroing.
     let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, n_words);
     let qb = qs.as_mut_ptr();
-    each_word(words, |cell, index| {
+    let place = |cell: usize, index: u32| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
         // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.
         unsafe {
@@ -974,7 +1027,17 @@ pub(super) fn build(
             *ob.add(cell) = e;
             *qb.add(e as usize) = index;
         }
+    };
+    // Each word's cursor `offsets[cell]` prefetched, the word placed `PLACE_AHEAD` words later.
+    let mut ahead = PlaceAhead::new();
+    each_word(words, |cell, index| {
+        if let Some((cell, index)) = ahead.push(ob.wrapping_add(cell), cell, index) {
+            place(cell, index);
+        }
     });
+    for (cell, index) in ahead.drain() {
+        place(cell, index);
+    }
     // SAFETY: `offsets` was written in full; the runs partition `0 .. n_words`, and the place
     // pass wrote each place once.
     unsafe { assemble(offsets, qs, cells, n_words) }

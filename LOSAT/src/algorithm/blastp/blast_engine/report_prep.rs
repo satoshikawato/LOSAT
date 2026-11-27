@@ -221,7 +221,7 @@ fn pairwise_read_order(
         hits.into_iter()
             .map(|(hit, _, seqalign_num_ident, _)| (hit.s_idx, (hit, seqalign_num_ident))),
         |(hit, seqalign_num_ident)| {
-            crate::report::hit_sort::HspScores::of_hit(hit, *seqalign_num_ident)
+            crate::report::hit_sort::HspScores::of_hit(hit, *seqalign_num_ident as i64)
         },
         |previous, s_idx| {
             crate::report::db_subject::rank_joins_as_copy(

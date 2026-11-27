@@ -1,0 +1,112 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       20.1    0.86 
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       18.7    2.3  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       17.8    4.3  
+BDT63515.1 wsv139-like protein [Pasiphaea japonica whispovirus]       17.3    6.0  
+BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]       16.8    8.3  
+
+
+>BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]
+Length=1890
+
+ Score = 20.1 bits (37),  Expect = 0.86
+ Identities = 6/30 (20%), Positives = 17/30 (57%), Gaps = 0/30 (0%)
+
+Query  5    KKIELDDHAAHLLFSANRWEVCSKIKQLLD  34
+            K++++  HA  L++  +  ++   +  L+D
+Sbjct  883  KRVDVIKHAYSLMYGVSLLDMTVSLPDLID  912
+
+
+>BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]
+Length=771
+
+ Score = 18.7 bits (34),  Expect = 2.3
+ Identities = 8/20 (40%), Positives = 13/20 (65%), Gaps = 0/20 (0%)
+
+Query  14   AHLLFSANRWEVCSKIKQLL  33
+            A+++FS +R +    IKQ L
+Sbjct  291  AYMMFSRHRVQSGDCIKQFL  310
+
+
+>BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 17.8 bits (32),  Expect = 4.3
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+
+Query  18    FSANRWEVCSK  28
+             F A  W +CS+
+Sbjct  1147  FVAGLWSMCSQ  1157
+
+
+>BDT63515.1 wsv139-like protein [Pasiphaea japonica whispovirus]
+Length=1136
+
+ Score = 17.3 bits (31),  Expect = 6.0
+ Identities = 5/14 (36%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  3    LTKKIELDDHAAHL  16
+            + K +  +DH  HL
+Sbjct  680  IIKNLSENDHTEHL  693
+
+
+>BDT63552.1 wsv427-like protein [Pasiphaea japonica whispovirus]
+Length=531
+
+ Score = 16.8 bits (30),  Expect = 8.3
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+
+Query  16   LLFSANRWEVC  26
+            L  +AN W+ C
+Sbjct  314  LPIAANFWDFC  324
+
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 968820
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

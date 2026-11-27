@@ -664,7 +664,7 @@ fn pairwise_read_order<'h>(
     let parsed = |ordinal: u32| titled_parsed(titles, ordinal as usize);
     crate::report::x_pairwise_par::QueryGroup::read_order(
         ordered.into_iter().map(|hsp| (hsp.hit.s_idx, hsp)),
-        |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident),
+        |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident as i64),
         |previous, ordinal| match (parsed(previous), parsed(ordinal)) {
             (Some(earlier), Some(later)) => {
                 crate::report::db_subject::joins_as_copy(earlier, later)

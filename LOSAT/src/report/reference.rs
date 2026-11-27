@@ -276,7 +276,8 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// reference of a megablast search with a MegaBLAST database index (`indexed_megablast`,
 /// `m_IndexedMegablast`); then psiblast's compositionally adjusted
 /// matrices, and the composition-based statistics of psiblast (`starting in round 2`) and blastp,
-/// each after a newline. `program` is NCBI's `m_Program` (`blastp`, `psiblast`, `rpsblast`,
+/// each after a newline; deltablast's (DELTA-BLAST) first, then its compositionally adjusted
+/// matrices. `program` is NCBI's `m_Program` (`blastp`, `psiblast`, `rpsblast`,
 /// `blastn`, ...; compared without case, so the callers may pass the version line's name).
 /// `html`: the `-html` form, each reference with the scheme of its own read of `./.ncbirc`
 /// (`formatter_registry::FormatterNcbirc::protocol`), whose posts go to the run's diagnostics
@@ -285,8 +286,9 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// first one; `None`: the plain form.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
-/// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. LOSAT has no
-/// deltablast and no domain database: their branches are not taken.)
+/// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. `deltablast`'s
+/// references are blast_formatter's of a deltablast archive; LOSAT has no domain database
+/// report: its branch is not taken, the same two newlines as deltablast's.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
     mut html: Option<(&super::formatter_registry::FormatterNcbirc, &mut dyn Write)>,
@@ -295,6 +297,7 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     indexed_megablast: bool,
 ) -> io::Result<()> {
     let psiblast = program.eq_ignore_ascii_case("psiblast");
+    let deltablast = program.eq_ignore_ascii_case("deltablast");
     let primary = if megablast {
         Publication::MegaBlast
     } else {
@@ -313,12 +316,19 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
             None => write_reference(out, false, DEFAULT_PROTOCOL, publication, is_psiblast),
         }
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:396-400
+    // deltablast's own reference and a line feed first (blast_formatter's report of a deltablast
+    // archive without psiblast's parameters, whose program stays deltablast).
+    if deltablast {
+        write(&mut *out, Publication::DeltaBlast, false)?;
+        crate::cli::insert(out, b"\n")?;
+    }
     write(&mut *out, primary, false)?;
     if megablast && indexed_megablast {
         crate::cli::insert(out, b"\n")?;
         write(&mut *out, Publication::IndexedMegablast, false)?;
     }
-    if psiblast {
+    if psiblast || deltablast {
         crate::cli::insert(out, b"\n")?;
         write(&mut *out, Publication::CompAdjustedMatrices, false)?;
     }

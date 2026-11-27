@@ -811,6 +811,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
     empty.hit.q_idx = 2;
     empty.hit.sort_query_end = empty.hit.sort_query_offset;
     let query = |name: &[u8]| BlastpPairwiseQuery {
+        ancillary: None,
         query_name: name.to_vec(),
         query_length: 300,
         ungapped_karlin: Default::default(),
@@ -1261,6 +1262,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         ..KarlinParams::default()
     };
     let query = |length: usize| BlastpPairwiseQuery {
+        ancillary: None,
         query_name: Vec::new(),
         query_length: length,
         ungapped_karlin: karlin,
@@ -1447,6 +1449,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
         ..KarlinParams::default()
     };
     let queries = [BlastpPairwiseQuery {
+        ancillary: None,
         query_name: Vec::new(),
         query_length: 61,
         ungapped_karlin: karlin,
@@ -1597,6 +1600,7 @@ fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
         ..KarlinParams::default()
     };
     let queries = [BlastpPairwiseQuery {
+        ancillary: None,
         query_name: Vec::new(),
         query_length: 61,
         ungapped_karlin: karlin,
@@ -1728,6 +1732,7 @@ fn psiblast_html_two_part_table_restarts_rank_reads_empty_part_and_epilog_ends_h
         ..KarlinParams::default()
     };
     let queries = [BlastpPairwiseQuery {
+        ancillary: None,
         query_name: Vec::new(),
         query_length: 61,
         ungapped_karlin: karlin,

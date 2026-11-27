@@ -352,7 +352,7 @@ pub(crate) fn hsp_scores(
     Ok(crate::report::hit_sort::HspScores::of_values(
         hsp.bit_score,
         hsp.evalue,
-        hsp.identity,
+        hsp.identity as i64,
         length,
         (usize::try_from(qstart)?, usize::try_from(qend)?),
         (usize::try_from(raw.s_start + 1)?, usize::try_from(s_end)?),
@@ -992,6 +992,7 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
+                ancillary: None,
                 // The footer's Karlin blocks (`write_translated_query_footer`).
                 valid: first.is_some(),
                 batch_skipped: batch.search_skipped,
@@ -1402,7 +1403,7 @@ pub(super) fn pairwise_hits(
                         // identities on the unmasked query frame (`statistics::identity_and_positive`),
                         // not those of the rows (`a.identity`), which the display's translation
                         // and the subject's stored gap characters make.
-                        seqalign_num_ident: hsp.identity,
+                        seqalign_num_ident: hsp.identity as i64,
                         edge: crate::report::pairwise::PairwiseEdge::Normal,
                     });
                     // The model of the reads sorts by `hsp_scores` of the batch's query length

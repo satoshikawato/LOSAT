@@ -590,7 +590,7 @@ impl<'r, 'o> Run<'r, 'o> {
         if let Some(matrix) = search.results.rps_matrix(&request.service) {
             self.matrix_name = Some(Some(matrix));
         }
-        search
+        let masks = search
             .results
             .masks(request.queries.num_queries(), || {
                 request.query_is_translated()
@@ -603,7 +603,9 @@ impl<'r, 'o> Run<'r, 'o> {
         // which NCBI loads each subject through its data loaders: refused (decision C3-1). Their
         // `PrintProlog` writes nothing; the tabular driver reads the variable after its prolog.
         let tabular = TabularSpec::of_formatter(&formatting.choice).is_some();
-        if !tabular && prefetch_seqs_limit()? == Some(i32::MAX) {
+        // The pairwise report reads the variable after its prolog (`pairwise::print_object`).
+        let pairwise = formatting.choice.number == output_format::PAIRWISE;
+        if !tabular && !pairwise && prefetch_seqs_limit()? == Some(i32::MAX) {
             return Err(Refusal::Prefetch.into());
         }
         let alignments = search.results.alignments();
@@ -616,7 +618,7 @@ impl<'r, 'o> Run<'r, 'o> {
         } else {
             Ok(None)
         };
-        if tabular {
+        if tabular || pairwise {
             let inputs = super::tabular::ObjectInputs {
                 settings: self.settings,
                 options: search_options,
@@ -632,6 +634,23 @@ impl<'r, 'o> Run<'r, 'o> {
                 output: &mut self.output,
                 diag,
             };
+            if pairwise {
+                let epilog_matrix = self.matrix_name.clone().flatten();
+                let pairwise_inputs = super::pairwise::PairwiseInputs {
+                    formatting: &formatting,
+                    epilog_matrix: epilog_matrix.as_deref(),
+                    masks: &masks,
+                };
+                return super::pairwise::print_object(
+                    &inputs,
+                    &pairwise_inputs,
+                    request,
+                    &search.results,
+                    &sets,
+                    &alignments,
+                    &mut sink,
+                );
+            }
             return super::tabular::print_object(&inputs, request, &sets, &alignments, &mut sink);
         }
         // A `Web_StepNumber` that is no integer throws where the first query's report is
@@ -702,6 +721,13 @@ impl super::tabular::ReportSink for TabularSink<'_, '_, '_> {
 
     fn post(&mut self, lines: &[u8]) {
         post_line(self.output, self.diag, lines);
+    }
+
+    fn badbit(&mut self) -> anyhow::Error {
+        let (stream, _) = self.output.opened();
+        stream.setstate(IoState::BAD);
+        let _ = stream.take_thrown();
+        NativeError::write_failure().into()
     }
 }
 

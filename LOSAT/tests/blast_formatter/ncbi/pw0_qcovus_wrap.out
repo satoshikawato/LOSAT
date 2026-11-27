@@ -1,0 +1,134 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: in/s3.fa
+           3 sequences; 1,000 total letters
+
+
+
+Query= q1 query one
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject one                                                        217     4e-61
+
+
+>s1 subject one
+Length=400
+
+ Score = 217 bits (117),  Expect = 4e-61
+ Identities = 50/50 (100%), Gaps = 0/50 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTC  50
+            ||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTC  150
+
+
+ Score = 217 bits (117),  Expect = 4e-61
+ Identities = 12/55 (22%), Gaps = 5/55 (9%)
+ Strand=Plus/Plus
+
+Query  61   AATATACTGTTATGAGACAT-----TGGATTTGCCAGCAATGTTAAGCGCCGCCA  110
+            |   |   ||    |             |      |    | | |  |   |   
+Sbjct  131  ATCCTTAAGTAGACACGGTCTCGTGCCCACCATATACTGTTATGAGACATTGGAT  185
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+Query= q2 query two
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s3 subject three                                                      185     1e-51
+s1 subject one                                                        185     1e-51
+s2 subject two                                                        174     2e-48
+
+
+>s3 subject three
+Length=200
+
+ Score = 185 bits (100),  Expect = 1e-51
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31   AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  90
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  91   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  130
+
+
+>s1 subject one
+Length=400
+
+ Score = 185 bits (100),  Expect = 1e-51
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+>s2 subject two
+Length=400
+
+ Score = 174 bits (94),  Expect = 2e-48
+ Identities = 98/100 (98%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTAGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            |||||||||| |||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCAGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+  Database: in/s3.fa
+    Posted date:  Nov 23, 2026  7:19 AM
+  Number of letters in database: 1,000
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

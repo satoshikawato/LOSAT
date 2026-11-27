@@ -1566,7 +1566,7 @@ pub(super) fn hsp_scores(
     Ok(crate::report::hit_sort::HspScores::of_values(
         payload.bit_score,
         linked.evalue,
-        usize::try_from(payload.num_ident)?,
+        usize::try_from(payload.num_ident)? as i64,
         payload.align_length,
         (
             usize::try_from(hsp.q_start + 1)?,
@@ -1788,7 +1788,7 @@ fn pairwise_hits(
                     // writers): the engine's identities, counted on the masked query, so that a
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
-                    seqalign_num_ident: usize::try_from(payload.num_ident)?,
+                    seqalign_num_ident: usize::try_from(payload.num_ident)? as i64,
                     edge,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
@@ -1918,6 +1918,7 @@ fn write_pairwise(
         .zip(&parameters.lengths)
         .enumerate()
         .map(|(q_idx, ((query, &karlin), length))| BlastpPairwiseQuery {
+            ancillary: None,
             // TBLASTN's report reads the validity from its own arrays.
             valid: true,
             batch_skipped: false,

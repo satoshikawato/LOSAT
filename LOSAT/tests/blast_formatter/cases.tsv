@@ -6,6 +6,7 @@
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
 # Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
+# Rows from pw_default_subject on (line RG item F3 PR 4a, agent 4A of ad-RG-F3-12, 2026-11-27): the pairwise report (outfmt 0, the default without -outfmt) and -html. NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was full), by remaining-gaps-20261112/F/f3/tools/fixPW.py, every NCBI run under unshare -rn. New inputs: in/qmask.fa and in/smask.fa (a query whose middle 60 letters are a dinucleotide repeat that dust masks, and a subject holding it whole, so that its HSP crosses the mask; a second query without a mask), in/qmask.faa and in/smask.faa (a 20-residue run that SEG masks), in/s3gi.fa (the records of in/s3.fa with gi and GenBank ids) and in/gidb/g (makeblastdb -parse_seqids -blastdb_version 4 of it); in/mask_n.asn (blastn -query in/qmask.fa -subject in/smask.fa), in/mask_p.asn (blastp -query in/qmask.faa -subject in/smask.faa -seg yes), in/gi.asn (blastn -query in/q2.fa -db in/gidb/g), each -outfmt 11 of NCBI's search programs.
 noargs	
 h	-h
 help	-help
@@ -254,3 +255,106 @@ of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
 bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
 bad_title_2_xml	-archive in/bad2.xml -outfmt 8
 of8_bom	-archive in/bom.asn -outfmt 8
+pw_default_subject	-archive in/bn.asn
+pw_default_db	-archive in/db.asn
+pw0_subject	-archive in/bn.asn -outfmt 0
+pw0_subject_html	-archive in/bn.asn -outfmt 0 -html
+pw0_db_html	-archive in/db.asn -html
+pw0_db_show_gis	-archive in/db.asn -show_gis
+pw0_db_pd	-archive in/db.asn -parse_deflines
+pw0_db_ll40	-archive in/db.asn -line_length 40
+pw0_db_ll100	-archive in/db.asn -line_length 100
+pw0_db_na0	-archive in/db.asn -num_alignments 0
+pw0_db_nd0	-archive in/db.asn -num_descriptions 0
+pw0_db_nd0_na0	-archive in/db.asn -num_descriptions 0 -num_alignments 0
+pw0_db_nd1_na2	-archive in/db.asn -num_descriptions 1 -num_alignments 2
+pw0_db_mts1	-archive in/db.asn -max_target_seqs 1
+pw0_db_out	-archive in/db.asn -out @OUT@/o.txt
+pw0_db_html_out	-archive in/db.asn -html -out @OUT@/o.html
+pw0_db_sorthits0	-archive in/db.asn -sorthits 0
+pw0_db_sorthsps0	-archive in/db.asn -sorthsps 0
+pw0_db_sorthits1	-archive in/db.asn -sorthits 1
+pw0_db_sorthsps1	-archive in/db.asn -sorthsps 1
+pw0_db_sorthits2	-archive in/db.asn -sorthits 2
+pw0_db_sorthsps2	-archive in/db.asn -sorthsps 2
+pw0_db_sorthits3	-archive in/db.asn -sorthits 3
+pw0_db_sorthsps3	-archive in/db.asn -sorthsps 3
+pw0_db_sorthits4	-archive in/db.asn -sorthits 4
+pw0_db_sorthsps4	-archive in/db.asn -sorthsps 4
+pw0_batch	-archive in/batch.asn
+pw0_batch_html	-archive in/batch.asn -html
+pw0_messages	-archive in/warn.asn
+pw0_messages_mts2	-archive in/warn.asn -max_target_seqs 2
+pw0_pd_archive_only	-archive in/pd.asn
+pw0_pd_both	-archive in/pd.asn -parse_deflines
+pw0_mask_algorithm	-archive in/soft.asn
+pw0_psiblast	-archive in/ps.asn
+pw0_psiblast_html	-archive in/ps.asn -html
+pw0_psiblast_step_string	-archive in/ps_step_str.asn
+pw0_psiblast_ll100	-archive in/ps.asn -line_length 100
+pw0_rpsblast	-archive in/rps.asn
+pw0_rpsblast_html	-archive in/rps.asn -html
+pw0_rpsblast_sorthits1	-archive in/rps.asn -sorthits 1
+pw0_deltablast	-archive in/delta.asn
+pw0_deltablast_html	-archive in/delta.asn -html
+pw0_phi	-archive in/phi.asn
+pw0_phi_html	-archive in/phi.asn -html
+pw0_ungapped	-archive in/bn_ungapped.asn
+pw0_dc_megablast	-archive in/dcmb.asn
+pw0_blastn_task	-archive in/bnt.asn
+pw0_bnspd	-archive in/bnspd.asn
+pw0_bnspd_pd	-archive in/bnspd.asn -parse_deflines
+pw0_bnspd_html	-archive in/bnspd.asn -html
+pw0_blastp_db	-archive in/bp_db.asn
+pw0_blastp_db_html	-archive in/bp_db.asn -html
+pw0_blastp_db_ll30	-archive in/bp_db.asn -line_length 30
+pw0_blastp_ungapped	-archive in/bp_ungapped.asn
+pw0_blastp_subject	-archive in/bp_subject.asn
+pw0_blastp_subject_html	-archive in/bp_subject.asn -html
+pw0_blastp_subject_pd	-archive in/bp_subject_pd.asn
+pw0_blastp_subject_pd_pd	-archive in/bp_subject_pd.asn -parse_deflines
+pw0_mix_n_p	-archive in/mix_n_p.asn
+pw0_mix_n_p_html	-archive in/mix_n_p.asn -html
+pw0_error_object	-archive in/err.asn
+pw0_cut_in_object_2	-archive in/cut2.asn
+pw0_trailing_garbage	-archive in/garbage.asn
+pw0_taxids_both	-archive in/tax_both.asn
+pw0_tx5_both	-archive in/tx5_both.asn
+pw0_hitlist0	-archive in/opt_hitlist0.asn
+pw0_evalue0	-archive in/opt_evalue0.asn
+pw0_real_pinf	-archive in/real_pinf.asn
+pw0_bit_pinf	-archive in/bit_pinf.asn
+pw0_minus	-archive in/minus.asn
+pw0_minus_subj	-archive in/minus_subj.asn
+pw0_strands_pm	-archive in/strands_pm.asn
+pw0_strands_mp	-archive in/strands_mp.asn
+pw0_zero	-archive in/zero.asn
+pw0_qcovus_wrap	-archive in/qcovus_wrap.asn
+pw0_missing_scores	-archive in/missing_scores.asn
+pw0_ids1_q2	-archive in/ids1_q2.asn
+pw0_ids1_subj	-archive in/ids1_subj.asn
+pw0_gi_ok	-archive in/gi_ok.asn
+pw0_self_subj	-archive in/self_subj.asn
+pw0_self_subj_pd	-archive in/self_subj.asn -parse_deflines
+pw0_two_ids	-archive in/two_ids.asn
+pw0_two_ids_show_gis	-archive in/two_ids.asn -show_gis
+pw0_bad_title_2	-archive in/bad2.asn
+pw0_db_bin	-archive in/db.asnb
+pw0_subject_xml	-archive in/bn.xml
+pw0_batch_bin	-archive in/batch.asnb
+pw0_bom	-archive in/bom.asn
+pw0_mask_n	-archive in/mask_n.asn
+pw0_mask_n_html	-archive in/mask_n.asn -html
+pw0_mask_p	-archive in/mask_p.asn
+pw0_mask_p_html	-archive in/mask_p.asn -html
+pw0_gi	-archive in/gi.asn
+pw0_gi_show_gis	-archive in/gi.asn -show_gis
+pw0_gi_html_show_gis	-archive in/gi.asn -html -show_gis
+prefetch_abc_0	PRE_FETCH_SEQS_LIMIT=abc -archive in/db.asn
+prefetch_0_0	PRE_FETCH_SEQS_LIMIT=0 -archive in/db.asn
+prefetch_1_0	PRE_FETCH_SEQS_LIMIT=1 -archive in/batch.asn
+out_full_bn_0	-archive in/bn.asn -out /dev/full
+out_full_db_0	-archive in/db.asn -out /dev/full
+refused_pw_prefetch_max	PRE_FETCH_SEQS_LIMIT=2147483647 -archive in/db.asn
+refused_pw_bl2seq_legacy	BL2SEQ_LEGACY=1 -archive in/bn.asn
+refused_pw_rpstblastn	-archive in/rtn.asn

@@ -14,12 +14,12 @@
 
 use super::{
     alignment_id_local, blastp_family_program, database_description_label, shown_hsp, table_scores,
-    write_blast_database_header, write_blastp_database_header_spacing,
-    write_blastp_query_footer_spacing, write_blastp_query_header, write_blastp_subject_part,
-    write_description_row_start, write_description_table, write_no_hits_found, write_prolog,
-    write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
-    BlastpPairwiseReport, HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit,
-    PairwiseView, RowDecoration,
+    write_blast_database_header, write_blastp_database_header_spacing, write_blastp_query_header,
+    write_blastp_subject_part, write_description_row_start, write_description_table,
+    write_no_hits_found, write_prolog, write_query_footer, write_spaces,
+    write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
+    HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit, PairwiseView,
+    RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::ReportWrite;
@@ -435,13 +435,9 @@ impl QuerySections for RoundSections<'_> {
             } else if !query.valid {
                 Self::invalid_foot(writer)?;
             } else {
-                write_blastp_query_footer_spacing(
+                write_query_footer(
                     writer,
-                    query.ungapped_karlin,
-                    report.gapped_karlin,
-                    report.gumbel,
-                    report.gapped,
-                    query.effective_search_space,
+                    &query.footer(report.gapped_karlin, report.gumbel, report.gapped),
                     false,
                 )?;
             }
@@ -455,8 +451,10 @@ impl QuerySections for RoundSections<'_> {
                 group.subject_order.len() <= report.num_descriptions,
                 &group.subject_hits,
                 false,
-                // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502).
-                None,
+                // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502):
+                // its `config.sort` sorts nothing; blast_formatter hands its own
+                // (blast_formatter.cpp:423-424).
+                self.config.sort_columns(query.query_length),
                 |s_idx| self.label(group, s_idx),
                 place,
                 self.html_rows(),
@@ -541,13 +539,13 @@ impl QuerySections for RoundSections<'_> {
         q_idx: usize,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        write_blastp_query_footer_spacing(
+        write_query_footer(
             writer,
-            query.ungapped_karlin,
-            self.report.gapped_karlin,
-            self.report.gumbel,
-            self.report.gapped,
-            query.effective_search_space,
+            &query.footer(
+                self.report.gapped_karlin,
+                self.report.gumbel,
+                self.report.gapped,
+            ),
             false,
         )
     }

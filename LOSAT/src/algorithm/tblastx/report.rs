@@ -1084,7 +1084,7 @@ impl<'a> PairwiseRows<'a> {
             subject_stored_gaps: Vec::new(),
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
-            seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
+            seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident as i64, i64::from),
             edge: crate::report::pairwise::PairwiseEdge::Normal,
         }
     }

@@ -1,0 +1,110 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 440 total letters
+
+
+
+<b>Query=</b> qm1 masked query
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sm1 masked subject                                                    <a href=#Subject_1>333</a>     3e-96
+
+
+><a name=Subject_1></a> sm1 masked subject
+Length=240
+
+ Score = 333 bits (180),  Expect = 3e-96
+ Identities = 180/180 (100%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31   CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  90
+
+Query  61   <font color="#000000">cacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca</font>  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  91   CACACACACACACACACACACACACACACACACACACACACACACACACACACACACACA  150
+
+Query  121  AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  151  AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  210
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 71400
+
+
+<b>Query=</b> qm2 second query
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sm2 second subject                                                    <a href=#Subject_2>185</a>     5e-52
+
+
+><a name=Subject_2></a> sm2 second subject
+Length=200
+
+ Score = 185 bits (100),  Expect = 5e-52
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1   AGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGTCGT  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   AGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGTCGT  60
+
+Query  61  GGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGC  100
+           ||||||||||||||||||||||||||||||||||||||||
+Sbjct  61  GGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGC  100
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 71400
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 440
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

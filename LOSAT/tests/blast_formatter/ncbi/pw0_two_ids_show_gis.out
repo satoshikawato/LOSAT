@@ -1,0 +1,96 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 40 total letters
+
+
+
+Query= query a
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gi|1234|sp|P0E7A1.1|E7A1_TEST  two ids                                83.2    2e-29
+
+
+>gi|1234|sp|P0E7A1.1|E7A1_TEST two ids
+Length=40
+
+ Score = 83.2 bits (204),  Expect = 2e-29, Method: Compositional matrix adjust.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+
+Query  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+           DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+Sbjct  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1600
+
+
+Query= query b
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gi|1234|sp|P0E7A1.1|E7A1_TEST  two ids                                71.6    6e-25
+
+
+>gi|1234|sp|P0E7A1.1|E7A1_TEST two ids
+Length=40
+
+ Score = 71.6 bits (174),  Expect = 6e-25, Method: Compositional matrix adjust.
+ Identities = 34/40 (85%), Positives = 34/40 (85%), Gaps = 0/40 (0%)
+
+Query  1   DYLAKKIELDAHAAHLLASANRWEACSKIKQALDDGIHAV  40
+           DYL KKIELD HAAHLL SANRWE CSKIKQ LDDGIH V
+Sbjct  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1600
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 40
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

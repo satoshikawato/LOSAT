@@ -4134,6 +4134,31 @@ pub(crate) fn refuse_described_lines(
     program: &str,
 ) -> Result<()> {
     let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
+    refuse_described_lines_of(
+        num_queries,
+        reported,
+        described,
+        parsed,
+        load_of,
+        oid_of,
+        protein,
+        program,
+    )
+}
+
+/// [`refuse_described_lines`] of a report whose subjects are proteins where `protein`, named
+/// `program` in the refusal (blast_formatter's, whose name does not say the archive's program).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refuse_described_lines_of(
+    num_queries: usize,
+    reported: impl FnMut(usize) -> Vec<u32>,
+    described: impl FnMut(usize) -> Result<Vec<u32>>,
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    load_of: impl Fn(u32) -> crate::report::db_subject::HitLoad,
+    oid_of: impl Fn(u32) -> crate::seqdb::Oid,
+    protein: bool,
+    program: &str,
+) -> Result<()> {
     match described_refusal(num_queries, reported, described, parsed, load_of, protein)? {
         Some((rank, reason)) => Err(parsed_refusal(oid_of(rank), &reason, program)),
         None => Ok(()),
@@ -4152,6 +4177,20 @@ pub(crate) fn refuse_described_records(
     records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     program: &str,
 ) -> Result<()> {
+    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
+    refuse_described_records_of(num_queries, reported, described, records, protein, program)
+}
+
+/// [`refuse_described_records`] of a report whose subjects are proteins where `protein`, named
+/// `program` in the refusal (blast_formatter's).
+pub(crate) fn refuse_described_records_of(
+    num_queries: usize,
+    reported: impl FnMut(usize) -> Vec<u32>,
+    described: impl FnMut(usize) -> Result<Vec<u32>>,
+    records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    protein: bool,
+    program: &str,
+) -> Result<()> {
     // A record that the reports show as one read without `-parse_deflines` has its local id there
     // (`ParsedSubject::shown_as_record`).
     let shown: Vec<_> = records
@@ -4159,7 +4198,6 @@ pub(crate) fn refuse_described_records(
         .map(|record| record.clone().filter(|record| !record.shown_as_record()))
         .collect();
     let loaded = |_| crate::report::db_subject::HitLoad::Loaded;
-    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
     match described_refusal(num_queries, reported, described, &shown, loaded, protein)? {
         Some((index, reason)) => Err(shown[index as usize]
             .as_deref()

@@ -1,0 +1,89 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           3 sequences; 100 total letters
+
+
+
+Query= ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p1 subject one                                                        83.2    4e-29
+P0E1A1.1 subject two                                                  53.9    2e-17
+p3 unnamed protein product                                            45.1    4e-14
+
+
+>p1 subject one
+Length=40
+
+ Score = 83.2 bits (204),  Expect = 4e-29, Method: Compositional matrix adjust.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+
+Query  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+           DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+Sbjct  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+
+
+>P0E1A1.1 subject two
+Length=40
+
+ Score = 53.9 bits (128),  Expect = 2e-17, Method: Compositional matrix adjust.
+ Identities = 34/40 (85%), Positives = 34/40 (85%), Gaps = 0/40 (0%)
+
+Query  1   DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV  40
+           DYL KKIELD HAAHLL SANRWE CSKIKQ LDDGIH V
+Sbjct  1   DYLAKKIELDAHAAHLLASANRWEACSKIKQALDDGIHAV  40
+
+
+>p3 unnamed protein product
+Length=20
+
+ Score = 45.1 bits (105),  Expect = 4e-14, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+
+Query  21  NRWEVCSKIKQLLDDGIHVV  40
+           NRWEVCSKIKQLLDDGIHVV
+Sbjct  1   NRWEVCSKIKQLLDDGIHVV  20
+
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 3168
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 100
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

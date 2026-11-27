@@ -7,6 +7,7 @@
 
 mod archive;
 mod formatting;
+mod pairwise;
 pub(crate) mod refusals;
 mod search_program;
 mod tabular;

@@ -888,10 +888,30 @@ pub(crate) fn html_links(
     database: Option<&[u8]>,
     formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
-    html_links_with(
+    html_links_of(
         html,
-        app,
-        engine,
+        app.application(),
+        engine.subject_is_nucleotide(),
+        database,
+        formats,
+    )
+}
+
+/// [`html_links`] of the application named `application` (in lower case: the name of its
+/// registry posts and, in upper case, of its refusals) whose subjects are nucleotides where
+/// `nucleotide` (`RequestKind::subject_is_nucleotide` of the engine; blast_formatter's of the
+/// archive's program).
+pub(crate) fn html_links_of(
+    html: bool,
+    application: &str,
+    nucleotide: bool,
+    database: Option<&[u8]>,
+    formats: &[i32],
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    html_links_named_with(
+        html,
+        application,
+        nucleotide,
         database,
         formats,
         crate::report::formatter_registry::FormatterNcbirc::read,
@@ -900,6 +920,7 @@ pub(crate) fn html_links(
 }
 
 /// [`html_links`] with the `./.ncbirc` and `InitConfig` readers supplied by the caller.
+#[cfg(test)]
 fn html_links_with(
     html: bool,
     app: RequestKind,
@@ -909,10 +930,30 @@ fn html_links_with(
     read_ncbirc: impl FnOnce(&str) -> Result<crate::report::formatter_registry::FormatterNcbirc, String>,
     read_registry: impl FnOnce(&str) -> Result<crate::report::formatter_registry::InitConfig, String>,
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    html_links_named_with(
+        html,
+        app.application(),
+        engine.subject_is_nucleotide(),
+        database,
+        formats,
+        read_ncbirc,
+        read_registry,
+    )
+}
+
+/// [`html_links_of`] with the `./.ncbirc` and `InitConfig` readers supplied by the caller.
+fn html_links_named_with(
+    html: bool,
+    lower: &str,
+    nucleotide: bool,
+    database: Option<&[u8]>,
+    formats: &[i32],
+    read_ncbirc: impl FnOnce(&str) -> Result<crate::report::formatter_registry::FormatterNcbirc, String>,
+    read_registry: impl FnOnce(&str) -> Result<crate::report::formatter_registry::InitConfig, String>,
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
     if !html || !formats_link_ids(formats) {
         return Ok(None);
     }
-    let lower = app.application();
     let upper = lower.to_ascii_uppercase();
     // The prolog's references read `./.ncbirc` before the first id link reads InitConfig's file.
     let ncbirc = read_ncbirc(lower).map_err(|what| anyhow::anyhow!("{what}'s {upper}"))?;
@@ -925,7 +966,7 @@ fn html_links_with(
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
             // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`).
-            nucleotide: engine.subject_is_nucleotide(),
+            nucleotide,
         },
     )))
 }

@@ -1,0 +1,40 @@
+BLASTN 2.17.0+
+
+
+Query= q1 query one
+
+Length=120
+
+Subject= s1 subject one
+
+Length=400
+
+
+ Score = 217 bits (117),  Expect = 2e-61
+ Identities = 119/120 (99%), Gaps = 0/120 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  160
+
+Query  61   AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+             |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  161  CATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 43401
+
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

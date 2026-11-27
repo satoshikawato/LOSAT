@@ -1,0 +1,290 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qm1 masked query"
+                  }
+                }
+              },
+              title "qm1 masked query"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 180,
+              seq-data ncbi2na '64BEACFB5890D6735F0B211ADDB9514444444444444444
+444444444444440CC7BCE213E8FE5243BC26594FDC88'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qm2 second query"
+                  }
+                }
+              },
+              title "qm2 second query"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 100,
+              seq-data ncbi2na '26594FDC88FCAFA2BAEB6187BAF2DBA67A4543E9BEF475
+7019'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sm1 masked subject"
+                }
+              }
+            },
+            title "sm1 masked subject"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 240,
+            seq-data ncbi2na 'F97359E9886EBA164BEACFB5890D6735F0B211ADDB951444
+4444444444444444444444444440CC7BCE213E8FE5243BC26594FDC884AEB9226B65CD6F'H
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sm2 second subject"
+                }
+              }
+            },
+            title "sm2 second subject"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 200,
+            seq-data ncbi2na '26594FDC88FCAFA2BAEB6187BAF2DBA67A4543E9BEF47570
+19A012375D1156C500D3856F46D86DB56C59A9E127542439B0B9'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 71400
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 60,
+                  to 119,
+                  id local str "Query_1"
+                },
+                {
+                  from 60,
+                  to 119,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 180
+          },
+          {
+            id str "blast_score",
+            value int 180
+          },
+          {
+            id str "e_value",
+            value real { 285106693179257, 10, -110 }
+          },
+          {
+            id str "bit_score",
+            value real { 333517231654535, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 180
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            30
+          },
+          lens {
+            180
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 100
+          },
+          {
+            id str "blast_score",
+            value int 100
+          },
+          {
+            id str "e_value",
+            value real { 454378727909784, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 185785259467505, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            local str "Subject_2"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            100
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 60,
+              to 119,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650114, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 71400",
+      "Effective search space used: 71400",
+      "Length adjustment: 10"
+    }
+  }
+}

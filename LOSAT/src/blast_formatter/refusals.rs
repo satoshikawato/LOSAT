@@ -12,7 +12,13 @@ use crate::ncbi_app::Diag;
 
 /// The output formats that blast_formatter writes; it refuses the others by name
 /// (`Refusal::OutputFormat`).
-pub(crate) const WRITTEN_FORMATS: [i32; 7] = [6, 7, 8, 9, 10, 12, 20];
+pub(crate) const WRITTEN_FORMATS: [i32; 8] = [0, 6, 7, 8, 9, 10, 12, 20];
+
+/// The tabular formats' name in `Refusal::NotCovered`.
+pub(crate) const TABULAR_FORMATS: &str = "tabular output formats (6, 7, 10 and 20)";
+
+/// The pairwise formats' name in `Refusal::NotCovered`.
+pub(crate) const PAIRWISE_FORMATS: &str = "pairwise output format (0)";
 
 /// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
 /// tests' list of the refusals (`documented`).
@@ -60,10 +66,11 @@ pub(crate) enum Refusal {
     /// a delay buffer). The bytes of the Seq-annot that went to the output before it stay
     /// written.
     Unwritable(&'static str, i32),
-    /// A form of a BLAST archive that the tabular formats (6, 7, 10 and 20) do not write yet: the
-    /// translated programs, queries given as locations, and the forms whose subjects or rows
-    /// NCBI's scope may find otherwise than LOSAT (decision F3-13 of line RG). What it is.
-    Tabular(String),
+    /// A form of a BLAST archive that a group of output formats (`format`: the tabular formats
+    /// 6, 7, 10 and 20, the pairwise format 0) does not write yet: the translated programs,
+    /// queries given as locations, and the forms whose subjects or rows NCBI's scope may find
+    /// otherwise than LOSAT (decisions F3-13 and F3-19 of line RG, O9). What it is.
+    NotCovered { format: &'static str, what: String },
 }
 
 impl Refusal {
@@ -99,7 +106,7 @@ impl Refusal {
             ),
             Refusal::Prefetch => format!(
                 "PRE_FETCH_SEQS_LIMIT=2147483647, with which NCBI BLAST+ loads the subject \
-                 sequences of output formats 8, 9 and 12 ahead (from NCBI's servers where the \
+                 sequences of output formats 0, 8, 9 and 12 ahead (from NCBI's servers where the \
                  database lacks one), is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
@@ -112,9 +119,8 @@ impl Refusal {
                  supported by LOSAT's {}",
                 super::PROGRAM
             ),
-            Refusal::Tabular(what) => format!(
-                "the tabular output formats (6, 7, 10 and 20) of a BLAST archive with {what} are \
-                 not supported by LOSAT's {}",
+            Refusal::NotCovered { format, what } => format!(
+                "the {format} of a BLAST archive with {what} are not supported by LOSAT's {}",
                 super::PROGRAM
             ),
         }
@@ -140,7 +146,7 @@ impl Refusal {
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
             Refusal::Unwritable(..) => "an archive's results".to_string(),
-            Refusal::Tabular(_) => "tabular output formats".to_string(),
+            Refusal::NotCovered { format, .. } => format.to_string(),
         }
     }
 }
@@ -184,7 +190,14 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
         Refusal::Unwritable("", 12),
-        Refusal::Tabular(String::new()),
+        Refusal::NotCovered {
+            format: TABULAR_FORMATS,
+            what: String::new(),
+        },
+        Refusal::NotCovered {
+            format: PAIRWISE_FORMATS,
+            what: String::new(),
+        },
     ]);
     refusals
 }

@@ -61,7 +61,7 @@ fn rows_keep_the_seqalign_identities_of_their_hsps() {
         &placements,
         None,
     );
-    let counts: Vec<(usize, usize)> = rows
+    let counts: Vec<(usize, i64)> = rows
         .iter()
         .map(|row| (row.hit.num_ident, row.seqalign_num_ident))
         .collect();

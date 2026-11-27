@@ -41,13 +41,20 @@ pub(crate) struct ReadAlign<'a> {
     piece: Option<V<'a>>,
 }
 
-/// What `GetAlnScores` reads (align_format_util.cpp:811-848): each -1 where the list has none.
+/// What `GetAlnScores` reads (align_format_util.cpp:811-848): each -1 where the list has none
+/// (`comp_adjustment_method` 0).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct AlnScores {
     pub(crate) score: i64,
     pub(crate) bit_score: f64,
     pub(crate) evalue: f64,
     pub(crate) num_ident: i64,
+    /// The "sum_n" score: the size of the HSP's linked set (outfmt 0's `Expect(N)`).
+    pub(crate) sum_n: i64,
+    /// The "comp_adjustment_method" score (outfmt 0's `Method:`).
+    pub(crate) comp_adjustment_method: i64,
+    /// Whether the list holds a "use_this_gi" score (the GIs the description lines show).
+    pub(crate) use_this_gi: bool,
 }
 
 /// The Dense-seg of two rows that the tabular formats build of a Seq-align
@@ -143,6 +150,9 @@ impl<'a> ReadAlign<'a> {
             bit_score: -1.0,
             evalue: -1.0,
             num_ident: -1,
+            sum_n: -1,
+            comp_adjustment_method: 0,
+            use_this_gi: false,
         };
         if let Some(list) = self.own_scores() {
             if read_scores(list, &mut scores)? {
@@ -362,9 +372,12 @@ fn read_scores(list: V<'_>, scores: &mut AlnScores) -> Result<bool, ReadStop> {
                 scores.evalue = real()?;
                 has_score = true;
             }
-            b"use_this_gi" | b"sum_n" | b"comp_adjustment_method" => {
+            b"use_this_gi" => {
                 int()?;
+                scores.use_this_gi = true;
             }
+            b"sum_n" => scores.sum_n = int()?,
+            b"comp_adjustment_method" => scores.comp_adjustment_method = int()?,
             b"num_ident" => scores.num_ident = int()?,
             text if text.starts_with(b"gi:") => {
                 if gi_of_name(text).is_none() {

@@ -1242,6 +1242,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
     };
     let queries: Vec<BlastnPairwiseQuery> = (0..4)
         .map(|q_idx| BlastnPairwiseQuery {
+            ancillary: None,
             query_name: format!("q{q_idx} query {q_idx}").into_bytes(),
             query_length: 100,
             karlin: Some((karlin, karlin)),
@@ -1869,6 +1870,7 @@ fn tblastn_nullb_empty_subject_row_html_preprocess_and_id_texts() {
         let mut hit = PairwiseHit::from(make_hit());
         hit.edge = PairwiseEdge::NullbEmptySubjectRow { left };
         let queries = [BlastpPairwiseQuery {
+            ancillary: None,
             query_name: Vec::new(),
             query_length: 30,
             ungapped_karlin: Default::default(),

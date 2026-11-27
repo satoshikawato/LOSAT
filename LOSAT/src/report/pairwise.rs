@@ -376,7 +376,7 @@ pub struct PairwiseHit {
     /// as a mismatch; BLASTP's display recount (pyrrolysine, stored gap characters), BLASTX's and
     /// TBLASTX's rows translated by the display's tables count others. Every count is at least
     /// 0, so every Seq-align carries it.
-    pub(crate) seqalign_num_ident: usize,
+    pub(crate) seqalign_num_ident: i64,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982
     // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_diag.hpp:98-121
     /// Program-specific report edge marker packed into one byte so `PairwiseHit` stays at 376
@@ -698,7 +698,7 @@ impl From<Hit> for PairwiseHit {
             subject_stored_gaps: Vec::new(),
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
-            seqalign_num_ident,
+            seqalign_num_ident: seqalign_num_ident as i64,
             edge: PairwiseEdge::Normal,
         }
     }
@@ -719,6 +719,31 @@ pub struct BlastpPairwiseQuery {
     /// Whether every query of the query's batch is invalid, so NCBI did not search the
     /// batch (local_blast.cpp:177-207: -1 parameters and no Seq-align set).
     pub batch_skipped: bool,
+    /// The footer's values where the caller has them whole (blast_formatter's of an archive,
+    /// `Ancillary::of_archive`); `None`: the search's, `Ancillary::of_search` of the fields above
+    /// (`footer`).
+    pub ancillary: Option<Ancillary>,
+}
+
+impl BlastpPairwiseQuery {
+    /// The footer's values of the query (`ancillary`, else the search's of its blocks, the
+    /// report's gapped block `gapped_karlin` and Gumbel block `gumbel`, in a gapped search
+    /// where `gapped`).
+    fn footer(
+        &self,
+        gapped_karlin: KarlinParams,
+        gumbel: Option<BlastGumbelBlk>,
+        gapped: bool,
+    ) -> Ancillary {
+        self.ancillary.unwrap_or_else(|| {
+            Ancillary::of_search(
+                Some((self.ungapped_karlin, gapped_karlin)),
+                gumbel,
+                gapped,
+                self.effective_search_space,
+            )
+        })
+    }
 }
 
 /// NCBI BLASTP pairwise run-level footer/header data.
@@ -1827,14 +1852,15 @@ fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
     }
 }
 
-/// The `Expect` label of an HSP's header: `Expect` followed by n in parentheses for an HSP of a
-/// linked set of n > 1 HSPs
-/// (`sum_n`, `BlastHSP::num`), else `Expect` (showalign.cpp:3593-3598, cited at
+/// The `Expect` label of an HSP's header: `Expect` followed by n in parentheses for an HSP whose
+/// Seq-align has the "sum_n" score n above 0 (`PairwiseHit::sum_n`: the searches give it for a
+/// linked set of n > 1 HSPs, as their Seq-aligns hold it, blast_seqalign.cpp:1180-1182; an
+/// archive's Seq-align may hold any value), else `Expect` (showalign.cpp:3593-3598, cited at
 /// `write_hsp_info`).
 #[inline]
 fn expect_label(sum_n: Option<i32>) -> String {
     sum_n
-        .filter(|&count| count > 1)
+        .filter(|&count| count > 0)
         .map_or_else(|| "Expect".to_string(), |count| format!("Expect({count})"))
 }
 
@@ -1862,26 +1888,20 @@ pub fn write_hsp_info<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3593-3598
     // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
     let expect = expect_label(hit.sum_n);
-    // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
-    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
-        let method = match hit.comp_adjust_method {
-            Some(1) => ", Method: Composition-based stats.",
-            Some(2) => ", Method: Compositional matrix adjust.",
-            _ => "",
-        };
-        writeln!(
-            writer,
-            " Score = {} bits ({}),  {} = {}{}",
-            bit_score_str, h.raw_score, expect, evalue_str, method
-        )?;
-    } else {
-        writeln!(
-            writer,
-            " Score = {} bits ({}),  {} = {}",
-            bit_score_str, h.raw_score, expect, evalue_str
-        )?;
-    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
+    // The method of the HSP's "comp_adjustment_method" score, whatever the program: the searches
+    // give one only where their Seq-aligns hold it (blastp's, psiblast's first round, rpsblast's
+    // redo; BLASTN gives none), blast_formatter where the archive's Seq-align holds it.
+    let method = match hit.comp_adjust_method {
+        Some(1) => ", Method: Composition-based stats.",
+        Some(2) => ", Method: Compositional matrix adjust.",
+        _ => "",
+    };
+    writeln!(
+        writer,
+        " Score = {} bits ({}),  {} = {}{}",
+        bit_score_str, h.raw_score, expect, evalue_str, method
+    )?;
     write_hsp_identities(writer, hit, config)
 }
 
@@ -2898,13 +2918,14 @@ const HTML_PREFIX: &[u8] = b"<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></
 const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
 
 /// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, `phiblastp`
-/// (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), or `blastp` for any
+/// (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), `deltablast`
+/// (blast_formatter's of a deltablast archive without psiblast's parameters), or `blastp` for any
 /// other name (its tasks).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
 pub(crate) fn blastp_family_program(program: &str) -> &str {
     match program {
-        "psiblast" | "rpsblast" | "phiblastp" => program,
+        "psiblast" | "rpsblast" | "phiblastp" | "deltablast" => program,
         _ => "blastp",
     }
 }
@@ -3292,57 +3313,16 @@ fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478 (cited
-    // above): `kbp_gap` (the `Gapped` block) is printed only where the search made it; an
-    // ungapped search has neither it nor a Gumbel block.
-    let Some(gumbel) = gumbel.filter(|_| gapped) else {
-        return write_nucleotide_query_footer_spacing(
-            writer,
+    write_query_footer(
+        writer,
+        &Ancillary::of_search(
             Some((ungapped_karlin, gapped_karlin)),
+            gumbel,
             gapped,
             effective_search_space,
-            trailing,
-        );
-    };
-    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
-    crate::report::ostream::ncbi_endl(writer)?;
-    // A block that the query's results do not keep (`stats::tables::ancillary_kept`) has no
-    // part in the footer.
-    if crate::stats::tables::ancillary_kept(ungapped_karlin.lambda) {
-        writeln!(writer, "Lambda      K        H        a         alpha")?;
-        write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
-        write_ncbi_ka_field(writer, ungapped_karlin.k)?;
-        write_ncbi_ka_field(writer, ungapped_karlin.h)?;
-        write_ncbi_ka_field(writer, gumbel.a_un)?;
-        write_ncbi_ka_field(writer, gumbel.alpha_un)?;
-        writeln!(writer)?;
-    }
-    writeln!(writer)?;
-    if crate::stats::tables::ancillary_kept(gapped_karlin.lambda) {
-        writeln!(writer, "Gapped")?;
-        writeln!(
-            writer,
-            "Lambda      K        H        a         alpha    sigma"
-        )?;
-        write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
-        write_ncbi_ka_field(writer, gapped_karlin.k)?;
-        write_ncbi_ka_field(writer, gapped_karlin.h)?;
-        write_ncbi_ka_field(writer, gumbel.a)?;
-        write_ncbi_ka_field(writer, gumbel.alpha)?;
-        write_ncbi_ka_field(writer, gumbel.sigma)?;
-        writeln!(writer)?;
-    }
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Effective search space used: {}",
-        effective_search_space
-    )?;
-    if trailing {
-        writeln!(writer)?;
-        writeln!(writer)?;
-    }
-    Ok(())
+        ),
+        trailing,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268
@@ -4125,13 +4105,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
             } else {
-                write_blastp_query_footer_spacing(
+                write_query_footer(
                     writer,
-                    query.ungapped_karlin,
-                    self.gapped_karlin(q_idx),
-                    report.gumbel,
-                    report.gapped,
-                    query.effective_search_space,
+                    &query.footer(self.gapped_karlin(q_idx), report.gumbel, report.gapped),
                     false,
                 )?;
             }
@@ -4240,13 +4216,13 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         q_idx: usize,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        write_blastp_query_footer_spacing(
+        write_query_footer(
             writer,
-            query.ungapped_karlin,
-            self.gapped_karlin(q_idx),
-            self.report.gumbel,
-            self.report.gapped,
-            query.effective_search_space,
+            &query.footer(
+                self.gapped_karlin(q_idx),
+                self.report.gumbel,
+                self.report.gapped,
+            ),
             false,
         )
     }
@@ -4283,6 +4259,18 @@ pub struct BlastnPairwiseQuery {
     /// an invalid query.
     pub karlin: Option<(KarlinParams, KarlinParams)>,
     pub effective_search_space: i64,
+    /// The footer's values where the caller has them whole (`BlastpPairwiseQuery::ancillary`).
+    pub ancillary: Option<Ancillary>,
+}
+
+impl BlastnPairwiseQuery {
+    /// The footer's values of the query (`ancillary`, else the search's of `karlin` in a gapped
+    /// search where `gapped`).
+    fn footer(&self, gapped: bool) -> Ancillary {
+        self.ancillary.unwrap_or_else(|| {
+            Ancillary::of_search(self.karlin, None, gapped, self.effective_search_space)
+        })
+    }
 }
 
 /// Run-level data of the BLASTN pairwise report.
@@ -4977,54 +4965,134 @@ fn write_blastn_description_table<W: Write>(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-478
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:472-480
-// Without a Gumbel block, PrintKAParameters (align_format_util.cpp:585-619) prints only
-// the Lambda, K and H columns. An invalid query has neither Karlin block (`karlin` is
-// `None`) and a search space of 0.
-/// The footer of a nucleotide query, with the two blank lines that follow it (the next
-/// query's preamble or the epilog) when `trailing`.
-fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:58-160
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:60-148
+/// NCBI's `CBlastAncillaryData` of one query as the footer prints it
+/// (`CBlastFormat::x_PrintOneQueryFooter`): the Karlin blocks that the results keep in the
+/// slots the footer reads, the Gumbel block, and the search space. The one value of every
+/// footer of the pairwise reports (`write_query_footer`); the search programs make it from
+/// their statistics (`of_search`), blast_formatter from the archive (`of_archive`).
+#[derive(Debug, Clone, Copy)]
+pub struct Ancillary {
+    /// The ungapped block (`GetUngappedKarlinBlock`), `None` where the results have none.
+    pub ungapped: Option<KarlinParams>,
+    /// The gapped block (`GetGappedKarlinBlock`), `None` where the results have none.
+    pub gapped: Option<KarlinParams>,
+    /// The Gumbel block (`GetGumbelBlock`): its columns follow each block's.
+    pub gumbel: Option<BlastGumbelBlk>,
+    /// `GetSearchSpace`.
+    pub search_space: i64,
+}
+
+impl Ancillary {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115
+    /// The search's constructor of the query whose Karlin blocks are `karlin` (ungapped,
+    /// gapped; `None` for an invalid query, which has neither) in a gapped search (`gapped`):
+    /// a block whose Lambda is below 0 is left out (`stats::tables::ancillary_kept`), an
+    /// ungapped search has no gapped block and no Gumbel block, a gapped one the Gumbel block
+    /// `gumbel` where the program makes it.
+    pub fn of_search(
+        karlin: Option<(KarlinParams, KarlinParams)>,
+        gumbel: Option<BlastGumbelBlk>,
+        gapped: bool,
+        search_space: i64,
+    ) -> Self {
+        let kept = |block: KarlinParams| {
+            crate::stats::tables::ancillary_kept(block.lambda).then_some(block)
+        };
+        Ancillary {
+            ungapped: karlin.and_then(|(ungapped, _)| kept(ungapped)),
+            gapped: karlin
+                .filter(|_| gapped)
+                .and_then(|(_, gapped_block)| kept(gapped_block)),
+            gumbel: gumbel.filter(|_| gapped && karlin.is_some()),
+            search_space,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-148
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2238-2250
+    /// The formatter's constructor (`GetResultSet` of an archive): both blocks as the archive
+    /// gives them (`(lambda, K, H)`, 0 where it has none of the kind), whatever their values,
+    /// and no Gumbel block. In the Psi slots where the run's task is psiblast; a footer that
+    /// reads the other slots (`psi_slots_read` differs from `psi_task`: a deltablast archive
+    /// without the psiblast parameters) finds none.
+    pub fn of_archive(
+        ungapped: (f64, f64, f64),
+        gapped: (f64, f64, f64),
+        search_space: i64,
+        psi_task: bool,
+        psi_slots_read: bool,
+    ) -> Self {
+        let block = |(lambda, k, h): (f64, f64, f64)| KarlinParams {
+            lambda,
+            k,
+            h,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let found = psi_task == psi_slots_read;
+        Ancillary {
+            ungapped: found.then(|| block(ungapped)),
+            gapped: found.then(|| block(gapped)),
+            gumbel: None,
+            search_space,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:444-478
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:585-619
+/// `x_PrintOneQueryFooter` of `ancillary`: the first `NcbiEndl` (a flush), each block present
+/// (`PrintKAParameters`, with the Gumbel block's columns where it has one), the search space,
+/// and the two blank lines that follow it (the next query's preamble or the epilog) when
+/// `trailing`.
+fn write_query_footer<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
-    karlin: Option<(KarlinParams, KarlinParams)>,
-    gapped: bool,
-    effective_search_space: i64,
+    ancillary: &Ancillary,
     trailing: bool,
 ) -> io::Result<()> {
-    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
     crate::report::ostream::ncbi_endl(writer)?;
-    // (A block that the results do not keep is not written, `stats::tables::ancillary_kept`.)
-    if let Some((ungapped, _)) =
-        karlin.filter(|(ungapped, _)| crate::stats::tables::ancillary_kept(ungapped.lambda))
-    {
-        writeln!(writer, "Lambda      K        H")?;
+    if let Some(ungapped) = ancillary.ungapped {
+        match ancillary.gumbel {
+            Some(_) => writeln!(writer, "Lambda      K        H        a         alpha")?,
+            None => writeln!(writer, "Lambda      K        H")?,
+        }
         write_ncbi_ka_field(writer, ungapped.lambda)?;
         write_ncbi_ka_field(writer, ungapped.k)?;
         write_ncbi_ka_field(writer, ungapped.h)?;
+        if let Some(gumbel) = ancillary.gumbel {
+            write_ncbi_ka_field(writer, gumbel.a_un)?;
+            write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+        }
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1130-1159
-    // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
-    if let Some((_, gapped_block)) = karlin
-        .filter(|_| gapped)
-        .filter(|(_, gapped_block)| crate::stats::tables::ancillary_kept(gapped_block.lambda))
-    {
+    if let Some(gapped_block) = ancillary.gapped {
         writeln!(writer, "Gapped")?;
-        writeln!(writer, "Lambda      K        H")?;
+        match ancillary.gumbel {
+            Some(_) => writeln!(
+                writer,
+                "Lambda      K        H        a         alpha    sigma"
+            )?,
+            None => writeln!(writer, "Lambda      K        H")?,
+        }
         write_ncbi_ka_field(writer, gapped_block.lambda)?;
         write_ncbi_ka_field(writer, gapped_block.k)?;
         write_ncbi_ka_field(writer, gapped_block.h)?;
+        if let Some(gumbel) = ancillary.gumbel {
+            write_ncbi_ka_field(writer, gumbel.a)?;
+            write_ncbi_ka_field(writer, gumbel.alpha)?;
+            write_ncbi_ka_field(writer, gumbel.sigma)?;
+        }
         writeln!(writer)?;
     }
     writeln!(writer)?;
     writeln!(
         writer,
         "Effective search space used: {}",
-        effective_search_space
+        ancillary.search_space
     )?;
-    // The two blank lines of the next query's preamble or of the epilog
-    // (blast_format.cpp:1491, 2249).
     if trailing {
         writeln!(writer)?;
         writeln!(writer)?;
@@ -5267,13 +5335,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else {
-                write_nucleotide_query_footer_spacing(
-                    writer,
-                    query.karlin,
-                    report.gapped,
-                    query.effective_search_space,
-                    false,
-                )?;
+                write_query_footer(writer, &query.footer(report.gapped), false)?;
             }
             return Ok(());
         };
@@ -5452,13 +5514,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             return Ok(());
         }
         let query = &self.queries[q_idx];
-        write_nucleotide_query_footer_spacing(
-            writer,
-            query.karlin,
-            self.report.gapped,
-            query.effective_search_space,
-            false,
-        )
+        write_query_footer(writer, &query.footer(self.report.gapped), false)
     }
 }
 
@@ -6559,7 +6615,9 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182:
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3595-3598:
-    let expect = expect_label(hit.sum_n);
+    // TBLASTN's and BLASTX's rows carry the HSP's `BlastHSP::num` (1 for an HSP of no linked
+    // set), whose Seq-align has a "sum_n" score only above 1.
+    let expect = expect_label(hit.sum_n.filter(|&num| num > 1));
     writeln!(
         writer,
         " Score = {} bits ({}),  {} = {}{}",

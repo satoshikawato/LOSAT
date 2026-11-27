@@ -181,7 +181,7 @@ pub(crate) fn refuse_pairwise_reports(
             .map(|(hsp, index)| {
                 let mut row = crate::report::pairwise::PairwiseHit::from(hsp.hit.clone());
                 if let Some(identities) = seqalign_identities {
-                    row.seqalign_num_ident = identities[index] as usize;
+                    row.seqalign_num_ident = identities[index] as i64;
                 }
                 row
             })

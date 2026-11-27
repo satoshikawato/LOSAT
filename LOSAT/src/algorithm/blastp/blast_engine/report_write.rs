@@ -936,6 +936,7 @@ pub(super) fn write_pairwise(
         .iter()
         .enumerate()
         .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
+            ancillary: None,
             query_name: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
             // The query record's length, also with `-query_loc`.

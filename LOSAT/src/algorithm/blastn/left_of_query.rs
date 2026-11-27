@@ -227,7 +227,7 @@ pub(crate) fn blastn_hsp_scores(hsp: &BlastnHsp, offset: usize, ungapped: bool) 
         return HspScores::of_left_of_record(
             hsp.bit_score,
             hsp.e_value,
-            hsp.num_ident,
+            hsp.num_ident as i64,
             hsp.length,
             (from as i32, len),
             (hsp.s_start, hsp.s_end),
@@ -243,7 +243,7 @@ pub(crate) fn blastn_hsp_scores(hsp: &BlastnHsp, offset: usize, ungapped: bool) 
     HspScores::of_values(
         hsp.bit_score,
         hsp.e_value,
-        hsp.num_ident,
+        hsp.num_ident as i64,
         hsp.length,
         query,
         (hsp.s_start, hsp.s_end),

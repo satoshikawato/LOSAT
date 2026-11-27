@@ -516,7 +516,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 7] = [
+const REFUSED_ROWS: [RefusedRow; 10] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -536,7 +536,7 @@ const REFUSED_ROWS: [RefusedRow; 7] = [
         ncbi_err: "Note[F]",
         losat_err: "severity Fatal",
     },
-    // An output format outside what LOSAT's blast_formatter writes (6 to 10, 12 and 20): NCBI
+    // An output format outside what LOSAT's blast_formatter writes (0, 6 to 10, 12 and 20): NCBI
     // writes it.
     RefusedRow {
         program: "blast_formatter",
@@ -551,7 +551,7 @@ const REFUSED_ROWS: [RefusedRow; 7] = [
     RefusedRow {
         program: "blast_formatter",
         name: "refused_tabular_rpstblastn",
-        kind: "Tabular",
+        kind: "NotCovered",
         ncbi_status: 0,
         ncbi_err: "",
         losat_err: "a translated search",
@@ -561,7 +561,7 @@ const REFUSED_ROWS: [RefusedRow; 7] = [
     RefusedRow {
         program: "blast_formatter",
         name: "refused_tabular_bl2seq_legacy_7",
-        kind: "Tabular",
+        kind: "NotCovered",
         ncbi_status: 0,
         ncbi_err: "",
         losat_err: "BL2SEQ_LEGACY set and outfmt 7",
@@ -571,10 +571,40 @@ const REFUSED_ROWS: [RefusedRow; 7] = [
     RefusedRow {
         program: "blast_formatter",
         name: "refused_tabular_locations",
-        kind: "Tabular",
+        kind: "NotCovered",
         ncbi_status: 255,
         ncbi_err: "www.ncbi.nlm.nih.gov",
         losat_err: "queries given as locations",
+    },
+    // The pairwise report (outfmt 0) of a translated search's archive (PR 4c of line RG-F3): NCBI
+    // writes it.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_pw_rpstblastn",
+        kind: "NotCovered",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a translated search",
+    },
+    // `-subject` sequences with `BL2SEQ_LEGACY` at outfmt 0: NCBI writes the legacy bl2seq
+    // report, which LOSAT's search programs refuse too (decision O8 of PR 4).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_pw_bl2seq_legacy",
+        kind: "NotCovered",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "BL2SEQ_LEGACY set",
+    },
+    // `PRE_FETCH_SEQS_LIMIT=2147483647` at outfmt 0: NCBI loads every subject sequence ahead,
+    // from NCBI's servers where the database lacks one (here it has them all).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_pw_prefetch_max",
+        kind: "Prefetch",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "PRE_FETCH_SEQS_LIMIT=2147483647",
     },
     // A NaN or an infinite real number in the results: NCBI stops at it in JSON with an error of
     // its stream (in ASN.1 binary it writes its one special octet, as LOSAT does: row

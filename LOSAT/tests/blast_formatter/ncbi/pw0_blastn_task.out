@@ -1,0 +1,160 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/s3.fa
+           3 sequences; 1,000 total letters
+
+
+
+Query= q1 query one
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject one                                                        213     1e-59
+s2 subject two                                                        202     2e-56
+s3 subject three                                                      37.4    6e-07
+
+
+>s1 subject one
+Length=400
+
+ Score = 213 bits (235),  Expect = 1e-59
+ Identities = 119/120 (99%), Gaps = 0/120 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  160
+
+Query  61   AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+             |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  161  CATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+>s2 subject two
+Length=400
+
+ Score = 202 bits (223),  Expect = 2e-56
+ Identities = 116/119 (97%), Gaps = 0/119 (0%)
+ Strand=Plus/Plus
+
+Query  2    GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACA  61
+            ||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||| 
+Sbjct  102  GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTCGACACGGTCTCGTGCCCACC  161
+
+Query  62   ATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+            ||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||
+Sbjct  162  ATATACTGTTATGAGACATAGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+>s3 subject three
+Length=200
+
+ Score = 37.4 bits (40),  Expect = 6e-07
+ Identities = 20/20 (100%), Gaps = 0/20 (0%)
+ Strand=Plus/Plus
+
+Query  101  AGCGCCGCCATTTCTAGAGA  120
+            ||||||||||||||||||||
+Sbjct  1    AGCGCCGCCATTTCTAGAGA  20
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 105403
+
+
+Query= q2 query two
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s3 subject three                                                      181     2e-50
+s1 subject one                                                        181     2e-50
+s2 subject two                                                        172     9e-48
+
+
+>s3 subject three
+Length=200
+
+ Score = 181 bits (200),  Expect = 2e-50
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31   AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  90
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  91   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  130
+
+
+>s1 subject one
+Length=400
+
+ Score = 181 bits (200),  Expect = 2e-50
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+>s2 subject two
+Length=400
+
+ Score = 172 bits (190),  Expect = 9e-48
+ Identities = 98/100 (98%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTAGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            |||||||||| |||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCAGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 105403
+
+
+  Database: in/s3.fa
+    Posted date:  Nov 23, 2026  7:19 AM
+  Number of letters in database: 1,000
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -5021,6 +5021,7 @@ fn blastn_pairwise_report(
         .iter()
         .enumerate()
         .map(|(q_idx, query)| BlastnPairwiseQuery {
+            ancillary: None,
             query_name: query_titles[q_idx].to_vec(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
             // The length of the query's record, also where `-query_loc` searches part of it.

@@ -132,6 +132,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
         num_positives: 50_000,
     });
     let query = BlastpPairwiseQuery {
+        ancillary: None,
         query_name: b"q".to_vec(),
         query_length: 150_000,
         ungapped_karlin: Default::default(),

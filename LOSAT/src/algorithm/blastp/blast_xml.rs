@@ -225,8 +225,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                             .get(next_row)
                             .context("BLASTP report rows do not cover the hit list")?;
                         next_row += 1;
-                        let identities =
-                            read_num_ident(row.seqalign_num_ident as i64, xml.program_type);
+                        let identities = read_num_ident(row.seqalign_num_ident, xml.program_type);
                         if hsps.unaligned([XmlHsp::unaligned(
                             hsp.raw_score,
                             hsp.bit_score,

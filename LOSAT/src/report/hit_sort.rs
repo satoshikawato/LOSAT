@@ -99,7 +99,7 @@ impl HspScores {
     pub(crate) fn of_left_of_record(
         bits: f64,
         e_value: f64,
-        seqalign_num_ident: usize,
+        seqalign_num_ident: i64,
         length: usize,
         (start, query_len): (i32, u32),
         subject: (usize, usize),
@@ -115,7 +115,7 @@ impl HspScores {
         Self {
             bits,
             evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
-            num_ident: seqalign_num_ident as i64,
+            num_ident: seqalign_num_ident,
             length: length as i64,
             query_from,
             query_to,
@@ -128,7 +128,7 @@ impl HspScores {
     /// `seqalign_num_ident` (`PairwiseHit::seqalign_num_ident`): [`Self::of`] of the report's row
     /// of it, which the models of the reads read before the rows are made
     /// (`x_pairwise_par::QueryGroup::read_order`).
-    pub(crate) fn of_hit(h: &crate::common::Hit, seqalign_num_ident: usize) -> Self {
+    pub(crate) fn of_hit(h: &crate::common::Hit, seqalign_num_ident: i64) -> Self {
         Self::of_values(
             h.bit_score,
             h.e_value,
@@ -146,7 +146,7 @@ impl HspScores {
     pub(crate) fn of_values(
         bits: f64,
         e_value: f64,
-        seqalign_num_ident: usize,
+        seqalign_num_ident: i64,
         length: usize,
         query: (usize, usize),
         subject: (usize, usize),
@@ -158,7 +158,7 @@ impl HspScores {
             // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
             // two HSPs below it tie; -1 where the Seq-align has none.
             evalue: crate::report::serial::seqalign::seqalign_evalue_read(e_value),
-            num_ident: seqalign_num_ident as i64,
+            num_ident: seqalign_num_ident,
             length: length as i64,
             query_from: zero_based(query.0.min(query.1)),
             query_to: zero_based(query.0.max(query.1)),

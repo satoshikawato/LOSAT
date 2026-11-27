@@ -1,0 +1,148 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.9    0.15 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  15.1    2.9  
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  13.9    6.3  
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.9 bits (38),  Expect = 0.15, Method: Composition-based stats.
+ Identities = 5/15 (33%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -3
+
+Query  53   KVNPAKMAA*TPHIC  9
+            ++N A++   TP++C
+Sbjct  115  QINSARIETGTPYVC  129
+
+
+ Score = 13.9 bits (25),  Expect = 6.6, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+ Frame = +3
+
+Query  252  GDKRQ  266
+            GDKR+
+Sbjct  13   GDKRR  17
+
+
+ Score = 13.5 bits (24),  Expect = 7.3, Method: Composition-based stats.
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  215  KHETTGKFTWLVRGQA  262
+            K+E  GK   +V+ +A
+Sbjct  96   KYEAEGKGKEVVKARA  111
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 15.1 bits (28),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 5/21 (24%), Positives = 9/21 (43%), Gaps = 0/21 (0%)
+ Frame = +1
+
+Query  385  NNTKRDITVDSVSLSPGLNAT  447
+            +N+ R   +  +  S GL   
+Sbjct  54   SNSNRQTPITRIEESLGLRFI  74
+
+
+ Score = 14.0 bits (25),  Expect = 6.5, Method: Composition-based stats.
+ Identities = 5/17 (29%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  197  L*MGRYKHETTGKFTWL  247
+            L + + K++TT     L
+Sbjct  11   LVLEKMKNKTTDSLLLL  27
+
+
+ Score = 14.0 bits (25),  Expect = 6.8, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  626  SPTLNKSLPGLN  591
+            SP +N +  G++
+Sbjct  92   SPNMNVTAAGMD  103
+
+
+ Score = 14.0 bits (25),  Expect = 6.9, Method: Composition-based stats.
+ Identities = 3/15 (20%), Positives = 8/15 (53%), Gaps = 1/15 (7%)
+ Frame = +2
+
+Query  455  NFLPISLFCTLSQQC  499
+            ++ P  + C ++ Q 
+Sbjct  103  DYFP-EIVCDINMQF  116
+
+
+ Score = 13.6 bits (24),  Expect = 7.2, Method: Composition-based stats.
+ Identities = 3/5 (60%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+ Frame = +2
+
+Query  158  LPLMV  172
+            LP+M+
+Sbjct  138  LPIML  142
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 13.9 bits (25),  Expect = 6.3, Method: Composition-based stats.
+ Identities = 9/30 (30%), Positives = 14/30 (47%), Gaps = 1/30 (3%)
+ Frame = +1
+
+Query  142  SEIINLTINGVARGNHFNFVNGTLQTRNYG  231
+            + + N+         H  FV  +L+TR YG
+Sbjct  28   TYLKNIYQQENGGNKHCLFVKHSLETR-YG  56
+
+
+ Score = 13.9 bits (25),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 5/17 (29%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  591  PHTQKIVSVSVIYILIK  541
+            P+T  IV ++   ++ K
+Sbjct  139  PYTNSIVKLASKCMICK  155
+
+
+
+Lambda      K        H
+   0.317    0.136    0.383 
+
+Gapped
+Lambda      K        H
+   0.267   0.0500    0.140 
+
+Effective search space used: 87584
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

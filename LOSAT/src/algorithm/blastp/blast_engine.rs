@@ -3007,7 +3007,7 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row,
 /// except under `-html`, where each HSP's go to `html_masks` in the order of `hits`
 /// (`HspMasks::copy_rows`, `report::pairwise::HtmlRowMasks`: their spans).
-fn set_row_masks(
+pub(crate) fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
@@ -3897,7 +3897,7 @@ fn build_pairwise_hits(
             // The Seq-align's `num_ident` (`collect_hits_and_methods_from_hit_lists`): the
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
-            seqalign_num_ident,
+            seqalign_num_ident: seqalign_num_ident as i64,
             edge: crate::report::pairwise::PairwiseEdge::Normal,
         })
     };

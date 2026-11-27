@@ -1,0 +1,288 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: in/s3.fa
+           3 sequences; 1,000 total letters
+
+
+
+<b>Query=</b> q1 query one
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 subject one                                                        <a href=#BL_ORD_ID:0>217</a>     4e-61
+s2 subject two                                                        <a href=#BL_ORD_ID:1>204</a>     3e-57
+
+
+><a name=BL_ORD_ID:0></a> s1 subject one
+Length=400
+
+ Score = 217 bits (117),  Expect = 4e-61
+ Identities = 119/120 (99%), Gaps = 0/120 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCAC  160
+
+Query  61   AATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+             |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  161  CATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+><a name=BL_ORD_ID:1></a> s2 subject two
+Length=400
+
+ Score = 204 bits (110),  Expect = 3e-57
+ Identities = 116/119 (97%), Gaps = 0/119 (0%)
+ Strand=Plus/Plus
+
+Query  2    GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACA  61
+            ||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||| 
+Sbjct  102  GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTCGACACGGTCTCGTGCCCACC  161
+
+Query  62   ATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  120
+            ||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||
+Sbjct  162  ATATACTGTTATGAGACATAGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA  220
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+<b>Query=</b> q2 query two
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s3 subject three                                                      <a href=#BL_ORD_ID:2>185</a>     1e-51
+s1 subject one                                                        <a href=#BL_ORD_ID:0>185</a>     1e-51
+s2 subject two                                                        <a href=#BL_ORD_ID:1>174</a>     2e-48
+
+
+><a name=BL_ORD_ID:2></a> s3 subject three
+Length=200
+
+ Score = 185 bits (100),  Expect = 1e-51
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31   AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  90
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  91   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  130
+
+
+><a name=BL_ORD_ID:0></a> s1 subject one
+Length=400
+
+ Score = 185 bits (100),  Expect = 1e-51
+ Identities = 100/100 (100%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+><a name=BL_ORD_ID:1></a> s2 subject two
+Length=400
+
+ Score = 174 bits (94),  Expect = 2e-48
+ Identities = 98/100 (98%), Gaps = 0/100 (0%)
+ Strand=Plus/Plus
+
+Query  1    AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACT  60
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  231  AGGTGGTGGTCGACGACTGTGGTTAGTCGTAGCGCTGGCACCCAATTGGCGTTGTTCACT  290
+
+Query  61   CCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA  100
+            |||||||||| |||||||||||||||||||||||||||||
+Sbjct  291  CCCTAAACGCAGAAACAGATCTCCTCACACCCCGTACCAA  330
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 106700
+
+
+  Database: in/s3.fa
+    Posted date:  Nov 23, 2026  7:19 AM
+  Number of letters in database: 1,000
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+<b>Query=</b> ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:74>19.2</a>    0.92 
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:18>18.9</a>    1.3  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:31>18.5</a>    1.7  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:58>17.7</a>    2.8  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:82>17.3</a>    5.0  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       <a href=#BL_ORD_ID:81>16.9</a>    5.6  
+
+
+><a name=BL_ORD_ID:74></a> BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]
+Length=141
+
+ Score = 19.2 bits (38),  Expect = 0.92, Method: Composition-based stats.
+ Identities = 9/32 (28%), Gaps = 2/32 (6%)
+ Strand=Plus/Plus
+
+Query  11   DHAAHLLFSANRWEVCSKIKQL--LDDGIHVV  40
+                  | | |  |  |        ||  || 
+Sbjct  82   NFGGYILLSGNSGEIISGLGEPRDIDDELHVL  113
+
+
+><a name=BL_ORD_ID:18></a> BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]
+Length=2526
+
+ Score = 18.9 bits (37),  Expect = 1.3, Method: Composition-based stats.
+ Identities = 10/26 (38%), Gaps = 2/26 (8%)
+ Strand=Plus/Plus
+
+Query  3     LTKKIELDDHAAHLLFSA--NRWEVC  26
+             |||  ||      ||       || |
+Sbjct  1897  LTKILELQEKQITLLLDVGYKAWESC  1922
+
+
+><a name=BL_ORD_ID:31></a> BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]
+Length=771
+
+ Score = 18.5 bits (36),  Expect = 1.7, Method: Composition-based stats.
+ Identities = 8/20 (40%), Gaps = 0/20 (0%)
+ Strand=Plus/Plus
+
+Query  14   AHLLFSANRWEVCSKIKQLL  33
+            |   ||  |      ||| |
+Sbjct  291  AYMMFSRHRVQSGDCIKQFL  310
+
+
+><a name=BL_ORD_ID:58></a> BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]
+Length=1890
+
+ Score = 17.7 bits (34),  Expect = 2.8, Method: Composition-based stats.
+ Identities = 6/30 (20%), Gaps = 0/30 (0%)
+ Strand=Plus/Plus
+
+Query  5    KKIELDDHAAHLLFSANRWEVCSKIKQLLD  34
+            |      ||  |               | |
+Sbjct  883  KRVDVIKHAYSLMYGVSLLDMTVSLPDLID  912
+
+
+><a name=BL_ORD_ID:82></a> BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 17.3 bits (33),  Expect = 5.0, Method: Composition-based stats.
+ Identities = 9/28 (32%), Gaps = 3/28 (11%)
+ Strand=Plus/Plus
+
+Query  7     IELDDHAAHLLFSANRWEVCSKIKQLLD  34
+             | |  ||  |       | |   | |  
+Sbjct  3480  IKLRNHAMTLALDG---ENCREYKELME  3504
+
+
+><a name=BL_ORD_ID:81></a> BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 16.9 bits (32),  Expect = 5.6, Method: Composition-based stats.
+ Identities = 5/11 (45%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  18    FSANRWEVCSK  28
+             | |  |  || 
+Sbjct  1147  FVAGLWSMCSQ  1157
+
+
+
+Lambda      K        H
+   0.323    0.138    0.428 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1636200
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

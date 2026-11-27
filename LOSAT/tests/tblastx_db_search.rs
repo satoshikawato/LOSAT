@@ -351,8 +351,9 @@ fn query_batches_read_the_titles_of_their_reported_sequences() {
 }
 
 // A sequence file shorter than its index says is LOSAT's refusal where NCBI reads past its
-// mapping: it is raised by the first batch with a valid context, as NCBI's read errors are, and
-// stops the run there without the reports of the batches before (as TBLASTN's does).
+// mapping: it is raised by the first batch with a valid context, as NCBI's read errors are, after
+// the reports of the batches before and the batch's warnings (line RG series D, D-SO-5; before,
+// the run stopped there without the reports of the batches before).
 #[test]
 fn a_truncated_sequence_file_stops_the_run() {
     let dir = temp_dir("cut");
@@ -377,9 +378,17 @@ fn a_truncated_sequence_file_stops_the_run() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let report = String::from_utf8_lossy(&output.stdout);
-    assert!(!report.contains("Query= "), "{report}");
+    assert!(
+        report.matches("Query= ").count() == 1 && report.contains("Query= nn all N\n"),
+        "{report}"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("passes the end of the file"), "{stderr}");
+    assert!(
+        stderr.starts_with("Warning: [tblastx] Query_1 nn all N: ")
+            && stderr.lines().count() == 2
+            && stderr.contains("passes the end of the file"),
+        "{stderr}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

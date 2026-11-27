@@ -65,21 +65,24 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
 // makeblastdb runs with the default method (replace and warn) and the
-// substitute '#': every byte outside ' '..'~' is written as '#' and reported
-// with the stream position of the replacement. The runs of visible bytes between them are
-// copied whole (`for_each_bad_visible`).
+// substitute '#': every byte outside ' '..'~' (`is_bad_visible`) is written as '#' and
+// reported with the stream position of the replacement. The runs of visible bytes between them
+// are found a block at a time (`find_first`) and copied whole. `bad_visible_chars` finds the
+// same bytes with the same rule and search without writing. Each has its own loop: a walk
+// shared through a closure cost this writer 26 to 42 more instructions a call on strings
+// without such bytes (callgrind).
 fn write_visible_string_bytes(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
-    let mut copied = 0;
-    for_each_bad_visible(text, |at| {
-        out.extend_from_slice(&text[copied..at]);
+    let mut rest = text;
+    while let Some(at) = find_first(rest, is_bad_visible) {
+        out.extend_from_slice(&rest[..at]);
         bad.push(BadTitleChar {
-            byte: text[at],
+            byte: rest[at],
             stream_offset: out.len(),
         });
         out.push(b'#');
-        copied = at + 1;
-    });
-    out.extend_from_slice(&text[copied..]);
+        rest = &rest[at + 1..];
+    }
+    out.extend_from_slice(rest);
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
@@ -97,32 +100,21 @@ fn is_bad_visible(byte: u8) -> bool {
     Stream::AsnBinary.replaces(byte)
 }
 
-/// Calls `found` with the index of each byte of `text` that `write_visible_string` writes as `#`,
-/// in order: the one walk of `write_visible_string_bytes` and `bad_visible_chars`. The runs of
-/// visible bytes between them are found a block at a time (`find_first`).
-///
-/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
-#[inline(always)]
-fn for_each_bad_visible(text: &[u8], mut found: impl FnMut(usize)) {
-    let mut from = 0;
-    while let Some(at) = find_first(&text[from..], is_bad_visible) {
-        found(from + at);
-        from += at + 1;
-    }
-}
-
 /// The bytes of `text` that `write_visible_string` writes as `#` and the stream offsets that it
 /// reports, without writing them: `start` is the stream offset of the string's first byte, after
-/// its tag and length.
+/// its tag and length. The same rule (`is_bad_visible`) and search (`find_first`) as
+/// `write_visible_string_bytes`.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
 fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
-    for_each_bad_visible(text, |at| {
+    let mut at = 0;
+    while let Some(found) = find_first(&text[at..], is_bad_visible) {
         bad.push(BadTitleChar {
-            byte: text[at],
-            stream_offset: start + at,
+            byte: text[at + found],
+            stream_offset: start + at + found,
         });
-    });
+        at += found + 1;
+    }
 }
 
 /// The bytes of `defline_set`'s record besides its title: at most 77 (eleven tags with indefinite
@@ -532,7 +524,7 @@ pub(crate) fn encode_defline_set_checked(
     null_seqids: &[(usize, usize)],
     bad: &mut Vec<BadChar>,
 ) -> Result<Vec<u8>, NullSeqIdWriteError> {
-    let mut w = SetWriter::new(Vec::with_capacity(encoded_capacity(set)), true, bad);
+    let mut w = SetWriter::header(set, bad);
     w.set(set, null_seqids)?;
     Ok(w.out)
 }
@@ -547,16 +539,33 @@ pub(crate) fn encode_defline_set_checked(
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
 pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
-    SetWriter::new(Vec::with_capacity(COUNTED_WALK_ROOM), false, bad)
+    SetWriter::counting(bad)
         .set(set, &[])
         .expect("no NULL Seq-id");
 }
 
 impl<'a> SetWriter<'a> {
-    /// The writer of a record into `out` (empty), with or without the bytes of its strings (the
-    /// buffer is the caller's, of LOSAT's capacity: `encoded_capacity` for the header,
-    /// `COUNTED_WALK_ROOM` for the diagnostics alone; the reference is where NCBI builds the
+    /// The writer of `set`'s header record (`encode_defline_set_checked`): every byte, into a
+    /// buffer of `encoded_capacity` (LOSAT's capacity; the reference is where NCBI builds the
     /// record).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
+    fn header(set: &DeflineSet, bad: &'a mut Vec<BadChar>) -> Self {
+        Self::new(Vec::with_capacity(encoded_capacity(set)), true, bad)
+    }
+
+    /// The writer of the diagnostics alone (`defline_set_bad_chars`): the strings' bytes are
+    /// searched, not written, and the other bytes are counted out of a buffer of
+    /// `COUNTED_WALK_ROOM` (`count_out`; LOSAT's capacity, NCBI has no such buffer).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
+    fn counting(bad: &'a mut Vec<BadChar>) -> Self {
+        Self::new(Vec::with_capacity(COUNTED_WALK_ROOM), false, bad)
+    }
+
+    /// The writer of a record into `out` (empty), with or without the bytes of its strings
+    /// (`header` and `counting` give the buffer).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
     fn new(out: Vec<u8>, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {

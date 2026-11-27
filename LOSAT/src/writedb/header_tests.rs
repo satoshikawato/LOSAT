@@ -465,7 +465,8 @@ mod parsed {
     /// a date of both kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the
     /// root, and the diagnostics-alone walk's buffer does not grow (`COUNTED_WALK_ROOM`), with a
     /// title whose length takes four bytes, strings whose lengths take three, integers of four
-    /// bytes and a gi of eight.
+    /// bytes and a gi of eight. The writers are those of `encode_defline_set_checked` and
+    /// `defline_set_bad_chars` (`SetWriter::header`, `SetWriter::counting`).
     #[test]
     fn the_member_path_fits_the_fixed_depth() {
         let mut ids = ids_with_strings(&[b's'; 300]);
@@ -484,11 +485,11 @@ mod parsed {
         };
         for write_strings in [true, false] {
             let mut bad = Vec::new();
-            let mut w = SetWriter::new(
-                Vec::with_capacity(COUNTED_WALK_ROOM),
-                write_strings,
-                &mut bad,
-            );
+            let mut w = if write_strings {
+                SetWriter::header(&set, &mut bad)
+            } else {
+                SetWriter::counting(&mut bad)
+            };
             let room = w.out.capacity();
             w.set(&set, &[]).unwrap();
             assert_eq!(w.path_len, 1);

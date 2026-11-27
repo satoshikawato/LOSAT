@@ -4,9 +4,10 @@
 // reports of the batches before, so the input is not refused before the run. Its card lists the records
 // before the error and warns with the command line's message; a run that reads that far ends with that
 // message and keeps the outputs written before it, the reports of the batches before (line WQA's D28,
-// 2026-11-27): when the error's batch is the first, no record has results, outfmt 0 keeps its prolog
-// (-html its page's head, outfmt 15 the start of its JSON), and outfmt 5, 6 and 7 are empty. Under -parse_deflines an error of an earlier batch (two records of one id) comes
-// first, as on the command line. A query of comment lines only is a batch without a query: the
+// 2026-11-27): the records of the error's batch have none, so with the error in the first batch no record has
+// results (PSI-BLAST searches one query at a time: the records before the error keep theirs), outfmt 0 keeps its prolog
+// (-html its page's head, outfmt 15 the start of its JSON), and outfmt 5, 6 and 7 are empty. Under -parse_deflines an
+// error of an earlier batch (two records of one id) comes first, as on the command line. A query of comment lines only is a batch without a query: the
 // card says that it has no sequence, and the run ends with NCBI's `Empty CBlastQueryVector`.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -44,12 +45,12 @@ const NOT_PLAUSIBLE = (line: number) =>
  */
 const WARNING = 'A run that reaches this error fails there, as the command line does: ';
 /**
- * What the warning says that the run keeps (line WQA's D28 and its review r1 L1, 2026-11-27: the reports of the query batches
- * before the error's, none in a query shorter than a batch) and what to do (review L2), with the input's own line where the
+ * What the warning says that the run keeps (line WQA's D28 and its reviews r1 L1 and r2 M1, 2026-11-27: the reports of the
+ * query batches before the error's; the records of the error's batch have none, one record in PSI-BLAST) and what to do (review L2), with the input's own line where the
  * run's differs (review L-b, 2026-11-20).
  */
 const REMEDY = (own?: string) =>
-  ` Only the records searched before it keep their results; in a short query, that is none. Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
+  ` The records searched before it keep their results; the records read together with it have none (PSI-BLAST reads one record at a time). Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
 
 /** The native CLI's run of `words` (program first) on the inputs as query.fa and subject.fa, one thread. */
 function nativeRun(words: readonly string[], query: string, subject: string): { status: number | null; stdout: string; stderr: string } {
@@ -164,6 +165,39 @@ test("a query whose reader fails in a later batch: the run fails with the reader
   const cli = nativeRun(['blastp', '-outfmt', '6'], query, subject);
   expect(cli.status).toBe(1);
   expect(cli.stderr).toBe(`${NOT_PLAUSIBLE(22)}\n`);
+  expect((await shown.textContent()) ?? '').toBe(cli.stdout);
+});
+
+// PSI-BLAST searches one query at a time (line WQA's D28, review r2 M1, 2026-11-27): its first batch is one record, so the
+// records before the error keep their results, as the command line writes them, where BLASTP's short query keeps none.
+test("a PSI-BLAST query whose reader fails on a later record: the run keeps the hits of the records before it", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine writes the records' hits: the engine build runs this test");
+  const protein = letters('ACDEFGHIKLMNPQRSTVWY', 11, 200);
+  const query = `${Array.from({ length: 3 }, (_, i) => `>q${i + 1}\n${protein}\n`).join('')}>bad\nACDEF%%%%\n`;
+  const subject = `>s1\n${protein}\n`;
+  await program(page, 'psiblast');
+  await paste(page, 'subject', subject);
+  await paste(page, 'query', query);
+  const check = page.getByTestId('query-source-0-check');
+  await expect(check).toHaveAttribute('data-reader-error', '');
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(8)}${REMEDY()}`);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-outfmt 6');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  const status = await failedRun(page, 1);
+  await expect(status).toContainText(NOT_PLAUSIBLE(8));
+  await expect(status).toContainText('It keeps the outputs written before the error.');
+  const shown = page.getByTestId('results-failed-outputs').getByTestId('result-output');
+  await expect(shown).toContainText('q1\ts1\t');
+  await expect(shown).toContainText('q3\ts1\t');
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The CLI's output: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const cli = nativeRun(['psiblast', '-outfmt', '6'], query, subject);
+  expect(cli.status).toBe(1);
+  expect(cli.stderr).toBe(`${NOT_PLAUSIBLE(8)}\n`);
+  expect(cli.stdout).toContain('q3\ts1\t');
   expect((await shown.textContent()) ?? '').toBe(cli.stdout);
 });
 

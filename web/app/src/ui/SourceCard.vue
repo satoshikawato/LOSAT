@@ -96,13 +96,16 @@ const lineOf = (message: string | undefined) => {
 /**
  * The warning of a reader's error, with what to do (review L2 and M-a, 2026-11-20): a run that reaches it fails there, and
  * keeps only the outputs that the command line writes before it (line WQA's sweep, D15): the reports of the query batches
- * before the error's. The records of the error's batch have no results; with the error in the first batch (a query
- * shorter than a batch) no record has, and outfmt 0 keeps only its prolog (-html its page's head, outfmt 15 the start of
- * its JSON), while outfmt 5, 6 and 7 are empty. It says neither that the run ends with this error nor that it gives no
+ * before the error's. The records read together with the error, in its batch, have no results: a batch holds about 10000
+ * letters of BLASTP's queries and one record of PSI-BLAST's, which searches one query at a time, so the records before
+ * the error keep their results in PSI-BLAST and, in a query of 10000 letters or fewer, have none in BLASTP. With
+ * the error in the first batch outfmt 0 keeps only its prolog (-html its page's head, outfmt 15 the start of its JSON),
+ * while outfmt 5, 6 and 7 are empty. The sentence names no size and no program, so it holds for each (review r2 M1 and L1,
+ * 2026-11-27). It says neither that the run ends with this error nor that it gives no
  * results (line WQA's D28, 2026-11-27): an error that comes before it (a query ID repeated under -parse_deflines in an
- * earlier batch) ends the run first, and an error in a later batch comes after the hits of the batches before. A short
- * query is the run's (in a Combined input, all of its inputs): this input may be short, and yet the records of it that
- * close a batch of an earlier input's records keep their results (review r1 L1). The message is the run's:
+ * earlier batch) ends the run first, and an error in a later batch comes after the hits of the batches before. A batch is
+ * the run's (in a Combined input, all of its inputs): the records of this input that close a batch of an earlier input's
+ * records keep their results (review r1 L1). The message is the run's:
  * in a Combined input the line it names counts the inputs before this one, and with records excluded it counts the records
  * included (`SearchDraft`'s check), so the card adds this input's own line where the two differ (review L-b, 2026-11-20).
  */
@@ -111,7 +114,7 @@ const readerErrorText = (message: string) => {
   const run = lineOf(message);
   const where = own !== undefined && run !== undefined && own !== run ? ` (line ${own} of ${sourceName(props.source)})` : '';
   return [
-    `A run that reaches this error fails there, as the command line does: ${message} Only the records searched before it keep their results; in a short query, that is none. Correct that line${where} to search this input.`,
+    `A run that reaches this error fails there, as the command line does: ${message} The records searched before it keep their results; the records read together with it have none (PSI-BLAST reads one record at a time). Correct that line${where} to search this input.`,
     ...(sourcesAfter.value ? ['The run does not read the inputs after this one.'] : []),
   ].join(' ');
 };

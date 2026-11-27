@@ -89,8 +89,9 @@
   item T8a, RG DECISIONS T8-1; Owner-delegated, the same standing instruction);
   1.37 2026-11-27 (exception 9 withdrawn: a failed write of rpsbproc's report or standard error
   is NCBI's, the later writes dropped and the run going on to its exit status; rpsbproc's closed
-  pipe, of its report, its standard error, its version and its help, in exception 10; line RG item
-  T8b; Owner-delegated, the same standing instruction)
+  pipe, of its report, its standard error, its version and its help, in exception 10; makeblastdb's
+  volume files at a closed pipe of its log as NCBI's, exception 10; line RG item T8b;
+  Owner-delegated, the same standing instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -361,13 +362,15 @@ BLAST+.
    NCBI's ended process leaves its own. At a line of `EndBuild`, after the close (the reader
    closed at the line "Adding sequences from FASTA"), both leave the volume files without the
    metadata file, the same bytes. At the line "Adding sequences from FASTA" itself, before the
-   close, both leave the files of the volume that is still open and LMDB's data files, but not
-   the same: LOSAT's volume files hold what its writer has passed on (every sequence but the
-   last), where NCBI's file streams still hold part of it (NCBI 2.17.0: empty files for three
-   short sequences; for 400 sequences of 100,000 bases the same sequence file and 24,656 of
-   LOSAT's 29,976 header bytes), and NCBI's ended process also leaves LMDB's lock files
-   (`.ndb-lock`, `.ntf-lock`), which LOSAT's writer removes as it does after an error
-   (PD-LOSAT-DATABASE-SEARCH). A build that LOSAT
+   close, both leave the files of the volume that is still open and LMDB's data files. Since
+   version 1.37 (line RG item T8b) they hold the same bytes: the database's file buffers drop
+   what they still hold when the closed pipe ends the build (`writedb::ofstream::end_at_closed_pipe`),
+   as NCBI's ended process loses what its file streams hold (NCBI 2.17.0, 2026-11-27: empty
+   files for a few short sequences, nucleotide and protein, versions 4 and 5; for a volume cut by
+   `-max_file_sz` the same 32,976 header bytes and sequence file). Before, LOSAT's volume files
+   held what its writer had passed on (every sequence but the last). NCBI's ended process also
+   leaves LMDB's lock files (`.ndb-lock`, `.ntf-lock`), which LOSAT's writer removes as it does
+   after an error (PD-LOSAT-DATABASE-SEARCH). A build that LOSAT
    refuses at its end (mask data whose order NCBI takes from memory addresses) removes its files
    when the closed pipe meets the first line of `EndBuild`, so that LOSAT leaves no database it
    refuses. With `-logfile` naming a file nothing goes to the standard output, and the build runs
@@ -446,7 +449,8 @@ BLAST+.
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
    `blastdbcmd/metadata.rs` (`writedb::metadata::write_metadata`, `writedb::cout`),
    `taxonomy.rs`, `list.rs` and `mod.rs`; `writedb::build_db::endl` (`WriteDbError::ClosedPipe`)
-   and `writedb::makeblastdb::CoutLog` for makeblastdb's log; `makembindex::work::run`
+   and `writedb::makeblastdb::CoutLog` for makeblastdb's log (`writedb::ofstream::end_at_closed_pipe`
+   for its volume files); `makembindex::work::run`
    (`Failure::ClosedPipe`), `dbindex::factory::make_index` (`Stop::ClosedPipe`) and
    `dbindex::format::SuperHeader::save` for makembindex; `makeprofiledb::work::run`
    (`RunError::ClosedPipe`, `post_diag`, `ncbi_app::Diag::is_cerr`, `writedb::cout::cout`,
@@ -457,7 +461,8 @@ BLAST+.
    Tests:
    `tests/makeblastdb_closed_pipe.rs` (`a_closed_pipe_at_the_first_line_makes_no_file`,
    `an_old_database_of_the_name_is_left_as_it_was`, `logfile_builds_with_the_pipe_closed`,
-   `a_logfile_that_is_the_closed_pipe_makes_no_file`), `writedb/tests.rs`
+   `a_logfile_that_is_the_closed_pipe_makes_no_file`,
+   `a_reader_gone_before_the_sequences_leaves_the_volume_empty`), `writedb/tests.rs`
    (`a_closed_pipe_ends_the_build_at_its_line`), `tests/makembindex_closed_pipe.rs`
    (`normal_index_builds_complete_with_a_closed_stdout_pipe`,
    `show_filters_help_and_version_on_a_closed_pipe_end_silently`,

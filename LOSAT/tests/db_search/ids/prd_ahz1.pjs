@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_ahz1",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_ahz1 (parsed Seq-ids)",
+  "number-of-letters": 1500,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-25T04:06:00",
+  "number-of-volumes": 1,
+  "bytes-total": 51327,
+  "bytes-to-cache": 1649,
+  "files": [
+    "prd_ahz1.pdb",
+    "prd_ahz1.phr",
+    "prd_ahz1.pin",
+    "prd_ahz1.pog",
+    "prd_ahz1.pos",
+    "prd_ahz1.pot",
+    "prd_ahz1.psq",
+    "prd_ahz1.ptf",
+    "prd_ahz1.pto"
+  ]
+}

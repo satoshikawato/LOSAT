@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "zpApP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "zpApP",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-24T16:47:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49635,
+  "bytes-to-cache": 238,
+  "files": [
+    "zpApP.pdb",
+    "zpApP.phr",
+    "zpApP.pin",
+    "zpApP.pog",
+    "zpApP.pos",
+    "zpApP.pot",
+    "zpApP.psq",
+    "zpApP.ptf",
+    "zpApP.pto"
+  ]
+}

@@ -5017,7 +5017,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
@@ -6996,10 +7002,10 @@ fn search(
                         XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
-                // Outfmt 13 to 16 ask for the same refusal of NCBI's taxonomy cache at the first
-                // batch that reports a subject with a positive taxid (`read_reported_taxonomy`),
-                // which can be in a later block too: the search of all queries, which refuses
-                // before any byte.
+                // Outfmt 13 to 16 follow the same slot of NCBI's taxonomy cache through the loads
+                // of every batch (their prefetch or reports' reads where it is off), whose refusal
+                // can come at a later block too: the search of all queries, which refuses before
+                // any byte.
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
@@ -10845,11 +10851,7 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(
-        database,
-        &query_batches,
-        report_prep::prefetch_format(args.app, &requested_formats),
-    );
+    let reads = database::CallTitles::new(database, &query_batches);
     let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     resolve_seen_queries(

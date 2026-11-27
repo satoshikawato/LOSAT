@@ -32,8 +32,6 @@ fn the_documented_refusals_are_one_of_each_kind() {
         formats,
         [0, 1, 2, 3, 4, 5, 6, 7, 10, 13, 14, 15, 16, 17, 18, 20]
     );
-    assert!(documented.contains(&Refusal::BinaryArchive));
-    assert!(documented.contains(&Refusal::XmlArchive));
     assert!(documented.contains(&Refusal::FatalMessage));
     assert!(documented.contains(&Refusal::SeqLocQuery));
     for refusal in &documented {

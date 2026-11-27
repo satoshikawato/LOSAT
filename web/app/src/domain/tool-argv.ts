@@ -196,8 +196,11 @@ export interface MaskingArgvInput {
 }
 
 export interface MakeblastdbArgvInput {
-  /** The names that `-in` lists (files of the run directory, or a database's name), omitted when empty. */
-  readonly inputNames: readonly string[];
+  /**
+   * `-in`'s value as the command line takes it, omitted when empty: the files of the run as one list
+   * (`makeblastdbInputList`), or a database's name or list as the user typed it.
+   */
+  readonly input: string;
   /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
   readonly values: FormValues;
   /** Parsed `-xmlhelp` description (provides defaults and usage order). */
@@ -231,7 +234,10 @@ export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
  * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes.
  */
 export function makeblastdbInputList(names: readonly string[]): string {
-  return names.map((name) => (name.includes(' ') ? `"${name}"` : name)).join(' ');
+  return names
+    .filter((name) => name.trim() !== '')
+    .map((name) => (name.includes(' ') ? `"${name}"` : name))
+    .join(' ');
 }
 
 /**
@@ -241,8 +247,7 @@ export function makeblastdbInputList(names: readonly string[]): string {
  */
 export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly string[] {
   const argv: string[] = ['makeblastdb'];
-  const names = input.inputNames.filter((name) => name.trim() !== '');
-  if (names.length > 0) argv.push('-in', makeblastdbInputList(names));
+  if (input.input.trim() !== '') argv.push('-in', input.input);
   const ordered = makeblastdbParameters(input.description).filter((param) => param.flag !== '-in');
   pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
   pushExtraWords(argv, input.extra);

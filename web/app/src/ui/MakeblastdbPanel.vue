@@ -93,6 +93,15 @@ watch(changed, (count, before) => {
 const submittedFrom = ref<'top' | 'bottom'>('top');
 const messageBelow = computed(() => submittedFrom.value === 'bottom' && open.value);
 
+/**
+ * A message from outside the tab (a refused "Use as -mask_data in makeblastdb", which opens the tab at its top) shows
+ * at the top, not by the bottom Run LOSAT of an earlier run.
+ */
+function showMessagesAtTop(): void {
+  submittedFrom.value = 'top';
+}
+defineExpose({ showMessagesAtTop });
+
 async function submit(from: 'top' | 'bottom'): Promise<void> {
   if (state.value.submitting) return;
   submittedFrom.value = from;

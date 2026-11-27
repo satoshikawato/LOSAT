@@ -8,7 +8,7 @@
 // with a maskinfo `-outfmt` (asn1_bin to a -out file, asn1_bin and the default asn1_text to the standard output), and
 // its download is the native command line's bytes (the argv shown beside Run LOSAT, in a folder of the same files);
 // "Use as -mask_data in makeblastdb" then hands that file to the makeblastdb tab, whose database files are the native
-// makeblastdb's but the seconds of their dates (support/native-run.ts). One more run writes maskinfo_xml, which
+// makeblastdb's just before or just after the browser's run, but the seconds of their dates (support/makeblastdb-native.ts). One more run writes maskinfo_xml, which
 // makeblastdb does not read: its bytes are the native's and no hand-over is offered. Without the engine the same steps
 // run on the FakeEngine's outputs and nothing is compared.
 //
@@ -22,7 +22,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE } from './support/native';
-import { downloadAll, masked, nativeMakeblastdb, nativeRun, ZONE } from './support/native-run';
+import { asNative, downloadAll, maskedFiles, nativeRun } from './support/makeblastdb-native';
 import { openSearch, waitStatus } from './support/search';
 
 const SCREENSHOT_DIR = process.env['LOSAT_E2E_SCREENSHOT_DIR'];
@@ -304,6 +304,8 @@ test('Masking tab: FASTA files (a .gz read) shared by the tools, Separate runs, 
 // --- each tool through the form, its download against the native command line, then makeblastdb's -mask_data ---------
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
+/** The browser's time zone of the real-engine runs (`test.use`); the native runs use it as `TZ`. */
+const ZONE = 'Asia/Tokyo';
 
 interface MaskingCase {
   readonly tool: 'dustmasker' | 'segmasker' | 'convert2blastmask';
@@ -393,10 +395,10 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'run view overflow at 390px').toBeLessThanOrEqual(1);
       await page.setViewportSize(DESKTOP_VIEWPORT);
       if (real) {
-        const native = nativeRun(argv.slice(1), new Map([[inName, fasta]]));
+        const native = nativeRun(argv.slice(1), new Map([[inName, fasta]]), ZONE);
         expect(native.status, `native ${argv.slice(1).join(' ')}: ${native.stderr.toString()}`).toBe(0);
-        expect(made.equals(c.out === undefined ? native.stdout : native.made.get(c.out)!), `${c.tool} ${argv.slice(1).join(' ')}: the downloaded bytes`).toBe(true);
-        if (c.out !== undefined) expect([...native.made.keys()], 'the files the native run made').toEqual([c.out]);
+        expect(made.equals(c.out === undefined ? native.stdout : native.files.get(c.out)!), `${c.tool} ${argv.slice(1).join(' ')}: the downloaded bytes`).toBe(true);
+        if (c.out !== undefined) expect([...native.files.keys()], 'the files the native run made').toEqual([c.out]);
       }
 
       if (c.noMaskData) {
@@ -426,6 +428,14 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         ['input.fa', fasta],
         [maskName, made],
       ]);
+      // The native run just before the browser's and just after it: the browser's database is one of them, the seconds of
+      // its dates masked (makeblastdb-native.ts).
+      const nativeMade = () => {
+        const run = nativeRun(makeblastdbArgv, makeblastdbInputs, ZONE);
+        expect(run.status, `native ${makeblastdbArgv.join(' ')}: ${run.stderr.toString()}`).toBe(0);
+        return maskedFiles(run.files);
+      };
+      const before = real ? nativeMade() : undefined;
       await page.getByTestId('mk-run-losat').click();
       await waitStatus(page, 2, 'completed');
       await expect(page.getByTestId('tool-run-view')).toHaveAttribute('data-run', '2');
@@ -434,8 +444,8 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       const names = [...database.files.keys()];
       expect(names.some((name) => /^db\.[np]in$/.test(name)), `database files: ${names.join(' ')}`).toBe(true);
       if (real) {
-        const native = nativeMakeblastdb(makeblastdbArgv, makeblastdbInputs);
-        expect(masked(database.files), `${c.tool}: makeblastdb -mask_data ${maskName}`).toEqual(masked(native));
+        const browser = maskedFiles(database.files);
+        expect(browser, `${c.tool}: makeblastdb -mask_data ${maskName}`).toEqual(asNative(browser, [before!, nativeMade()]));
       }
 
       expect(external, 'requests outside the origin').toEqual([]);

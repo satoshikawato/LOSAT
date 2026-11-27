@@ -4,14 +4,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from 'losat';
 import { parseToolDescription } from 'losat/domain';
 import type { ToolEngine } from 'losat/ports';
-import { Coordinator, type EnqueueAllResult, type ToolRequest } from '../../src/application/coordinator';
+import { Coordinator, madeDatabaseFolder, type EnqueueAllResult, type ToolRequest } from '../../src/application/coordinator';
 import { MakeblastdbDraft } from '../../src/application/makeblastdb-draft';
-import { discoverBlastDatabases, primaryBlastDb } from '../../src/domain/blast-db';
+import { assembleSearchDirectory, discoverBlastDatabases, primaryBlastDb } from '../../src/domain/blast-db';
 import { tarArchive } from '../../src/domain/tar';
 import {
   buildMakeblastdbArgv,
   changedMakeblastdbOptionsCount,
   fileListNames,
+  makeblastdbInputList,
   maskDataName,
   refusedToolFields,
 } from '../../src/domain/tool-argv';
@@ -46,7 +47,7 @@ describe('makeblastdb domain helpers', () => {
   it('writes -in as the command line takes a list (spaces separate, quotes keep a name with spaces)', () => {
     expect(
       buildMakeblastdbArgv({
-        inputNames: ['input.fa', 'my genome.fa.gz'],
+        input: makeblastdbInputList(['input.fa', 'my genome.fa.gz']),
         values: { '-dbtype': 'nucl', '-parse_seqids': true, '-out': 'db', '-mask_data': 'a.asnb, b.asnb' },
         description: MK_DESC,
         extra: ['-logfile', 'run.log'],
@@ -65,7 +66,7 @@ describe('makeblastdb domain helpers', () => {
       '-logfile',
       'run.log',
     ]);
-    expect(buildMakeblastdbArgv({ inputNames: [], values: { '-dbtype': 'prot' }, description: MK_DESC })).toEqual([
+    expect(buildMakeblastdbArgv({ input: '', values: { '-dbtype': 'prot' }, description: MK_DESC })).toEqual([
       'makeblastdb',
       '-dbtype',
       'prot',
@@ -262,6 +263,29 @@ describe('MakeblastdbDraft', () => {
     expect(queued[0]!.argv).toEqual(['makeblastdb', '-in', 'in/old', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'new']);
   });
 
+  it('writes -in of -input_type blastdb as typed (a list of databases), and a found name with a space quoted, in the field too (WW4b2 R1 finding 1)', async () => {
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    draft.setField('-dbtype', 'nucl');
+    draft.setField('-out', 'merged');
+    const inOf = () => draft.previewCommandWords().slice(draft.previewCommandWords().indexOf('-in') + 1)[0];
+    draft.setDbIn('db1 db2');
+    expect(inOf()).toBe('db1 db2');
+    draft.setDbIn('"my db" db2');
+    expect(inOf()).toBe('"my db" db2');
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expect(queued[0]!.argv.slice(0, 3)).toEqual(['makeblastdb', '-in', '"my db" db2']);
+
+    const found = setup().draft;
+    await loaded(found);
+    found.setField('-input_type', 'blastdb');
+    found.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `my db.${ext}`)));
+    expect(found.state.get().dbIn).toBe('"my db"');
+    expect(found.previewCommandWords().slice(1, 4)).toEqual(['makeblastdb', '-in', '"my db"']);
+  });
+
   it('adds mask data to -mask_data as a list, once per file, and takes it away with the file', async () => {
     const { draft } = setup();
     const a = new File(['a'], 'wm.asnb');
@@ -282,10 +306,63 @@ describe('MakeblastdbDraft', () => {
     expect(state.values['-mask_data']).toBe('seg.asnb');
     draft.addMaskData(new File(['c'], 'wm.asnb'), 'wm.asnb', { kind: 'made', runNumber: 4 });
     draft.addMaskData(new File(['d'], 'seg.asnb'), 'seg.asnb', { kind: 'made', runNumber: 5 });
-    expect(draft.state.get().runFilesError).toBe('A file named "seg.asnb" is already in the run directory.');
+    state = draft.state.get();
+    expect(state.runFilesError).toBeUndefined();
+    expect(state.values['-mask_data']).toBe('seg.asnb,wm.asnb');
+    expect(state.runFiles.map((entry) => [entry.name, entry.origin])).toEqual([
+      ['seg.asnb', { kind: 'made', runNumber: 5 }],
+      ['wm.asnb', { kind: 'made', runNumber: 4 }],
+    ]);
     draft.resetOptions();
     state = draft.state.get();
     expect(state.values['-mask_data']).toBeUndefined();
+    expect(state.runFiles).toHaveLength(0);
+  });
+  it("replaces the mask data of an earlier run handed over under the same name, in its place (WW4b2 R1 finding 4)", async () => {
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setFastaPaste('>p\nMKV\n');
+    draft.setField('-dbtype', 'prot');
+    draft.addMaskData(new File(['a'], 'wm.asnb'), 'wm.asnb', { kind: 'made', runNumber: 1 });
+    draft.addMaskData(new File(['s'], 'seg.asnb'), 'seg.asnb', { kind: 'made', runNumber: 2 });
+    const later = new File(['bb'], 'wm.asnb');
+    draft.addMaskData(later, 'wm.asnb', { kind: 'made', runNumber: 3 });
+    const state = draft.state.get();
+    expect(state.values['-mask_data']).toBe('wm.asnb,seg.asnb');
+    expect(state.runFiles.map((entry) => [entry.name, entry.size, entry.origin])).toEqual([
+      ['wm.asnb', 2, { kind: 'made', runNumber: 3 }],
+      ['seg.asnb', 1, { kind: 'made', runNumber: 2 }],
+    ]);
+    expect(state.runFilesError).toBeUndefined();
+    expect(state.message).toBeUndefined();
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expect(queued[0]!.directory.find((entry) => entry.name === 'wm.asnb')?.file).toBe(later);
+  });
+
+  it('refuses mask data under the name of a file that the user opened, in the message at the top of the tab (WW4b2 R1 finding 4)', async () => {
+    const { draft } = setup();
+    await loaded(draft);
+    draft.addRunFiles([new File(['mine'], 'wm.asnb')]);
+    draft.addMaskData(new File(['a'], 'wm.asnb'), 'wm.asnb', { kind: 'made', runNumber: 1 });
+    const state = draft.state.get();
+    expect(state.message).toEqual({ kind: 'error', text: 'A file named "wm.asnb" is already in the run directory.' });
+    expect(state.runFilesError).toBeUndefined();
+    expect(state.values['-mask_data'] ?? '').toBe('');
+    expect(state.runFiles.map((entry) => [entry.name, entry.origin])).toEqual([['wm.asnb', undefined]]);
+  });
+
+  it('refuses mask data whose name holds a comma, which -mask_data cannot list, and says why (WW4b2 R1 finding 6)', async () => {
+    const { draft } = setup();
+    await loaded(draft);
+    draft.addMaskData(new File(['a'], 'a,b.asnb'), 'a,b.asnb', { kind: 'made', runNumber: 1 });
+    let state = draft.state.get();
+    expect(state.message).toEqual({ kind: 'error', text: 'A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.' });
+    expect(state.values['-mask_data'] ?? '').toBe('');
+    expect(state.runFiles).toHaveLength(0);
+    draft.setOptionFile('-mask_data', new File(['a'], 'a,b.asnb'));
+    state = draft.state.get();
+    expect(state.runFilesError).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
     expect(state.runFiles).toHaveLength(0);
   });
 });
@@ -336,7 +413,7 @@ describe('the results of a makeblastdb run', () => {
     });
     const made = await coordinator.madeDatabase(runId);
     expect(made.kind).toBe('protein');
-    expect([...made.names].sort()).toEqual(['db/mydb.phr', 'db/mydb.pin', 'db/mydb.psq']);
+    expect([...made.names].sort()).toEqual(['run1/db/mydb.phr', 'run1/db/mydb.pin', 'run1/db/mydb.psq']);
     expect(made.files.map((file) => file.name).sort()).toEqual(['mydb.phr', 'mydb.pin', 'mydb.psq']);
 
     await coordinator.exportToolFiles(runId);
@@ -345,6 +422,26 @@ describe('the results of a makeblastdb run', () => {
     const tar = new Uint8Array(await saved[0]!.blob.arrayBuffer());
     expect(tar.length % 512).toBe(0);
     expect(new TextDecoder().decode(tar.subarray(0, 100)).replace(/\0+$/, '')).toMatch(/^db\/mydb\.p(hr|in|sq)$/);
+  });
+
+  it("hands two runs' databases of one name to one search in two folders, one per run (WW4b2 R1 finding 3)", async () => {
+    const { coordinator } = makeCoordinator();
+    const request = (sequence: string): ToolRequest => ({
+      tool: 'makeblastdb',
+      stage: 'build',
+      argv: ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl'],
+      directory: [{ name: 'input.fa', file: new Blob([sequence]), origin: { kind: 'pasted' } }],
+    });
+    const first = await coordinator.madeDatabase(await finished(coordinator, request('>a\nACGT\n')));
+    const second = await coordinator.madeDatabase(await finished(coordinator, request('>b\nGGCC\n')));
+    expect([...first.names].sort()).toEqual(['run1/input.fa.nhr', 'run1/input.fa.nin', 'run1/input.fa.nsq']);
+    expect([...second.names].sort()).toEqual(['run2/input.fa.nhr', 'run2/input.fa.nin', 'run2/input.fa.nsq']);
+    expect(madeDatabaseFolder(2)).toBe('run2');
+    const directory = assembleSearchDirectory({
+      subjectDb: { discovery: await discoverBlastDatabases(first.files, first.names), selectedName: 'run1/input.fa' },
+      filteringDb: { discovery: await discoverBlastDatabases(second.files, second.names), selectedName: 'run2/input.fa' },
+    });
+    expect(directory.files.map((file) => file.name).sort()).toEqual([...first.names, ...second.names].sort());
   });
 
   it("hands a WindowMasker run's maskinfo output to makeblastdb's -mask_data", async () => {

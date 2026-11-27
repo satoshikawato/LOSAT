@@ -6,9 +6,10 @@
 //
 // With the real engine (LOSAT_WEB_REACTORS) and the native binary (LOSAT_WEB_NATIVE): a nucleotide version 5 database
 // with -parse_seqids made from pasted FASTA, and a protein database with -mask_data (seg) made from opened files, are the
-// native command line's files byte for byte but the seconds of their times (run in a folder of the same files, in the
-// browser's time zone), and the searches that "Use as Database (-db)" starts (blastn; blastp with -db_soft_mask 21) write
-// the native command line's outfmt 0 and 6 on the files that the browser made.
+// files of the native command line's run just before or just after the browser's byte for byte but the seconds of their
+// times (run in a folder of the same files, in the browser's time zone; support/makeblastdb-native.ts), and the searches
+// that "Use as Database (-db)" starts (blastn; blastp with -db_soft_mask 21) on the database in its run's folder
+// (run1/db, run3/pdb) write the native command line's outfmt 0 and 6 on the files that the browser made, in that folder.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the screens (empty tab, filled form, finished run, Search after "Use as Database
 // (-db)") at 1280 and 390 px, in the light and the dark colour scheme.
@@ -18,13 +19,14 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
+import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { downloadAll, folderOf, masked, nativeMakeblastdb, ZONE } from './support/native-run';
 import { openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
-// The engine writes the dates of a database in the browser's zone; the native runs use the same (support/native-run.ts).
+// The engine writes the dates of a database in the browser's zone; the native run below uses the same.
+const ZONE = 'Asia/Tokyo';
 test.use({ timezoneId: ZONE });
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
@@ -210,13 +212,13 @@ test('makeblastdb run: the files it made, Download all, Use as Database (-db), U
   await expect(page.getByTestId('search-panel')).toBeVisible();
   await expect(page.getByTestId('program-blastn')).toBeChecked();
   await expect(page.getByTestId('subject-source-database')).toBeChecked();
-  await expect(page.getByTestId('subject-db-selected')).toContainText('db/mydb');
+  await expect(page.getByTestId('subject-db-selected')).toContainText('run1/db/mydb');
   await shots(page, 'mk-search-after-use-as-database');
 
   await pickRun(page, 1);
   await page.getByTestId('tool-use-as-repeats-database').click();
   await expect(page.getByTestId('search-panel')).toBeVisible();
-  await expect(page.getByTestId('param-filtering_db-selected')).toContainText('db/mydb');
+  await expect(page.getByTestId('param-filtering_db-selected')).toContainText('run1/db/mydb');
 
   // A protein database: Use as Database (-db) chooses blastp, and there is no Repeats database button.
   await page.getByTestId('tab-makeblastdb').click();
@@ -227,7 +229,7 @@ test('makeblastdb run: the files it made, Download all, Use as Database (-db), U
   await expect(page.getByTestId('tool-use-as-repeats-database')).toHaveCount(0);
   await page.getByTestId('tool-use-as-database').click();
   await expect(page.getByTestId('program-blastp')).toBeChecked();
-  await expect(page.getByTestId('subject-db-selected')).toContainText('pdb');
+  await expect(page.getByTestId('subject-db-selected')).toContainText('run2/pdb');
 
   expect(external, 'requests outside the origin').toEqual([]);
 });
@@ -251,9 +253,51 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
   await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb');
   await expect(page.getByTestId('mk-run-files')).toContainText('windowmasker-run1.asnb');
   await expect(page.getByTestId('mk-options-changed')).toHaveText('(1 changed)');
+
+  // A later run's mask data under the name of an earlier run's takes its place (WW4b2 R1 finding 4).
+  await page.getByTestId('tab-windowmasker').click();
+  await page.getByTestId('wm-out').fill('wm.asnb');
+  for (const run of [2, 3]) {
+    await page.getByTestId('tab-windowmasker').click();
+    await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, run, 'completed');
+    await page.getByTestId('tool-use-as-mask-data').click();
+    await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb,wm.asnb');
+    await expect(page.getByTestId('mk-run-files-list').locator('.source-name')).toHaveText(['windowmasker-run1.asnb', 'wm.asnb']);
+    await expect(page.getByTestId('mk-run-files-error')).toHaveCount(0);
+    await expect(page.getByTestId('mk-message')).toHaveCount(0);
+  }
+
+  // A hand-over that the run directory refuses (a file that the user opened holds the name) says why at the top of the
+  // tab, where it opens, after a run from the bottom Run LOSAT too.
+  await page.getByTestId('mk-run-file-remove-1').click();
+  await page.getByTestId('mk-run-files-input').setInputFiles({ name: 'wm.asnb', mimeType: 'application/octet-stream', buffer: Buffer.from('mine') });
+  await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+  await settled(page);
+  await page.getByTestId('mk-run-losat-bottom').click();
+  await waitStatus(page, 4, 'completed');
+  await page.getByTestId('tab-windowmasker').click();
+  await page.getByTestId('wm-run-losat').click();
+  await waitStatus(page, 5, 'completed');
+  await page.getByTestId('tool-use-as-mask-data').click();
+  await expect(page.getByTestId('mk-message')).toHaveText('A file named "wm.asnb" is already in the run directory.');
+  await expect(page.getByTestId('mk-message-bottom')).toHaveCount(0);
+  await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb');
 });
 
 // --- the real engine, against the native command line ----------------------------------------------------------------
+
+/** The native makeblastdb's run of `argv` in a folder of `inputs`, in the browser's zone; a run that fails stops the test. */
+function nativeMade(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>): Written {
+  const run = nativeRun(argv, inputs, ZONE);
+  if (run.status !== 0) throw new Error(`native ${argv.join(' ')} exited ${run.status}: ${run.stderr.toString()}`);
+  return run;
+}
+
+/** `files` under `folder`: where "Use as Database (-db)" puts a run's database in Search (run<N>/, one folder per run). */
+const inFolder = (folder: string, files: ReadonlyMap<string, Buffer>) => [...files].map(([name, bytes]) => [`${folder}/${name}`, bytes] as const);
 
 /** The native search's outfmt `format` in a folder of `files` (the database that the browser made, and the query). */
 function nativeSearch(argv: readonly string[], files: ReadonlyMap<string, Buffer>, format: 0 | 6): string {
@@ -280,25 +324,25 @@ test('real engine: the databases of the tab are the native command line\'s, and 
   await openOptions(page);
   await page.getByTestId('mk-param-parse_seqids').check();
   await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in input.fa -dbtype nucl -parse_seqids -out db');
+  const nuclArgv = ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-out', 'db'];
+  const nuclInputs = new Map([['input.fa', Buffer.from(NUCL_FASTA)]]);
+  const nuclBefore = nativeMade(nuclArgv, nuclInputs);
   await runMakeblastdb(page, 1);
   const nucl = await downloadAll(page);
-  const nativeNucl = nativeMakeblastdb(
-    ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-out', 'db'],
-    new Map([['input.fa', Buffer.from(NUCL_FASTA)]]),
-  );
-  expect(masked(nucl.files)).toEqual(masked(nativeNucl));
+  const nuclAfter = nativeMade(nuclArgv, nuclInputs);
+  expect(maskedFiles(nucl.files)).toEqual(asNative(maskedFiles(nucl.files), [maskedFiles(nuclBefore.files), maskedFiles(nuclAfter.files)]));
 
   const query = readFileSync(join(LOSAT, 'tests/dropin_corpus/nq.fna'));
   await page.getByTestId('tool-use-as-database').click();
-  await expect(page.getByTestId('subject-db-selected')).toContainText('db');
+  await expect(page.getByTestId('subject-db-selected')).toContainText('run1/db');
   await paste(page, 'query', query.toString('utf8'));
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   await page.getByTestId('run-losat').click();
   await waitStatus(page, 2, 'completed');
-  const nuclFiles = new Map([...nucl.files, ['q.fna', query]]);
+  const nuclFiles = new Map([...inFolder('run1', nucl.files), ['q.fna', query]]);
   for (const format of [0, 6] as const) {
     const shown = await result(page, 2, format);
-    expect(shown.output, `blastn -db outfmt ${format}`).toBe(nativeSearch(['blastn', '-db', 'db', '-query', 'q.fna'], nuclFiles, format));
+    expect(shown.output, `blastn -db outfmt ${format}`).toBe(nativeSearch(['blastn', '-db', 'run1/db', '-query', 'q.fna'], nuclFiles, format));
   }
 
   // 2. A protein database with -mask_data (seg) from opened files; blastp -db_soft_mask 21 on it.
@@ -312,20 +356,23 @@ test('real engine: the databases of the tab are the native command line\'s, and 
   await page.getByTestId('mk-param-parse_seqids').uncheck();
   await page.getByTestId('mk-param-mask_data-file').setInputFiles({ name: 'seg.asnb', mimeType: 'application/octet-stream', buffer: seg });
   await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in prot.faa -dbtype prot -mask_data seg.asnb -out pdb');
+  await shots(page, 'mk-mask-data-form');
+  const protArgv = ['makeblastdb', '-in', 'prot.faa', '-dbtype', 'prot', '-mask_data', 'seg.asnb', '-out', 'pdb'];
+  const protInputs = new Map([
+    ['prot.faa', protein],
+    ['seg.asnb', seg],
+  ]);
+  const protBefore = nativeMade(protArgv, protInputs);
   await runMakeblastdb(page, 3);
+  await expect(page.getByTestId('tool-output-text')).toContainText('Adding sequences from FASTA');
+  await shots(page, 'mk-mask-data-finished');
   const prot = await downloadAll(page);
-  const nativeProt = nativeMakeblastdb(
-    ['makeblastdb', '-in', 'prot.faa', '-dbtype', 'prot', '-mask_data', 'seg.asnb', '-out', 'pdb'],
-    new Map([
-      ['prot.faa', protein],
-      ['seg.asnb', seg],
-    ]),
-  );
-  expect(masked(prot.files)).toEqual(masked(nativeProt));
+  const protAfter = nativeMade(protArgv, protInputs);
+  expect(maskedFiles(prot.files)).toEqual(asNative(maskedFiles(prot.files), [maskedFiles(protBefore.files), maskedFiles(protAfter.files)]));
 
   await page.getByTestId('tool-use-as-database').click();
   await expect(page.getByTestId('program-blastp')).toBeChecked();
-  await expect(page.getByTestId('subject-db-selected')).toContainText('pdb');
+  await expect(page.getByTestId('subject-db-selected')).toContainText('run3/pdb');
   await paste(page, 'query', protein.toString('utf8'));
   await page.getByTestId('subject-db-filters-toggle').click();
   await page.getByTestId('db-mask-mode').selectOption('soft');
@@ -333,12 +380,12 @@ test('real engine: the databases of the tab are the native command line\'s, and 
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   await page.getByTestId('run-losat').click();
   await waitStatus(page, 4, 'completed');
-  const protFiles = new Map([...prot.files, ['q.faa', protein]]);
+  const protFiles = new Map([...inFolder('run3', prot.files), ['q.faa', protein]]);
   for (const format of [0, 6] as const) {
     const shown = await result(page, 4, format);
     expect(shown.command, 'blastp command').toContain('-db_soft_mask 21');
     expect(shown.output, `blastp -db -db_soft_mask 21 outfmt ${format}`).toBe(
-      nativeSearch(['blastp', '-db', 'pdb', '-query', 'q.faa', '-db_soft_mask', '21'], protFiles, format),
+      nativeSearch(['blastp', '-db', 'run3/pdb', '-query', 'q.faa', '-db_soft_mask', '21'], protFiles, format),
     );
   }
 

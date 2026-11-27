@@ -488,8 +488,8 @@ What: the reading of the BitMagic data in the Seq-tables of a PSSM query (the BV
 that psiblast and tblastn -in_pssm read), ported from BitMagic's deserializer (bm.h,
 bmblocks.h, bmconst.h, bmdef.h, bmfunc.h, bmserial.h, bmsimd.h, bmsse2.h, bmsse4.h,
 bmsse_util.h, encoding.h); in the tests, the encoder of encoding.h (bit_out).
-Files: src/algorithm/pssm_search/annot_index/bitmagic.rs,
-src/algorithm/pssm_search/annot_index/bitmagic_tests.rs.
+Files: src/objmgr/annot_index/bitmagic.rs,
+src/objmgr/annot_index/bitmagic_tests.rs.
 License: Apache License 2.0. BitMagic's license.txt, then the Apache License 2.0 that it
 names:
 

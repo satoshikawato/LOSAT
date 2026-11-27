@@ -361,7 +361,7 @@ pub enum Value {
     Bool(bool),
     /// NULL; or, as an element of a list of `CRef<>`s, the empty reference that an element stated
     /// as `NULL` leaves (`read::TypedReader::next_element`): the program that uses the list
-    /// dereferences it where NCBI's does (`blastinput::pssm_text`, `pssm_search::annot_index`),
+    /// dereferences it where NCBI's does (`blastinput::pssm_text`, `objmgr::annot_index`),
     /// and the writers throw where they reach it (`Encoder::null_element`).
     Null,
     Real(f64),

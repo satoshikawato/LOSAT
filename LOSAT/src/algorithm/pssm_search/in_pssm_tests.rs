@@ -2,12 +2,12 @@ use super::*;
 use crate::report::serial::asn_types::Value;
 
 /// The text of the stop `abort`: NCBI's report, or LOSAT's refusal.
-fn abort_text(abort: &super::super::annot_index::Abort) -> String {
+fn abort_text(abort: &crate::objmgr::annot_index::Abort) -> String {
     match abort {
-        super::super::annot_index::Abort::Native { message, .. } => {
+        crate::objmgr::annot_index::Abort::Native { message, .. } => {
             String::from_utf8(message.clone()).unwrap()
         }
-        super::super::annot_index::Abort::Refused(text) => text.clone(),
+        crate::objmgr::annot_index::Abort::Refused(text) => text.clone(),
     }
 }
 
@@ -390,7 +390,7 @@ fn ncbis_unit_test_pssms_are_read_or_refused() {
     assert!(search.request.is_none() && !search.joins_scope());
     assert_eq!(
         search.annot.abort,
-        Some(super::super::annot_index::Abort::Native {
+        Some(crate::objmgr::annot_index::Abort::Native {
             exit: 255,
             message: b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
           NCBI-Seqset::Seq-entry.not set\n\n"

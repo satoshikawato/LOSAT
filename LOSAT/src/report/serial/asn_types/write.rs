@@ -178,7 +178,7 @@ fn write_document_until<E: Encoder>(
 
 /// What an output stream that has failed gets of `value` written as a document of the named type
 /// `ty` (an object written after `MSerial_AsnText` in a message of NCBI's diagnostic stream after
-/// it failed, `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to
+/// it failed, `objmgr::annot_index`): the bytes that NCBI's buffer held when it first wrote to
 /// the stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
 /// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer first
 /// flushed. NCBI's writing stops there: the first pass follows its buffer to find how many bytes it

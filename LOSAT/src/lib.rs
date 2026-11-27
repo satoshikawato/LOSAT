@@ -66,6 +66,9 @@ pub(crate) mod seqid;
 /// The mask readers and writers of NCBI's masking tools (`dustmasker`, `segmasker`,
 /// `windowmasker`, `convert2blastmask`); makembindex reads its sequences through them too.
 pub(crate) mod seqmasks_io;
+// NCBI objmgr/: the object manager's index of a Seq-entry's annotations as the entry joins a scope
+// (psiblast and tblastn `-in_pssm`, makeblastdb's ASN.1 input).
+pub(crate) mod objmgr;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and c++/src/app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub(crate) mod writedb;

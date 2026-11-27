@@ -66,7 +66,7 @@ pub struct PssmQuery {
 
 /// The PSSM's `query Seq-entry`: its `seq` variant, the Bioseq that the search reads, or its `set`
 /// variant, a Bioseq-set as the generic reader read it, which NCBI's object manager takes with its
-/// annotations (`pssm_search::annot_index::index_entry`) and NCBI's application then stops at
+/// annotations (`objmgr::annot_index::index_entry`) and NCBI's application then stops at
 /// (`CSeq_entry::GetSeq()`, `pssm_search::in_pssm::psi_search_and_object`).
 // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:58-60,63
 #[derive(Debug, Clone, PartialEq)]

@@ -680,7 +680,7 @@ impl Drop for MainDiagGuard {
 
 /// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X` of
 /// the object manager, subcode 6, with "Failed to parse location of " and `s.rdbuf()`,
-/// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
+/// `objmgr::annot_index`): the run's later posts print their header only
 /// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast or
 /// tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`; each
 /// call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.

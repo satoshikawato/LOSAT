@@ -1746,7 +1746,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `a_nest_of_any_depth_is_read_without_recursion` (`LOSAT/src/report/serial/asn_types/read_tests.rs`),
     `a_nest_of_any_depth_is_written_without_recursion` (`write_tests.rs`),
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
-    (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
+    (`LOSAT/src/objmgr/annot_index/tests.rs`, `table_tests.rs`).
 
 ## Approved exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.107)
 

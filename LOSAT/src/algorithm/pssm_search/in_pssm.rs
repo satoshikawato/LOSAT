@@ -482,7 +482,7 @@ fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRe
 /// messages and exception; no rows, values, request or PSSM files (NCBI reads none of them).
 fn stopped_as_query_joins_scope(
     pssm: PssmWithParameters,
-    annot: super::annot_index::AnnotOutcome,
+    annot: crate::objmgr::annot_index::AnnotOutcome,
     defline_reads_annot: bool,
 ) -> (PsiSearch, InPssmFile) {
     // A query Seq-entry set has no Bioseq of its own: an empty record.
@@ -555,15 +555,15 @@ const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exceptio
 /// (NCBI BLAST+ 2.17.0: `CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.not
 /// set`, exit status 255; PS6 corpus `e.stop`, `r.ch.q.star`.)
 pub(crate) fn psi_search_unset_query(pssm: PssmWithParameters) -> (PsiSearch, InPssmFile) {
-    let annot = super::annot_index::AnnotOutcome {
-        abort: Some(super::annot_index::Abort::of(
+    let annot = crate::objmgr::annot_index::AnnotOutcome {
+        abort: Some(crate::objmgr::annot_index::Abort::of(
             crate::cli::NativeError::exception(&NcbiException::new(
                 SEQ_ENTRY_GET_SEQ,
                 "CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.not set",
             )),
             false,
         )),
-        ..super::annot_index::AnnotOutcome::default()
+        ..crate::objmgr::annot_index::AnnotOutcome::default()
     };
     stopped_as_query_joins_scope(pssm, annot, false)
 }
@@ -625,9 +625,9 @@ pub(crate) fn psi_search_and_object_of(
             .refused(exception, IN_PSSM_ANNOT)?;
         Some(reader.refuse(refused).to_string())
     };
-    let mut annot = super::annot_index::index_entry(&program, entry, reader.database, &get_refusal)
+    let mut annot = crate::objmgr::annot_index::index_entry(&program, entry, reader.database, &get_refusal)
         .unwrap_or_else(|refusal| {
-            super::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
+            crate::objmgr::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
         });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (c++/src/app/blast/tblastn_app.cpp:228)
     // A query Seq-entry set that the object manager took ends the run here: `GetSeq()` of a set is
@@ -637,7 +637,7 @@ pub(crate) fn psi_search_and_object_of(
         SeqEntry::Seq(query) => Some(query.as_ref()),
         SeqEntry::Set(_) => {
             if annot.abort.is_none() {
-                annot.abort = Some(super::annot_index::Abort::of(
+                annot.abort = Some(crate::objmgr::annot_index::Abort::of(
                     crate::cli::NativeError::exception(&NcbiException::new(
                         SEQ_ENTRY_GET_SEQ,
                         "CSeq_entry::GetSeq(): Invalid choice selection: NCBI-Seqset::Seq-entry.set",

@@ -230,7 +230,7 @@ fn pssm(mut value: Value) -> Result<Pssm, PssmReadError> {
 
 // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:292-308
 /// The query's `Seq-entry`: its `seq` variant, a Bioseq, or its `set` variant as read (whose
-/// elements stated as `NULL` the object manager's step meets, `pssm_search::annot_index`). An
+/// elements stated as `NULL` the object manager's step meets, `objmgr::annot_index`). An
 /// element of the Bioseq's `id` stated as `NULL` is refused: NCBI's object manager dereferences
 /// each Seq-id when the query joins its scope (`CBioseq_Info`), and its report of the exception
 /// prints memory addresses (psiblast and tblastn 2.17.0, rc 255, probe D3c-3b `t_id_elem_null`,

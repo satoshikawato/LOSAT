@@ -3,7 +3,7 @@
 //! by (`c++/src/app/blastdb/masked_range_set.hpp`, `.cpp`: a `map<CSeq_id_Handle, CConstRef<CSeq_loc>>`
 //! per algorithm, filled with `CSeq_id_Handle::GetHandle` of the id and looked up the same way), and
 //! that the object manager keys the ranges of a PSSM query's annotations by
-//! (`algorithm::pssm_search::annot_index`, `CHandleRangeMap`; psiblast and tblastn `-in_pssm`
+//! (`objmgr::annot_index`, `CHandleRangeMap`; psiblast and tblastn `-in_pssm`
 //! probes of line RG D3-1, `om/` cases `s_i*` and `s_o*`, agree with the rules below and with
 //! [`mask_handle_order`]).
 //!
@@ -612,7 +612,7 @@ fn push_opt_i32(key: &mut Vec<u8>, value: Option<i32>) {
 /// NCBI's `CSeq_id_Giim_Tree` ([`TreeHandle::Giim`]): the live handles of each `giim` number, in
 /// the order they were made, each with the Giimport-id it was made from (`GetSeqId()` of the
 /// info). The one model of the tree: `makeblastdb`'s mask ranges (`writedb::mask_data::range_set`)
-/// and the object manager's index and attach of a PSSM query (`algorithm::pssm_search::annot_index`)
+/// and the object manager's index and attach of a PSSM query (`objmgr::annot_index`)
 /// keep their handles in it and drop each one when the last thing holding it goes.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct GiimTree {

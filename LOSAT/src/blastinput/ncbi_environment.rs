@@ -79,7 +79,7 @@ const REJECTED_VARIABLES: &[&str] = &[
     // With `OBJECTS_PACK_TEXTID=0` a GenBank, EMBL or DDBJ accession no longer matches the same
     // accession of another of the three; with `OBJECTS_PACK_GENERAL=0` the order of the ranges of
     // two `general` ids changes (and both change the order of the messages of a PSSM query's
-    // annotations, `algorithm::pssm_search::annot_index`). Refused at any value, NCBI's default 1 included: accepting it
+    // annotations, `objmgr::annot_index`). Refused at any value, NCBI's default 1 included: accepting it
     // would mean porting how NCBI reads a bool parameter, for a setting nobody gives. The registry
     // forms (`[OBJECTS] PACK_TEXTID` in a registry file, `NCBI_CONFIG__OBJECTS__PACK_TEXTID`) are
     // not harmless entries, so they are refused like every entry LOSAT does not know.

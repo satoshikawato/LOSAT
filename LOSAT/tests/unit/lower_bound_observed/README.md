@@ -12,7 +12,7 @@ asks about the same elements in the same order as `std::lower_bound` did here. T
 stands for NCBI's other calls of `lower_bound` whose elements nothing checks for order: the units
 of a binary windowmasker file (`CSeqMaskerUsetArray::get_info`, `LOSAT/src/utils/winmask/istat.rs`)
 and the `indexes` of a Seq-table's sparse index (`CSeqTable_sparse_index::GetIndexAt`,
-`LOSAT/src/algorithm/pssm_search/annot_index/table.rs`).
+`LOSAT/src/objmgr/annot_index/table.rs`).
 
 The order was observed, not taken from any library's source: `observe_lower_bound.cpp` passes
 `std::lower_bound` a comparator that records every call it receives (the index of the element and

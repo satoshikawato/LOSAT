@@ -13,7 +13,6 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2826
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:113-126
 
-pub(crate) mod annot_index;
 pub(crate) mod evalue;
 pub(crate) mod gapalign;
 pub(crate) mod in_pssm;
@@ -25,6 +24,7 @@ pub(crate) mod traceback0;
 pub(crate) mod ungapped;
 
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::objmgr::annot_index;
 use crate::stats::KarlinParams;
 
 /// The statistical values of a PSSM's `finalData`, each `None` where NCBI's getter gives

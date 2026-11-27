@@ -1,0 +1,2 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+anything,Query_1,100.000,148,0,0,1,148,1,148,1.57e-81,225

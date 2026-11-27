@@ -2278,9 +2278,11 @@ impl BlastpReport {
     }
 
     /// The call's reports `formats` as line RG item X7 sorts them
-    /// (`report::query_bioseq::FoundWriters`): psiblast's rounds that make the next round's PSSM
-    /// (`round`, `PsiRoundIo::may_make_next`) read the found query's letters for it.
+    /// (`report::query_bioseq::FoundWriters`): psiblast's calls that make a PSSM of the found
+    /// query's letters (`psi_reads`: a round that makes the next round's PSSM or the last one
+    /// saved, and the one round of `-save_pssm_after_last_round`; review 1 of X7-1, B5).
     fn found_writers(
+        args: &ResolvedBlastpArgs,
         formats: &[BlastpReport],
         round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
     ) -> crate::report::query_bioseq::FoundWriters<'static> {
@@ -2304,8 +2306,7 @@ impl BlastpReport {
                     }
                 })
                 .collect(),
-            search_reads: round
-                .is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next),
+            search_reads: Self::psi_reads(args, round),
         }
     }
 
@@ -2326,7 +2327,7 @@ impl BlastpReport {
                 && !psi_reads
                 && args.psi_search.is_none()
                 && args.phi.is_none()))
-            && Self::found_writers(formats, None).shows_shown()
+            && Self::found_writers(args, formats, None).shows_shown()
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
@@ -6630,7 +6631,7 @@ fn search(
                 .query_scopes
                 .as_ref()
                 .map(|scopes| scopes.numbered_from(0)),
-            prefetch_scope: None,
+            scope_records: None,
             strategy_next: next,
             call_requests: None,
             x_plan_blocks: true,
@@ -7045,7 +7046,7 @@ fn search(
                                     .query_scopes
                                     .as_ref()
                                     .map(|scopes| scopes.numbered_from(block.start)),
-                                prefetch_scope: None,
+                                scope_records: None,
                                 strategy_next: None,
                                 call_requests: None,
                                 x_plan_blocks: false,
@@ -8842,7 +8843,7 @@ fn reports_then_engine_error(
         // BLASTP and psiblast's PHI-BLAST round (no PSSM): no psiblast PSSM stops here.
         stopped_pssms: None,
         query_scopes: reports.query_scopes,
-        prefetch_scope: None,
+        scope_records: None,
         strategy_next: None,
         call_requests: None,
         x_plan_blocks: false,
@@ -8871,6 +8872,15 @@ fn reports_then_engine_error(
         return error;
     }
     crate::blastinput::app::engine_error(text)
+}
+
+/// The query records of a run (`records`) and the input records of one batch among them
+/// (`start..end`): psiblast's round of a query (`BlastpReports::scope_records`).
+#[derive(Clone, Copy)]
+pub(super) struct ScopeRecords<'a> {
+    pub(super) records: &'a [FastaRecord],
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
 /// What the reports of the searched batches need besides the search: the reader's
@@ -8914,11 +8924,12 @@ struct BlastpReports<'a> {
     /// subjects must not have (`ListedTitles::refuse_ids_of_queries`); `None` elsewhere.
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
     /// psiblast's round of a query (`psi_round`), a call of its own one record: the query records
-    /// that NCBI's scope holds at the round's prefetch (the query's batch, the records that
-    /// `-query_loc` skips before it included, or the PSSM's query of `-in_pssm`), made only where
-    /// the prefetch stops (`common::database::PrefetchQueries`); `None` elsewhere: the call's
-    /// batches are its input records (`report_prep::prefetch_reported_subjects`).
-    prefetch_scope: Option<&'a (dyn Fn() -> crate::blastinput::query_batch::QueryScope + Sync)>,
+    /// of the run and the query's batch among them, of which NCBI's scope holds the batch's (the
+    /// records that `-query_loc` skips before the query included; in outfmt 5 those before too)
+    /// at the round's prefetch and its reports (`report_prep::ReportPrep::scope_records`; the
+    /// PSSM's query of `-in_pssm`, `ReportPrep::batch_scope`); `None` elsewhere: the call's
+    /// batches are its input records.
+    scope_records: Option<ScopeRecords<'a>>,
     /// `-export_search_strategy`: the batch whose request the run writes right after this call's
     /// batches are reported (`NextRequest`), set by the caller.
     strategy_next: Option<NextRequest<'a>>,
@@ -8948,7 +8959,7 @@ impl<'a> BlastpReports<'a> {
             psi_round: None,
             stopped_pssms: None,
             query_scopes: None,
-            prefetch_scope: None,
+            scope_records: None,
             strategy_next: None,
             call_requests: None,
             x_plan_blocks: false,
@@ -9916,6 +9927,9 @@ fn resolve_seen_queries(
         protein: true,
         writers: &crate::report::query_bioseq::FoundWriters::NONE,
         taxdb: false,
+        load_texts: true,
+        // `-parse_deflines` ids only: the generated ids are `report_prep`'s.
+        found: crate::report::query_bioseq::NOT_COMPARED,
     };
     titles.refuse_ids_of_queries(hit_lists, scopes, &run)
 }

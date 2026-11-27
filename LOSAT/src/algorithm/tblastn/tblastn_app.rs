@@ -1600,30 +1600,26 @@ fn pairwise_reading(
     ))
 }
 
-/// The queries that NCBI's scope holds for the reports of the batch of the searched queries
-/// `searched` without `-parse_deflines` (`query_batch::GeneratedQueries`): the PSSM's query of
-/// `-in_pssm` (`PsiSearch::query_scope`), else the generated ids of the batch's input records
-/// (`input_records`, cut into batches by `query_input`), in outfmt 5 (`xml`) the whole run's.
-fn generated_scope(
+/// The query records that NCBI's scope holds for the batch whose input records are `input`, the
+/// one producer for the check of line RG item X7 (`query_batch::GeneratedQueries`) and the
+/// prefetch (`shared::PrefetchQueries`; review 1 of X7-1, S1): the PSSM's query of `-in_pssm`
+/// (`PsiSearch::query_scope`), else the input records that NCBI's reader added for the batch
+/// (`RangedBatch::input` of `input_records`: the records that `-query_loc` drops included,
+/// numbered in the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter
+/// keeps (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those before them too, up
+/// to the record `xml_end` (`Some`; the prefetch: the batch's last; the reports: every record of
+/// the run, so that a later batch's query, which NCBI's kept scope searches as the sequence, is
+/// found).
+fn scope_of_batch(
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
     input_records: &[FastaRecord],
-    query_input: &crate::blastinput::seq_range::QueryInput,
-    batch_size: u32,
-    xml: bool,
-    searched: &std::ops::Range<usize>,
+    input: std::ops::Range<usize>,
+    xml_end: Option<usize>,
 ) -> crate::blastinput::query_batch::QueryScope {
     if let Some(psi) = pssm {
         return psi.query_scope();
     }
-    let input = if xml {
-        0..input_records.len()
-    } else {
-        query_input
-            .batches(batch_size)
-            .into_iter()
-            .find(|batch| batch.searched == *searched)
-            .map_or(0..0, |batch| batch.input)
-    };
+    let input = xml_end.map_or(input, |end| 0..end.min(input_records.len()));
     crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
 }
 
@@ -2106,11 +2102,13 @@ fn search(
                 resolved.html.as_deref(),
             )?;
         }
-        for range in query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
+        // The batches, made here only (review 3 of line DBID loadord, M1): the loop's and the
+        // prefetch's (`batch_scope`).
+        let ranged_batches = query_input.batches(batch_size);
+        for (range, batch_input) in ranged_batches
+            .iter()
+            .map(|batch| (batch.searched.clone(), batch.input.clone()))
+            .filter(|(searched, _)| !searched.is_empty() && searched.end <= searched_done)
         {
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-280
             // The batch's search strategy request (`-export_search_strategy`): once its query
@@ -2275,18 +2273,19 @@ fn search(
                     protein: true,
                     writers: &writers,
                     taxdb: database.taxdb_found(),
+                    load_texts: database.loads_write_texts(),
+                    // A protein query is never compared with the nucleotide sequence.
+                    found: crate::report::query_bioseq::NOT_COMPARED,
                 };
                 let xml = crate::blastinput::query_batch::outfmts_have_xml(
                     outputs.formats.iter().map(|format| format.outfmt),
                 );
                 let generated = || {
-                    generated_scope(
+                    scope_of_batch(
                         pssm.as_deref(),
                         input_records,
-                        &query_input,
-                        batch_size,
-                        xml,
-                        &range,
+                        batch_input.clone(),
+                        xml.then_some(usize::MAX),
                     )
                 };
                 let batch_queries =
@@ -2298,7 +2297,11 @@ fn search(
                         .enumerate()
                         .flat_map(|(index, hitlist)| {
                             hitlist.lists().iter().filter_map(move |list| {
-                                Some((range.start + index, u32::try_from(list.oid).ok()?))
+                                Some((
+                                    range.start + index,
+                                    u32::try_from(list.oid).ok()?,
+                                    Vec::<std::ops::Range<usize>>::new,
+                                ))
                             })
                         }),
                     database.oid_map(),
@@ -2361,18 +2364,13 @@ fn search(
         let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
             outputs.formats.iter().map(|format| format.outfmt),
         );
-        // The batches are made here only (review 3 of line DBID loadord, M1).
         let batch_scope = |span: &std::ops::Range<usize>| {
-            if let Some(psi) = pssm.as_deref() {
-                return psi.query_scope();
-            }
-            let input = query_input
-                .batches(batch_size)
-                .into_iter()
+            let input = ranged_batches
+                .iter()
                 .find(|batch| batch.searched == *span)
-                .map_or(0..0, |batch| batch.input);
-            let input = if xml_scope { 0..input.end } else { input };
-            crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
+                .map_or(0..0, |batch| batch.input.clone());
+            let xml_end = xml_scope.then_some(input.end);
+            scope_of_batch(pssm.as_deref(), input_records, input, xml_end)
         };
         // A batch whose prefetch loads a subject whose lookup fails on a file stops the run in
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is

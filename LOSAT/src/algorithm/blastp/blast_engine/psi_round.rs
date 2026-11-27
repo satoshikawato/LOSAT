@@ -261,20 +261,21 @@ fn run_queries(
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
         // (cited at `seq_range::cut_queries`: a record whose range starts past its end is
         // dropped from the batch after its reader added it to the scope)
-        // NCBI's scope at each round's prefetch (`BlastpReports::prefetch_scope`), made only where
-        // it stops: the input records that NCBI's reader read for the query's batch (those that
-        // `-query_loc` drops before the query included; each with its `Query_N` of the run,
-        // `FastaRecord::local_id`), which every round of the query keeps; with `-in_pssm` the
-        // PSSM's query (`PsiSearch::query_scope`; a later round's PSSM has no ids of its own).
+        // NCBI's scope at each round's prefetch and reports (`BlastpReports::scope_records`): the
+        // input records that NCBI's reader read for the query's batch (those that `-query_loc`
+        // drops before the query included; each with its `Query_N` of the run,
+        // `FastaRecord::local_id`), which every round of the query keeps; in outfmt 5, whose scope
+        // `ResetScopeHistory` keeps, those of the batches before too (review 1 of X7-1, B6); with
+        // `-in_pssm` the PSSM's query (`PsiSearch::query_scope`; a later round's PSSM has no ids
+        // of its own).
         let input_end = batches
             .starts
             .get(batch + 1)
             .map_or(batches.input_done, |&(input, _)| input);
-        let batch_records = &query_records[input_start..input_end];
-        let pssm_query = args.psi_search.as_deref();
-        let prefetch_scope = || match pssm_query {
-            Some(psi) => psi.query_scope(),
-            None => crate::blastinput::query_batch::QueryScope::of_shown_records(batch_records),
+        let scope_records = super::ScopeRecords {
+            records: query_records,
+            start: input_start,
+            end: input_end,
         };
         // The query as round 1 searches it, in every round: with `-query_loc` its range of the
         // record (`placement`; the PSSM is made of the whole record, `next_pssm`, and searched
@@ -496,7 +497,7 @@ fn run_queries(
                         .query_scopes
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(query)),
-                    prefetch_scope: Some(&prefetch_scope),
+                    scope_records: Some(scope_records),
                     strategy_next: None,
                     call_requests: None,
                     x_plan_blocks: false,

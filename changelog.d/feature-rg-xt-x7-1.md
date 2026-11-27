@@ -6,5 +6,8 @@
   that the taxonomy database names, and `psiblast` rounds that make the next PSSM, in all eight
   search programs. LOSAT wrote the sequence's own output there, which differed from NCBI's
   (before: only `-outfmt 1` to `4` of five programs and some `rpsblast` and `rpstblastn`
-  formats were refused). `-outfmt 8`, `9`, `11`, `12` and `17`, and tables that read nothing of
-  the sequence, still give NCBI's output.
+  formats were refused). `-outfmt 8`, `9`, `11`, `12` and `17`, tables that read nothing of
+  the sequence, and tables that read only its length and letters where the query is the sequence
+  letter for letter (a copy of the query in the database), still give NCBI's output; so does
+  `rpsblast`'s and `rpstblastn`'s organism report of a profile with a taxid when no taxonomy
+  database names it, which LOSAT refused before.

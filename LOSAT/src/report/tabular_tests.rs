@@ -1552,8 +1552,8 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             Some(spec),
             program,
             ident,
-            taxid,
-            taxdb,
+            (taxid, taxdb),
+            &crate::report::query_bioseq::FoundMatch::default,
         )
     };
     let refuses =
@@ -1580,10 +1580,18 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
         ] {
             assert!(refuses(fields, program, 5, false), "{fields} {program:?}");
         }
-        // Taxonomy: only where the profile has a taxid.
+        // Taxonomy: only where the profile has a taxid; its names only with a taxonomy database
+        // (without one both print `N/A`, probe `rps.f6tx` of `x71/fix2/rps18`; review 1, N4).
         for fields in ["qseqid staxid", "qseqid ssciname", "qseqid sskingdoms"] {
             assert!(!refuses(fields, program, 5, false), "{fields} {program:?}");
             assert!(refuses(fields, program, 5, true), "{fields} {program:?}");
+        }
+        assert!(differs(&csv("qseqid staxid"), program, 5, true, false));
+        for fields in ["qseqid ssciname", "qseqid sskingdoms", "qseqid scomnames"] {
+            assert!(
+                !differs(&csv(fields), program, 5, true, false),
+                "{fields} {program:?}"
+            );
         }
         // `nident` where the block opens for it (identities).
         assert!(!refuses("qseqid nident", program, 0, false));
@@ -1621,6 +1629,63 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
         assert!(!refuses(fields, Program::Blastp, 5, false), "{fields}");
         assert!(refuses(fields, Program::Blastx, 5, false), "{fields}");
     }
+    // A found query whose record is the profile's sequence letter for letter (`compare_found`:
+    // `rpscol`'s query `qp1`): its letters and length are the profile's, its titles, ids and
+    // taxonomy are not; RPSTBLASTN's block still throws.
+    let both = || crate::report::query_bioseq::FoundMatch {
+        length: true,
+        aligned: true,
+    };
+    let same = |spec: Option<&TabularSpec>, program| {
+        crate::report::query_bioseq::tabular_differs_for_generated_id(
+            spec,
+            program,
+            5,
+            (true, true),
+            &both,
+        )
+    };
+    for fields in [
+        "qseqid sseq pident mismatch btop",
+        "qseqid slen positive ppos",
+    ] {
+        assert!(!same(Some(&csv(fields)), Program::Blastp), "{fields}");
+        assert!(same(Some(&csv(fields)), Program::Blastx), "{fields}");
+    }
+    for fields in [
+        "qseqid stitle",
+        "qseqid sallseqid",
+        "qseqid staxids",
+        "qseqid ssciname",
+    ] {
+        assert!(same(Some(&csv(fields)), Program::Blastp), "{fields}");
+    }
+    assert!(!same(None, Program::Blastp));
+    assert!(same(None, Program::Blastx));
+    assert!(!same(None, Program::Blastn));
+    assert!(same(
+        Some(&spec(18, ReportFormat::TaxFormat, "")),
+        Program::Blastp
+    ));
+    // Letters over the HSPs without the length: `slen` differs, the letters do not
+    // (`bp.tail.f6slen`, `bp.tail.f6btop` of `x71/fix2/ev2`).
+    let aligned = || crate::report::query_bioseq::FoundMatch {
+        length: false,
+        aligned: true,
+    };
+    let tail = |fields: &str| {
+        crate::report::query_bioseq::tabular_differs_for_generated_id(
+            Some(&csv(fields)),
+            Program::Blastp,
+            5,
+            (false, false),
+            &aligned,
+        )
+    };
+    assert!(tail("qseqid sseqid slen"));
+    assert!(!tail(
+        "qseqid sseqid sseq pident nident mismatch positive ppos btop"
+    ));
 }
 
 /// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's

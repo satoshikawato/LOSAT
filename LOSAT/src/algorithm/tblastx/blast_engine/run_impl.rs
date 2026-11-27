@@ -3600,6 +3600,22 @@ fn check_found_queries(
             query_records.get(query).filter(|_| query < end)?,
         )
     };
+    // How the found query's record compares with the sequence (`compare_found`): the searched
+    // records are whole without `-query_loc`.
+    let found = |subject: &crate::report::db_subject::ParsedSubject,
+                 ordinal: u32,
+                 ranges: &[std::ops::Range<usize>]| {
+        crate::report::query_bioseq::found_record(subject, query_records)
+            .filter(|_| !ranged)
+            .map_or_else(Default::default, |record| {
+                crate::report::query_bioseq::compare_found(
+                    &record.sequence,
+                    &database.db,
+                    ordinal,
+                    ranges,
+                )
+            })
+    };
     let run = crate::report::query_bioseq::SeenRun {
         shows: writers.shows_shown() && !ranged && !database.loads_write_texts(),
         known: start..match scopes {
@@ -3610,14 +3626,20 @@ fn check_found_queries(
         protein: false,
         writers: &writers,
         taxdb: database.taxdb_found(),
+        load_texts: database.loads_write_texts(),
+        found: &found,
     };
     let queries = crate::blastinput::query_batch::BatchQueries::of(scopes, generated, None);
     let held = queries.held(
         crate::algorithm::common::database::refuse_reported_ids_of_queries(
             &reports.titles.borrow(),
-            ordered
-                .iter()
-                .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+            ordered.iter().map(|hsp| {
+                let range = hsp.hit.s_start.min(hsp.hit.s_end).saturating_sub(1)
+                    ..hsp.hit.s_start.max(hsp.hit.s_end);
+                (start + hsp.hit.q_idx as usize, hsp.hit.s_idx, move || {
+                    vec![range.clone()]
+                })
+            }),
             database.oid_map(),
             &queries,
             super::super::database::parsed_shown(&formats, prefetch_format),

@@ -9091,6 +9091,21 @@ fn run_in_pool(
         // for a refusal of a title (above). A generated id's refusal is held (`found_refusal`)
         // until after the batch's prefetch (`BatchQueries::held`).
         let mut found_refusal = None;
+        // NCBI's scope of the batch's queries, the one producer for the check of line RG item X7
+        // and the prefetch (`shared::PrefetchQueries`; review 1 of X7-1, S1): the batch's input
+        // records (those that `-query_loc` drops included, each with its `Query_N` of the run,
+        // `FastaRecord::local_id`), in outfmt 5, whose scope the formatter keeps, the records
+        // read before them too, up to the record `xml_end` (the prefetch: the batch's last; the
+        // reports: every record of the run, so that a later batch's query, which NCBI's kept
+        // scope searches as the sequence, is found).
+        let batch_scope = |xml_end: usize| {
+            crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
+                x_query_stream::Queries::Records { input, .. } if xml => {
+                    &input[..xml_end.min(input.len())]
+                }
+                _ => batch_records.input(),
+            })
+        };
         if let SubjectSource::Database(database) = source {
             let searched = batch_records.searched();
             let record = |query: usize| {
@@ -9104,6 +9119,25 @@ fn run_in_pool(
                 })
             };
             let writers = found_writers(&output_formats);
+            // How the found query's record compares with the sequence (`compare_found`): the
+            // batch's input records are whole without `-query_loc` (`LOSAT_X_BNQPACK`'s records
+            // without letters compare as neither).
+            let ranged = query_input.placements.ranged();
+            let input_records = batch_records.input();
+            let found = |subject: &crate::report::db_subject::ParsedSubject,
+                         ordinal: u32,
+                         ranges: &[std::ops::Range<usize>]| {
+                crate::report::query_bioseq::found_record(subject, input_records)
+                    .filter(|_| !ranged)
+                    .map_or_else(Default::default, |record| {
+                        crate::report::query_bioseq::compare_found(
+                            &record.sequence,
+                            &database.db,
+                            ordinal,
+                            ranges,
+                        )
+                    })
+            };
             let run = crate::report::query_bioseq::SeenRun {
                 shows: writers.shows_shown()
                     && !query_input.placements.ranged()
@@ -9119,15 +9153,12 @@ fn run_in_pool(
                 protein: false,
                 writers: &writers,
                 taxdb: database.taxdb_found(),
+                load_texts: database.loads_write_texts(),
+                found: &found,
             };
             // Without `-parse_deflines`, the generated ids of the batch's input records, in outfmt
             // 5 those of the whole run (of a stream of records by their numbers, `Query_N`).
-            let generated = || {
-                crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
-                    x_query_stream::Queries::Records { input, .. } if xml => input,
-                    _ => batch_records.input(),
-                })
-            };
+            let generated = || batch_scope(usize::MAX);
             let later = (xml && !matches!(queries, x_query_stream::Queries::Records { .. }))
                 .then(|| 1..query_input.input_lengths.len() + 1);
             let batch_queries = crate::blastinput::query_batch::BatchQueries::of(
@@ -9143,9 +9174,19 @@ fn run_in_pool(
                     .flat_map(|(query, hit_list)| {
                         hit_list.iter().flat_map(move |hit_list| {
                             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                            hit_list.hsplist_array[..count]
-                                .iter()
-                                .map(move |hsp_list| (start + query, hsp_list.oid))
+                            hit_list.hsplist_array[..count].iter().map(move |hsp_list| {
+                                let ranges = move || {
+                                    hsp_list
+                                        .hsps
+                                        .iter()
+                                        .map(|hsp| {
+                                            hsp.s_start.min(hsp.s_end).saturating_sub(1)
+                                                ..hsp.s_start.max(hsp.s_end)
+                                        })
+                                        .collect()
+                                };
+                                (start + query, hsp_list.oid, ranges)
+                            })
                         })
                     }),
                 database.oid_map(),
@@ -9202,17 +9243,9 @@ fn run_in_pool(
                 _ => crate::report::tabular::SubjectFetch::Every,
             };
             // NCBI's scope at the batch's prefetch (`shared::PrefetchQueries`), made only where it
-            // stops (both forms of the prefetch below): the batch's input records (those that
-            // `-query_loc` drops included, each with its `Query_N` of the run,
-            // `FastaRecord::local_id`), in outfmt 5, whose scope the formatter keeps, those of the
-            // batches before too (outfmt 5 keeps the records read before the search, as
-            // `query_scopes` above).
-            let scope = || {
-                crate::blastinput::query_batch::QueryScope::of_shown_records(match &queries {
-                    x_query_stream::Queries::Records { input, .. } if xml => &input[..input_end],
-                    _ => batch_records.input(),
-                })
-            };
+            // stops (both forms of the prefetch below): `batch_scope` up to the batch's last
+            // record (outfmt 5 keeps the records read before the search, as `query_scopes` above).
+            let scope = || batch_scope(input_end);
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                     .where_reports_unchanged_by_load_throws(

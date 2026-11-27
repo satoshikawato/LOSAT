@@ -1561,6 +1561,11 @@ impl ReportedSubjects {
                         subject,
                         || oid,
                         (first + batch.query_ordinal + qidx, self.ordinals[list.oid]),
+                        // A nucleotide query is never compared with the protein sequence.
+                        &crate::report::query_bioseq::ReportedHsps {
+                            num_ident: 1,
+                            ranges: &Vec::<std::ops::Range<usize>>::new,
+                        },
                         queries,
                         run,
                         PROGRAM,

@@ -1938,6 +1938,10 @@ impl ListedTitles<'_> {
                         subject,
                         || self.oids.oid(ordinal),
                         (scopes.first() + query, ordinal),
+                        &crate::report::query_bioseq::ReportedHsps {
+                            num_ident: 1,
+                            ranges: &Vec::<std::ops::Range<usize>>::new,
+                        },
                         &crate::blastinput::query_batch::BatchQueries::Shown(scopes.run()),
                         run,
                         self.program,
@@ -1955,33 +1959,31 @@ impl ListedTitles<'_> {
     }
 
     /// Queries read without `-parse_deflines` (line RG item X7; T3a review 2 D2, PS15a-1,
-    /// PS15a-2): LOSAT's refusal of a subject with parsed Seq-ids of the final hit lists
-    /// `hit_lists` whose Seq-align id is the generated id (`lcl|Query_N`, or the local id of a PSSM
-    /// query) of a query of the batch that reports it, as NCBI's scope finds an id (`scope_of`:
-    /// that batch's scope, by query, `QueryScope::of_generated_ids`; in outfmt 5 the run's), where
-    /// a report differs for it: `effect_of(query, list index, subject)` (the index among the
-    /// query's reported lists, `EngineCounts`' key) gives what NCBI does with it
-    /// (`report::query_bioseq::FoundWriters::generated_effect`). NCBI's formatter adds the batch's
-    /// queries to its scope before their reports and finds such a subject there: its reports show
-    /// the query's title and letters in the subject's place, and the query-anchored merge of the
-    /// query's own Bioseq can abort (`double free or corruption`, as
-    /// `pairwise::blastp_section_aborts`). A weak match (`QueryScopeKeys::weak`, of text Seq-ids)
-    /// never meets a local id.
-    pub(super) fn refuse_generated_ids<'s>(
+    /// PS15a-2): the check of line RG item X7 (`report::query_bioseq::check` with `run`) of each
+    /// subject with parsed Seq-ids of the final hit lists `hit_lists` of the batch's searched
+    /// queries `searched`, HSP by HSP (`num_ident((query, list index, HSP index), hsp)`, the
+    /// Seq-align's identities, `EngineCounts`), against the generated ids that NCBI's scope holds
+    /// for the batch (`queries`: `lcl|Query_N`, or the local id of a PSSM query; in outfmt 5 the
+    /// run's). NCBI's formatter adds the batch's queries to its scope before their reports and
+    /// finds such a subject there: its reports show the query's title and letters in the
+    /// subject's place, and the query-anchored merge of the query's own Bioseq can abort (`double
+    /// free or corruption`, as `pairwise::blastp_section_aborts`). A weak match
+    /// (`QueryScopeKeys::weak`, of text Seq-ids) never meets a local id.
+    pub(super) fn refuse_generated_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
-        scope_of: &impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
-        effect_of: impl Fn(
-            usize,
-            usize,
-            &crate::report::db_subject::ParsedSubject,
-        ) -> Option<&'static str>,
+        searched: std::ops::Range<usize>,
+        queries: &crate::blastinput::query_batch::BatchQueries<'_>,
+        run: &crate::report::query_bioseq::SeenRun<'_, '_>,
+        num_ident: impl Fn((u32, u32, u32), &super::super::hsp::BlastpHsp) -> usize,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
         }
-        for (query, hit_list) in hit_lists.iter().enumerate() {
-            let Some(hit_list) = hit_list else {
+        // The generated path notes nothing (`check`).
+        let mut seen = crate::report::query_bioseq::QueryBioseqs::default();
+        for query in searched {
+            let Some(Some(hit_list)) = hit_lists.get(query) else {
                 continue;
             };
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
@@ -1990,18 +1992,26 @@ impl ListedTitles<'_> {
                 let Some(subject) = &self.parsed[rank] else {
                     continue;
                 };
-                if !subject.alignment_id_is_local()
-                    || !scope_of(query).has_key(&subject.query_scope_keys().own)
-                {
-                    continue;
-                }
-                if let Some(effect) = effect_of(query, list_index, subject) {
-                    return Err(crate::report::query_bioseq::generated_refusal(
+                let ordinal = self.listed.ordinals[rank];
+                for (index, hsp) in hsp_list.hsps.iter().enumerate() {
+                    let range =
+                        hsp.s_start.min(hsp.s_end).saturating_sub(1)..hsp.s_start.max(hsp.s_end);
+                    crate::report::query_bioseq::check(
+                        &mut seen,
                         subject,
-                        self.oids.oid(self.listed.ordinals[rank]),
+                        || self.oids.oid(ordinal),
+                        (query, ordinal),
+                        &crate::report::query_bioseq::ReportedHsps {
+                            num_ident: num_ident(
+                                (query as u32, list_index as u32, index as u32),
+                                hsp,
+                            ),
+                            ranges: &|| vec![range.clone()],
+                        },
+                        queries,
+                        run,
                         self.program,
-                        effect,
-                    ));
+                    )?;
                 }
             }
         }

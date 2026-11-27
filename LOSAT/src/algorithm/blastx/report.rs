@@ -509,7 +509,9 @@ pub(super) fn found_writers(
             8 | 9 | 11 | 12 => FoundWriter::Annots,
             18 => FoundWriter::TaxReport,
             6 | 7 | 10 | 20 => FoundWriter::Table(options.tabular),
-            17 => FoundWriter::Sam,
+            17 => FoundWriter::Sam {
+                target_letters: false,
+            },
             _ => FoundWriter::Structured,
         }],
         search_reads: false,

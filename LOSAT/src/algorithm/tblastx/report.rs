@@ -1391,7 +1391,10 @@ impl TblastxOutputFormat {
             Self::CustomTabular(spec) => FoundWriter::Table(Some(spec)),
             Self::Seqalign(_) | Self::Archive => FoundWriter::Annots,
             Self::Xml | Self::Xml2(_) => FoundWriter::Structured,
-            Self::Sam(_) => FoundWriter::Sam,
+            // NCBI takes SAM in BLASTN only (`CFormattingArgs::ExtractAlgorithmOptions`).
+            Self::Sam(_) => FoundWriter::Sam {
+                target_letters: false,
+            },
             // Refused before the search (`ReportFormat::writes`).
             Self::Unsupported => FoundWriter::Structured,
         }

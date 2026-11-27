@@ -3698,16 +3698,18 @@ pub(crate) fn refuse_display_ids_of_queries<'s>(
 }
 
 /// The check of line RG item X7 (`report::query_bioseq::check` with `run`) of each reported
-/// sequence of `reported` (a searched query, by its index in the run, and a sequence that its
-/// report names, by ordinal id; `oids` the database's OIDs) whose header `titles` holds with
+/// sequence of `reported` (a searched query, by its index in the run, a sequence that its report
+/// names, by ordinal id, and the subject ranges of the HSPs of that report, asked only where a
+/// report reads the letters of a query found by a generated id; `oids` the database's OIDs) whose
+/// header `titles` holds with
 /// parsed Seq-ids, against the queries that NCBI's scope holds for that query's batch
 /// (`queries`), where the reports `shown` resolve the sequences' Seq-align ids
 /// (`ParsedShown::resolves_subject`). A program calls it for each query batch after it reads the
 /// batch's titles: its cache of the titles keeps those of the batches before.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn refuse_reported_ids_of_queries(
+pub(crate) fn refuse_reported_ids_of_queries<R: Fn() -> Vec<std::ops::Range<usize>>>(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
-    reported: impl IntoIterator<Item = (usize, u32)>,
+    reported: impl IntoIterator<Item = (usize, u32, R)>,
     oids: crate::seqdb::OidMap<'_>,
     queries: &crate::blastinput::query_batch::BatchQueries<'_>,
     shown: ParsedShown,
@@ -3718,13 +3720,17 @@ pub(crate) fn refuse_reported_ids_of_queries(
     if !shown.resolves_subject() {
         return Ok(());
     }
-    for (query, ordinal) in reported {
+    for (query, ordinal, ranges) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
             crate::report::query_bioseq::check(
                 seen,
                 subject,
                 || oids.oid(ordinal),
                 (query, ordinal),
+                &crate::report::query_bioseq::ReportedHsps {
+                    num_ident: 1,
+                    ranges: &ranges,
+                },
                 queries,
                 run,
                 program,
@@ -8557,6 +8563,13 @@ impl<'a> PrefetchQueries<'a> {
             xml_before: None,
             reports_unchanged_by_load_throws: false,
         }
+    }
+
+    /// The maker of the batch's scope of queries (`new`), which the check of line RG item X7 asks
+    /// too (`query_batch::GeneratedQueries`): one producer of a batch's scope (review 1 of X7-1,
+    /// S1).
+    pub(crate) fn scope(&self) -> &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope {
+        self.scope
     }
 
     /// The same batch of a run whose formats write the same where every load of a subject with a

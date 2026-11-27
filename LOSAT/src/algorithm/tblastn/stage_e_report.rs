@@ -210,7 +210,9 @@ pub(super) fn found_writers(
                 8 | 9 | 11 | 12 => FoundWriter::Annots,
                 18 if spec.is_none() => FoundWriter::TaxReport,
                 6 | 7 | 10 | 18 | 20 => FoundWriter::Table(spec.as_ref()),
-                17 => FoundWriter::Sam,
+                17 => FoundWriter::Sam {
+                    target_letters: false,
+                },
                 _ => FoundWriter::Structured,
             })
             .collect(),

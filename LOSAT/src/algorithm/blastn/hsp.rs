@@ -241,7 +241,13 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::CustomTabular(spec) => FoundWriter::Table(Some(spec)),
             BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FoundWriter::Annots,
             BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_) => FoundWriter::Structured,
-            BlastnOutputFormat::Sam(_) => FoundWriter::Sam,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:90-96
+            // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:181-233
+            // The scope's Bioseq of the subject gives `@SQ LN:` (`SR`) or the target's trailing
+            // hard clip and, with `SQ`, SEQ's letters (without `SR`).
+            BlastnOutputFormat::Sam(spec) => FoundWriter::Sam {
+                target_letters: spec.sequence && !spec.subject_as_reference,
+            },
         }
     }
 

@@ -1,0 +1,7 @@
+# BLASTP 2.17.0+
+# Query: anything sg6 letters
+# Database: tests/db_search/of1/qid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+anything	Query_1	100.000	148	0	0	1	148	1	148	1.57e-81	225
+# BLAST processed 1 queries

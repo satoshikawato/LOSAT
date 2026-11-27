@@ -340,8 +340,10 @@ pub(crate) enum FoundWriter<'s> {
     Table(Option<&'s crate::report::tabular::TabularSpec>),
     /// The organism report (outfmt 18) of a program that keeps no field list for it.
     TaxReport,
-    /// SAM (outfmt 17), which reads the Seq-align and the query.
-    Sam,
+    /// SAM (outfmt 17): the target row's Bioseq, which is the subject's without `SR`, gives the
+    /// CIGAR's trailing hard clip its length and, with `SQ`, SEQ its letters; with `SR` the
+    /// subject's gives `@SQ LN:` its length (`target_letters`: `SQ` without `SR`).
+    Sam { target_letters: bool },
     /// The Seq-annots and the archive (outfmt 8, 9, 11 and 12), which write the Seq-align id alone.
     Annots,
 }
@@ -388,12 +390,21 @@ pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML, XML2 
 /// (`tabular_differs_for_generated_id`).
 pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the tables (outfmt 6, 7, 10 and \
      20) whose fields show what it finds by that id and in the organism report (outfmt 18) of a \
-     sequence with a taxid that the taxonomy database names (BLASTX's and RPSTBLASTN's tables can \
-     stop with an exception)";
+     sequence with a taxid where a taxonomy database is found (BLASTX's and RPSTBLASTN's tables \
+     can stop with an exception)";
 
-/// What NCBI does with it in psiblast's rounds after the first.
-pub(crate) const SEARCH_EFFECT: &str =
-    "makes the next round's PSSM from that query's letters in its place (psiblast)";
+/// What NCBI does with it in psiblast's rounds after the first and in a saved PSSM.
+pub(crate) const SEARCH_EFFECT: &str = "makes the next round's PSSM, or the PSSM it saves, from \
+     that query's letters in its place (psiblast)";
+
+/// What NCBI does with it in SAM where the found query's length or letters are not the sequence's.
+pub(crate) const SAM_EFFECT: &str = "takes that query's length (and with SQ its letters) for it \
+     in SAM (outfmt 17)";
+
+/// What NCBI does with it where the run's loads of a sequence with a taxid write texts of the
+/// taxonomy database (`common::database::TaxdbRun::loads_write_texts`).
+pub(crate) const LOAD_EFFECT: &str =
+    "loads nothing of it, where LOSAT's load writes the taxonomy database's messages";
 
 impl FoundWriters<'_> {
     /// Whether every report shows NCBI's bytes for a sequence that the scope finds by its own
@@ -410,19 +421,25 @@ impl FoundWriters<'_> {
     }
 
     /// What NCBI does that LOSAT does not for the reported database sequence `subject` that the
-    /// scope finds by a generated id (`query_batch::GeneratedQueries`), with the Seq-align's
-    /// identities `num_ident` (1 where the caller does not have them: `nident` then counts as
-    /// read) and the taxonomy database found (`taxdb`): the effect of the first report that
-    /// differs, `None` where every report is NCBI's bytes (the Seq-annots and the archive, SAM,
-    /// tables of fields that read nothing of the found query, the organism report of a sequence
-    /// without a taxid the taxonomy database names; probes of line RG item X7, `x71/probe2`).
+    /// scope finds by a generated id (`query_batch::GeneratedQueries`), for an HSP with the
+    /// Seq-align's identities `num_ident` (1 where the caller does not have them: `nident` then
+    /// counts as read), with the taxonomy database found (`taxdb`) and `found()`, how the found
+    /// query's record compares with the sequence over the HSPs ([`FoundMatch`], asked only where a
+    /// report reads the found letters or length): the effect of the first report that differs,
+    /// `None` where every report is NCBI's bytes (the Seq-annots and the archive; SAM where the
+    /// found query has the sequence's length, and with `SQ` without `SR` its letters over the
+    /// HSPs; tables of fields that read nothing of the found query, or only letters and a length
+    /// that are the sequence's own there; the organism report of a sequence without a taxid, or
+    /// without a taxonomy database; psiblast's PSSM of letters that are the sequence's over the
+    /// HSPs; probes of line RG item X7, `x71/probe2`, `x71/fix2/ev2`).
     pub(crate) fn generated_effect(
         &self,
         subject: &ParsedSubject,
         num_ident: usize,
         taxdb: bool,
+        found: &dyn Fn() -> FoundMatch,
     ) -> Option<&'static str> {
-        if self.search_reads {
+        if self.search_reads && !found().aligned {
             return Some(SEARCH_EFFECT);
         }
         let taxid = subject.first_source_taxid().is_some();
@@ -430,12 +447,20 @@ impl FoundWriters<'_> {
             FoundWriter::Pairwise => Some(PAIRWISE_EFFECT),
             FoundWriter::Anchored => Some(QUERY_ANCHORED_EFFECT),
             FoundWriter::Structured => Some(XML_EFFECT),
-            FoundWriter::Table(spec) => {
-                tabular_differs_for_generated_id(spec, self.program, num_ident, taxid, taxdb)
-                    .then_some(TABLE_EFFECT)
-            }
+            FoundWriter::Table(spec) => tabular_differs_for_generated_id(
+                spec,
+                self.program,
+                num_ident,
+                (taxid, taxdb),
+                found,
+            )
+            .then_some(TABLE_EFFECT),
             FoundWriter::TaxReport => (taxid && taxdb).then_some(TABLE_EFFECT),
-            FoundWriter::Sam | FoundWriter::Annots => None,
+            FoundWriter::Sam { target_letters } => {
+                let found = found();
+                (!found.length || (target_letters && !found.aligned)).then_some(SAM_EFFECT)
+            }
+            FoundWriter::Annots => None,
         })
     }
 }
@@ -445,12 +470,18 @@ impl FoundWriters<'_> {
 /// `tabular_differs_for_generated_id`).
 struct FoundFields {
     /// Fields that show what the scope finds beyond the Seq-align id: its ids and titles
-    /// (`sallseqid`, `sallacc`, `stitle`, `salltitles`), `staxids` (`N/A` for a query), `slen`,
-    /// and in TBLASTN and TBLASTX the frame of the found Bioseq's length (`sframe`, `frames`).
+    /// (`sallseqid`, `sallacc`, `stitle`, `salltitles`) and `staxids` (`N/A` for a query).
     names: bool,
+    /// Fields of the found Bioseq's length: `slen`, and in TBLASTN and TBLASTX the frame that it
+    /// gives (`sframe`, `frames`).
+    length: bool,
     /// Fields that read the found Bioseq's letters (`tabular_shows`).
     letters: bool,
-    /// Fields of the taxonomy of the sequence's taxid (`staxid`, the names, the kingdoms).
+    /// The sequence's taxid (`staxid`: `N/A` for a query).
+    taxid: bool,
+    /// Fields of the taxonomy database's names of the sequence's taxid (the names, the kingdoms:
+    /// `N/A` for a query, and without a taxonomy database for the sequence too; probe
+    /// `x71/fix2/rps18`).
     taxonomy: bool,
     /// In BLASTX (and RPSTBLASTN, whose driver is BLASTX's) a field that enters the alignment
     /// block, which throws (`TabularSpec::opens_counts`).
@@ -473,8 +504,8 @@ fn found_fields(
             SubjectTitle,
             SubjectAllTitles,
             SubjectTaxIds,
-            SubjectLength,
-        ]) || (translated && spec.has_any(&[SubjectFrame, Frames])),
+        ]),
+        length: spec.has(SubjectLength) || (translated && spec.has_any(&[SubjectFrame, Frames])),
         letters: spec.has_any(&[SubjectSeq, Positives, PercentPositives, Btop])
             || (program != Program::Blastn
                 && (spec.has_any(&[Mismatches, PercentIdentical])
@@ -483,8 +514,8 @@ fn found_fields(
                 && spec.has(QuerySeq)
                 && spec.has_any(&[Mismatches, PercentIdentical, NumIdentical]))
             || (program == Program::Tblastn && spec.has(QuerySeq)),
+        taxid: spec.has(SubjectTaxId),
         taxonomy: spec.has_any(&[
-            SubjectTaxId,
             SubjectSciName,
             SubjectCommonName,
             SubjectBlastName,
@@ -537,6 +568,7 @@ pub(crate) fn tabular_shows(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-924
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:958,985-986
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:964-968
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
 /// Whether `program`'s table of `spec` (`None`: the default fields of outfmt 6, 7 and 10) or
@@ -544,35 +576,132 @@ pub(crate) fn tabular_shows(
 /// Seq-align id is a generated id (`lcl|Query_N`, or a PSSM query's local id) of a query of its
 /// batch (`program` is the driver's: BLASTP for RPSBLAST and PSIBLAST, BLASTX for RPSTBLASTN).
 /// NCBI's formatter finds that query by the id, so its row differs where it shows what it found
-/// beyond the id (`FoundFields::names`), the found query's letters (`letters`; `nident` where the
-/// block opens for it, `num_ident > 0`), and the taxonomy where the subject has a taxid
-/// (`subject_taxid`; a query has none); in BLASTX and RPSTBLASTN, whose found query is nucleotide,
-/// every row that enters the alignment block ends the run with an exception of the Seq-align's
-/// conversion. The organism report differs for a subject with a taxid where the taxonomy
-/// database (`taxdb`) names it: without one, NCBI lists neither (probe `tx.bp.qid.f18`). The
-/// subject's own ids (`sseqid`, `sacc`, `saccver`, `sgi`, `sallgi`), the query's letters, the
-/// scores and the coordinates are NCBI's bytes (review S1 of PS15a-2; probes of line RG item X7,
-/// `x71/probe2`: BLASTN's default fields are, its `sallseqid` and `stitle` are not).
+/// beyond the id (`FoundFields::names`), the found query's length (`length`) unless it is the
+/// sequence's (`found().length`), the letters of the alignment's subject row (`letters`;
+/// `nident` where the block opens for it, `num_ident > 0`; TBLASTX's `qseq`, which translates the
+/// found Bioseq where an HSP straddles its length, `tblastx_qseq_throws`) unless the found query
+/// has the sequence's letters over the HSP (`found().aligned`: NCBI then reads the letters that
+/// LOSAT reads of the sequence; BLASTP `q` against its copy `lcl|Query_1`,
+/// `tests/non_utf8_names` R3_7 and R7; a found query shorter than the HSP's end reads gaps there,
+/// TBLASTX `0.000`, probe `x71/fix2/ev2` `tx.tail.f6`), and the sequence's taxid where it has
+/// one (`subject_taxid`; a query has none: `N/A`), with a taxonomy database (`taxdb`) also its
+/// names; in BLASTX and RPSTBLASTN, whose found query is nucleotide, every row that enters the
+/// alignment block ends the run with an exception of the Seq-align's conversion. The organism
+/// report differs for a subject with a taxid where a taxonomy database is found: without one,
+/// NCBI lists neither (probe `tx.bp.qid.f18`; rows `db.x7.rps.of18coltax` and
+/// `db.x7.rpstbn.of18coltax`). The subject's own ids (`sseqid`, `sacc`, `saccver`, `sgi`,
+/// `sallgi`), the query's letters, the scores and the coordinates are NCBI's bytes (review S1
+/// of PS15a-2; probes of line RG item X7, `x71/probe2`: BLASTN's default fields are, its
+/// `sallseqid` and `stitle` are not).
 pub(crate) fn tabular_differs_for_generated_id(
     spec: Option<&crate::report::tabular::TabularSpec>,
     program: crate::blastinput::app::Program,
     num_ident: usize,
-    subject_taxid: bool,
-    taxdb: bool,
+    (subject_taxid, taxdb): (bool, bool),
+    found: &dyn Fn() -> FoundMatch,
 ) -> bool {
     use crate::blastinput::app::Program;
     let Some(spec) = spec else {
-        return program != Program::Blastn;
+        // `pident` and `mismatch` read the letters, but not BLASTN's; BLASTX's block throws.
+        return match program {
+            Program::Blastn => false,
+            Program::Blastx => true,
+            _ => !found().aligned,
+        };
     };
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
         return subject_taxid && taxdb;
     }
-    let mut fields = found_fields(spec, program, num_ident);
-    // TBLASTX's `qseq` translates the found Bioseq where an HSP straddles its length
-    // (`tblastx_qseq_throws`), which a generated id's caller does not check.
-    fields.letters |=
-        program == Program::Tblastx && spec.has(crate::report::tabular::TabularField::QuerySeq);
-    fields.names || fields.letters || (subject_taxid && fields.taxonomy) || fields.throws
+    let fields = found_fields(spec, program, num_ident);
+    let reads_letters = fields.letters
+        || (program == Program::Tblastx
+            && spec.has(crate::report::tabular::TabularField::QuerySeq));
+    fields.names
+        || (subject_taxid && (fields.taxid || (taxdb && fields.taxonomy)))
+        || fields.throws
+        || (fields.length && !found().length)
+        || (reads_letters && !found().aligned)
+}
+
+/// How the query record that NCBI's scope finds by the generated id of a reported database
+/// sequence compares with that sequence (`compare_found`; `FoundMatch::default()`: neither, where
+/// the found query is not compared, as a query of the other molecule).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FoundMatch {
+    /// The record has the sequence's length (`slen`; the frames of TBLASTN and TBLASTX; SAM's
+    /// trailing hard clip and `@SQ LN:`).
+    pub length: bool,
+    /// Over the subject range of each HSP the record has the sequence's letters (the fields that
+    /// read the letters of the alignment's subject row; SAM's SEQ; psiblast's PSSM).
+    pub aligned: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:946-947 (a masked residue is
+// kept in upper case)
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector.cpp:1082-1085 (a gap reads `-` in ncbieaa)
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:343,411-460 (the PSSM
+// reads the subject over its alignment)
+/// How the query record whose whole letters are `record` (as the FASTA reader keeps them: IUPAC,
+/// in lower case where the mask covers them) compares with the database sequence `ordinal` of
+/// `db` over the subject ranges `ranges` (0-based, end exclusive, on its plus strand) of the
+/// reported HSPs, as NCBI's formatter reads the found query's Bioseq: its residues in upper case,
+/// a protein's as ncbieaa letters (`tabular.cpp`'s `SetAaCoding`). A protein record's `X` is
+/// never the sequence's: a `>?` gap line reads as `X` in the record and `-` in NCBI's Bioseq. A
+/// range past the record's end is not the sequence's (NCBI reads gaps there). A sequence that the
+/// database cannot read compares as neither (LOSAT refuses).
+pub(crate) fn compare_found(
+    record: &[u8],
+    db: &crate::seqdb::SeqDb,
+    ordinal: u32,
+    ranges: &[std::ops::Range<usize>],
+) -> FoundMatch {
+    let compare = |letters: &[u8], protein: bool| FoundMatch {
+        length: letters.len() == record.len(),
+        aligned: ranges.iter().all(|range| {
+            match (record.get(range.clone()), letters.get(range.clone())) {
+                (Some(found), Some(letters)) => {
+                    found.iter().zip(letters).all(|(&residue, &letter)| {
+                        let residue = residue.to_ascii_uppercase();
+                        residue == letter && !(protein && residue == b'X')
+                    })
+                }
+                _ => false,
+            }
+        }),
+    };
+    match db.seqtype() {
+        crate::seqdb::SeqType::Protein => db.read_sequence(ordinal).map_or_else(
+            |_| FoundMatch::default(),
+            |block| {
+                compare(
+                    &crate::sequence::stdaa_letters::protein_fasta_letters(block.protein(0)),
+                    true,
+                )
+            },
+        ),
+        crate::seqdb::SeqType::Nucleotide => db.nucleotide_iupac(ordinal).map_or_else(
+            |_| FoundMatch::default(),
+            |letters| compare(&letters, false),
+        ),
+    }
+}
+
+/// The query record of `records` (a batch's input records, read without `-parse_deflines`) that
+/// NCBI's scope finds by the Seq-align id of the reported sequence `subject`: the record whose
+/// local id (`Query_N`) is that local string id, as the scope compares local ids, without case
+/// (`query_batch::GeneratedQueries::finds`).
+pub(crate) fn found_record<'r>(
+    subject: &ParsedSubject,
+    records: &'r [crate::record::FastaRecord],
+) -> Option<&'r crate::record::FastaRecord> {
+    let crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(text)) =
+        subject.alignment_id()
+    else {
+        return None;
+    };
+    records
+        .iter()
+        .find(|record| record.local_id.as_bytes().eq_ignore_ascii_case(text))
 }
 
 /// What `check` reads of a run besides the sequence: whether its reports show NCBI's bytes for a
@@ -580,8 +709,13 @@ pub(crate) fn tabular_differs_for_generated_id(
 /// `FoundWriters::shows_shown` of the run's reports, and no text that the taxonomy database
 /// writes at a load, `common::database::TaxdbRun::loads_write_texts`), the queries the caller has
 /// (`known`, ends `usize::MAX` where they reach the run's last searched query) and `record(h)` of
-/// each, whether the queries are proteins (`protein`), the run's reports (`writers`) and whether
-/// its taxonomy database is found (`taxdb`), for a sequence found by a generated id.
+/// each, whether the queries are proteins (`protein`), the run's reports (`writers`), whether
+/// its taxonomy database is found (`taxdb`), whether a load of a sequence with a taxid writes
+/// the taxonomy database's texts (`load_texts`, `loads_write_texts`) and `found(subject,
+/// ordinal, ranges)`, how the query record that the scope finds by the generated id of the
+/// sequence `subject` (ordinal id `ordinal`) compares with it over the HSPs' subject ranges
+/// `ranges` ([`compare_found`]; [`NOT_COMPARED`] where the found query's molecule is not the
+/// sequence's), for a sequence found by a generated id.
 pub(crate) struct SeenRun<'s, 'r> {
     pub shows: bool,
     pub known: std::ops::Range<usize>,
@@ -589,6 +723,31 @@ pub(crate) struct SeenRun<'s, 'r> {
     pub protein: bool,
     pub writers: &'s FoundWriters<'s>,
     pub taxdb: bool,
+    pub load_texts: bool,
+    pub found: &'s FoundCompare<'s>,
+}
+
+/// `SeenRun::found`: how the query record found by the generated id of a reported sequence
+/// compares with it (`compare_found`).
+pub(crate) type FoundCompare<'s> =
+    dyn Fn(&ParsedSubject, u32, &[std::ops::Range<usize>]) -> FoundMatch + 's;
+
+/// `SeenRun::found` of a run whose found query is never compared: a query of the other molecule
+/// (BLASTX, RPSTBLASTN, TBLASTN), or a run whose reports keep LOSAT's refusal.
+pub(crate) fn not_compared(_: &ParsedSubject, _: u32, _: &[std::ops::Range<usize>]) -> FoundMatch {
+    FoundMatch::default()
+}
+
+/// [`not_compared`] as `SeenRun::found`.
+pub(crate) const NOT_COMPARED: &FoundCompare<'static> = &not_compared;
+
+/// The HSPs of a reported sequence as `check` reads them: the Seq-align's identities
+/// (`num_ident`, 1 where the caller does not have them: `nident` then counts as read) and their
+/// subject ranges (`ranges`, 0-based on the plus strand, asked only where a report reads the found
+/// query's letters).
+pub(crate) struct ReportedHsps<'h> {
+    pub num_ident: usize,
+    pub ranges: &'h dyn Fn() -> Vec<std::ops::Range<usize>>,
 }
 
 impl SeenRun<'static, 'static> {
@@ -600,6 +759,8 @@ impl SeenRun<'static, 'static> {
         protein: false,
         writers: &FoundWriters::NONE,
         taxdb: false,
+        load_texts: true,
+        found: NOT_COMPARED,
     };
 }
 
@@ -620,14 +781,18 @@ fn no_record(_: usize) -> Option<QueryRecordRef<'static>> {
 ///   a query), where the id matches a query weakly, and where the holder is not one searched
 ///   query of the scope that the caller has, or LOSAT does not write its tabular ids
 ///   ([`NotNoted`]).
-/// - A generated id (`BatchQueries::Generated`): LOSAT's refusal where a report differs for it
-///   (`FoundWriters::generated_effect`), or where the sequence's load posts the warning of a
-///   UTF8String header; else nothing (every report is NCBI's bytes).
+/// - A generated id (`BatchQueries::Generated`), for the HSPs `hsps` of the sequence: LOSAT's
+///   refusal where a report differs for it (`FoundWriters::generated_effect`), where the sequence
+///   has a taxid and the run's loads write the taxonomy database's texts (`SeenRun::load_texts`:
+///   NCBI loads nothing of it; probe `bp.tax.badmagic` of `x71/fix2/ev2`), or where its load posts
+///   the warning of a UTF8String header; else nothing (every report is NCBI's bytes).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check(
     seen: &mut QueryBioseqs,
     subject: &ParsedSubject,
     oid: impl Fn() -> crate::seqdb::Oid,
     (query, ordinal): (usize, u32),
+    hsps: &ReportedHsps<'_>,
     queries: &crate::blastinput::query_batch::BatchQueries<'_>,
     run: &SeenRun<'_, '_>,
     program: &str,
@@ -639,9 +804,16 @@ pub(crate) fn check(
             if !generated.finds(subject) {
                 return Ok(());
             }
+            let found = std::cell::OnceCell::new();
             let effect = run
                 .writers
-                .generated_effect(subject, 1, run.taxdb)
+                .generated_effect(subject, hsps.num_ident, run.taxdb, &|| {
+                    *found.get_or_init(|| (run.found)(subject, ordinal, &(hsps.ranges)()))
+                })
+                .or_else(|| {
+                    (run.load_texts && subject.first_source_taxid().is_some())
+                        .then_some(LOAD_EFFECT)
+                })
                 .or_else(|| {
                     subject.scope_utf8_read().is_some().then_some(
                         "loads nothing of it where LOSAT posts the warning of its header",

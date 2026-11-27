@@ -5277,7 +5277,8 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
   the run, also the id of a later batch's query, which NCBI then searches as the database
   sequence, probe `b1.bp.q2x.f5`), in the tables (outfmt 6, 7, 10 and 20) whose fields show what
-  NCBI finds by that id (its ids, titles, length or letters; the default fields outside BLASTN),
+  NCBI finds by that id (its ids and titles; its length or letters, the default fields outside
+  BLASTN among them, unless the found query's record is the sequence letter for letter),
   in the organism report (outfmt 18) of a sequence with a taxid that the taxonomy database names,
   and in psiblast's rounds that make the next PSSM; as the display id in outfmt 0 to 4 (TBLASTN's
   merge then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's
@@ -5285,8 +5286,10 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`, as BLASTX's and RPSTBLASTN's tables of a field of the
   alignment): NCBI shows the query's title and letters for the id (its second lookup, by the
   display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM
-  (17), the tables of fields that read nothing of the sequence and the organism report of a
-  sequence without such a taxid are NCBI's bytes.
+  (17), the tables of fields that read nothing of the sequence, or only its letters and length
+  where the found query's record is the sequence letter for letter (a database copy of the query:
+  NCBI reads the same letters, rows `db.x7.bp.qid.same.*`), and the organism report of a sequence
+  without such a taxid are NCBI's bytes.
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
   cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with

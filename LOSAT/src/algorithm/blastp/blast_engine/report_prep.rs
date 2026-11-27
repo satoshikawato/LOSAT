@@ -86,6 +86,54 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) pssm_reads: &'a database::PssmReads,
 }
 
+impl ReportPrep<'_, '_> {
+    /// The query records that NCBI's scope holds for the batch of the searched queries `span`:
+    /// psiblast's round of a query gives its query's batch (`BlastpReports::scope_records`), else
+    /// the input records that NCBI's reader added for the batch (`RangedBatch::input`: the
+    /// records that `-query_loc` drops included, numbered in the run, `FastaRecord::local_id`);
+    /// in outfmt 5, whose scope the formatter keeps (`ResetScopeHistory`, cited at
+    /// `shared::stop_lookup_unsure`), those of the batches before too, and with `to_end` (the
+    /// reports, where a later batch's query that NCBI's kept scope searches as the sequence is
+    /// found) every record of the run.
+    pub(super) fn scope_records(&self, span: &Range<usize>, to_end: bool) -> &[FastaRecord] {
+        let (records, batch) = match self.reports.scope_records {
+            Some(scope) => (scope.records, scope.start..scope.end),
+            None => (
+                self.ranges.input_records,
+                self.query_batches
+                    .iter()
+                    .find(|batch| batch.searched == *span)
+                    .map_or(0..0, |batch| batch.input.clone()),
+            ),
+        };
+        let xml = crate::blastinput::query_batch::outfmts_have_xml(
+            self.outputs.formats.iter().map(|format| format.outfmt),
+        );
+        match (xml, to_end) {
+            (false, _) => &records[batch],
+            (true, false) => &records[..batch.end],
+            (true, true) => records,
+        }
+    }
+
+    /// NCBI's scope of queries of the batch of the searched queries `span`, the one producer for
+    /// the prefetch (`shared::PrefetchQueries`) and the check of line RG item X7 (`to_end` as
+    /// `scope_records`; review 1 of X7-1, S1): the PSSM's query of `-in_pssm`
+    /// (`PsiSearch::query_scope`), else the ids of `scope_records`.
+    pub(super) fn batch_scope(
+        &self,
+        span: &Range<usize>,
+        to_end: bool,
+    ) -> crate::blastinput::query_batch::QueryScope {
+        match self.args.psi_search.as_deref() {
+            Some(psi) => psi.query_scope(),
+            None => crate::blastinput::query_batch::QueryScope::of_shown_records(
+                self.scope_records(span, to_end),
+            ),
+        }
+    }
+}
+
 /// The warning lines of each query of the call, which the first format writes once, before the
 /// query's report (`QueryWarnings`): the reader's messages of the query's batch, then, unless the
 /// first format is a Seq-annot (which writes no result warnings), the query's own messages (none
@@ -515,29 +563,9 @@ pub(super) fn prefetch_reported_subjects(
     let pairwise_first =
         first_report.is_some_and(|format| blastp_pairwise_view_of(format as i32).is_some());
     // The query records that NCBI's scope holds at the prefetch of the batch of the searched
-    // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
-    // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of
-    // `-in_pssm` (`PsiSearch::query_scope`); else the input records that NCBI's reader added for
-    // the batch (`RangedBatch::input`: the records that `-query_loc` drops included, numbered in
-    // the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
-    // (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those of the batches before.
-    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
-        outputs.formats.iter().map(|format| format.outfmt),
-    );
-    let batch_scope = |span: &std::ops::Range<usize>| {
-        if let Some(scope) = reports.prefetch_scope {
-            return scope();
-        }
-        if let Some(psi) = args.psi_search.as_deref() {
-            return psi.query_scope();
-        }
-        let input = query_batches
-            .iter()
-            .find(|batch| batch.searched == *span)
-            .map_or(0..0, |batch| batch.input.clone());
-        let input = if xml_scope { 0..input.end } else { input };
-        crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
-    };
+    // queries `span` (`shared::PrefetchQueries`, made only where the batch stops):
+    // `ReportPrep::batch_scope`.
+    let batch_scope = |span: &std::ops::Range<usize>| prep.batch_scope(span, false);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:677-707
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:331-380
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
@@ -1080,67 +1108,89 @@ pub(super) fn refuse_unreportable(
     // a query of the batch that reports it (in outfmt 5, whose scope NCBI's formatter keeps, of
     // the run) is that query's own Bioseq for NCBI's scope, which shows the query's title and
     // letters in its place where a report reads them, can abort on its query-anchored merge, and
-    // in psiblast makes the next round's PSSM from its letters: refused here where a report
-    // differs for it (`FoundWriters::generated_effect`; the Seq-annots, the archive, tables of
-    // fields that read nothing of it and the organism report of a sequence without a taxid that
-    // the taxonomy database names are NCBI's bytes), and one whose description line shows such an
+    // in psiblast makes the next round's PSSM, or the one it saves, from its letters: the batch's
+    // check (`report::query_bioseq::check`, HSP by HSP, against `ReportPrep::batch_scope`, the
+    // prefetch's scope) refuses where a report differs for it (`FoundWriters::generated_effect`;
+    // the Seq-annots, the archive, tables of fields that read nothing of it, or only letters and a
+    // length that are its own where the found query's record has them, and the organism report of
+    // a sequence without a taxid are NCBI's bytes), and one whose description line shows such an
     // id as its display id (outfmt 0 to 4: NCBI shows the query's title there,
     // `ListedTitles::refuse_display_ids`). Under `-parse_deflines` (or a PSSM query shown with its
     // ids) the scopes of the batches refuse (`ListedTitles::refuse_ids_of_queries`, and below by
     // the display id). A `-subject` search cannot meet it: without `-parse_deflines` the subjects
     // are `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
-    // (`id_scope`) unless it is the query's own record (the abort above). The refusal runs in the
-    // search of all queries, before any byte of the call's reports (in a psiblast round after the
-    // first, after the earlier rounds' output): such a sequence has parsed Seq-ids, and the block
-    // search never takes a database with them (`database::x_titles_allow_blocks`).
+    // (`id_scope`) unless it is the query's own record (the abort above). The refusal of a
+    // generated id fails its batch (`ErrorAfterBatchReports` of the batch's first query): the
+    // reports of the batches before are written first, as NCBI formats batch by batch (review 1
+    // of X7-1, S5); the display ids' refusal runs before any byte of the call's reports (in a
+    // psiblast round after the first, after the earlier rounds' output): such a sequence has
+    // parsed Seq-ids, and the block search never takes a database with them
+    // (`database::x_titles_allow_blocks`).
     if let (None, Some(titles)) = (reports.query_scopes, listed_titles.as_ref()) {
-        let xml = format_plans
-            .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
-        let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = if xml {
-            vec![(
-                usize::MAX,
-                crate::blastinput::query_batch::QueryScope::of_shown_records(ranges.input_records),
-            )]
-        } else {
-            query_batches
-                .iter()
-                .map(|batch| {
-                    (
-                        batch.searched.end,
-                        crate::blastinput::query_batch::QueryScope::of_shown_records(
-                            &ranges.input_records[batch.input.clone()],
-                        ),
-                    )
-                })
-                .collect()
-        };
-        let none = crate::blastinput::query_batch::QueryScope::default();
-        let scope_of = |query: usize| {
-            scopes
-                .get(scopes.partition_point(|&(end, _)| end <= query))
-                .map_or(&none, |(_, scope)| scope)
-        };
-        let writers = BlastpReport::found_writers(format_plans, reports.psi_round);
+        let writers = BlastpReport::found_writers(args, format_plans, reports.psi_round);
         let taxdb = database.is_some_and(database::BlastpDatabase::taxdb_found);
-        titles.refuse_generated_ids(hit_lists, &scope_of, |query, list_index, subject| {
-            let Some(Some(hit_list)) = hit_lists.get(query) else {
-                return None;
+        let load_texts = database.is_some_and(database::BlastpDatabase::loads_write_texts);
+        // The found query's record is compared with the sequence where the records are whole
+        // (not cut by `-query_loc`) and a FASTA query's (not the PSSM's of `-in_pssm`).
+        let compares = !ranges.query_input.placements.ranged() && args.psi_search.is_none();
+        let no_record = |_: usize| None;
+        for batch in query_batches {
+            let records = prep.scope_records(&batch.searched, true);
+            let found = |subject: &crate::report::db_subject::ParsedSubject,
+                         ordinal: u32,
+                         ranges: &[Range<usize>]| {
+                database
+                    .filter(|_| compares)
+                    .zip(crate::report::query_bioseq::found_record(subject, records))
+                    .map_or_else(Default::default, |(database, record)| {
+                        crate::report::query_bioseq::compare_found(
+                            &record.sequence,
+                            database.seqdb(),
+                            ordinal,
+                            ranges,
+                        )
+                    })
             };
-            // The first HSP whose report differs, by its Seq-align's `num_ident` (`EngineCounts`).
-            hit_list.hsplist_array[list_index]
-                .hsps
-                .iter()
-                .enumerate()
-                .find_map(|(index_in_list, hsp)| {
-                    let num_ident = engine_counts.num_ident(
-                        (query as u32, list_index as u32, index_in_list as u32),
-                        hsp.num_ident,
-                    );
-                    writers.generated_effect(subject, num_ident, taxdb)
-                })
-        })?;
+            let run = crate::report::query_bioseq::SeenRun {
+                shows: false,
+                known: 0..0,
+                record: &no_record,
+                protein: true,
+                writers: &writers,
+                taxdb,
+                load_texts,
+                found: &found,
+            };
+            let scope = || prep.batch_scope(&batch.searched, true);
+            let queries = crate::blastinput::query_batch::BatchQueries::Generated(
+                crate::blastinput::query_batch::GeneratedQueries::new(&scope, None),
+            );
+            titles
+                .refuse_generated_ids(
+                    hit_lists,
+                    batch.searched.clone(),
+                    &queries,
+                    &run,
+                    |key, hsp| engine_counts.num_ident(key, hsp.num_ident),
+                )
+                .map_err(|error| {
+                    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+                        batch.searched.start,
+                        error,
+                    ))
+                })?;
+        }
         if !pairwise_views.is_empty() {
+            let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
+                .iter()
+                .map(|batch| (batch.searched.end, prep.batch_scope(&batch.searched, true)))
+                .collect();
+            let none = crate::blastinput::query_batch::QueryScope::default();
+            let scope_of = |query: usize| {
+                scopes
+                    .get(scopes.partition_point(|&(end, _)| end <= query))
+                    .map_or(&none, |(_, scope)| scope)
+            };
             titles
                 .refuse_display_ids(hit_lists, scope_of, true, |q_idx| described(q_idx, false))?;
         }

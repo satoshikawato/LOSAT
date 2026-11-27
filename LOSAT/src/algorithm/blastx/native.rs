@@ -1588,13 +1588,14 @@ pub(super) fn reported_batch(
             protein: false,
             writers: &writers,
             taxdb: database.taxdb_found(),
+            load_texts: database.loads_write_texts(),
+            // A nucleotide query is never compared with the protein sequence.
+            found: crate::report::query_bioseq::NOT_COMPARED,
         };
-        let generated = || {
-            crate::blastinput::query_batch::QueryScope::of_shown(super::input::shown_ids(queries))
-        };
+        // The batch's scope as its prefetch makes it (`BatchScopes::of_batch`, one producer).
         let queries = crate::blastinput::query_batch::BatchQueries::of(
             query_scopes.map(|scopes| scopes.run()),
-            &generated,
+            prefetch_queries.scope(),
             (options.outfmt == 5).then(|| 1..run_queries.map_or(usize::MAX, |queries| queries + 1)),
         );
         queries.held(reported.refuse_ids_of_queries(

@@ -804,6 +804,17 @@ impl Args {
         files::open_output_file(name, value, stdout, &self.files)
     }
 
+    /// The device of the `eOutputFile` key `name` without NCBI's stream (`output_file`,
+    /// `files::open_output_device`), for a writer that models the stream itself.
+    pub(crate) fn output_device<'a>(
+        &self,
+        name: &str,
+        stdout: &'a mut dyn Write,
+    ) -> Result<files::OutputDevice<'a>, ArgException> {
+        let value = self.os_value(name).ok_or_else(|| no_value(name))?;
+        files::open_output_device(name, value, stdout, &self.files)
+    }
+
     /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
     /// given, or its default, UTF-8 or not. The programs open a file by it (`output_file`,
     /// `files::open_input_file`). In a debug build `name` must be an argument of the program by

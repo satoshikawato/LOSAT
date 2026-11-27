@@ -9,9 +9,9 @@ fn line(fmt: &str) -> Vec<u8> {
         blast_name: b"primates".to_vec(),
         super_kingdom: Ok(b"Eukaryota".to_vec()),
     };
-    let mut out = Vec::new();
+    let mut out = CutBuffer::default();
     fields.line(9606, &LineNames::Named(names), 3, &mut out);
-    out
+    out.bytes
 }
 
 // NCBI's lines for these formats: probes T10-T12, J140-J159 of line BDC.
@@ -48,9 +48,9 @@ fn the_format_is_read_as_ncbi_s_loop_reads_it() {
 #[test]
 fn missing_names_are_not_available() {
     let fields = TaxFields::parse(b"%f").unwrap();
-    let mut out = Vec::new();
+    let mut out = CutBuffer::default();
     fields.line(0, &LineNames::NotAvailable, 0, &mut out);
-    assert_eq!(out, b"0\tN/A\tN/A\tN/A\tN/A\n");
+    assert_eq!(out.bytes, b"0\tN/A\tN/A\tN/A\tN/A\n");
 }
 
 // NCBI's lines for a taxid found in the index without names (probe of line RG T5b,
@@ -58,7 +58,7 @@ fn missing_names_are_not_available() {
 #[test]
 fn a_taxid_found_without_names_has_empty_names() {
     let fields = TaxFields::parse(b"%T|%S|%L|%K|%B").unwrap();
-    let mut out = Vec::new();
+    let mut out = CutBuffer::default();
     fields.line(9606, &LineNames::Empty, 0, &mut out);
-    assert_eq!(out, b"9606||||\n");
+    assert_eq!(out.bytes, b"9606||||\n");
 }

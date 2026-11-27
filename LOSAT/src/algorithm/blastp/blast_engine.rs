@@ -789,15 +789,6 @@ fn blastp_compo_adjust_mode(mode: BlastpCompositionMode) -> BlastCompoAdjustMode
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3099-3107
-// No NCBI counterpart: code placement only; it changes no value NCBI computes.
-/// Runs `f` in a function of its own: each closure gives an instance that is not inlined into the
-/// caller (the per-subject kernel's branches of another matrix than BLOSUM62, item SC2b).
-#[inline(never)]
-fn x_outlined<R>(f: impl FnOnce() -> R) -> R {
-    f()
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
 /// The composition-based redo's workspace of another matrix than BLOSUM62 (item SC2b), put in
 /// place of `workspace` (BLOSUM62's, which its callers make as before): cold and in place, so that

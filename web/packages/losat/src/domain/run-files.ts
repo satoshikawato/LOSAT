@@ -57,13 +57,17 @@ function matchesPssmFile(fileName: string, baseName: string | null | undefined, 
 
 /**
  * The files of a run (stream 8) with the option that named each, which the engine's *start* of the
- * argv gives (ABI v2 §9: `log_file`, `log_file_name`, `strategy_file`, `out_pssm`,
- * `out_ascii_pssm`, `save_each_pssm`). A file that none of them names is an error of the engine.
+ * argv gives (ABI v2 §9: `log_file_name`, `strategy_file`, `out_pssm`, `out_ascii_pssm`,
+ * `save_each_pssm`): each is the command line's file name under which a run gives that file, and
+ * they are matched in that order (the file of `-logfile`, the strategy file, the PSSM files). The
+ * `-logfile` value as written (`log_file`) is not matched: every module of this ABI version gives
+ * the log file under `log_file_name` (since version 14), and the value as written may be the name of
+ * another option's file (`-logfile -` makes no file, and `-export_search_strategy ./-` makes the
+ * file `-`). A file that none of them names is an error of the engine.
  */
 export function namedRunFiles(
   files: readonly RunFile[],
   start: {
-    readonly logFile: string | null;
     readonly logFileName?: string | null;
     readonly strategyFile: string | null;
     readonly outPssm?: string | null;
@@ -73,9 +77,7 @@ export function namedRunFiles(
 ): RunFile[] {
   const saveEach = start.saveEachPssm === true;
   return files.map((file) => {
-    if (file.name === start.logFile || (start.logFileName != null && file.name === start.logFileName)) {
-      return { name: file.name, bytes: file.bytes };
-    }
+    if (start.logFileName != null && file.name === start.logFileName) return { name: file.name, bytes: file.bytes };
     if (file.name === start.strategyFile) return { name: file.name, bytes: file.bytes, option: 'export_search_strategy' };
     const isAscii = matchesPssmFile(file.name, start.outAsciiPssm, saveEach);
     const isAsn = matchesPssmFile(file.name, start.outPssm, saveEach);

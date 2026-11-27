@@ -70,7 +70,7 @@ The output is the same as NCBI BLAST+ 2.17.0's `deltablast -num_threads 1` (stan
 ## Differences from NCBI BLAST+
 
 - **Domain hits that tie in E-value.** Before building a query's round-1 PSSM, LOSAT sorts the domain hits with a stable sort, so two hits of the same domain with equal E-value keep their order from the domain search. NCBI's `deltablast` sorts them with its C++ library's unstable sort, which can trim overlapping hits of that domain differently and change the query's PSSM and search results. See [Differences from NCBI BLAST+](../differences.md#deltablast-domain-hits-that-tie).
-- `deltablast` is not in LOSAT Web (the browser refuses it, as it refuses `psiblast`), and not in the library API or `pylosat`.
+- `deltablast` is not in LOSAT Web (the browser refuses it), and not in the library API or `pylosat`.
 
 ## What LOSAT refuses
 

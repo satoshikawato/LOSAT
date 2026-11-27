@@ -82,6 +82,12 @@ const TOOL_FILE_OPTIONS = new Set([
   '-mask_id',
   '-mask_desc',
 ]);
+/**
+ * Placeholder for makeblastdb's `-taxid` values other than 0 in tool option keys: makeblastdb stores such a taxonomy
+ * ID in every sequence as given, while 0 leaves the sequences to `-taxid_map` (writedb `taxid_set.rs`,
+ * `global_taxid != 0`), so the key keeps 0 and not the other values.
+ */
+export const TAXID_VALUE = '<taxid>';
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */
@@ -149,6 +155,10 @@ export function toolOptionKey(words: readonly string[], grammar: ToolOptionGramm
     if (TOOL_NOT_OPTIONS.has(flag)) continue;
     if (TOOL_FILE_OPTIONS.has(flag)) {
       pairs.push([flag, FILE_VALUE]);
+      continue;
+    }
+    if (flag === '-taxid') {
+      pairs.push([flag, /^\+?0+$/.test(value) ? '0' : TAXID_VALUE]);
       continue;
     }
     const isBool = grammar.isBoolean?.(flag) === true;

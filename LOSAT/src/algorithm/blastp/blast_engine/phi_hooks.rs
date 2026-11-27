@@ -323,20 +323,13 @@ pub(super) enum PhiStart<'p> {
 /// What LOSAT's limits of PHI-BLAST read besides the options (`phi_limits`): the call's formats
 /// and its subjects.
 pub(super) struct PhiLimits<'a> {
-    formats: &'a [super::BlastpReport],
     subject_source: super::BlastpSubjectSource<'a>,
 }
 
 impl<'a> PhiLimits<'a> {
-    /// The limits' inputs: the call's formats and subjects.
-    pub(super) fn new(
-        formats: &'a [super::BlastpReport],
-        subject_source: super::BlastpSubjectSource<'a>,
-    ) -> Self {
-        Self {
-            formats,
-            subject_source,
-        }
+    /// The limits' inputs: the call's subjects.
+    pub(super) fn new(subject_source: super::BlastpSubjectSource<'a>) -> Self {
+        Self { subject_source }
     }
 }
 
@@ -381,9 +374,8 @@ pub(super) fn phi_call<'p>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
-/// LOSAT's limits of PHI-BLAST (item PS8a; their order after NCBI's errors is `phi_call`'s):
-/// outfmt 11 of the round (a later item, PS8b), whatever is searched. Then only where the
-/// round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
+/// LOSAT's limits of PHI-BLAST (item PS8a; their order after NCBI's errors is `phi_call`'s),
+/// only where the round is searched (`searched`: NCBI's table has a Karlin block for the matrix and gap costs;
 /// without it round 1 is the run's last whatever `-num_iterations` and `-sum_stats` say, probes
 /// `k.pam.it3.0`, `k.pam.ss3.0`): `-sum_stats true` (NCBI links the
 /// preliminary HSPs with the pattern's Karlin block and reaps them by the linked e-values; probe
@@ -397,15 +389,6 @@ fn phi_limits(
     searched: bool,
 ) -> Option<anyhow::Error> {
     let program = args.app.name();
-    use super::BlastpReport;
-    if let Some(number) = limits.formats.iter().find_map(|format| match format {
-        BlastpReport::Archive => Some(11),
-        _ => None,
-    }) {
-        return Some(anyhow::anyhow!(
-            "-phi_pattern with output format {number} is not supported by LOSAT's {program} yet"
-        ));
-    }
     if !searched {
         return None;
     }
@@ -888,6 +871,25 @@ pub(super) fn request_searched(
             0
         },
     })
+}
+
+/// PHI-BLAST's round 1 of psiblast's rounds (item PS8b): the context 0 of its one query batch as
+/// the options handle keeps it after the search (`request_searched`), for the archives of the
+/// later rounds (`RoundOutcome::phi_handle`); a query is valid where its context is
+/// (`call_setup::call_lookup`'s rule).
+#[cold]
+#[inline(never)]
+pub(super) fn round_handle(
+    phi: &PhiCall<'_>,
+    contexts: &[QueryContext],
+) -> Option<crate::report::archive::SearchedContext0> {
+    let mut query_valid = vec![true; phi.searches.len()];
+    for context in contexts {
+        if !context.is_valid {
+            query_valid[context.q_idx as usize] = false;
+        }
+    }
+    request_searched(phi, contexts, &query_valid, 0)
 }
 
 /// The footers of PHI-BLAST's outfmt 0 report: each searched query's ungapped and gapped Karlin

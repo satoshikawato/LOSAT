@@ -401,10 +401,16 @@ impl PsiblastArgs {
             None => RequestKind::Psiblast,
         };
         let mut inputs = OptionInputs::new(kind, "blastp");
-        inputs.phi_pattern = self
-            .phi_pattern
-            .as_deref()
-            .and_then(crate::algorithm::phi_search::file::pattern_text);
+        // The library's pattern bytes (`phi_pattern_bytes`) in place of the file's.
+        inputs.phi_pattern = match self.phi_pattern_bytes.as_deref() {
+            Some(bytes) => crate::algorithm::phi_search::file::read_pattern(bytes)
+                .ok()
+                .map(|pattern| String::from_utf8_lossy(&pattern).into_owned()),
+            None => self
+                .phi_pattern
+                .as_deref()
+                .and_then(crate::algorithm::phi_search::file::pattern_text),
+        };
         inputs.dbsize = self.dbsize;
         inputs.searchsp = self.searchsp;
         inputs.sum_stats = self.sum_stats;
@@ -463,8 +469,7 @@ impl PsiblastArgs {
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
     /// `-outfmt`. `phi`: the run has `-phi_pattern`, whose formats 8, 9 and 12 end with NCBI's
-    /// engine error (`blast_engine/phi_hooks.rs`); its refusal of formats 5 and 11 comes after
-    /// NCBI's errors of the pattern's search (`phi_hooks::phi_limits`).
+    /// engine error (`report_write::write_phi_report`).
     pub fn check_outfmt(
         outfmt: impl AsRef<[u8]>,
         out: Option<&std::path::Path>,
@@ -483,9 +488,9 @@ impl PsiblastArgs {
             return Ok(());
         }
         if ReportFormat::from_number(choice.number).is_some() {
-            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), formats
-            // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
-            // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
+            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`; formats
+            // 8, 9 and 12 reach NCBI's engine error). Without a pattern: `writes_outfmt` (0..=12,
+            // 18, 20).
             let allowed = if phi {
                 matches!(choice.number, 0..=12 | 18 | 20)
             } else {

@@ -378,6 +378,9 @@ fn run_queries(
         // `kbp_psi[0]` and `kbp_gap_psi[0]` of the input PSSM's search, after a round 1 without
         // alignments (`in_pssm_files::InPssmRounds::written_back`).
         let mut searched_input = None;
+        // PHI-BLAST's round 1's context 0 in the archive's options handle, which the later rounds'
+        // archives read (`RoundOutcome::phi_handle`).
+        let mut phi_handle = None;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:337-340
         // The query's search strategy request, before its first round (also when round 1 fails
         // with a header file NCBI cannot read). Round 1's call notes the query's searched space
@@ -527,6 +530,7 @@ fn run_queries(
                     .as_deref()
                     .and_then(|psi| psi.query_seq_loc_id().cloned()),
                 outcome: std::sync::Mutex::new(None),
+                phi_handle: phi_handle.filter(|_| round > 1),
             };
             // The library's records of the round (`FormatObserver::round_begin`): the call's hit
             // list and HSP numbers are the round's.
@@ -633,6 +637,9 @@ fn run_queries(
                 .take()
                 .expect("every round's search reaches its outcome hook");
             result_sets += outcome.result_sets;
+            if round == 1 {
+                phi_handle = outcome.phi_handle;
+            }
             if !outcome.has_alignments {
                 if round == 1 {
                     searched_input = outcome.searched;
@@ -1119,6 +1126,7 @@ pub(super) fn round_outcome(
         next_warnings,
         searched,
         result_sets: phi.map_or(1, |phi| phi.occurrences(0)),
+        phi_handle: phi.and_then(|phi| super::phi_hooks::round_handle(phi, contexts)),
     });
     Ok(found_before)
 }

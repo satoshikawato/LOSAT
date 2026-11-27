@@ -189,6 +189,10 @@ pub(crate) struct PsiArchive {
     /// The PSSM that the request of a PSSM search holds in place of the query, with the round's
     /// K/A written back; `None` for a FASTA query's first round (its Bioseq).
     pub pssm: Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+    /// psiblast `-phi_pattern`'s rounds after round 1 (item PS8b): the context 0 that PHI-BLAST's
+    /// round 1 left in the options handle of the archive, whose `EffectiveSearchSpace` option it
+    /// gives in place of the round's own (`RoundOutcome::phi_handle`).
+    pub handle_space: Option<crate::report::archive::SearchedContext0>,
 }
 
 /// What the archive of a call needs: the call's batches (the batches of one block, or of the
@@ -345,10 +349,13 @@ pub(crate) fn for_each_batch(
                     ka_blocks,
                     search_space: context.search_space,
                     length_adjustment: context.length_adjustment,
-                    searched_space: searched.then_some(crate::report::archive::SearchedContext0 {
-                        space: context.context0_space,
-                        query_length: context.context0_length,
-                    }),
+                    searched_space: match psi.and_then(|psi| psi.handle_space) {
+                        Some(handle) => Some(handle),
+                        None => searched.then_some(crate::report::archive::SearchedContext0 {
+                            space: context.context0_space,
+                            query_length: context.context0_length,
+                        }),
+                    },
                     round: psi.map(|psi| psi.round),
                 };
                 each(span, &batch)

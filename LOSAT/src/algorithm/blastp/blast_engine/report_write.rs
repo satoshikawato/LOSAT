@@ -321,7 +321,9 @@ pub(super) fn write_archive(
 /// PSSM search builds its request with the PSSM and the run's database, so with `-subject`
 /// (`database` false) NCBI's `CExportStrategy` stops there with its engine error, after the
 /// archives of the rounds before (the bl2seq archive of a FASTA query's first round is another
-/// path, `x_Process_SearchDb` is not reached).
+/// path, `x_Process_SearchDb` is not reached). With `-phi_pattern` (item PS8b) the archives of the
+/// rounds after round 1 are written with PHI-BLAST's options handle (`opts_hndl`): round 1's
+/// `EffectiveSearchSpace` and no composition-based mode (`RoundOutcome::phi_handle`).
 fn psi_archive(
     args: &ResolvedBlastpArgs,
     reports: &BlastpReports<'_>,
@@ -353,11 +355,16 @@ fn psi_archive(
         }
         _ => None,
     };
-    let comp_based_stats = pssm.as_ref().map(|_| match args.comp_based_stats.mode {
-        BlastpCompositionMode::NoCompositionBasedStats => 0,
-        BlastpCompositionMode::CompositionBasedStats => 1,
-        BlastpCompositionMode::CompositionMatrixAdjust => 2,
-        BlastpCompositionMode::ForceFullMatrixAdjust => 3,
+    // psiblast `-phi_pattern`'s later rounds: the handle is PHI-BLAST's of round 1, which their
+    // set-up does not reach (`RoundOutcome::phi_handle`).
+    let handle_space = reports.psi_round.and_then(|io| io.phi_handle);
+    let comp_based_stats = pssm.as_ref().filter(|_| handle_space.is_none()).map(|_| {
+        match args.comp_based_stats.mode {
+            BlastpCompositionMode::NoCompositionBasedStats => 0,
+            BlastpCompositionMode::CompositionBasedStats => 1,
+            BlastpCompositionMode::CompositionMatrixAdjust => 2,
+            BlastpCompositionMode::ForceFullMatrixAdjust => 3,
+        }
     });
     Ok(archive::PsiArchive {
         round: crate::report::archive::ArchiveRound {
@@ -365,6 +372,7 @@ fn psi_archive(
             comp_based_stats,
         },
         pssm,
+        handle_space,
     })
 }
 
@@ -961,7 +969,6 @@ impl<'a> PhiPairwise<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1658-1664
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-706
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub(super) fn write_phi_report(
     view: &ReportView<'_>,
     outfmt: BlastpReport,
@@ -1020,10 +1027,62 @@ pub(super) fn write_phi_report(
                 )),
             }
         }
-        BlastpReport::Xml2(_) | BlastpReport::Archive => Err(anyhow::anyhow!(
+        BlastpReport::Archive => write_phi_archive_round(view, phi, format, warnings, probe, rows_of),
+        BlastpReport::Xml2(_) => Err(anyhow::anyhow!(
             "LOSAT internal error: a PHI-BLAST report of a format that LOSAT refuses with -phi_pattern"
         )),
     }
+}
+
+/// psiblast `-phi_pattern` with outfmt 11 (item PS8b): PHI-BLAST's round is not written as an
+/// archive (`PrintPhiResult` writes the structured formats only, and the archive is none of them),
+/// but as its outfmt 0 report (`write_pairwise`) without the prolog and the epilog, which NCBI's
+/// formatter writes for no archive. The subjects that it shows are those of the final lists,
+/// whose titles are checked first, as the loop over the formats checks a pairwise format's
+/// (`check_pairwise_shown_titles`). The rounds after it write their archives (`write_archive`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2024-2037
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-361
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2237-2238
+#[cold]
+#[inline(never)]
+fn write_phi_archive_round(
+    view: &ReportView<'_>,
+    phi: PhiPairwise<'_>,
+    format: &mut FormatOutput<'_>,
+    warnings: &mut Option<QueryWarnings<'_>>,
+    probe: &mut Option<FormatProbe<'_>>,
+    rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
+) -> Result<()> {
+    let pairwise = crate::report::pairwise::PairwiseView::Pairwise;
+    let shown: BTreeSet<usize> = view
+        .hit_lists
+        .iter()
+        .flatten()
+        .flat_map(|hit_list| hit_list.hsplist_array.iter().take(hit_list.hsplist_count))
+        .flat_map(|hsp_list| &hsp_list.hsps)
+        .map(|hsp| hsp.s_idx as usize)
+        .collect();
+    super::check_pairwise_shown_titles(view, pairwise, rows_of, &shown)?;
+    let reports = super::BlastpReports {
+        x_prolog: false,
+        epilog: false,
+        ..*view.reports
+    };
+    let view = ReportView {
+        reports: &reports,
+        ..*view
+    };
+    write_pairwise(
+        &view,
+        pairwise,
+        format,
+        warnings,
+        probe,
+        &Some(shown),
+        rows_of,
+        Some(phi),
+    )
 }
 
 /// Outfmt 0 to 4: the pairwise report of the queries (`write_blastp_pairwise_window`), or psiblast's

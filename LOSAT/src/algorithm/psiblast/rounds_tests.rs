@@ -75,6 +75,7 @@ fn a_round_may_make_a_pssm_only_where_a_round_follows_or_the_last_is_saved() {
             request: plan.request,
             query_id: None,
             outcome: std::sync::Mutex::new(None),
+            phi_handle: None,
         }
     };
     assert!(!io(1, 0, false).may_make_next(), "one round");

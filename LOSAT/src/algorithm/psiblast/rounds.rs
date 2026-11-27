@@ -260,6 +260,10 @@ pub(crate) struct PsiRoundIo {
     /// query (`Query_<n>`).
     pub(crate) query_id: Option<crate::seqid::ParsedSeqId>,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
+    /// psiblast `-phi_pattern`'s rounds after round 1 (item PS8b): the batch's context 0 that
+    /// PHI-BLAST's round 1 left in the options handle of the archive (`RoundOutcome::phi_handle`);
+    /// `None` for the other rounds.
+    pub(crate) phi_handle: Option<crate::report::archive::SearchedContext0>,
 }
 
 impl PsiRoundIo {
@@ -300,6 +304,12 @@ pub(crate) struct RoundOutcome {
     /// The result sets of the round (BLAST XML's `Iteration`s): 1, or PHI-BLAST's pattern
     /// occurrences (item PS8b).
     pub(crate) result_sets: usize,
+    /// PHI-BLAST's round 1 (item PS8b): its batch's context 0 as the options handle keeps it
+    /// (`phi_hooks::request_searched`). NCBI's archive of each later round is written with that
+    /// handle (`opts_hndl`), which the later rounds, searching with the second `SetOptions`' handle,
+    /// leave as it is: its `EffectiveSearchSpace` is round 1's and it has no composition-based
+    /// mode (`report_write::psi_archive`).
+    pub(crate) phi_handle: Option<crate::report::archive::SearchedContext0>,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's

@@ -231,25 +231,25 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
 }
 
 /// The capacity that `encode_defline_set` gives the record of `set`: 64 bytes, and for each
-/// definition line its title (when writing string bytes) and 64 bytes an id, so that a record of
-/// the usual size is written without growing its buffer (LOSAT's speed; NCBI has no such
-/// capacity, and the reference is where it builds the record); a larger one grows as before.
+/// definition line its title and 64 bytes an id, so that a record of the usual size is written
+/// without growing its buffer (LOSAT's speed; NCBI has no such capacity, and the reference is
+/// where it builds the record); a larger one grows as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
-fn encoded_capacity(set: &DeflineSet, write_strings: bool) -> usize {
+fn encoded_capacity(set: &DeflineSet) -> usize {
     64 + set
         .deflines
         .iter()
-        .map(|defline| {
-            let title_len = if write_strings {
-                defline.title.as_ref().map_or(0, Vec::len)
-            } else {
-                0
-            };
-            title_len + 64 * defline.ids.len()
-        })
+        .map(|defline| defline.title.as_ref().map_or(0, Vec::len) + 64 * defline.ids.len())
         .sum::<usize>()
 }
+
+/// The buffer of the diagnostics-alone walk (`defline_set_bad_chars`): every close, string and
+/// list value counts the bytes of `SetWriter::out` out (`SetWriter::count_out`), so it holds at
+/// most the opens since the last of them, one tag with its length or one integer, and one end, and
+/// does not grow (`the_member_path_fits_the_fixed_depth` checks it; LOSAT's speed, NCBI has no
+/// such buffer).
+const COUNTED_WALK_ROOM: usize = 64;
 
 /// The names of the deepest member path of a record, kept inline on the stack so that the path is
 /// never heap-allocated (LOSAT's speed): `Blast-def-line-set.E.seqid.E` and four below it, as
@@ -269,6 +269,9 @@ struct SetWriter<'a> {
     /// (the diagnostics alone, `defline_set_bad_chars`): every other byte is written either
     /// way, so the stream offsets of the reports are the same.
     write_strings: bool,
+    /// The bytes of the stream that are not in `out`: in the diagnostics-alone walk, the strings'
+    /// bytes (searched, not written) and the bytes counted out of `out` (`count_out`); 0 for the
+    /// header. The stream offset is `skipped + out.len()` either way.
     skipped: usize,
     path: [&'static str; MEMBER_PATH_DEPTH],
     path_len: usize,
@@ -282,6 +285,16 @@ impl SetWriter<'_> {
 
     fn close(&mut self) {
         close(&mut self.out);
+        self.count_out();
+    }
+
+    /// In the diagnostics-alone walk, counts the bytes of `out` into `skipped` and empties it
+    /// (`COUNTED_WALK_ROOM`); the header keeps every byte.
+    fn count_out(&mut self) {
+        if !self.write_strings {
+            self.skipped += self.out.len();
+            self.out.clear();
+        }
     }
 
     /// Enters the member, the alternative or the element (`E`) `name`: the path names one more
@@ -331,6 +344,7 @@ impl SetWriter<'_> {
             write_length(&mut self.out, text.len());
             bad_visible_chars(text, self.skipped + self.out.len(), &mut bad);
             self.skipped += text.len();
+            self.count_out();
         }
         if bad.is_empty() {
             return;
@@ -478,6 +492,7 @@ impl SetWriter<'_> {
             w.open(TAG_SEQUENCE);
             for &value in values {
                 write_int4(&mut w.out, value);
+                w.count_out();
             }
             w.close();
         });
@@ -517,7 +532,7 @@ pub(crate) fn encode_defline_set_checked(
     null_seqids: &[(usize, usize)],
     bad: &mut Vec<BadChar>,
 ) -> Result<Vec<u8>, NullSeqIdWriteError> {
-    let mut w = SetWriter::new(set, true, bad);
+    let mut w = SetWriter::new(Vec::with_capacity(encoded_capacity(set)), true, bad);
     w.set(set, null_seqids)?;
     Ok(w.out)
 }
@@ -532,21 +547,23 @@ pub(crate) fn encode_defline_set_checked(
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
 pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
-    SetWriter::new(set, false, bad)
+    SetWriter::new(Vec::with_capacity(COUNTED_WALK_ROOM), false, bad)
         .set(set, &[])
         .expect("no NULL Seq-id");
 }
 
 impl<'a> SetWriter<'a> {
-    /// The writer of the record of `set`, with or without the bytes of its strings (the buffer's
-    /// capacity is LOSAT's, `encoded_capacity`; the reference is where NCBI builds the record).
+    /// The writer of a record into `out` (empty), with or without the bytes of its strings (the
+    /// buffer is the caller's, of LOSAT's capacity: `encoded_capacity` for the header,
+    /// `COUNTED_WALK_ROOM` for the diagnostics alone; the reference is where NCBI builds the
+    /// record).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
-    fn new(set: &DeflineSet, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {
+    fn new(out: Vec<u8>, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {
         let mut path = [""; MEMBER_PATH_DEPTH];
         path[0] = "Blast-def-line-set";
         SetWriter {
-            out: Vec::with_capacity(encoded_capacity(set, write_strings)),
+            out,
             write_strings,
             skipped: 0,
             path,

@@ -463,25 +463,39 @@ mod parsed {
 
     /// The member path of the deepest members (every alternative with strings, `ids_with_strings`,
     /// a date of both kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the
-    /// root.
+    /// root, and the diagnostics-alone walk's buffer does not grow (`COUNTED_WALK_ROOM`), with a
+    /// title whose length takes four bytes, strings whose lengths take three, integers of four
+    /// bytes and a gi of eight.
     #[test]
     fn the_member_path_fits_the_fixed_depth() {
+        let mut ids = ids_with_strings(&[b's'; 300]);
+        ids.push(ParsedSeqId::Gi(i64::MAX));
         let set = DeflineSet {
             deflines: vec![BlastDefline {
-                title: text("t"),
-                ids: ids_with_strings(b"s"),
-                taxid: Some(1),
-                memberships: Some(vec![1]),
+                title: Some(vec![b't'; 70_000]),
+                ids,
+                taxid: Some(i32::MAX),
+                memberships: Some(vec![i32::MIN, 1, i32::MAX]),
+                links: Some(vec![i32::MAX]),
+                other_info: Some(vec![-5]),
                 ..BlastDefline::default()
             }],
             utf8: false,
         };
         for write_strings in [true, false] {
             let mut bad = Vec::new();
-            let mut w = SetWriter::new(&set, write_strings, &mut bad);
+            let mut w = SetWriter::new(
+                Vec::with_capacity(COUNTED_WALK_ROOM),
+                write_strings,
+                &mut bad,
+            );
+            let room = w.out.capacity();
             w.set(&set, &[]).unwrap();
             assert_eq!(w.path_len, 1);
             assert_eq!(&w.path[..w.path_len], ["Blast-def-line-set"]);
+            if !write_strings {
+                assert_eq!(w.out.capacity(), room, "the counted walk's buffer grew");
+            }
         }
     }
 

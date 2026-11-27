@@ -346,7 +346,12 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
     new Uint8Array(memory.buffer, 100_000, bytes.length).set(bytes);
     ref.abi!.emit(stream, 100_000, bytes.length);
   };
-  const argvOf = (ptr: number, len: number) => text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+  // The adapter's reading of an argv (web/adapter/src/lib.rs `words`): NUL-separated words, the empty one after the last NUL dropped.
+  const argvOf = (ptr: number, len: number) => {
+    const words = text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+    if (words.at(-1) === '') words.pop();
+    return words;
+  };
   const exports = {
     memory,
     losat_web2_abi_version: () => ABI_VERSION,

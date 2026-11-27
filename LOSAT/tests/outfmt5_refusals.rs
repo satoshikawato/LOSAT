@@ -162,7 +162,8 @@ fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
                 let whole = run_with(&args_of(false), &env);
                 assert_eq!(whole.status.code(), Some(0), "{what}");
                 // a query title: the 291st query; a subject title: the subject of the last
-                // query's hit (the only query with one)
+                // query's hit (the only query with one). The batches before hold fewer queries.
+                let refused_query = if what == "a query title" { 290 } else { 299 };
                 if what == "a query title" {
                     many_queries(&query, Some((290, PUNCTUATION)), &hit);
                 } else {
@@ -193,7 +194,7 @@ fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
                     assert!(
                         whole.stdout.starts_with(&written)
                             && written.ends_with(b"</Iteration>")
-                            && (1..=290).contains(&iterations),
+                            && (1..=refused_query).contains(&iterations),
                         "{what}: {iterations} iterations of\n{}",
                         String::from_utf8_lossy(&written)
                     );

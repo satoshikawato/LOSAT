@@ -1,0 +1,299 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: dbs.faa
+           492 sequences; 341,132 total letters
+
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       293     3e-93
+BDV50182.1 wsv423-like protein [Chiromantes dehaani nimavirus]        288     3e-90
+BDU62129.1 wsv423-like protein [Chionoecetes opilio bacilliform v...  226     9e-70
+BDT63084.1 wsv423-like protein [Sicyonia whispovirus]                 204     4e-60
+BDT61690.1 wsv423-like protein [Marsupenaeus japonicus endogenous...  39.7    6e-05
+BDU62219.1 wsv325-like protein [Chionoecetes opilio bacilliform v...  26.6    0.95 
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       25.1    3.1  
+BDU62147.1 wsv139-like protein [Chionoecetes opilio bacilliform v...  24.3    4.7  
+BDT61745.1 wsv289-like protein [Marsupenaeus japonicus endogenous...  24.3    4.9  
+BDT63145.1 wsv133-like protein [Sicyonia whispovirus]                 24.3    5.0  
+BDT63124.1 wsv343-like protein [Sicyonia whispovirus]                 24.3    5.9  
+BDV50237.1 wsv465-like protein [Chiromantes dehaani nimavirus]        23.9    6.9  
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 293 bits (749),  Expect = 3e-93, Method: Composition-based stats.
+ Identities = 28/395 (7%), Positives = 63/395 (16%), Gaps = 27/395 (7%)
+
+Query  1    MEGGDQRTKLTP--ATVMGLYQSKTPGEGEGGEGGGQ---------FKIPSAIAVKSCCS  49
+                +  +K          +         +                  I +    +   +
+Sbjct  188  HFNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSN  247
+
+Query  50   KNATRRSPPSDSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRP  109
+                        P          K              L                  +R 
+Sbjct  248  N------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRD  301
+
+Query  110  ITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTV  169
+                E      +        +     S +  S     R  A+    K             
+Sbjct  302  ANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIH  361
+
+Query  170  NLKARDYTPLSVLRSHVKGPKHLKSSCDTVTET---NVVKRNFSSIDKWVKLEKPPCYFA  226
+                   T    L  +      L  +   V      +                    +  
+Sbjct  362  TNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH--  419
+
+Query  227  VAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNN  286
+                  ++       F L +++ +  +  +   +       KQ C + K  +        
+Sbjct  420  -----LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEA  474
+
+Query  287  RTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPG  346
+                         F    L V          +            +           L   
+Sbjct  475  YFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGA  534
+
+Query  347  ACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAH  381
+                 +  +   L    A     +    ++    +
+Sbjct  535  VGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLN  569
+
+
+>BDV50182.1 wsv423-like protein [Chiromantes dehaani nimavirus]
+Length=958
+
+ Score = 288 bits (736),  Expect = 3e-90, Method: Composition-based stats.
+ Identities = 23/388 (6%), Positives = 54/388 (14%), Gaps = 20/388 (5%)
+
+Query  6    QRTKLTPATVMGLYQSKTPGEGEGGEGGGQFKIPSAIAVKSCCSKNATRRSPPSDSPYSL  65
+            ++              ++    E           S   +    S    ++         +
+Sbjct  355  KKKTPIVILDHQQSTKRSDYIDELLP----PPPSSITTISYTQSSAPQQQRKN----NQV  406
+
+Query  66   RPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFATLNPTYA  125
+               K                     +    S          KR     E       P   
+Sbjct  407  NYFKINLTTRVYDSLSIFRSHIGGGKHLGSSCNPVTETILLKRNCDRVEKWGKLTEPPVY  466
+
+Query  126  TDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSH  185
+             + ++        A S     R  A         +      +                  
+Sbjct  467  FERVEADANICGGAYSSSSFRRQAAQLGLFGSIQNVILQFDTLKRQCNDC-------IKD  519
+
+Query  186  VKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLI  245
+                  + +    V         +                       +I       F L 
+Sbjct  520  TDKTVKVPNHWWPVGIEG---SVYQHRTCIDPRLLRANSNKRKIK--DIEYMAREVFKLS  574
+
+Query  246  RQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGSKNL  305
+              A    L      +        Q        +                     F     
+Sbjct  575  DSAIANVLNKTSSLLYEVSAVCSQWHKKRSLLSMPGHVPAKYASTTILIGPNERFLEVKD  634
+
+Query  306  SVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQ  365
+             V          +   +  +     +           +           +   +    A 
+Sbjct  635  GVYYMLERGTVIKFMIHPTRFTDFVLETAIGYSIQNNIKGAVGVIGTCPEAFCIEMEFAG  694
+
+Query  366  CKKWESYRRNIPVPAHVQPEYASQVVMI  393
+                +    ++    +            
+Sbjct  695  VTLQDVINGDLNCVLNHPRAPGVPPTKT  722
+
+
+>BDU62129.1 wsv423-like protein [Chionoecetes opilio bacilliform 
+virus]
+Length=617
+
+ Score = 226 bits (577),  Expect = 9e-70, Method: Composition-based stats.
+ Identities = 24/315 (8%), Positives = 50/315 (16%), Gaps = 9/315 (3%)
+
+Query  67   PMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFATLNPTYAT  126
+                                  + +    S     +     R             P    
+Sbjct  76   FFDISLNTVVYNSHSILLSHIQQDKHLGSSCRTITDTLLVNRNKNSIGRWALIEKPPPYF  135
+
+Query  127  DIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHV  186
+              ++       S  S     R  A                 T       Y          
+Sbjct  136  VHVESDMNICNSICSSSSFERKAASMALVPELQLAITEFTQTRIKCNNIYRGRLNF----  191
+
+Query  187  KGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIR  246
+                   S+   V E     +  S                      +IA      F +  
+Sbjct  192  DNEVSPGSNLWPVGEEGSNMKPSSMFPI---NTLRSKTPVG--RRMSIAHTARDIFKVSD  246
+
+Query  247  QAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGSKNLS  306
+            +A    +      +   ++  +    D K+                       F    L 
+Sbjct  247  EAFARIITKRSSLLLEVHKICEGWLNDRKKIDVPSYVPKAYAPYTAIIGPSERFLEVKLG  306
+
+Query  307  VLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQC  366
+            V          +            +  +       K+           +   +    A  
+Sbjct  307  VYFMLEKGTVIKFLTEKACFSDFVIETEIGFSIDKKIKGAVGVIHTCPEAFCVEMSFAGV  366
+
+Query  367  KKWESYRRNIPVPAH  381
+               +    ++    +
+Sbjct  367  ALQDVLNGDLNCILN  381
+
+
+>BDT63084.1 wsv423-like protein [Sicyonia whispovirus]
+Length=932
+
+ Score = 204 bits (520),  Expect = 4e-60, Method: Composition-based stats.
+ Identities = 25/358 (7%), Positives = 61/358 (17%), Gaps = 39/358 (11%)
+
+Query  40   SAIAVKSCCSKNATRRSP----PSDSP-YSLRPMKRLKKNNGEVGGKAPPPVTLRLREDY  94
+            +A   ++     + + S         P                                 
+Sbjct  360  AATGKRNERDAQSAQFSKVPGTRPQKPYRCRAFA---ISAKAYSPLTVFRAHLPGGCHTG  416
+
+Query  95   ESTPYNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQY  154
+               P   +     R     E     + P       +     S    S +   +   +   
+Sbjct  417  APCPPVVDTLVVNRNDFHTEKWERMMEPPSYFVRAEVNADISSCGNSSMNFRKRAVELGL  476
+
+Query  155  RKRFSHPNCAKFSTVNLK-----ARDYTPLSVLRSHVKGPKHLKSSCDTVTE--TNVV-K  206
+                 +         +            P+S    +         S   V     +   K
+Sbjct  477  VGEIWNFVRNFEMNRHRSRMVCKYAARRPVSNYLMYD--------SLWPVGYDGGSQNGK  528
+
+Query  207  RNFSSIDKWVKLEKPPCYFAVAE---ADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSN  263
+                               A +       +++  +E  F L  +AA   +      +   
+Sbjct  529  TMLDITPL-----------AGSIPSDKQVSLSFMIEDIFSLGPEAAARVVAKQTTLLREV  577
+
+Query  264  YETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNN  323
+                K                               F      V          +    +
+Sbjct  578  ASLCKAWVARRDTLPKPPHVPEAYLPHTTVVGPDELFLEVKRGVYYVIASGKVVKFMMKH  637
+
+Query  324  GKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAH  381
+                     ++        +   +  S +  +        A     +    ++    +
+Sbjct  638  SSMADFVAEVNVGLHI-GAVKGMSSISWVCPEAFCTVMDFAGLALQDVINGDLNCELN  694
+
+
+>BDT61690.1 wsv423-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=422
+
+ Score = 39.7 bits (91),  Expect = 6e-05, Method: Composition-based stats.
+ Identities = 2/80 (3%), Positives = 9/80 (11%), Gaps = 10/80 (13%)
+
+Query  289  KQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGAC  348
+                              V   S   +  +              +        ++     
+Sbjct  139  SNVCIISP---------GVYYISKSDSIIKFLFKISNIEHFLNELFFGLLVQ-EVKGTVP  188
+
+Query  349  ESILEKKTTLLGEVTAQCKK  368
+               +  +             
+Sbjct  189  IQHVYPEAFCYEMPFIGLSL  208
+
+
+>BDU62219.1 wsv325-like protein [Chionoecetes opilio bacilliform 
+virus]
+Length=464
+
+ Score = 26.6 bits (57),  Expect = 0.95, Method: Composition-based stats.
+ Identities = 2/22 (9%), Positives = 3/22 (14%), Gaps = 0/22 (0%)
+
+Query  377  PVPAHVQPEYASQVVMIGPSEL  398
+                H+    A           
+Sbjct  280  KCKTHIDLLKAPDPTTYSSDPS  301
+
+
+>BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]
+Length=730
+
+ Score = 25.1 bits (53),  Expect = 3.1, Method: Composition-based stats.
+ Identities = 1/32 (3%), Positives = 7/32 (22%), Gaps = 2/32 (6%)
+
+Query  1   MEGGDQRTKLTPATVMGLYQSKTPGEGEGGEG  32
+               +++       +    +        G + 
+Sbjct  69  NFNSNKKKYAMSVDLNM--RIHFAYASFGVKK  98
+
+
+>BDU62147.1 wsv139-like protein [Chionoecetes opilio bacilliform 
+virus]
+Length=1049
+
+ Score = 24.3 bits (51),  Expect = 4.7, Method: Composition-based stats.
+ Identities = 3/56 (5%), Positives = 9/56 (16%), Gaps = 7/56 (13%)
+
+Query  76    GEVGGKAP-----PPVTLRLREDYESTPYNFNRNKKKRPITIDENQFAT--LNPTY  124
+                               + +    +      +   KR  T  ++           
+Sbjct  946   EFTLLSYLSQIKANSHIKQRQHHNLNELIIKLQGMVKRTETSVDHCVRLIEEVQPC  1001
+
+
+>BDT61745.1 wsv289-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1562
+
+ Score = 24.3 bits (51),  Expect = 4.9, Method: Composition-based stats.
+ Identities = 2/25 (8%), Positives = 6/25 (24%), Gaps = 0/25 (0%)
+
+Query  95   ESTPYNFNRNKKKRPITIDENQFAT  119
+             +     +    K+ I   +     
+Sbjct  46   NTCGTITDETTLKQTIKYIDIWPKI  70
+
+
+>BDT63145.1 wsv133-like protein [Sicyonia whispovirus]
+Length=314
+
+ Score = 24.3 bits (51),  Expect = 5.0, Method: Composition-based stats.
+ Identities = 2/35 (6%), Positives = 8/35 (23%), Gaps = 0/35 (0%)
+
+Query  145  KHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPL  179
+              R  A             +  +  + + +  +  
+Sbjct  63   LLRTAALVGLINSMGTVASSHLTINSARLQKQSQS  97
+
+
+>BDT63124.1 wsv343-like protein [Sicyonia whispovirus]
+Length=4245
+
+ Score = 24.3 bits (51),  Expect = 5.9, Method: Composition-based stats.
+ Identities = 3/30 (10%), Positives = 4/30 (13%), Gaps = 0/30 (0%)
+
+Query  78   VGGKAPPPVTLRLREDYESTPYNFNRNKKK  107
+               +             E      N    K
+Sbjct  806  TPLRVCREGVRGYEARVERCKNVTNAKVCK  835
+
+
+>BDV50237.1 wsv465-like protein [Chiromantes dehaani nimavirus]
+Length=1041
+
+ Score = 23.9 bits (50),  Expect = 6.9, Method: Composition-based stats.
+ Identities = 2/49 (4%), Positives = 7/49 (14%), Gaps = 1/49 (2%)
+
+Query  92   EDYESTPYNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAA  140
+                            + +   E       P   + +         +  
+Sbjct  597  YLKNFANVEREVRNLTKNLP-LEQFKRFEKPECYSVVKTIAADIEATVD  644
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.130    0.391    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0399    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97790188
+
+
+  Database: dbs.faa
+    Posted date:  Oct 25, 2026  12:08 AM
+  Number of letters in database: 341,132
+  Number of sequences in database:  492
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

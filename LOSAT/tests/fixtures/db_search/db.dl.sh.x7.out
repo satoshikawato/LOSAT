@@ -1,0 +1,20 @@
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query id, subject id, subject title, % query coverage per subject, % query coverage per hsp, positives, % positives
+# 3 hits found
+qserp	gnl|CDD|29117	cd00172, SERPIN, SERine Proteinase INhibitors (serpins) exhibit conformational polymorphism shifting from native to cleaved, latent, delta, or polymorphic forms. Many serpins, such as antitrypsin and antichymotrypsin, function as serine protease inhibitors which regulate blood coagulation cascades. Non-inhibitory serpins perform many diverse functions such as chaperoning proteins or transporting hormones. Serpins are of medical interest because mutants have been associated with blood clotting disorders, emphysema, cirrhosis, and dementia.	99	99	292	80.44
+qserp	gnl|CDD|200983	pfam00079, Serpin, Structure is a multi-domain fold containing a bundle of helices and a beta sandwich.	99	99	248	67.95
+qserp	gnl|CDD|197513	smart00093, SERPIN	98	98	222	61.33
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query id, subject id, subject title, % query coverage per subject, % query coverage per hsp, positives, % positives
+# 6 hits found
+qserp	s1	s1 serpin variant a	99	99	204	55.89
+qserp	s2	s2 serpin variant b	98	98	158	43.77
+qserp	BDT61653.1	BDT61653.1 reverse transcriptase [Marsupenaeus japonicus endogenous nimavirus]	12	12	18	40.00
+qserp	BDT63124.1	BDT63124.1 wsv343-like protein [Sicyonia whispovirus]	13	13	20	36.36
+qserp	BDV50239.1	BDV50239.1 wsv161-like protein [Chiromantes dehaani nimavirus]	29	29	39	33.33
+qserp	BDT63101.1	BDT63101.1 wsv295-like protein [Sicyonia whispovirus]	10	10	16	44.44
+# BLAST processed 2 queries

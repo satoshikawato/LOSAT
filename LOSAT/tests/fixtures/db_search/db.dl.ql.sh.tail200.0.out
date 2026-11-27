@@ -1,0 +1,464 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+
+
+Conserved Domain Database: CDD database for deltablast unit tests
+           3 sequences; 1,092 total letters
+
+Database: dbs.faa
+           492 sequences; 341,132 total letters
+
+Results from domain search
+
+
+Query= qtail serpin then kinase
+
+Length=1094
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:29117 cd00172, SERPIN, SERine Proteinase INhibitors (serpins)...  227     6e-71
+CDD:200983 pfam00079, Serpin, Structure is a multi-domain fold co...  193     8e-59
+CDD:197513 smart00093, SERPIN                                         174     6e-52
+
+
+>CDD:29117 cd00172, SERPIN, SERine Proteinase INhibitors (serpins) exhibit 
+conformational polymorphism shifting from native to cleaved, 
+latent, delta, or polymorphic forms. Many serpins, such 
+as antitrypsin and antichymotrypsin, function as serine protease 
+inhibitors which regulate blood coagulation cascades. Non-inhibitory 
+serpins perform many diverse functions such as 
+chaperoning proteins or transporting hormones. Serpins are 
+of medical interest because mutants have been associated with 
+blood clotting disorders, emphysema, cirrhosis, and dementia.
+Length=364
+
+ Score = 227 bits (581),  Expect = 6e-71, Method: Composition-based stats.
+ Identities = 131/163 (80%), Positives = 132/163 (81%), Gaps = 0/163 (0%)
+
+Query  202  AEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSAEKPDDLLWNLKEVEVEVY  261
+            AEDE LDAQ LELP KGSD SMLI+LPKE TGLA LEEK SAEK DDLL NLKE EVEV 
+Sbjct  202  AEDEELDAQVLELPYKGSDLSMLIILPKEVTGLAELEEKLSAEKLDDLLSNLKEREVEVT  261
+
+Query  262  LPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYVSKAIHKAIIEVNHEGTEE  321
+            LPKF IESS DLKE LQAL ITDL SPSA LSSI SDEP YVSK IHKA IEVN EGTE 
+Sbjct  262  LPKFKIESSLDLKEVLQALGITDLFSPSADLSSISSDEPLYVSKVIHKAFIEVNEEGTEA  321
+
+Query  322  AAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGRV  364
+            AAAT VSIV RRPS PVEF ADRP LFLI DDTT TILF GRV
+Sbjct  322  AAATAVSIVPRRPSPPVEFKADRPFLFLIRDDTTGTILFLGRV  364
+
+
+>CDD:200983 pfam00079, Serpin, Structure is a multi-domain fold containing 
+a bundle of helices and a beta sandwich.
+Length=369
+
+ Score = 193 bits (494),  Expect = 8e-59, Method: Composition-based stats.
+ Identities = 97/167 (58%), Positives = 113/167 (68%), Gaps = 3/167 (2%)
+
+Query  202  AEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSAEKPDDLLWNLK--EVEVE  259
+            AEDE L  + LELP KG + SMLI+LP E  GL  LE+  +AE  ++ L +LK  +V  E
+Sbjct  203  AEDEELGCKVLELPYKG-NLSMLIILPDEGGGLEELEKSLTAELLEEWLSSLKPRKVREE  261
+
+Query  260  VYLPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYVSKAIHKAIIEVNHEGT  319
+            +YLPKF IESS DLKE L+ L ITD  S  A  S I S EP YVSK +HKA IEVN EGT
+Sbjct  262  LYLPKFKIESSYDLKEVLKKLGITDAFSSKADFSGISSSEPLYVSKVVHKAFIEVNEEGT  321
+
+Query  320  EEAAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGRVME  366
+            E AAAT V IV R P  P EF ADRP LFLI D++T +ILF GRV+ 
+Sbjct  322  EAAAATGVVIVPRAPPPPPEFVADRPFLFLIRDNSTGSILFMGRVVN  368
+
+
+>CDD:197513 smart00093, SERPIN
+Length=359
+
+ Score = 174 bits (443),  Expect = 6e-52, Method: Composition-based stats.
+ Identities = 85/165 (52%), Positives = 106/165 (64%), Gaps = 4/165 (2%)
+
+Query  202  AEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSAEKPDDLLWNLKEVEVEVY  261
+              DE L+ Q LELP KG + SMLI+LP E  GL  LE+  + E     + +L +  VE+Y
+Sbjct  198  GHDEELNCQVLELPYKG-NASMLIILPDE-GGLEKLEKALTPETLKKWMKSLTKRSVELY  255
+
+Query  262  LPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYVSKAIHKAIIEVNHEGTEE  321
+            LPKF IE + DLK+ L+ L ITDL S  A LS I  D+   VSK +HKA++EVN EGTE 
+Sbjct  256  LPKFKIEGTYDLKDVLEKLGITDLFSNKADLSGISEDKDLKVSKVLHKAVLEVNEEGTEA  315
+
+Query  322  AAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGRVME  366
+            AAAT V  V R  S P EF A+RP LFLI D+ T +ILF G+V+ 
+Sbjct  316  AAATGVIAVPR--SLPPEFKANRPFLFLIRDNKTGSILFMGKVVN  358
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.133    0.392    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 816960
+
+
+Query= qtail serpin then kinase
+
+Length=1094
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV50182.1 wsv423-like protein [Chiromantes dehaani nimavirus]        500     1e-164
+BDU62129.1 wsv423-like protein [Chionoecetes opilio bacilliform v...  449     4e-149
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       455     5e-149
+BDT63084.1 wsv423-like protein [Sicyonia whispovirus]                 431     2e-138
+s1 serpin variant a                                                   181     8e-52 
+s2 serpin variant b                                                   118     3e-30 
+BDT61690.1 wsv423-like protein [Marsupenaeus japonicus endogenous...  111     1e-27 
+BDT63142.1 wsv137-like protein [Sicyonia whispovirus]                 29.9    0.19  
+BDT63096.1 wsv310-like protein [Sicyonia whispovirus]                 28.0    0.69  
+BDT61736.1 hypothetical protein [Marsupenaeus japonicus endogenou...  25.7    4.1   
+
+
+>BDV50182.1 wsv423-like protein [Chiromantes dehaani nimavirus]
+Length=958
+
+ Score = 500 bits (1288),  Expect = 1e-164, Method: Composition-based stats.
+ Identities = 30/531 (6%), Positives = 92/531 (17%), Gaps = 19/531 (4%)
+
+Query  364  VMEGGDQRTKLTPATVMGLYQSKTPGEGEGGEGGGQFKIPSAIAVKSCCSKNATRRSPPS  423
+            V E    +         G                       + +     +          
+Sbjct  441  VTETILLKRNCDRVEKWGKLTEPPVYFERVEADANICGGAYSSSSFRRQAAQLGLFGSIQ  500
+
+Query  424  DSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFAT  483
+            +       +KR   +               ++      P                     
+Sbjct  501  NVILQFDTLKRQCNDC-------IKDTDKTVKVPNHWWPVGIEG---SVYQHRTCIDPRL  550
+
+Query  484  LNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPL  543
+            L        IK   +  ++         A A+   +        +   +   K R    +
+Sbjct  551  LRANSNKRKIK--DIEYMAREVFKLSDSAIANVLNKTSSLLYEVSAVCSQWHKKRSLLSM  608
+
+Query  544  SVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLE  603
+                        +    +           +      V                       
+Sbjct  609  PGHVPAKYASTTILIGPNERFLEVKDGVYYMLERGTVIKFMIHPTRFTDFVLETAIGYSI  668
+
+Query  604  SPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVG  663
+                                         Q  I+                 PP+      
+Sbjct  669  QNNIKGAVGVIGTCPEAFCIEMEFAGVTLQDVINGDLNCVL--NHPRAPGVPPTKTVCQQ  726
+
+Query  664  FGSKNLSV---LDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKT  720
+               ++      +     + +            + +            +      ++ +K 
+Sbjct  727  ELIQHHMAPTKMTKMRGVLYGVRMLQVTGRLPEPLQEICKIPISDSYTAVGVTHVMREKL  786
+
+Query  721  TLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVI  780
+                   A        R +     +   +  + V+     +  +     V  + +     
+Sbjct  787  LGELPFVAAEIVNVVTRLSQQGLVNPDIKSDNVVIDGVTGQPKMIDFGLVIPVGKRETAR  846
+
+Query  781  --KFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGD  838
+                 +   +Y ++          E   + A+      +    +         +  ++  
+Sbjct  847  EVISSSSASVYSDYPQTAPEYLMGEKCQEAAMTYGLSYMINDMLNTLVRRTGDMGAVSMS  906
+
+Query  839  LKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGR  889
+            +   +   +V+           A  +    G+    R ++  +        
+Sbjct  907  VNIPLRAFMVKAYAQDFRERPRAYLMAPLIGACFPFRHSIAKLFNEPKHTL  957
+
+
+>BDU62129.1 wsv423-like protein [Chionoecetes opilio bacilliform 
+virus]
+Length=617
+
+ Score = 449 bits (1156),  Expect = 4e-149, Method: Composition-based stats.
+ Identities = 32/529 (6%), Positives = 92/529 (17%), Gaps = 21/529 (4%)
+
+Query  364  VMEGGDQRTKLTPATVMGLYQSKTPGEGEGGEGGGQFKIPSAIAVKSCCSKNATRRSPPS  423
+            + +               L +   P                + +     + +        
+Sbjct  109  ITDTLLVNRNKNSIGRWALIEKPPPYFVHVESDMNICNSICSSSSFERKAASMALVPELQ  168
+
+Query  424  DSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFAT  483
+             +       +    N               +       P     +  K           T
+Sbjct  169  LAITEFTQTRIKCNNIYRGRLNF----DNEVSPGSNLWPVGEEGSNMKPSSMFPI---NT  221
+
+Query  484  LNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPL  543
+            L         ++  +   +         A A    ++        K     L  R    +
+Sbjct  222  LRSKTPVG--RRMSIAHTARDIFKVSDEAFARIITKRSSLLLEVHKICEGWLNDRKKIDV  279
+
+Query  544  SVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLE  603
+                     P               +   F      V                       
+Sbjct  280  PSYVPKAYAPYTAIIGPSERFLEVKLGVYFMLEKGTVIKFLTEKACFSDFVIETEIGFSI  339
+
+Query  604  SPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVG  663
+                                  S      Q  ++                   +      
+Sbjct  340  DKKIKGAVGVIHTCPEAFCVEMSFAGVALQDVLNGDLNCIL--NV-----PVSTDGK--R  390
+
+Query  664  FGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLL  723
+               ++  +   +    +              +    +   +   S       + KK    
+Sbjct  391  EFIQHHMIPVKATGALYGVRMLQVTGRLPPGLRS--VRPIIDSYSAVGVTGCMRKKLLED  448
+
+Query  724  GEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFM  783
+                         R +     +   +  + V+     +  +     V  + +       +
+Sbjct  449  IPFVIAEIINIVTRLSQQGLVNPDIKSDNIVIDGYSGQPMMIDFGLVIPVGKRDTSRSML  508
+
+Query  784  TDK-EMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCK  842
+             +K  MY ++          E   + A+      +    +         I  ++  +   
+Sbjct  509  HEKTNMYVDYPQTAPEYLKGECCNEAAMTYGLAYLLTDMLNTLSTRTQDISPVSMSVNIP  568
+
+Query  843  MDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLP  891
+            +   +    + +      A  +    G+   + D +  +          
+Sbjct  569  LVNFIAAAYDENPYKRPRAYLMAALIGACFPLPDHIASLFSDPKHTIFS  617
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 455 bits (1172),  Expect = 5e-149, Method: Composition-based stats.
+ Identities = 25/531 (5%), Positives = 92/531 (17%), Gaps = 17/531 (3%)
+
+Query  364  VMEGGDQRTKLTPATVMGLYQSKTPGEGEGGEGGGQFKIPSAIAVKSCCSKNATRRSPPS  423
+            V E    R            +                   ++         N     P  
+Sbjct  292  VTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQ  351
+
+Query  424  DSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFN---RNKKKRPITIDENQ  480
+                    +    +          P  T   +      P  ++                 
+Sbjct  352  RVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKT  411
+
+Query  481  FATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDY  540
+            +     T+         L  ++         +      ++       +         R  
+Sbjct  412  YRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKG  464
+
+Query  541  TPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAA  600
+                        P  +  +         +   +      V                ++  
+Sbjct  465  VSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFG  524
+
+Query  601  GLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWS-NNRTKQPPSSW  659
+                                            Q  ++     +       +   Q     
+Sbjct  525  FGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRID  584
+
+Query  660  WPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKK  719
+             P     ++         + +N             +            +     +++  +
+Sbjct  585  KP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDR  642
+
+Query  720  TTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYY---MLET  776
+                             R +     +   +  + V+     +  +     +       + 
+Sbjct  643  FLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKV  702
+
+Query  777  GKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLN  836
+             +       + +Y  +              + A+      +  F +    +  +   V +
+Sbjct  703  KR-RNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGS  761
+
+Query  837  GDLKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQAT  887
+                 K+   +    +   +       L +       +++ +  + +    
+Sbjct  762  MKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH  812
+
+
+>BDT63084.1 wsv423-like protein [Sicyonia whispovirus]
+Length=932
+
+ Score = 431 bits (1108),  Expect = 2e-138, Method: Composition-based stats.
+ Identities = 33/538 (6%), Positives = 86/538 (16%), Gaps = 40/538 (7%)
+
+Query  364  VMEGGDQRTKLTPATVMGLYQSKTPGEGEGGEGGGQFKIPSAIAVKSCCSKNATRRSPPS  423
+            V++                                     ++       +          
+Sbjct  422  VVDTLVVNRNDFHTEKWERMMEPPSYFVRAEVNADISSCGNSSMNFRKRAVELGLVGEIW  481
+
+Query  424  DSPYSLRPMKRLK-----KNNGEVGGKAPPPVTLRLREDYESTPYNF--NRNK-KKRPIT  475
+            +   +    +                                 P  +       K     
+Sbjct  482  NFVRNFEMNRHRSRMVCKYAARRPVSNYLMYD--------SLWPVGYDGGSQNGKTMLDI  533
+
+Query  476  IDENQFATLNPTYATDII---KKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFST  532
+                             I   K+  L  +          A A    ++       A    
+Sbjct  534  TPL-----------AGSIPSDKQVSLSFMIEDIFSLGPEAAARVVAKQTTLLREVASLCK  582
+
+Query  533  VNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVA  592
+              +  RD  P          P       D +         +      V            
+Sbjct  583  AWVARRDTLPKPPHVPEAYLPHTTVVGPDELFLEVKRGVYYVIASGKVVKFMMKHSSMAD  642
+
+Query  593  EADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRT  652
+                               +           V        Q  I+               
+Sbjct  643  FVAEVNVGLHI-GAVKGMSSISWVCPEAFCTVMDFAGLALQDVINGDLNCEL--------  693
+
+Query  653  KQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGAC  712
+                +         ++         L +  +           +  D   + +   S    
+Sbjct  694  NLRTTREEGRPELVQHHMPPSNMRGLLYGVIMLQATGRLPSNLQSDCRLRILDSFSAVGV  753
+
+Query  713  ESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYY  772
+             +I+  +                 R       +   +  + V+     +  +     V  
+Sbjct  754  ANIMRNRLLDQLPFALAEMVNIVTRLAQQGLVNPDIKSDNIVLDGLTGQPKMIDFGLVVP  813
+
+Query  773  MLETGKVIKFMTDKEMYC-EFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISV  831
+                      ++ +   C  F          E   + A+      + G  +E+       
+Sbjct  814  AGTQDICRGSVSSERAACLSFPQTAPEYLKGEPCNESAMAYGLCYMVGSLLEVLSRRTGD  873
+
+Query  832  IDVLNGDLKCKMDENVVQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGR  889
+            +  ++  +   +     +             E+     S    +  +  +        
+Sbjct  874  MAAVSMSVNIPLINFFAKSYKEDQKLRPRVHEMAPIIASCFPFKPHIARLFCEPKHTI  931
+
+
+>s1 serpin variant a
+Length=369
+
+ Score = 181 bits (460),  Expect = 8e-52, Method: Composition-based stats.
+ Identities = 74/173 (43%), Positives = 96/173 (55%), Gaps = 3/173 (2%)
+
+Query  196  YGKFRDAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSAEKPDDLLWNLKE  255
+             G F  AE E L  +  ELP KG+  SML +LP E   L   E+  +AE+ ++ L + K 
+Sbjct  197  KGTFYYAEIEELMCKVRELPFKGNR-SMLPILPIEGGMLEEREKSRTAERLEEELSSRKP  255
+
+Query  256  VEV--EVYLPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYVSKAIHKAIIE  313
+             +V  ++YL KF  ESS DLK+ L+ L I D  +  A  S   S +P Y SK  HKA+IE
+Sbjct  256  RQVREKLYLVKFKPESSFDLKKVLKQLGICDAFASKAIFSGPSSSKPLYDSKVDHKALIE  315
+
+Query  314  VNHEGTEEAAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGRVME  366
+            V  EG E A AT   IV R P  P +F A RP  FLI D++  +I F G V+ 
+Sbjct  316  VTEEGCEAAGATGDVIVVRAPVPPPKFVAIRPFRFLIYDNSCGSIRFMGYVVN  368
+
+
+ Score = 105 bits (263),  Expect = 6e-26, Method: Composition-based stats.
+ Identities = 10/166 (6%), Positives = 21/166 (13%), Gaps = 3/166 (2%)
+
+Query  3    NDFELDLYNQLAKWEPDERVVFSSLSIAWALALPYLGAKGETRHQLRKALGLP--WLDDE  60
+             + E  +                 +       L              +        + ++
+Sbjct  203  AEIEELMCKVRELPFKG-NRSMLPILPIEGGMLEEREKSRTAERLEEELSSRKPRQVREK  261
+
+Query  61   GVHQAIKSLLWSLKDWEKGVHLKLARRLFVTKGLTAKEDFPDLAKNYYDAHVESVGFANP  120
+                  K                                 P          +  V     
+Sbjct  262  LYLVKFKPESSFDLKKVLKQLGICDAFASKAIFSGPSSSKPLYDSKVDHKALIEVTEEGC  321
+
+Query  121  HAAAATINNWAEEKTRGKIKGLLSPGALDPGTRLVPVNAIDFKGKC  166
+             AA AT +           K +               +        
+Sbjct  322  EAAGATGDVIVVRAPVPPPKFVAIRPFRFLIYDNSCGSIRFMGYVV  367
+
+
+>s2 serpin variant b
+Length=359
+
+ Score = 118 bits (296),  Expect = 3e-30, Method: Composition-based stats.
+ Identities = 54/165 (33%), Positives = 75/165 (45%), Gaps = 4/165 (2%)
+
+Query  201  DAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSAEKPDDLLWNLKEVEVEV  260
+              +DE L+ Q  EL  K  +  ML +L  E  GL  L +  +       + +  +  V +
+Sbjct  197  YGQDEMLNKQVTELYYK-PNADMLRILYDEP-GLMKLMKATTPMTLSKWVKSTTKCSVML  254
+
+Query  261  YLPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYVSKAIHKAIIEVNHEGTE  320
+            Y PK  I  + DL +  +   I DL S SA  S     +   V K  HK ++ VN EG E
+Sbjct  255  YTPKNKIMGTHDLSDVTEKTGIEDLNSNSADTSGRSELKDTKVDKVTHKIVLMVNMEGEE  314
+
+Query  321  EAAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGRVM  365
+              AA  V  V    S+P  F  +R  L LI D++T  IL  G V+
+Sbjct  315  AIAAEGVRAV--YRSTPPMFKINRYFLNLICDNSTGDILNMGSVV  357
+
+
+>BDT61690.1 wsv423-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=422
+
+ Score = 111 bits (279),  Expect = 1e-27, Method: Composition-based stats.
+ Identities = 17/320 (5%), Positives = 53/320 (17%), Gaps = 56/320 (18%)
+
+Query  553  PKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQA  612
+                  S             + S    +              +      L          
+Sbjct  139  SNVCIISP---------GVYYISKSDSIIKFLFKISNIEHFLNELFFGLLVQ-EVKGTVP  188
+
+Query  613  AKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGSKNLSVL  672
+             +                     ++     +       R      +       + +    
+Sbjct  189  IQHVYPEAFCYEMPFIGLS----LNYLLYDATD--VVKRPFLHCIAKKHCQPYNHD----  238
+
+Query  673  DTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKK  732
+                   ++             +                                     
+Sbjct  239  ----ETVYD-------------LVSTCTQTLAE-----------------QLPYVIAEMI  264
+
+Query  733  WESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEF  792
+                R N     ++  +  +  + I   + YL     + +       I F  D+  + ++
+Sbjct  265  NILTRLNNQKIVYLDIKPDNFAIDICTGQPYLIDMGLMTFAGTKYSDIDFDVDESNFYKY  324
+
+Query  793  VFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENVVQQPN  852
+                      E     ++         + +         ++ L+        + +     
+Sbjct  325  PQSPPELLRAEKCESKSMSYGMSYNLNYILSNLDYKGYNVEPLS--KNSHFIKWLKNAKR  382
+
+Query  853  PSTTSSKPAAELMQDHGSLC  872
+             +       +ELM       
+Sbjct  383  ENINLRPRMSELMDILKKCF  402
+
+
+>BDT63142.1 wsv137-like protein [Sicyonia whispovirus]
+Length=316
+
+ Score = 29.9 bits (66),  Expect = 0.19, Method: Composition-based stats.
+ Identities = 5/56 (9%), Positives = 12/56 (21%), Gaps = 2/56 (4%)
+
+Query  650  NRTKQPPSSWWPVGFGSKNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVF  705
+                    S  PV     +   L       +     +         S+  ++ +  
+Sbjct  182  EGPSCQTISGRPVAEFLYDDEALSRLR-TIFG-RAFSVDDASPAHTSVRCVSPDHD  235
+
+
+>BDT63096.1 wsv310-like protein [Sicyonia whispovirus]
+Length=258
+
+ Score = 28.0 bits (61),  Expect = 0.69, Method: Composition-based stats.
+ Identities = 4/71 (6%), Positives = 13/71 (18%), Gaps = 6/71 (8%)
+
+Query  121  HAAAATINN-WAEEKTRGKI-KGLLSPGALDPGTRLVPVNAIDFKGKCKTPFGPELTVKR  178
+              A     +   +E+    + + L            +  N    +   +       +   
+Sbjct  94   EEATIDAVSGIIKEELNKPVREMLARYPLHFLALVEIVKN----RRALEGGDRHAASEPA  149
+
+Query  179  PFDVSEGHSVQ  189
+                       
+Sbjct  150  SLASELRAMPP  160
+
+
+>BDT61736.1 hypothetical protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=589
+
+ Score = 25.7 bits (55),  Expect = 4.1, Method: Composition-based stats.
+ Identities = 2/43 (5%), Positives = 7/43 (16%), Gaps = 2/43 (5%)
+
+Query  715  ILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMI  757
+             L+                 S +        +       ++  
+Sbjct  85   KLQNNLLSSIP--LTKILNISEKLKTKGIFKLTNISDHILLKG  125
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.149    0.460    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0457    0.140     1.90     42.6     43.6 
+
+Effective search space used: 243141044
+
+
+Conserved Domain  Database: CDD database for deltablast unit tests
+    Posted date:  Sep 7, 2012  3:32 PM
+  Number of letters in database: 1,092
+  Number of sequences in database:  3
+
+  Database: dbs.faa
+    Posted date:  Oct 25, 2026  12:08 AM
+  Number of letters in database: 341,132
+  Number of sequences in database:  492
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

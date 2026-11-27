@@ -1,0 +1,31 @@
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 13 hits found
+qserp	s1	42.714	199	114	0	2	200	3	201	4.19e-74	223
+qserp	s2	34.197	193	122	3	8	197	2	192	3.81e-39	133
+qserp	BDT61653.1	22.222	45	29	1	90	134	217	255	0.026	30.2
+qserp	BDT63124.1	20.000	55	28	3	1	47	2730	2776	0.30	26.8
+qserp	BDT61669.1	9.783	92	66	3	45	127	143	226	1.7	24.5
+qserp	BDV50239.1	17.094	117	81	7	29	134	173	284	2.7	23.7
+qserp	BDT63149.1	17.391	92	58	4	52	129	183	270	4.4	22.9
+qserp	BDT63125.1	7.407	27	25	0	90	116	3836	3862	4.4	23.3
+qserp	BDT63517.1	15.686	51	38	1	83	133	6	51	5.6	22.9
+qserp	BDV50167.1	30.000	20	14	0	28	47	883	902	5.8	22.9
+qserp	BDT63554.1	55.556	9	4	0	18	26	479	487	6.7	22.5
+qserp	BDT63553.1	20.000	35	28	0	67	101	278	312	7.1	22.5
+qserp	BDT63528.1	28.571	28	18	1	167	192	796	823	9.1	22.2
+# DELTABLAST 2.17.0+
+# Iteration: 2
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+qserp	s1	42.714	199	114	0	2	200	3	201	1.89e-111	319
+qserp	s2	34.197	193	122	3	8	197	2	192	1.56e-85	252
+qserp	BDT63132.1	19.753	81	58	1	19	92	193	273	1.6	24.7
+
+Search has CONVERGED!
+# BLAST processed 2 queries

@@ -1,0 +1,181 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+
+
+Conserved Domain Database: CDD database for deltablast unit tests
+           3 sequences; 1,092 total letters
+
+Database: dbs.faa
+           492 sequences; 341,132 total letters
+
+Results from domain search
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.313    0.133    0.386    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 227010
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 serpin variant a                                                   178     1e-55
+s2 serpin variant b                                                   98.2    3e-25
+BDT63161.1 wsv079-like protein [Sicyonia whispovirus]                 26.2    0.81 
+BDT61740.1 wsv308-like protein [Marsupenaeus japonicus endogenous...  25.4    1.2  
+BDT63125.1 wsv360-like protein [Sicyonia whispovirus]                 24.3    3.3  
+
+
+>s1 serpin variant a
+Length=369
+
+ Score = 178 bits (452),  Expect = 1e-55, Method: Composition-based stats.
+ Identities = 20/269 (7%), Positives = 54/269 (20%), Gaps = 6/269 (2%)
+
+Query  2    NND---FELDLYNQLAKWEPDERVVFSSLSIAWALALPYLGAKGETRHQLRKALGLPWLD  58
+             +     +     +       +         +W         +       R         
+Sbjct  99   PDLLQLRKKYFGAEDESVIFSDVAEAYKQITSWVKKKTTGKIQDLLVEGSRDPDCRLVRV  158
+
+Query  59   DEGVHQAIKSLLWSLKDWEKGVHLKLARRLFVTKGLTAKEDFPDLAKNYYDAHVESVGFA  118
+            +    +      + ++  ++               ++ K  F           V  + F 
+Sbjct  159  NAPYFKMKWKCPFDVELTQEEPLHVDTGTTDKVPSMSQKGTFYYAEIEELMCKVRELPFK  218
+
+Query  119  NPHAAAATINNWAEEKTRGKIKGLLSPGALDPGTRLV--PVNAIDFKGKCKTPFGPELTV  176
+              + +   I          + K   +    +  +      V    +  K K     +L  
+Sbjct  219  G-NRSMLPILPIEGGMLEEREKSRTAERLEEELSSRKPRQVREKLYLVKFKPESSFDLKK  277
+
+Query  177  KRPFDVSEGHSVQVSMMYQYGKFRDAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAH  236
+                          ++       +   D  +D +AL    +    +              
+Sbjct  278  VLKQLGICDAFASKAIFSGPSSSKPLYDSKVDHKALIEVTEEGCEAAGATGDVIVVRAPV  337
+
+Query  237  LEEKPSAEKPDDLLWNLKEVEVEVYLPKF  265
+               K  A +P   L          ++   
+Sbjct  338  PPPKFVAIRPFRFLIYDNSCGSIRFMGYV  366
+
+
+>s2 serpin variant b
+Length=359
+
+ Score = 98.2 bits (243),  Expect = 3e-25, Method: Composition-based stats.
+ Identities = 19/267 (7%), Positives = 61/267 (23%), Gaps = 8/267 (3%)
+
+Query  1    ENNDFELDLYNQLAKWEPD-ERVVFSSLSIAWALALPYLGAKGETRHQLRKALGLPWLDD  59
+               D +     ++A      + +  S        +      K      L          +
+Sbjct  96   FTEDRKKTYGIEVASVLFSLKAMEASKQRNDGVESKTAGKRKDTLS--LLDDDTCLVTVN  153
+
+Query  60   EGVHQAIKSLLWSLKDWEKGVHLKLARRLFVTKGLTAKE-DFPDLAKNYYDAHVESVGFA  118
+               ++      +  +      +  L         ++A    F        +  V  + + 
+Sbjct  154  IIYNKGSWKEPFLPETTRMEDNHVLETETVSVPVMSATGCTFWYGQDEMLNKQVTELYYK  213
+
+Query  119  NPHAAAATINNWAEEKTRGKIKGLLSPGALDPGTRLVPVNAIDFKGKCKTPFGPELTVKR  178
+             P+A    I           +K                 + + +  K K     +L+   
+Sbjct  214  -PNADMLRILYDEP-GLMKLMKATTPMTLSKWVKSTTKCSVMLYTPKNKIMGTHDLSDVT  271
+
+Query  179  PFDVSEGHSVQVSMMYQYGKFRDAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLE  238
+                 E  +   +      + +D + + +  + + + +   + ++     +         
+Sbjct  272  EKTGIEDLNSNSADTSGRSELKDTKVDKVTHKIVLMVNMEGEEAIAAEGVRAVYR--STP  329
+
+Query  239  EKPSAEKPDDLLWNLKEVEVEVYLPKF  265
+                  +    L         + +   
+Sbjct  330  PMFKINRYFLNLICDNSTGDILNMGSV  356
+
+
+>BDT63161.1 wsv079-like protein [Sicyonia whispovirus]
+Length=810
+
+ Score = 26.2 bits (56),  Expect = 0.81, Method: Composition-based stats.
+ Identities = 3/44 (7%), Positives = 9/44 (20%), Gaps = 0/44 (0%)
+
+Query  48   LRKALGLPWLDDEGVHQAIKSLLWSLKDWEKGVHLKLARRLFVT  91
+               A+    L +    +     ++          L    +    
+Sbjct  708  ATDAMLRRNLTNVISFEEQCRTIFGEALGSLKNLLVSQEKSNQV  751
+
+
+>BDT61740.1 wsv308-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=591
+
+ Score = 25.4 bits (54),  Expect = 1.2, Method: Composition-based stats.
+ Identities = 5/50 (10%), Positives = 7/50 (14%), Gaps = 4/50 (8%)
+
+Query  148  LDPGTR--LVPVNAIDFKGKCKTPFGPELTVKRPFDVSEGHSVQVSMMYQ  195
+             D      L       F  K        L   +              +  
+Sbjct  30   DDYLKDSLLFETQLESFVKKM-IERQTAL-SIQNAMDISDIISPNVGIAS  77
+
+
+>BDT63125.1 wsv360-like protein [Sicyonia whispovirus]
+Length=6251
+
+ Score = 24.3 bits (51),  Expect = 3.3, Method: Composition-based stats.
+ Identities = 2/32 (6%), Positives = 4/32 (13%), Gaps = 5/32 (16%)
+
+Query  17   EPDERVVFSSLSIAWALALPYLGAKGETRHQL  48
+                +   +        A       G      
+Sbjct  952  GFARKDAVAVPV-----ARSRGSLSGRLGPGA  978
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.135    0.393    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0413    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58202284
+
+
+Conserved Domain  Database: CDD database for deltablast unit tests
+    Posted date:  Sep 7, 2012  3:32 PM
+  Number of letters in database: 1,092
+  Number of sequences in database:  3
+
+  Database: dbs.faa
+    Posted date:  Oct 25, 2026  12:08 AM
+  Number of letters in database: 341,132
+  Number of sequences in database:  492
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

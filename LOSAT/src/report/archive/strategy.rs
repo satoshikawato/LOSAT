@@ -465,10 +465,10 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// (`ReceivedFile`) under the name as typed, with the command line's error: NCBI's error at once
 /// for a name that the command line cannot open; `-` and the standard output (`/dev/stdout`),
 /// which the run does not have (its report is the caller's), refused at NCBI's first request; no
-/// file for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose
-/// command line run writes where the run has no file: the standard error, a device whose writes
-/// fail or wait for a reader, a file of the system (procfs, a message queue), or the file of
-/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`,
+/// file for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a
+/// name whose command line run writes where the run has no file: the standard error, a device
+/// whose writes fail or wait for a reader, a file of the system (procfs, a message queue), or the
+/// file of another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`,
 /// the files that the search reads from the run's folder, `web_adapter::open_strategy_file`),
 /// whose bytes the command line's strategy file replaces or mixes with its own.
 pub fn create_strategy_file_in(
@@ -521,9 +521,8 @@ pub fn create_strategy_file_in(
 // blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
 // psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
 /// LOSAT's refusal of the run's strategy file (`create_strategy_file_in`: `-`, standard output, or
-/// non-run files in LOSAT Web), raised where
-/// NCBI writes its first request: after its formatter and its prolog, once the first batch is read
-/// and before it is searched (`SaveSearchStrategy`).
+/// non-run files in LOSAT Web), raised where NCBI writes its first request: after its formatter
+/// and its prolog, once the first batch is read and before it is searched (`SaveSearchStrategy`).
 /// Every stop of NCBI's before that point (an empty query, a database or option error, a query
 /// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`, a device
 /// that fails at the prolog's flush) comes first with NCBI's own bytes, because the run's report

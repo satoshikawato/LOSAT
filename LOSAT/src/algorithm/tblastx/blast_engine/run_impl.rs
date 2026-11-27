@@ -3610,6 +3610,29 @@ fn refuse_tblastx_qseq_past_seen_query_len(
     Ok(())
 }
 
+/// The error that ends the run where a batch's search meets an unreadable `-db`: the first batch
+/// with a valid context of a search whose sequences could not be read (`search`, with the check's
+/// kept error `stores_error`), or a read of the database that failed during the batch's search
+/// (`XReadFailure`, with the error that the check gives for the same read). NCBI's read error is
+/// an engine error; LOSAT's refusal (a truncated sequence file, unreadable ambiguity data) is its
+/// own. Both come where NCBI's read error of the batch comes, after the reports of the batches
+/// before and the batch's reader messages (line RG series D, D-SO-5).
+fn unreadable_batch_error(
+    error: anyhow::Error,
+    stores_error: &mut Option<anyhow::Error>,
+) -> anyhow::Error {
+    let error = match error.downcast::<XReadError>() {
+        Ok(XReadError(error)) => error,
+        Err(_) => stores_error
+            .take()
+            .expect("unreadable subjects keep their read error"),
+    };
+    match error.downcast::<crate::algorithm::common::database::PreliminaryReadError>() {
+        Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
+        Err(refusal) => refusal,
+    }
+}
+
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
 /// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
 /// (`report_stream`), else all of them after the loop.
@@ -4014,26 +4037,9 @@ fn run_batch_loop(
                 batch
             }
             Err(error) if error.is::<SubjectsUnreadable>() || error.is::<XReadError>() => {
-                // The first batch with a valid context of a `-db` search whose sequences could
-                // not be read (`search`), or a read of the database that failed during the
-                // batch's search (`XReadFailure`, with the error that the check gives for the same
-                // read): NCBI's read error is an engine error after the reports of the batches
-                // before; LOSAT's refusal (a truncated sequence file, unreadable ambiguity data)
-                // stops the run, as any other refusal does.
-                let error = match error.downcast::<XReadError>() {
-                    Ok(XReadError(error)) => error,
-                    Err(_) => stores_error
-                        .take()
-                        .expect("unreadable subjects keep their read error"),
-                };
-                // LOSAT's refusal comes where NCBI's read error of the batch comes (line RG
-                // series D, D-SO-5).
-                let error = match error
-                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
-                {
-                    Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
-                    Err(refusal) => refusal,
-                };
+                // NCBI's read error or LOSAT's refusal of an unreadable database
+                // (`unreadable_batch_error`): after the batches before and the batch's messages.
+                let error = unreadable_batch_error(error, &mut stores_error);
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(error);

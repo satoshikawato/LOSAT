@@ -245,6 +245,7 @@ impl DeltablastArgs {
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
             BlastpApp::Deltablast,
+            false,
         )?;
         let delta = DeltaOptions {
             domain_inclusion_ethresh: self.domain_inclusion_ethresh,
@@ -310,6 +311,7 @@ impl DeltablastArgs {
             in_msa: None,
             msa_master_idx: None,
             ignore_msa_master: false,
+            phi_pattern: None,
             first_query_ordinal: self.first_query_ordinal,
             scope_refusal: self.scope_refusal,
             pssm_versions: self.pssm_versions,

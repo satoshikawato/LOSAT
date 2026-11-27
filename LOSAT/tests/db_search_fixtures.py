@@ -196,7 +196,8 @@ the rows of rpsblast and rpstblastn (the library API has no such program), those
 `-query` and `-in_pssm` (the library's query is one or the other), those that give `-in_msa` with either of them,
 those with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa` (the library takes the options with the
 alignment, `Inputs::msa`), those that write the search strategy file (`-export_search_strategy`, which the
-library refuses), those that read the query from
+library refuses), those with a PHI-BLAST pattern (`-phi_pattern`, which the library refuses until line PS item
+PS8b), those that read the query from
 standard input (the library's query is records), and those that set NCBI's settings of the process for its
 formatter, a `cwd=` token or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC;
 `process_settings`), are `library-skip`. The library API's contract names what a call reads of its process
@@ -1438,7 +1439,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # (`xinclude.ALIGNMENT_OPTIONS`) without `-in_msa` (`Inputs::msa` is the library's alignment
     # query, line LIB item 1.6), nor a row that writes the search strategy file
     # (`-export_search_strategy`: the library writes none and refuses it, `api::search::STRATEGY_FILES`,
-    # line RG item F1b-1).
+    # line RG item F1b-1), nor a row with a PHI-BLAST pattern (`-phi_pattern`: the library refuses its
+    # `phi_pattern`, `api::search`, until line PS item PS8b).
     # A row that sets NCBI's settings of the process for its formatter (`process_settings`: the run directory's
     # `.ncbirc` and FMTCFG file, `$NCBI`, GETURL_DEBUG) is not a library call either: the API's contract
     # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and the library's
@@ -1451,6 +1453,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                     or ("-in_msa" not in argv
                         and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
                     or "-export_search_strategy" in argv
+                    or "-phi_pattern" in argv
                     or query_stdin(row) or process_settings(row)
                     or device_mode(row)):
         return "library-skip", ""

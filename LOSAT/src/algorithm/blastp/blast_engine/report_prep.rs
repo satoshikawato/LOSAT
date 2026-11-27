@@ -114,8 +114,9 @@ pub(super) fn query_warning_lines(
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format, or, where it is structured, they are kept for the
     // later formats that write them (`later`).
-    let result_warnings = outputs.first_writes_query_warnings();
-    let later = outputs.keeps_later_query_warnings();
+    // PHI-BLAST's report writes them on its output (`phi_result_warnings`).
+    let result_warnings = outputs.first_writes_query_warnings() && args.phi.is_none();
+    let later = outputs.keeps_later_query_warnings() && args.phi.is_none();
     let mut later_lines = Vec::new();
     let lines = query_records
         .iter()
@@ -163,6 +164,47 @@ pub(super) fn query_warning_lines(
     (lines, later.then_some(later_lines))
 }
 
+/// psiblast `-phi_pattern`: each query's messages as PHI-BLAST's report writes them on its output
+/// (`query_warnings::phi_result_warning`), those of `query_warning_lines` and NCBI's message of a
+/// matrix and gap costs without its table's Karlin block (`no_statistics`, for every query).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170
+pub(super) fn phi_result_warnings(
+    prep: &ReportPrep<'_, '_>,
+    no_statistics: Option<&str>,
+) -> Vec<Vec<u8>> {
+    let ReportPrep {
+        args,
+        reports,
+        ranges,
+        query_records,
+        query_batch_skipped,
+        filtered_empty,
+        ..
+    } = *prep;
+    query_records
+        .iter()
+        .enumerate()
+        .map(|(q_idx, record)| {
+            // PHI-BLAST's score block is the pattern table's: no query's letters are checked for
+            // Karlin-Altschul parameters (`psiblast_stop_at_invalid_query`).
+            let mut messages = crate::report::query_warnings::query_messages(
+                record.seq(),
+                true,
+                reports.x_queries_before + q_idx < reports.identity_warned,
+                filtered_empty && !query_batch_skipped[q_idx],
+            );
+            messages.extend(no_statistics.map(str::to_string));
+            crate::report::query_warnings::phi_result_warning(
+                args.first_query_ordinal
+                    + ranges.x_ordinal_base
+                    + ranges.query_input.ordinal(q_idx),
+                record,
+                &messages,
+            )
+        })
+        .collect()
+}
 /// What query `query`'s pairwise report (outfmt 0 to 4) of its hit list `shown` reads, by rank
 /// (`QueryGroup::read_order` of the rows' hits as the writer reads them, `reading`; psiblast's
 /// later round's two-part table, `found_before`).
@@ -1262,6 +1304,9 @@ pub(super) struct ReportSetup<'a> {
     /// formatter's cut (`rps_hooks::RpsSearched::unlisted`), which outfmt 7's count and the
     /// prefetch's limit still count; empty otherwise.
     pub(super) unlisted: &'a [usize],
+    /// psiblast `-phi_pattern`: the call's PHI-BLAST searches, whose reports show some queries'
+    /// letters as their batch's first query's (`ShownQueries::of`).
+    pub(super) phi: Option<&'a super::phi_hooks::PhiCall>,
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
@@ -1285,6 +1330,7 @@ pub(super) fn read_shown_residues(
     outputs: &ReportOutputs<'_>,
     listed_subjects: &mut Option<database::ListedSubjects>,
     hit_lists: &[Option<BlastpHitList>],
+    phi: Option<&super::phi_hooks::PhiCall>,
     x_listed_lean: bool,
 ) -> Result<()> {
     // The residues that the reports read, read from the
@@ -1316,7 +1362,7 @@ pub(super) fn read_shown_residues(
         };
         // The query test of `recount_shown_identities`.
         let query_recounted: Vec<bool> = if residues == database::XShownResidues::WithO {
-            let queries = ShownQueries::of(query_records, args);
+            let queries = ShownQueries::of(query_records, args, phi);
             (0..query_records.len())
                 .map(|q_idx| queries.letters(q_idx).is_some_and(ShownLetters::recounted))
                 .collect()
@@ -1744,7 +1790,7 @@ pub(super) fn report_values(
     let mut engine_counts = EngineCounts::default();
     recount_shown_identities(
         hit_lists,
-        ShownQueries::of(query_records, args),
+        ShownQueries::of(query_records, args, setup.phi),
         shown_subjects,
         args.scoring.matrix,
         // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
@@ -1837,7 +1883,7 @@ pub(super) fn report_labels(
             ]
             .concat(),
         }),
-        program: args.app.ncbi_name().to_string(),
+        program: args.report_program().to_string(),
     };
     ReportLabels {
         subject_input_label,

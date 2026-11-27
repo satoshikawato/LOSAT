@@ -142,7 +142,8 @@ pub fn seg_filter(value: impl AsRef<[u8]>) -> Option<Filter> {
 /// five search programs, and the applications whose handle is another one's: psiblast with a
 /// FASTA or a PSSM query (`CPSIBlastOptionsHandle`), tblastn with a PSSM query (PSI-TBLASTN:
 /// `CPSIBlastOptionsHandle` with `SetPSITblastnDefaults`, whatever `-task`: the test names
-/// `blastx-fast`, which is no tblastn task), rpsblast (`CBlastRPSOptionsHandle`) and rpstblastn
+/// `blastx-fast`, which is no tblastn task), psiblast with `-phi_pattern`
+/// (`CPHIBlastProtOptionsHandle`, `Phiblastp`), rpsblast (`CBlastRPSOptionsHandle`) and rpstblastn
 /// (`CRPSTBlastnOptionsHandle`). `Program` stays the reports' name of the search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestKind {
@@ -153,6 +154,8 @@ pub enum RequestKind {
     Tblastx,
     Psiblast,
     PsiTblastn,
+    /// psiblast with `-phi_pattern` (PHI-BLAST, item PS8a).
+    Phiblastp,
     Rpsblast,
     Rpstblastn,
 }
@@ -177,6 +180,7 @@ impl RequestKind {
             RequestKind::Blastp
             | RequestKind::Psiblast
             | RequestKind::PsiTblastn
+            | RequestKind::Phiblastp
             | RequestKind::Rpsblast => "blastp",
             RequestKind::Blastx => "blastx",
             RequestKind::Tblastn | RequestKind::Rpstblastn => "tblastn",
@@ -198,7 +202,7 @@ impl RequestKind {
     /// deltablast is written (LOSAT refuses its archive and search strategy).
     pub fn application(self) -> &'static str {
         match self {
-            RequestKind::Psiblast => "psiblast",
+            RequestKind::Psiblast | RequestKind::Phiblastp => "psiblast",
             RequestKind::PsiTblastn => "tblastn",
             RequestKind::Rpsblast => "rpsblast",
             RequestKind::Rpstblastn => "rpstblastn",
@@ -339,6 +343,9 @@ pub struct OptionInputs {
     pub application: Option<&'static str>,
     /// psiblast's `-ignore_msa_master` (`CPsiBlastArgs`, always recorded).
     pub ignore_msa_master: bool,
+    /// psiblast's `-phi_pattern`: the pattern as the file gives it (`phi_search::file`), of
+    /// `RequestKind::Phiblastp`.
+    pub phi_pattern: Option<String>,
 }
 
 impl OptionInputs {
@@ -394,6 +401,7 @@ impl OptionInputs {
             imported: None,
             application: None,
             ignore_msa_master: false,
+            phi_pattern: None,
         }
     }
 }
@@ -509,6 +517,8 @@ enum Class {
     PsiBlast,
     /// psiblast's `CPssmEngineArgs`.
     PssmEngine,
+    /// psiblast's `CPhiBlastArgs`.
+    Phi,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:102-113 (the end of
@@ -530,6 +540,13 @@ fn class_order(kind: RequestKind) -> &'static [Class] {
         RequestKind::Psiblast => &[
             Db, Generic, Filtering, Matrix, Threshold, Hsp, Window, Formatting, Cbs, GapTrigger,
             PsiBlast, PssmEngine,
+        ],
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:102-116
+        // psiblast's classes with the PHI-BLAST class last; the composition-based statistics
+        // class records nothing for `ePHIBlastp` (`Class::Cbs`; `fi.export.it1`, NCBI 2.17.0).
+        RequestKind::Phiblastp => &[
+            Db, Generic, Filtering, Matrix, Threshold, Hsp, Window, Formatting, GapTrigger,
+            PsiBlast, PssmEngine, Phi,
         ],
         RequestKind::Rpsblast => &[Db, Generic, Filtering, Window, Formatting, Cbs],
         RequestKind::Rpstblastn => &[
@@ -660,6 +677,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             | RequestKind::Tblastn
             | RequestKind::Blastx
             | RequestKind::Psiblast
+            | RequestKind::Phiblastp
             | RequestKind::PsiTblastn
     );
     let mut threshold_set_by_word_size = false;
@@ -753,6 +771,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                             kind,
                             RequestKind::Blastp
                                 | RequestKind::Psiblast
+                                | RequestKind::Phiblastp
                                 | RequestKind::Rpsblast
                                 | RequestKind::Rpstblastn
                         ) {
@@ -934,6 +953,13 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::PssmEngine => {
                 list.set(fields::PSEUDO_COUNT, Integer(inputs.pseudocount));
                 list.set(fields::INCLUSION_THRESHOLD, Real(inputs.inclusion_ethresh));
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1382-1411
+            // The pattern as read (`SetPHIPattern`).
+            Class::Phi => {
+                if let Some(pattern) = &inputs.phi_pattern {
+                    list.set(fields::PHI_PATTERN, Str(pattern.as_bytes().to_vec()));
+                }
             }
         }
     }

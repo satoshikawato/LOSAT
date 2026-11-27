@@ -150,6 +150,16 @@ FASTA files:
   `x2d_d50r.asn.gz` is `x2d_d50.asn.gz` with its `-` column at 50 on rows 16 to 20 too (title `x2d dash 50 rows
   13-20`; `gzip -9n` of the text PSSM), so that the window's NULLBs past frame -3's NULLB sum above 0.
 
+- The databases under `x2d2/` (rows `db.x2d2.*`, line RG-XS2 item X2d-2; `-blastdb_version 4`, built with
+  `makeblastdb -dbtype nucl -blastdb_version 4`) are single- and two-sequence nucleotide databases of
+  `LOSAT/tests/fasta/x2d2/{a0_r1,a0_r2,a0_r2_m,fm1_r0,fm1_r1,fm1_r2}.fna`, exercising frame +1 and -1 with 0, 1 and 2
+  remainder bases past the frame's last codon for `-in_pssm -window_size 0` NULLB-start reporting.
+  `LOSAT/tests/fixtures/pssm/x2d_w10.asn.gz` is `x2d_d50.asn.gz` with row 10 `W` set to +10 and row 11 `V` to -10 so
+  ungapped NULLB-start alignments (`Sub(2)` / `Sub(1)`) map to an empty alignment under `-subject` (`eBadAlignment`).
+  `LOSAT/tests/fixtures/pssm/x2d_w20.asn.gz` sets row 10 `W` to +20 and row 11 `V` to -20 so negative-frame `-db`
+  NULLB-start alignments whose entire edit script lies in the trailing `Sub(k)` segment leave an empty subject row
+  (`Row is empty` in pairwise/XML/XML2/JSON/prefetch and `Row 1 contains gaps only.` in tabular).
+
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
   whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's

@@ -124,6 +124,7 @@ fn hsp(q: (i32, i32), s: (i32, i32), frame: i8, ident: i32, ops: &[GapEditOp]) -
         num_positives: 0,
         comp_adjust: 0,
         ops,
+        std_seg_nullb: None,
     }
 }
 
@@ -583,6 +584,7 @@ fn tbx_hsp(
         num_positives: 20,
         comp_adjust: 0,
         ops: &[],
+        std_seg_nullb: None,
     }
 }
 

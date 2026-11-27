@@ -660,6 +660,7 @@ impl TblastnArgs {
             evalue,
             psiblast: false,
             psi_tblastn: psi,
+            phi: false,
             x_dropoff: self.xdrop_ungap,
             culling_limit: self.culling_limit,
             best_hit_overhang: self.best_hit_overhang,

@@ -870,6 +870,7 @@ fn psiblast_args(
             format.side_out(args.out.as_deref()),
             false,
             crate::algorithm::blastp::args::BlastpApp::Psiblast,
+            false,
         )?;
     }
     args.into_blastp_args()

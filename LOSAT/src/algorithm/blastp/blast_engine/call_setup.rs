@@ -507,7 +507,7 @@ pub(super) fn call_lookup(
     // whole batches, each block a call of its own with its own lookup table (`PrelimOnly::Block`,
     // `x_prelim_block_plan`); `None`: one table for all queries. Planned only by the search of all
     // queries (`BlastpReports::x_plan_blocks`).
-    let x_blocks = if prelim.is_none() && reports.x_plan_blocks {
+    let x_blocks = if prelim.is_none() && reports.x_plan_blocks && args.phi.is_none() {
         x_prelim_block_plan(
             args,
             query_records,
@@ -529,6 +529,8 @@ pub(super) fn call_lookup(
         _ if args.rps_search.is_some() => rps_hooks::rps_contexts(args, query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
         _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(args, query_frames),
+        // psiblast `-phi_pattern`: the contexts, no word table (`phi_hooks::phi_lookup`).
+        _ if args.phi.is_some() => super::phi_hooks::phi_lookup(args, query_frames),
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks (`x_blocks`): each block
         // builds its own table; this call has the contexts of all queries (`x_blocks_contexts`).
         _ if x_blocks.is_some() => x_blocks_contexts(args, query_frames, blastp_parallel_pool),

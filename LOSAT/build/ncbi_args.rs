@@ -154,13 +154,12 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("blastx", "entrez_query", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-    // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
-    // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
-    // inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-    // not run either (blastp's rows; psiblast has no database masks, NCBI's unknown arguments of
-    // its parser, and no `-mt_mode`). The search strategy file is written, of a FASTA query and of
-    // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
-    ("psiblast", "phi_pattern", Refused::Read(None)),
+    // The arguments that blastp's engine does not run either (blastp's rows; psiblast has no
+    // database masks, NCBI's unknown arguments of its parser, and no `-mt_mode`). The ASCII and
+    // ASN.1 PSSM files are PS2's and PS3's (`algorithm::psiblast::pssm`), `-in_pssm` PS4's
+    // (`algorithm::psiblast::in_pssm`), the MSA inputs PS6's (`algorithm::psiblast::in_msa`) and
+    // `-phi_pattern` PS8a's (`algorithm::phi_search`). The search strategy file is written, of a
+    // FASTA query and of `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "entrez_query", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),

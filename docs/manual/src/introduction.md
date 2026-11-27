@@ -50,7 +50,8 @@ These are on the list for a later release:
 
 - `makeprofiledb -dbtype cobalt`;
 - `blast_formatter` output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML;
-- `psiblast -phi_pattern`;
+- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`,
+  and in the library and pylosat;
 - the `psiblast` output formats `13` to `16`.
 
 Not yet supported in `deltablast`: `-show_domain_hits`, `-query_loc`, `-html`, `-export_search_strategy`, and output formats other than `0`, `6` and `7` (see [deltablast](programs/deltablast.md)).

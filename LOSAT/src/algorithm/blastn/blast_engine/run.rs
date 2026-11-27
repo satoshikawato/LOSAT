@@ -6740,7 +6740,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
             let word_size =
@@ -9204,11 +9210,8 @@ fn run_in_pool(
                 }
             }
             let read = (&mut titles, &mut warnings[start]);
-            let one_by_one = crate::algorithm::common::database::prefetch_may_be_off(
-                database::prefetch_format(&output_formats),
-            );
             if let Err(error) =
-                database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
+                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
             {
                 let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
                 {
@@ -9521,7 +9524,7 @@ fn run_in_pool(
                         );
                         let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
                         database.batch_prefetch(
-                            &titles,
+                            (&titles, &run_loads),
                             database::LoadedBefore {
                                 hits: &hit_lists,
                                 spans: &batch_spans,

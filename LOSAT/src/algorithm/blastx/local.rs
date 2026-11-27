@@ -1197,7 +1197,13 @@ fn search_database(
     )?
     .showing_gis(args.show_gis)
     .after_calls(args.first_query_ordinal > 0)
-    .keeping_scope(keeps_scope, separate_xml2);
+    .keeping_scope(
+        keeps_scope,
+        separate_xml2,
+        crate::report::db_subject::FormatThrow::record_keeps_scope(
+            outputs.formats.iter().map(|format| format.outfmt),
+        ),
+    );
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     let mt_stop = crate::algorithm::common::database::ncbi_mt_splits_db(

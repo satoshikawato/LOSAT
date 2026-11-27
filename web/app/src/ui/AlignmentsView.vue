@@ -58,7 +58,7 @@ const heading = computed(() => {
 // --- the window of Ranges ------------------------------------------------------------------------
 
 const win = ref({ start: 0, end: 0 });
-const windowKey = computed(() => `${props.state.runId}:${props.state.qIdx}:${props.state.sIdx}:${ranges.value.length}`);
+const windowKey = computed(() => `${props.state.runId}:${props.state.qIdx}:${props.state.round ?? 0}:${props.state.sIdx}:${ranges.value.length}`);
 // Another subject (or other filters) centres the window on the selected Range; so does a selection
 // outside it. A selection inside it keeps the Ranges where they are.
 watch(
@@ -100,6 +100,8 @@ function showLater(): void {
 // --- moving the selection ------------------------------------------------------------------------
 
 const key = (id: HspId) => `${id.qIdx}-${id.rank}`;
+/** Cache key including round so switching PSI-BLAST iterations never reuses another round's section. */
+const sectionKey = (id: HspId) => `${id.qIdx}-${id.round}-${id.rank}`;
 
 /**
  * Brings an HSP's Range into view (the HSP chosen in the table, the plots or by the Range's
@@ -128,7 +130,7 @@ function selectSubject(offset: number): void {
 
 // --- the sections, read as they come into view -------------------------------------------------------
 
-/** Sections read for this run's Ranges, by `${qIdx}-${rank}`: the text, or null where it could not be read. */
+/** Sections read for this run's Ranges, by `${qIdx}-${round}-${rank}`: the text, or null where it could not be read. */
 const sections = reactive(new Map<string, string | null>());
 const reading = new Set<string>();
 /** Failed blocks that left the screen: they are read again when they come back into view. */
@@ -165,7 +167,7 @@ watch(
 );
 
 function read(range: RangeEntry): void {
-  const k = key(range.id);
+  const k = sectionKey(range.id);
   if (sections.has(k) || reading.has(k) || arrived.has(k)) return;
   reading.add(k);
   const runId = props.state.runId;
@@ -182,7 +184,7 @@ function read(range: RangeEntry): void {
 
 /** Reads a failed section again ("Try again", or its block back in view). */
 function retry(range: RangeEntry): void {
-  const k = key(range.id);
+  const k = sectionKey(range.id);
   away.delete(k);
   sections.delete(k);
   read(range);
@@ -201,11 +203,12 @@ onMounted(() => {
       for (const item of entries) {
         const k = (item.target as HTMLElement).dataset['range'];
         const range = shown.value.find((r) => key(r.id) === k);
-        if (range === undefined || k === undefined) continue;
-        if (sections.get(k) !== null) {
+        if (range === undefined) continue;
+        const sk = sectionKey(range.id);
+        if (sections.get(sk) !== null) {
           if (item.isIntersecting) read(range);
-        } else if (!item.isIntersecting) away.add(k);
-        else if (away.has(k)) retry(range);
+        } else if (!item.isIntersecting) away.add(sk);
+        else if (away.has(sk)) retry(range);
       }
     },
     { rootMargin: '300px 0px' },
@@ -228,7 +231,7 @@ watch(
 );
 
 const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
-  const text = sections.get(key(range.id));
+  const text = sections.get(sectionKey(range.id));
   return text === undefined ? 'pending' : text === null ? 'failed' : 'ready';
 };
 </script>
@@ -265,7 +268,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
       </p>
       <section
         v-for="range in shown"
-        :key="key(range.id)"
+        :key="sectionKey(range.id)"
         class="range-block"
         :class="{ selected: range === ranges[selectedAt] }"
         :data-testid="`range-${key(range.id)}`"
@@ -359,7 +362,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             class="output range-text"
             data-testid="range-section"
             data-state="ready"
-            >{{ sections.get(key(range.id)) }}</pre
+            >{{ sections.get(sectionKey(range.id)) }}</pre
           >
           <p
             v-else-if="sectionState(range) === 'failed'"

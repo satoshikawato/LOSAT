@@ -353,7 +353,7 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     }
     // Line DBID weakbatch: what the batches read of each subject they report, by ordinal id:
     // 7 in both batches, 8 in the first (3 Seq-aligns, on under limit 3), 9 in the second
-    // (4, off), whose reports read it one by one.
+    // (4, off), whose reports read it one by one (the walk's, `report::db_subject::ScopeWalk`).
     let sum = |span: std::ops::Range<usize>| counts[span].iter().sum();
     let never = |_: std::ops::Range<usize>| false;
     let reads = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([
@@ -362,22 +362,22 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         (1, 8),
         (3, 9),
     ]);
-    assert!(reads.prefetched(7) && reads.one_by_one(7));
-    assert!(reads.prefetched(8) && !reads.one_by_one(8));
-    assert!(!reads.prefetched(9) && reads.one_by_one(9));
+    assert!(reads.prefetched(7));
+    assert!(reads.prefetched(8));
+    assert!(!reads.prefetched(9));
     let every = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
-    assert!(every.prefetched(9) && !every.one_by_one(9));
+    assert!(every.prefetched(9));
     let none = BatchPrefetch::at(Some(0), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(0, 7)]);
-    assert!(!none.prefetched(7) && none.one_by_one(7));
+    assert!(!none.prefetched(7));
     // Review 5 of line DBID pfoff-4, H3: psiblast's outfmt 8 reads its subjects one by one.
     let seq_annot = PrefetchFormat::of(8, RequestKind::Psiblast);
     let annot =
         BatchPrefetch::at(None, seq_annot, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
-    assert!(!annot.prefetched(9) && annot.one_by_one(9));
+    assert!(!annot.prefetched(9));
     // Review 1 M1: a query of no batch (5, beyond the call's 5) is taken both ways.
     let beyond =
         BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(5, 6)]);
-    assert!(beyond.prefetched(6) && beyond.one_by_one(6));
+    assert!(beyond.prefetched(6));
     // Line DBID pfoff-7: a batch whose prefetch fails at a subject whose lookup throws on the id
     // (the second, `2..5`) prefetches, and its reports load its subjects one by one after it; the
     // reads whose texts its reports write stay the prefetch's. A batch whose prefetch is off is
@@ -401,9 +401,9 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         (false, false)
     );
     let fails_reads = failing.reads([(0, 7), (4, 7), (1, 8), (3, 9)]);
-    assert!(fails_reads.prefetched(9) && fails_reads.one_by_one(9));
-    assert!(fails_reads.prefetched(8) && !fails_reads.one_by_one(8));
-    assert!(fails_reads.prefetched(7) && fails_reads.one_by_one(7));
+    assert!(fails_reads.prefetched(9));
+    assert!(fails_reads.prefetched(8));
+    assert!(fails_reads.prefetched(7));
     let off = BatchPrefetch::at(
         Some(0),
         table,
@@ -418,7 +418,7 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         ..ParsedShown::default()
     };
     let of_9 = reads.shown(shown, 9);
-    assert!(!of_9.prefetched && of_9.one_by_one);
+    assert!(!of_9.prefetched);
     assert!(prefetch_off_at(Some(1), 2) && !prefetch_off_at(Some(2), 2));
     assert!(prefetch_off_at(Some(0), 0) && !prefetch_off_at(Some(i32::MAX), usize::MAX));
     assert!(!prefetch_off_at(None, usize::MAX));

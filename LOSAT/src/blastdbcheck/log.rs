@@ -3,7 +3,8 @@
 
 use std::io::Write;
 
-use crate::ncbi_app::files::Ostream;
+use crate::ncbi_app::files::OutputFile;
+use crate::report::ostream::ReportWrite;
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:95-103
 /// The verbosity levels: a line of level `L` is written when `L <= -verbosity`.
@@ -15,7 +16,7 @@ pub(super) const MINUTIAE: i32 = 4;
 /// What ends a run before NCBI's run ends.
 pub(super) enum Stop {
     /// A write found the report's pipe closed, where SIGPIPE ends NCBI's process
-    /// (`files::Ostream::closed`): the run ends at once, with exit status 0 and no message.
+    /// (`files::OutputFile::closed`): the run ends at once, with exit status 0 and no message.
     Closed,
     /// LOSAT's refusal: what NCBI does there is not what LOSAT gives (the reason).
     Refused(String),
@@ -28,16 +29,13 @@ pub(super) enum Stop {
 // the writes in NCBI's order (`report::run_files`).
 /// The report: its stream and the verbosity.
 pub(super) struct Log<'a> {
-    out: Ostream<'a>,
+    out: OutputFile<'a>,
     level: i32,
 }
 
 impl<'a> Log<'a> {
-    pub(super) fn new(out: &'a mut dyn Write, level: i32) -> Self {
-        Log {
-            out: Ostream::new(out),
-            level,
-        }
+    pub(super) fn new(out: OutputFile<'a>, level: i32) -> Self {
+        Log { out, level }
     }
 
     /// The verbosity (`GetLevel`).
@@ -56,7 +54,7 @@ impl<'a> Log<'a> {
             return Ok(());
         }
         let _ = self.out.write_all(text);
-        let _ = self.out.flush();
+        let _ = self.out.ncbi_flush();
         if self.out.closed() {
             return Err(Stop::Closed);
         }

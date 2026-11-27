@@ -89,7 +89,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
 | `-logfile` with `tblastx`, `rpsblast` or `rpstblastn` in the WASI command-line build | Refused. That build cannot send its standard error to a file. |
 | `-logfile` naming an input file read by the run (such as `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`, `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`, `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`, `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files, or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` / `-filtering_db`; including relative paths, symlinks, hard links, and missing inputs that `-logfile` would create) | Refused (exit status 1) in all programs, before opening or creating the file, leaving existing inputs unchanged. NCBI BLAST+ 2.17.0 appends diagnostics into the input file, which can corrupt it or enter an endless read loop. |
-| `-logfile` naming another existing file of the run's directory (not read by the run) or a missing file the run checks for reading (database lookup candidates of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb` — alias `.nal`/`.pal`, index `.nin`/`.pin`, group alias `index.alx`, alias `DBLIST` targets and local-copy/search-path candidates — `taxdb.bti` or paired `taxdb.btd` when `-outfmt` consults the taxonomy database, `taxonomy4blast.sqlite3` when `-taxids`/`-taxidlist` expands against a file on the search path, or entries read from `windowmasker -fa_list true`), or a `windowmasker` `-out` naming an existing file of the run's directory or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking) in LOSAT Web | Refused (exit status 1). On the command line those files are appended to, created and read back, or overwritten; LOSAT Web reads the run's files and writes none of them. |
+| `-logfile` naming another existing file of the run's directory (not read by the run) or a missing file the run checks for reading (database lookup candidates of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb` — alias `.nal`/`.pal`, index `.nin`/`.pin`, group alias `index.alx`, alias `DBLIST` targets and local-copy/search-path candidates — `taxdb.bti` or paired `taxdb.btd` when `-outfmt` consults the taxonomy database, `taxonomy4blast.sqlite3` when `-taxids`/`-taxidlist` expands against a file on the search path, entries read from `windowmasker -fa_list true`, or `-archive` of `blast_formatter`), or a `windowmasker` or `blast_formatter` `-out` naming an existing file of the run's directory or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking) in LOSAT Web | Refused (exit status 1). On the command line those files are appended to, created and read back, or overwritten; LOSAT Web reads the run's files and writes none of them. |
 | `-remote`, `-entrez_query` | Refused. They need NCBI's servers. See the end of this page. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#all-five-search-programs).
@@ -106,6 +106,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A very large `-xdrop_ungap` (such as `1e10`) with `-subject` that leads to an alignment outside its query context whose query coordinates leave the query on the left | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). Where they pass the query's end, or when searching a `-db` database, LOSAT matches NCBI BLAST+ in every output format. |
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
+| `-db` with a nucleotide index whose ambiguity offset passes the next sequence offset (`amb > next`), at `-num_threads` above 1 when traceback reads that sequence | Refused. NCBI `blastn` aborts (`SIGABRT`) with multiple threads. At `-num_threads 1` LOSAT reports NCBI's database error (`File error: could not get ambiguity data.`, exit status 2). |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
 | Alignments merged across a subject or query chunk overlap whose density-scaled score leaves 32-bit integers (`Int4`, e.g. a very long high-scoring match over ~1.07 Gbp with reward 2) | Refused when the search reaches it, naming the sequence by OID (exit status 1). NCBI's float-to-int conversion is undefined there. |
@@ -179,6 +180,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query batch that NCBI crashes on | Refused, as in `blastp`. See [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
 | `-db_hard_mask` on a database whose masks are stored out of the order of their start (masks that overlap or nest in that order are searched), and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused (exit status 1). A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well, and so are the few sequences with overlapping masks listed in [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
 | `-db_soft_mask` on a database sequence of more than about 15,000,000 bases whose masks are stored out of order, when a gapped search finds an alignment that starts in the letters before one of the 5,000,000-letter parts that NCBI BLAST+ searches a reading frame in (mostly with `-window_size 0`), and that alignment is longer than 11 letters or its middle lies before the part | Refused, naming the database sequence and the reading frame (exit status 1): `Error: TBLASTN: database sequence N, frame F: an initial alignment of the chunk from residue R starts before the chunk (...)`. NCBI BLAST+ crashes on these. Shorter alignments whose middle lies in the part are searched, with NCBI's rows. With `-ungapped` the search runs. |
+| `-db` with a nucleotide index whose ambiguity offset is out of order (`amb <= start`, where NCBI reads the byte before the sequence, or `amb > next`, where NCBI reads into the next sequence's bytes) | Refused: not yet supported (`blastn`, `blastdbcmd`, and `blastdbcheck` handle in-mapping out-of-order ambiguity offsets). |
 | `-ungapped -window_size 0` on a subject searched in overlapping parts (longer than 5,000,000 residues in a frame, or `-db_hard_mask`), when two one-hit alignments merged across a chunk overlap have query lengths summing to 0 or an out-of-range scaled score | Refused when the search reaches it, naming the sequence by OID and reading frame (exit status 1). NCBI divides by zero or converts an out-of-range float to a 32-bit integer there. |
 | `-in_pssm` | See the next section. |
 
@@ -192,6 +194,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-db_hard_mask` on a database whose masks are stored out of the order of their start (masks that overlap or nest in that order are searched), and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused (exit status 1). A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well, and so are the few sequences with overlapping masks listed in [Rare and pathological inputs](refusals-edge-cases.md#tblastx). |
+| `-db` with a nucleotide index whose ambiguity offset is out of order (`amb <= start`, where NCBI reads the byte before the sequence, or `amb > next`, where NCBI reads into the next sequence's bytes) | Refused: not yet supported (`blastn`, `blastdbcmd`, and `blastdbcheck` handle in-mapping out-of-order ambiguity offsets). |
 | `-outfmt 1` to `4` with `-parse_deflines` | See "All five search programs" above. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#tblastx).
@@ -379,18 +382,14 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blastdbcheck
 
-`blastdbcheck` runs every option of its `-help` but `-cdd_delta` (`-xmlhelp` on the command line only).
+`blastdbcheck` runs every option of its `-help`, including `-cdd_delta` (`-xmlhelp` on the command line only).
 
 | Option or input | What happens |
 | :--- | :--- |
-| `-cdd_delta` | Refused (not implemented yet). |
 | `-stride 0` or a negative `-stride` | Refused after the first OID passes. NCBI tests the first OID again and again and never finishes. |
 | `-random` or the default sample of 200 OIDs on a database that includes none of its OIDs (an alias file's OID range or list leaves none) | Refused. NCBI draws OIDs without end. |
-| A database file that is shorter than its index says: a cut index (`.pin`, `.nin`), sequence (`.psq`, `.nsq`) or header (`.phr`, `.nhr`) file of a few bytes or more | Refused when the volume is opened. NCBI reads zeros past the end of the file, from the rest of its last memory page. A sequence file of no bytes, a cut string ISAM file (`.psd`, `.nsd`) and a file found by `-dir` that is not a database index are refused too: NCBI crashes. |
-| An alias file whose `NSEQ`, `LENGTH`, `FIRST_OID`, `LAST_OID`, `MAXOID` or `OIDLIST` values overflow NCBI's arithmetic in its checks (such as `FIRST_OID 65535` with `LAST_OID 65535`), where the result of the overflow decides the check | Refused. C leaves the result undefined. Where the result does not decide the check, the alias file is checked as NCBI checks it. |
-| `-ends` with a value whose distance from the last OID passes the largest 32-bit integer (such as `-ends -2147483648`) | Refused. C leaves the result undefined. |
+| An empty (0-byte) sequence file (`.psq`, `.nsq`) or CDD profile file (`.loo`, `.rps`, `.freq`, `.wcounts`, `.obsr`), a cut database or profile file whose offsets pass its last 4 KiB memory page, a nucleotide index whose ambiguity offset causes NCBI to read before the start of the sequence file mapping (such as offset 0), a cut string ISAM file (`.psd`, `.nsd`), or a file found by `-dir` that is not a database index | Refused. NCBI crashes or reads outside its memory mapping. Cuts that stay within the last 4 KiB page read zero-filled bytes as NCBI does, and out-of-order ambiguity offsets that stay within the mapping match NCBI's behavior. |
 | `-must_have_taxids` with a sequence whose first definition line has no Seq-id (only a damaged database has one) | Refused. NCBI reads a null reference. |
-| A definition line whose title NCBI reads as a UTF8String, or bytes that NCBI reads as `#` | Refused. NCBI reports each read. |
 | An error report at `-verbosity 3` or 4 whose text LOSAT does not know | Refused. |
 | `SERIAL_VERIFY_DATA_READ` set to `NO`, `NEVER`, `DEFVALUE` or `DEFVALUE_ALWAYS` with a `-db` or `-dir` volume whose definition lines lack a member that NCBI's reader requires (only a damaged database has such lines) | Refused where NCBI's error would fail the check of that OID, after the same output. NCBI reports the member as missing and goes on. Other runs with these values are answered as NCBI does. |
 
@@ -451,15 +450,14 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blast_formatter
 
-`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text.
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text, ASN.1 binary or XML.
 
 | Input | What happens |
 | :--- | :--- |
 | `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
-| An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
 | A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
 | An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, an element stated as `NULL` in a list, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
-| An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
+| An archive in a form that LOSAT does not read | Refused, with the form named. |
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
 | `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of the mapper | Refused. NCBI's programs write none. |
@@ -538,7 +536,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
   the library and pylosat.
 - The `psiblast` output formats `13` to `16`.
-- `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
+- `blast_formatter`: the output formats other than `8`, `9` and `12`, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers

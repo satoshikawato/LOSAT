@@ -50,11 +50,11 @@ Blast4-archive ::= {
             title "s1 subject one"
           },
           inst {
- repr raw,
- mol aa,
- length 4,
- seq-data ncbieaa "ACGT"
- }
+            repr raw,
+            mol aa,
+            length 4,
+            seq-data ncbieaa "ACGT"
+          }
         }
       },
       algorithm-options {

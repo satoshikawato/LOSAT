@@ -50,14 +50,23 @@ Blast4-archive ::= {
             title "s1 subject one"
           },
           inst {
- repr delta,
- mol na,
- length 400,
- ext delta {
- literal { length 150, seq-data iupacna "GGATCACAGTCTACACTGCTCACTCCAACCCCGGCCCCTGAGTCCGAGGAGAGGGTGCTTCAGAGTATGTATACCACTGGGTAGGATACGGCGGAGGGCACGTCAATACGGTTCAATGCCCTACTGCATGCTCTTGTGGTTCATCTGCAT" },
- literal { length 250, seq-data iupacna "GGAGAGGGTGGGCATGGGTGGGGGTGCTGGCCCGTGATCTGGACCTCCCATCCACAGCTCATTGTACCGAGTGTAGAGAGGGGCTTGTCCTTCCAGATAG" }
- }
- }
+            repr delta,
+            mol na,
+            length 400,
+            ext delta {
+              literal {
+                length 150,
+                seq-data iupacna "GGATCACAGTCTACACTGCTCACTCCAACCCCGGCCCCTGAGTC
+CGAGGAGAGGGTGCTTCAGAGTATGTATACCACTGGGTAGGATACGGCGGAGGGCACGTCAATACGGTTCAATGCCCT
+ACTGCATGCTCTTGTGGTTCATCTGCAT"
+              },
+              literal {
+                length 250,
+                seq-data iupacna "GGAGAGGGTGGGCATGGGTGGGGGTGCTGGCCCGTGATCTGGAC
+CTCCCATCCACAGCTCATTGTACCGAGTGTAGAGAGGGGCTTGTCCTTCCAGATAG"
+              }
+            }
+          }
         }
       },
       algorithm-options {

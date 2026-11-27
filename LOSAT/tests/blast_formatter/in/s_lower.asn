@@ -73,11 +73,11 @@ Blast4-archive ::= {
             title "sp|P0E1A1.1|E1A1_TEST subject two"
           },
           inst {
- repr raw,
- mol aa,
- length 40,
- seq-data ncbieaa "DYLaKKIELkAHAAHLLASANRWEACSKIKQALDDGIHAV"
- }
+            repr raw,
+            mol aa,
+            length 40,
+            seq-data ncbieaa "DYLaKKIELkAHAAHLLASANRWEACSKIKQALDDGIHAV"
+          }
         },
         {
           id {

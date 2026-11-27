@@ -50,11 +50,11 @@ Blast4-archive ::= {
             title "p1 subject one"
           },
           inst {
- repr raw,
- mol aa,
- length 0,
- seq-data ncbieaa ""
- }
+            repr raw,
+            mol aa,
+            length 0,
+            seq-data ncbieaa ""
+          }
         },
         {
           id {
@@ -96,20 +96,20 @@ Blast4-archive ::= {
             title "p3"
           },
           inst {
- repr delta,
- mol aa,
- length 4294967295,
- ext delta {
- literal {
- length 10,
- seq-data ncbieaa "NRWEVCSKIK"
- },
- literal {
- length 10,
- seq-data ncbieaa "QLLDDGIHVV"
- }
- }
- }
+            repr delta,
+            mol aa,
+            length 4294967295,
+            ext delta {
+              literal {
+                length 10,
+                seq-data ncbieaa "NRWEVCSKIK"
+              },
+              literal {
+                length 10,
+                seq-data ncbieaa "QLLDDGIHVV"
+              }
+            }
+          }
         }
       },
       algorithm-options {

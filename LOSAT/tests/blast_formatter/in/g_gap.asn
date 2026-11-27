@@ -73,15 +73,23 @@ Blast4-archive ::= {
             title "sp|P0E1A1.1|E1A1_TEST subject two"
           },
           inst {
- repr delta,
- mol aa,
- length 40,
- ext delta {
- literal { length 10, seq-data ncbieaa "DYLAKKIELD" },
- literal { length 5 },
- literal { length 25, seq-data ncbieaa "LLASANRWEACSKIKQALDDGIHAV" }
- }
- }
+            repr delta,
+            mol aa,
+            length 40,
+            ext delta {
+              literal {
+                length 10,
+                seq-data ncbieaa "DYLAKKIELD"
+              },
+              literal {
+                length 5
+              },
+              literal {
+                length 25,
+                seq-data ncbieaa "LLASANRWEACSKIKQALDDGIHAV"
+              }
+            }
+          }
         },
         {
           id {

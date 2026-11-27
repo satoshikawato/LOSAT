@@ -1845,7 +1845,7 @@ fn subject_range(align: &ReadAlign<'_>, ds: &PairDenseg) -> Option<(u32, u32)> {
         range?
     } else {
         let lettered = || segs().filter(|&(start, _)| start >= 0);
-        let (first, last) = (lettered().next()?, lettered().last()?);
+        let (first, last) = (lettered().next()?, lettered().next_back()?);
         let (at_start, at_stop) = if ds.strands[1] == Strand::Minus {
             (last, first)
         } else {

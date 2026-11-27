@@ -23,14 +23,21 @@ Blast4-archive ::= {
               title "q1 query one"
             },
             inst {
- repr delta,
- mol na,
- length 120,
- ext delta {
- literal { length 50, seq-data iupacna "ATGAACTGGAGTCTACGATGAGTGTACGAACGTCAGCTGGAACAGGCTTC" },
- literal { length 70, seq-data iupacna "CCACCAGGGT" }
- }
- }
+              repr delta,
+              mol na,
+              length 120,
+              ext delta {
+                literal {
+                  length 50,
+                  seq-data iupacna "ATGAACTGGAGTCTACGATGAGTGTACGAACGTCAGCTGGAA
+CAGGCTTC"
+                },
+                literal {
+                  length 70,
+                  seq-data iupacna "CCACCAGGGT"
+                }
+              }
+            }
           }
         }
       },

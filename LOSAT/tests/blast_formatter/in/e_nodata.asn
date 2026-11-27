@@ -96,10 +96,10 @@ Blast4-archive ::= {
             title "p3"
           },
           inst {
- repr raw,
- mol aa,
- length 0
- }
+            repr raw,
+            mol aa,
+            length 0
+          }
         }
       },
       algorithm-options {

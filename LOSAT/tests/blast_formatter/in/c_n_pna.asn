@@ -50,11 +50,11 @@ Blast4-archive ::= {
             title "s1 subject one"
           },
           inst {
- repr raw,
- mol na,
- length 1,
- seq-data ncbipna 'FF000000FF'H
- }
+            repr raw,
+            mol na,
+            length 1,
+            seq-data ncbipna 'FF000000FF'H
+          }
         }
       },
       algorithm-options {

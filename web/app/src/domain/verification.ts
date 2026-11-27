@@ -63,7 +63,7 @@ export const RANGE_VALUE = '<range>';
 /** Placeholder for file-path option values (`-ustat`, `-ids`, `-exclude_ids`) in tool option keys. */
 export const FILE_VALUE = '<file>';
 /** Tool flags that name only input/output/log files and do not change the option set. */
-const TOOL_NOT_OPTIONS = new Set(['-in', '-out', '-logfile']);
+const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
 /** Tool flags whose values name files in the run directory (the flag stays in the key, the file name does not). */
 const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids']);
 

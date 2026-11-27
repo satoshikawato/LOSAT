@@ -2,11 +2,11 @@
 //! `-list_outfmt` (`CBlastDbFormatter`).
 
 use crate::wording::{DATABASE_ERROR, OPTIONS_ERROR};
-use std::io::Write;
 use std::path::Path;
 
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::Ostream;
+use crate::ncbi_app::files::OutputFile;
+use crate::report::ostream::CutBuffer;
 use crate::seqdb::find::{find_blast_dbs, FoundDb};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -258,7 +258,15 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
 // refusal of a database it does not read (an empty `x.pin` on which NCBI crashes: J168)
 // writes no line.
 /// `-list`: the databases of the directory, one line each, to `out`; the exit status.
-pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
+///
+/// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1195-1198
+/// Each line is one insertion and `NcbiEndl`.
+pub(super) fn list(
+    args: &Args,
+    path: &SearchPath,
+    diag: &mut Diag,
+    out: &mut OutputFile<'_>,
+) -> i32 {
     let dir = args.bytes("list").unwrap_or_default();
     let dbtype = args.value("dbtype").unwrap_or("guess");
     let dbs = find_blast_dbs(
@@ -275,18 +283,17 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Os
         diag.post(&format!("{OPTIONS_ERROR} Invalid format specification"));
         return 1;
     };
-    let mut text = Vec::new();
+    let mut text = CutBuffer::default();
     for db in &dbs {
         match write_line(&format, db, path) {
             Ok(line) => {
-                text.extend_from_slice(&line);
-                text.push(b'\n');
+                text.insertion(&line);
+                text.endl();
             }
             Err(ListStop::Ncbi(message, status)) => {
-                let _ = out.write_all(&text);
-                let _ = out.flush();
-                // `cerr`'s tie flushed the output first: a closed pipe ends the program there.
-                if out.closed() {
+                // The error comes after NCBI's writes of the lines (`Diag`); a closed pipe ends
+                // the program there.
+                if text.write_to(out).is_err() {
                     return 0;
                 }
                 diag.post_bytes(&message);
@@ -296,9 +303,8 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Os
         }
     }
     // NCBI's stream ignores a failed write (no exception is enabled on it), so does the run's
-    // `ncbi_app::files::Ostream` that `out` is.
-    let _ = out.write_all(&text);
-    let _ = out.flush();
+    // `files::OutputFile` that `out` is.
+    let _ = text.write_to(out);
     0
 }
 

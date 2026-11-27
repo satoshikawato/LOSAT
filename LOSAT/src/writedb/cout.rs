@@ -35,6 +35,8 @@ pub(crate) struct CoutBuf<'a> {
     buffer: NcbiBuffer,
     held: Vec<u8>,
     closed_pipe: bool,
+    /// The buffer was made by an insertion (the first one writes its whole blocks alone).
+    buffer_made: bool,
 }
 
 /// NCBI's `cout` over `out`.
@@ -54,6 +56,7 @@ impl<'a> CoutBuf<'a> {
             buffer: NcbiBuffer::new(stream),
             held: Vec::new(),
             closed_pipe: false,
+            buffer_made: false,
         }
     }
 }
@@ -62,6 +65,7 @@ impl CoutBuf<'_> {
     /// After `NcbiBuffer` took the bytes `added`: writes what it no longer holds, the bytes held
     /// before first; whether the write succeeded. A failed write leaves the buffer empty.
     fn settle(&mut self, added: &[u8]) -> bool {
+        let made = std::mem::replace(&mut self.buffer_made, true);
         let keep = self.buffer.held();
         let total = self.held.len() + added.len();
         if keep == total {
@@ -71,7 +75,16 @@ impl CoutBuf<'_> {
         let mut all = std::mem::take(&mut self.held);
         all.extend_from_slice(added);
         self.held = all.split_off(total - keep);
-        self.write_out(&all)
+        // A made buffer is filled and written first, then the insertion's whole blocks that
+        // follow, in a write of their own (each of the writes NCBI makes, line RG KD-11b2).
+        let fill = match self.buffer.stream() {
+            NcbiStdio::Cout {
+                block,
+                lines: false,
+            } if made => block.min(all.len()),
+            _ => all.len(),
+        };
+        self.write_out(&all[..fill]) && (fill == all.len() || self.write_out(&all[fill..]))
     }
 
     /// Writes `bytes` to the output and on to its device (a writer that buffers, as Rust's

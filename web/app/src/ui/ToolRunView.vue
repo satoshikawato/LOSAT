@@ -11,7 +11,7 @@ import type { Coordinator, SessionCountsEntry, ToolRunView } from '../applicatio
 import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
 import { toolCommandWords } from '../domain/tool-argv';
-import { decodeUtf8Preview, windowMaskerStageById } from '../domain/tools';
+import { decodeUtf8Preview, toolLabel, toolStageLabel } from '../domain/tools';
 import type { Badge } from '../domain/verification';
 import type { CountsCopy } from '../ports/counts';
 import { announce } from './announcer';
@@ -292,7 +292,10 @@ function maskWithCounts(): void {
 }
 
 const command = computed(() => toolCommandWords(props.run.snapshot.argv));
-const stageLabel = computed(() => windowMaskerStageById(props.run.snapshot.stage).label);
+const toolHeading = computed(() => {
+  const { tool, stage } = props.run.snapshot;
+  return tool === 'windowmasker' ? `${toolLabel(tool)} · ${toolStageLabel(tool, stage)}` : `${toolLabel(tool)} (blast_formatter)`;
+});
 const duration = computed(() => {
   const { startedAt, endedAt } = props.run.record;
   return startedAt !== undefined && endedAt !== undefined ? formatDuration(endedAt - startedAt) : '';
@@ -316,6 +319,8 @@ function originText(origin: ToolFileOrigin): string {
       return `combined from ${origin.parts.join(', ')}`;
     case 'made':
       return `made by run ${origin.runNumber}`;
+    case 'archive':
+      return `from run ${origin.runNumber} (-outfmt 11)`;
     case 'saved':
       return `saved for taxonomy ID ${origin.taxid}`;
   }
@@ -456,7 +461,7 @@ function originText(origin: ToolFileOrigin): string {
             {{ run.snapshot.number }}<template v-if="run.snapshot.group">, group run {{ run.snapshot.group.position }} of {{ run.snapshot.group.size }}</template>
           </dd>
           <dt>Tool</dt>
-          <dd>WindowMasker · {{ stageLabel }}</dd>
+          <dd>{{ toolHeading }}</dd>
           <dt>Command</dt>
           <dd><code data-testid="run-argv"><CommandText :words="command" :takes-value="takesValue" /></code></dd>
           <dt>Files of the run</dt>

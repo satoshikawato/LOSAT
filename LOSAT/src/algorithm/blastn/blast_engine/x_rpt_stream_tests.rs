@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::local_blast::FormatOutput;
+use crate::api::local_blast::{FormatOutput, OutputSink};
 use crate::blastinput::seq_range::RecordPlacement;
 
 // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from

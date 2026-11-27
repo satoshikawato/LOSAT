@@ -69,11 +69,7 @@ use crate::stats::tables::KarlinParams;
 
 /// The refusal of a form that the pairwise format does not write yet.
 fn refused(what: &str) -> anyhow::Error {
-    Refusal::NotCovered {
-        format: PAIRWISE_FORMATS,
-        what: what.to_string(),
-    }
-    .into()
+    super::tabular::refused_in(PAIRWISE_FORMATS, what)
 }
 
 /// A stop of a Seq-align's read as the run's error: NCBI's where it stops there, else the
@@ -272,7 +268,7 @@ pub(super) fn print_object(
         Ok(Some(limit)) => i64::try_from(seq_aligns).unwrap_or(i64::MAX) <= i64::from(*limit),
         Err(_) => false,
     };
-    let prefetched = prefetches && prefetch_reads(sets, alignments)?;
+    let prefetched = prefetches && prefetch_reads(sets, alignments, PAIRWISE_FORMATS)?;
     if prefetched {
         for set in sets {
             for &align in &alignments[set.clone()] {

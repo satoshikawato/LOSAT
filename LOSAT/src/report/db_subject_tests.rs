@@ -3803,7 +3803,7 @@ fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches
         .in_database(DbSequence::of_unrestricted(1));
     // Sequence 2 (`pdb|1CCC|A`) resolves to nothing alone, while sequence 3 (`pdb|1DDD|A` ^A
     // `pdb|1CCC|A`) may register it first -> `ShownBy::Order`, and `1CCC|A` must NOT be cached
-    // as `Resolved::Nothing` so a later load sees sequence 3 in `m_Ids`.
+    // as `Resolved::Nothing`: NCBI's scope keeps nothing or sequence 3 for it, as the order fell.
     let s2 = sequence(vec![pdb("1CCC", "A")], 2).found_instead(Some(FoundInstead::Sequence(
         DbSequence::of_unrestricted(99),
     )));
@@ -3817,8 +3817,9 @@ fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches
     assert_eq!(answers[&1], HitLoad::Loaded);
     assert_eq!(answers[&2], shown(Some(3), ShownBy::Order));
     assert_eq!(answers[&3], HitLoad::Loaded);
-    // `s2` was NOT cached as `Resolved::Nothing`; a later load sees `s3` in `m_Ids`.
-    assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Holder));
+    // `s2` was NOT cached as `Resolved::Nothing`; a later load gets nothing or `s3` (line DBID
+    // hr-3: `ShownBy::Holder` would name a sequence that NCBI gives).
+    assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Order));
 
     // A later batch of 1,100 fresh unpacked PDB ids evicts batch 0 from `m_Ids` and prunes
     // `blobs` / `scope_handles` on `enter(Some(1))`.

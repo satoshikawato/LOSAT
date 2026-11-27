@@ -2741,13 +2741,23 @@ impl ScopeWalk {
         // Pass 3: commit cache, scope loads, blob ids, `m_Ids`, and active `blobs`.
         self.ids
             .use_unordered_map(merged_uses, extra_ambiguous, total_uses);
-        for (index, &(_, handle, _, subject)) in group.iter().enumerate() {
+        for (index, &(_, handle, key, subject)) in group.iter().enumerate() {
             let alone = &results[index];
-            // A tie that resolved to nothing alone, where another may have registered its
-            // handle before it, is not known to be unresolved: a later read asks the loader.
+            // A tie whose answer the order moves: NCBI's scope keeps for its handle what came
+            // first, its own answer (also nothing) or the sequence that another's blob registered
+            // for it, so a later read of the handle in the scope gets either (`ShownBy::Order`;
+            // line DBID hr-3: `db.id.prd.ah4.reject`, whose PSSM reads Z or warns by memory
+            // layout). A lookup that throws is never kept: a later read asks the loader, which
+            // holds the other's registration then.
             let kept = match alone.resolved {
                 Some(Resolved::Throws) => None,
-                None if moved[index] => None,
+                _ if moved[index] => Some(Resolved::Unknown(
+                    match answers.get(&key) {
+                        Some(HitLoad::Shown(shown)) => shown.holder,
+                        _ => None,
+                    },
+                    ShownBy::Order,
+                )),
                 _ => Some(alone.resolved.unwrap_or(Resolved::Nothing)),
             };
             if let (Some(handle), Some(kept)) = (handle, kept) {

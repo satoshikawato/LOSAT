@@ -7,11 +7,10 @@
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
-import { computed, nextTick, onUnmounted, ref, watch, watchEffect } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
-import { isReadAgain } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
@@ -62,14 +61,9 @@ const threadChoices = computed(() => {
   return Array.from({ length: Math.max(1, Math.min(32, hardware)) }, (_, i) => i + 1);
 });
 
-/**
- * The runs that "Run LOSAT" makes now, as the draft counts them. While inputs are read again (`isReadAgain`), the count from
- * before, which their records give again once they are read: the button said "Run LOSAT" in place of "Run LOSAT (2 runs)"
- * while they were read, and was narrower (line WQA's D25, 2026-11-27).
- */
-const runCount = ref(props.draft.runCount());
-watchEffect(() => {
-  if (!roles.some((role) => state.value[role].sources.some(isReadAgain))) runCount.value = props.draft.runCount();
+const runCount = computed(() => {
+  void state.value; // recompute with the draft
+  return props.draft.runCount();
 });
 /**
  * The button runs LOSAT (the Owner's words, 2026-10-10: not "BLAST", which names NCBI's

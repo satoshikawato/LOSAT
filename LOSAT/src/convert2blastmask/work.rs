@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::{ArgException, Args};
-use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{file_exception, open_input_file, Cin};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::seqdb::mask::FilterProgram;
@@ -29,7 +29,7 @@ enum Failure {
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`): the
     /// run ends at once, exit status 0, no message.
     ClosedPipe,
 }
@@ -127,7 +127,7 @@ fn run_masks(
         Box::new(open_input_file("in", input, stdin).map_err(file_failure)?),
         args.flag("parse_seqids"),
     )?;
-    let mut output = args.output_file("out", out).map_err(file_failure)?;
+    let mut out = args.output_file("out", out).map_err(file_failure)?;
     let mut writer = writer(
         outfmt,
         &bytes("masking_algorithm"),
@@ -135,7 +135,6 @@ fn run_masks(
     );
     // A failed write leaves NCBI's stream bad, and the `interval` lines go on silently (exit
     // 0): `out` drops the bytes after the first failed write.
-    let mut out = Ostream::new(&mut output);
     let result = (|| {
         while let Some(record) = reader.next_sequence()? {
             if !record.mask.is_empty() {

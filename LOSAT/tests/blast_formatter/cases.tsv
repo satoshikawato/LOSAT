@@ -4,6 +4,7 @@
 # Rows from of8_db on (line RG item F3 PR 1, agent C5 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was down), by remaining-gaps-20261112/F/f3/tools/fixC.py, every NCBI run under unshare -rn. Their archives were written by NCBI's own programs: in/db.asn, in/batch.asn (BATCH_SIZE=1), in/warn.asn (-max_target_seqs 1, BATCH_SIZE=1) and in/pd.asn (-parse_deflines) by blastn -query in/q2.fa -db in/db/s3 -outfmt 11 (in/db/s3: makeblastdb -blastdb_version 4 of in/s3.fa, which holds in/s.fa, a copy with a change every 40 letters and its second half; in/q2.fa holds in/q.fa and a part of in/s.fa); in/err.asn (blastn -task blastn -reward 1 -penalty -2 -gapopen 0 -gapextend 0: an error object); in/ps.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2; in/ps.faa = residues 251-290 of tests/fasta/psiblast/tk.faa); in/rps.asn and in/rtn.asn (rpsblast -query in/rps.faa = tests/fasta/psiblast/tk.faa, rpstblastn -query in/rtn.fna = the second record of tests/fasta/rps/nq4.fna, -db in/rps/rps_mini, the files of tests/db_search/rps/rps_mini that a protein database open reads); in/soft.asn (blastn -db_soft_mask 11 on a dustmasker-masked database made elsewhere; in/m/db is the same sequence without its mask) and in/nodb.asn (a database that is not here). Made from them by fixC.py: in/garbage.asn (in/db.asn and a line), in/cut2.asn (in/batch.asn cut in its second object), in/empty.asn, in/fatal.asn (in/warn.asn with its first message's severity 4). @OUT@ is a new directory of each run; the files a run leaves there follow its standard output in ncbi/<name>.out. refused/<name>.err is LOSAT's refusal by name; ncbi/<name>.* keeps NCBI's bytes (refused_fatal_message's trace names the local binary).
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
+# Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
 noargs	
 h	-h
 help	-help
@@ -127,3 +128,33 @@ opt_hitlist0_8	-archive in/opt_hitlist0.asn -outfmt 8
 opt_evalue0_8	-archive in/opt_evalue0.asn -outfmt 8
 opt_cull_besthit_12	-archive in/opt_cull_besthit.asn -outfmt 12
 opt_hitlist0_9	-archive in/opt_hitlist0.asn -outfmt 9
+of8_db_bin	-archive in/db.asnb -outfmt 8
+of9_db_bin	-archive in/db.asnb -outfmt 9
+of12_db_bin	-archive in/db.asnb -outfmt 12
+of8_db_xml	-archive in/db.xml -outfmt 8
+of9_db_xml	-archive in/db.xml -outfmt 9
+of12_db_xml	-archive in/db.xml -outfmt 12
+of8_subject_bin	-archive in/bn.asnb -outfmt 8
+of9_subject_bin	-archive in/bn.asnb -outfmt 9
+of12_subject_bin	-archive in/bn.asnb -outfmt 12
+of8_subject_xml	-archive in/bn.xml -outfmt 8
+of9_subject_xml	-archive in/bn.xml -outfmt 9
+of12_subject_xml	-archive in/bn.xml -outfmt 12
+of8_batch_bin	-archive in/batch.asnb -outfmt 8
+of8_batch_xml	-archive in/batch.xml -outfmt 8
+of8_rpsblast_bin	-archive in/rps.asnb -outfmt 8
+of8_rpsblast_xml	-archive in/rps.xml -outfmt 8
+of8_error_object_bin	-archive in/err.asnb -outfmt 8
+of8_error_object_xml	-archive in/err.xml -outfmt 8
+of8_bin_cut1	-archive in/bin_cut1.asnb -outfmt 8
+of8_bin_cut2	-archive in/bin_cut2.asnb -outfmt 8
+of8_bin_plus30	-archive in/bin_plus30.asnb -outfmt 8
+of8_bin_plus00	-archive in/bin_plus00.asnb -outfmt 8
+of8_batch_bin_cut1	-archive in/batch_bin_cut1.asnb -outfmt 8
+of8_xml_cut1	-archive in/xml_cut1.xml -outfmt 8
+of8_xml_cut2	-archive in/xml_cut2.xml -outfmt 8
+of8_xml_cut20	-archive in/xml_cut20.xml -outfmt 8
+of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
+bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
+bad_title_2_xml	-archive in/bad2.xml -outfmt 8
+of8_bom	-archive in/bom.asn -outfmt 8

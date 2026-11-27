@@ -13,7 +13,7 @@ import { expect } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, inputNames, openFiles, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, inputNames, openFiles, openParameters, openSearch, paste, pickRun, program, settled, showOutput, storedOutputs, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine reads no ids of the deflines: the engine build runs these tests');
@@ -98,64 +98,87 @@ test('-parse_deflines runs: the outputs are the CLI\'s and the results name the 
 });
 
 // -parse_deflines typed in Additional options has the engine read the inputs again, with the other reader (line RG-XT
-// X7-5): until they are read, their blocks and cards keep their place (line WQA's D25, 2026-11-27). Their lines went and
-// came back, so "Run LOSAT" below them moved up (143 px with these inputs) and back, and a press whose release came
-// while they were read was released beside the button: no run started, and the page said nothing. Here the press
-// starts, the option comes in the field, and the press is released once the query is read again.
-test('Run LOSAT stays under a press while -parse_deflines has the inputs read again, and the press starts the run', async ({ page }) => {
-  const { program: id, query, subject } = CASES[1];
-  await program(page, id);
-  await paste(page, 'query', query);
-  await paste(page, 'subject', subject);
-  await openParameters(page);
-  const button = page.getByTestId('run-losat');
-  await button.scrollIntoViewIfNeeded();
-  const box = (await button.boundingBox())!;
-  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await page.mouse.move(point.x, point.y);
-  await page.mouse.down();
-  // The button's place in the page's layout when the press holds, and at each change of an input's state until its
-  // click: its row's place and its own box in the row. (Its pressed look, scale(0.97), is not in its layout and is not
-  // measured.) And whether the press's point is still on the button.
-  await page.evaluate((at) => {
-    const place = () => {
-      const target = document.querySelector<HTMLElement>('[data-testid="run-losat"]')!;
-      const row = target.parentElement!.getBoundingClientRect();
-      return `row ${row.left},${row.top} button ${target.offsetLeft},${target.offsetTop} ${target.offsetWidth}x${target.offsetHeight}`;
-    };
-    const on = () => document.elementFromPoint(at.x, at.y)?.closest('[data-testid="run-losat"]') !== null;
-    const places = [place()];
-    const hits = [on()];
-    const reading = () => document.querySelector('[data-testid="query-source-0"]')?.getAttribute('data-status') === 'indexing';
-    let readAgain: () => void = () => undefined;
-    const queryReadAgain = new Promise<void>((resolve) => (readAgain = resolve));
-    const observer = new MutationObserver(() => {
-      places.push(place());
-      hits.push(on());
-      if (reading()) readAgain();
+// X7-5). Each card shows "Reading the records…" in place of its lines, then "Checking…" in place of its warning until
+// its check answers, and "Run LOSAT" below them moved up and back: 143 px with these one-line cards, 35 px (1280 px)
+// and 136 px (390 px) with a query card that warns of the reader's error. A press whose release came meanwhile was
+// released beside the button: no run started, and the page said nothing (line WQA's D25 and D27, 2026-11-27). From a
+// press until its click, the pressed button now stays where it was under the pointer (ui/press-hold.ts). Here the
+// press starts, the option comes in the field, and the press is released once both inputs are read and checked again.
+const READER_ERROR_QUERY = `>q1 first\n${DNA.slice(0, 120)}\n>q2 second\n${DNA.slice(100, 260)}\n>bad\nACGTAC%%%%\n>q4\nACGT\n`;
+const PRESSED = [
+  { cards: 'one-line cards', program: 'blastp', query: CASES[1].query, subject: CASES[1].subject, end: 'completed' },
+  { cards: 'a query card with a warning', program: 'blastn', query: READER_ERROR_QUERY, subject: `>s1 subject\n${DNA}\n`, end: 'failed' },
+] as const;
+for (const width of [1280, 390]) {
+  for (const { cards, program: id, query, subject, end } of PRESSED) {
+    test(`Run LOSAT stays under a press while -parse_deflines has the inputs read and checked again (${cards}, ${width} px), and the press starts the run`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await program(page, id);
+      await paste(page, 'query', query);
+      await paste(page, 'subject', subject);
+      if (end === 'failed') await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
+      await openParameters(page);
+      const button = page.getByTestId('run-losat');
+      await button.scrollIntoViewIfNeeded();
+      const box = (await button.boundingBox())!;
+      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.down();
+      // At the press and at each change of the page until its click: the top of the button's row in the window, the
+      // button's box in the row (its pressed look, scale(0.97), is not in its layout), whether the press's point is still
+      // on the button, and how far the cards have come.
+      await page.evaluate((at) => {
+        const target = () => document.querySelector<HTMLElement>('[data-testid="run-losat"]')!;
+        const box = () => {
+          const button = target();
+          const row = button.parentElement!;
+          return `${button.offsetLeft - row.offsetLeft},${button.offsetTop - row.offsetTop} ${button.offsetWidth}x${button.offsetHeight}`;
+        };
+        const top = () => target().parentElement!.getBoundingClientRect().top;
+        const on = () => document.elementFromPoint(at.x, at.y)?.closest('[data-testid="run-losat"]') !== null;
+        const state = (role: string) =>
+          `${document.querySelector(`[data-testid="${role}-source-0"]`)?.getAttribute('data-status')}/${document.querySelector(`[data-testid="${role}-source-0-check"]`)?.getAttribute('data-check') ?? '-'}`;
+        const seen = { tops: [top()], boxes: [box()], hits: [on()], states: [`${state('query')} ${state('subject')}`] };
+        const observer = new MutationObserver(() => {
+          seen.tops.push(top());
+          seen.boxes.push(box());
+          seen.hits.push(on());
+          seen.states.push(`${state('query')} ${state('subject')}`);
+        });
+        observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+        window.addEventListener('click', () => observer.disconnect(), { capture: true, once: true });
+        Object.assign(window, { readAgainTest: seen });
+      }, point);
+      // The option comes in the field as typed just before the press: not by a focus of the field, which (in Chromium and
+      // Firefox) scrolls the field, far below the button, into view, so that the test itself would move the button.
+      await page.getByTestId('param-extra').evaluate((field: HTMLInputElement) => {
+        field.value = '-parse_deflines';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'indexing', { timeout: 30_000 }).catch(() => undefined);
+      await settled(page, 'query');
+      await settled(page, 'subject');
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await page.mouse.up();
+      const seen = await page.evaluate(
+        () => (window as unknown as { readAgainTest: { tops: number[]; boxes: string[]; hits: boolean[]; states: string[] } }).readAgainTest,
+      );
+      const states = [...new Set(seen.states)].join('; ');
+      expect(seen.states.some((state) => state.startsWith('indexing')), `the query was read again: ${states}`).toBe(true);
+      expect(seen.states.some((state) => state.includes('pending')), `the inputs were checked again: ${states}`).toBe(true);
+      // The window's scroll is in whole pixels in some browsers: the row stays within a pixel of its place.
+      const moved = seen.tops.map((top) => Math.round((top - seen.tops[0]!) * 100) / 100);
+      expect(Math.max(...moved.map(Math.abs)), `the row's moves in the window: ${[...new Set(moved)].join(', ')}`).toBeLessThan(1);
+      expect(new Set(seen.boxes), 'the button\'s box in its row').toEqual(new Set([seen.boxes[0]]));
+      expect(new Set(seen.hits), `the press's point on the button (cards: ${states})`).toEqual(new Set([true]));
+      await waitStatus(page, 1, end);
+      if (end === 'completed') {
+        await chooseRun(page, 1);
+        await expect(page.getByTestId('results-run-options')).toContainText('-parse_deflines');
+      }
     });
-    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-status', 'data-check'] });
-    window.addEventListener('click', () => observer.disconnect(), { capture: true, once: true });
-    Object.assign(window, { readAgainTest: { places, hits, queryReadAgain } });
-  }, point);
-  // The option comes in the field as typed just before the press: not by a focus of the field, which (in Chromium and
-  // Firefox) scrolls the field, far below the button, into view, so that the test itself would move the button.
-  await page.getByTestId('param-extra').evaluate((field: HTMLInputElement) => {
-    field.value = '-parse_deflines';
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await page.evaluate(() => (window as unknown as { readAgainTest: { queryReadAgain: Promise<void> } }).readAgainTest.queryReadAgain);
-  await page.mouse.up();
-  const { places, hits } = await page.evaluate(
-    () => (window as unknown as { readAgainTest: { places: string[]; hits: boolean[] } }).readAgainTest,
-  );
-  expect(places.length, 'the button\'s place at the press and at the changes of the inputs').toBeGreaterThan(1);
-  expect(new Set(places), `the button's places: ${places.join('; ')}`).toEqual(new Set([places[0]]));
-  expect(new Set(hits), 'the press\'s point on the button').toEqual(new Set([true]));
-  await waitStatus(page, 1, 'completed');
-  await chooseRun(page, 1);
-  await expect(page.getByTestId('results-run-options')).toContainText('-parse_deflines');
-});
+  }
+}
 
 // The CLI reads the subjects first, and two subject records of one id stop it under -parse_deflines
 // (LOSAT's refusal: NCBI BLAST+ shows the first for both). When both records are in one subject

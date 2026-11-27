@@ -6,7 +6,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
-import { cannotFollow, cannotFollowText, includedOf, isReadAgain, noSequenceOf, queryEndBefore } from '../application/draft';
+import { cannotFollow, cannotFollowText, includedOf, noSequenceOf, queryEndBefore } from '../application/draft';
 import { accessionsOnALine, isSeqIdReason, pointsToFetch } from '../domain/accession';
 import { duplicateIds } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind } from '../domain/programs';
@@ -14,7 +14,6 @@ import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatBytes, formatCount } from './format';
-import { holdHeightWhile } from './height-hold';
 import LosatLoader from './LosatLoader.vue';
 import RecordList from './RecordList.vue';
 import { vScrollFocus } from './scroll-focus';
@@ -208,9 +207,6 @@ const formatName = computed(() => {
   return lead !== undefined && 'format' in lead ? FORMAT_NAMES[lead.format] : undefined;
 });
 const card = ref<HTMLElement>();
-// A card read again keeps its height until it is read (line WQA's D25, 2026-11-27): "Reading the records…" replaced its
-// lines and they came back, so that what is below it moved up and back, and a press whose release came between was no click.
-holdHeightWhile(() => card.value, () => isReadAgain(props.source));
 /**
  * Asks the draft to rewrite the box ("Add the line", "Put '>'", "Remove the byte order mark"): the input is read again, so
  * the button goes, and the focus goes to the card, which the live region then speaks of, not to the page's body (WA2-AX-04).

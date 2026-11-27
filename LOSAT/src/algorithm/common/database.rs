@@ -711,43 +711,6 @@ impl std::fmt::Display for PreliminaryReadError {
 
 impl std::error::Error for PreliminaryReadError {}
 
-/// The error of an `ErrorAfterBatchReports` whose batch NCBI's run stops in after more of the
-/// batch's posts than a failed search writes (the batch's reader messages, its search strategy
-/// request's posts and its UTF8String warning, which the caller writes): a tabular row at which
-/// NCBI stops in the batch's report (`report::tabular::FailedLookupRefusal`), after the batch's
-/// prefetch texts and the own warnings of its queries up to that row's query (`posts`), which
-/// NCBI writes before each query's report.
-#[derive(Debug)]
-pub(crate) struct ErrorAfterPosts {
-    pub(crate) posts: crate::report::diag_log::Posts,
-    pub(crate) error: anyhow::Error,
-}
-
-impl ErrorAfterPosts {
-    /// The error of a batch's failure (`ErrorAfterBatchReports::error`), its posts written first
-    /// to `diagnostics` (and the archive's messages) where it is an `ErrorAfterPosts`.
-    pub(crate) fn written(
-        error: anyhow::Error,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&crate::report::archive::ArchiveHandle>,
-    ) -> Result<anyhow::Error> {
-        match error.downcast::<Self>() {
-            Ok(after) => {
-                after.posts.write(diagnostics, archive)?;
-                Ok(after.error)
-            }
-            Err(error) => Ok(error),
-        }
-    }
-}
-
-impl std::fmt::Display for ErrorAfterPosts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for ErrorAfterPosts {}
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
 /// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
 /// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
@@ -4235,7 +4198,7 @@ pub(crate) struct ParsedShown {
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
     /// Whether a tabular format can stop at a row whose subject lookup throws
-    /// (`report::tabular::stops_at_lookup_failure`: `sacc`, `saccver`, the default fields, a
+    /// (`report::tabular::stops_at_lookup_failure_for`: `sacc`, `saccver`, the default fields, a
     /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
     pub(crate) stops_at_failed_lookup: bool,
     /// Whether a tabular format stops at a subject that has a definition line without a Seq-id
@@ -4384,6 +4347,8 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(|(rank, (record, &ordinal))| {
             let id = match parsed.get(rank).and_then(Option::as_deref) {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                Some(subject) if subject.scope_finds_none() => Ok(None),
                 Some(subject) => subject.tabular_saccver(protein).map_err(|problem| {
                     parsed_refusal(oids.oid(ordinal), &format!("has {problem}"), program)
                 }),
@@ -6873,6 +6838,27 @@ impl TaxdbRun {
             }),
             ..TaxdbRun::default()
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:218-222 (one
+    // `CTaxDBFileInfo` per process, made at the first `GetTaxNames`)
+    /// A sequential run ([`TaxdbRun::sequential`]) of another `CSeqDB` of the process of this run:
+    /// the taxonomy database is the one this run opened (NCBI's one per process), so its texts of
+    /// opening are not written again; the volumes' caches are the new database's, whose lookups
+    /// write their texts again (NCBI 2.17.0, windowmasker `-mk_counts -infmt blastdb`, line RG
+    /// T8 survey W1: the open error once in three passes, the offset error in each).
+    pub(crate) fn sequential_after(&self) -> Self {
+        let run = TaxdbRun::sequential();
+        if let Some(lazy) = self.lazy.get() {
+            let _ = run.lazy.set(std::sync::Arc::clone(lazy));
+        }
+        if let Some(&texts) = self.texts.get() {
+            let _ = run.texts.set(texts);
+        }
+        if let Some(&found) = self.found.get() {
+            let _ = run.found.set(found);
+        }
+        run
     }
 
     /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its

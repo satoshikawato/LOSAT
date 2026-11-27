@@ -1565,6 +1565,23 @@ pub(super) fn write_custom_tabular(
     Ok(())
 }
 
+/// What the refusal at a row where NCBI has no result says of its subject
+/// (`report::tabular::row_stop_end`).
+fn stopped_subject(view: &ReportView<'_>, s_idx: usize) -> String {
+    match view.listed_titles {
+        Some(titles) => crate::report::tabular::failed_database_subject(
+            titles.oid(s_idx),
+            view.hit_loads.thrown(s_idx),
+            view.listed_parsed.get(s_idx).and_then(Option::as_deref),
+            false,
+        ),
+        None => crate::report::tabular::failed_record_title(
+            s_idx,
+            view.subject_records[s_idx].shown_id(),
+        ),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2034-2067
 /// psiblast `-phi_pattern` (item PS8a): outfmt 6 and 7 of the `std` fields, the tabular report
 /// of each query occurrence of each batch in turn (`write_blastp_tabular_hit_lists` of the
@@ -1624,7 +1641,8 @@ pub(super) fn write_phi_text(
                 Some(slot) => std::slice::from_ref(slot),
                 None => &[None],
             };
-            write_blastp_tabular_hit_lists(
+            let stopped = |s_idx: usize| stopped_subject(view, s_idx);
+            if let Err(err) = write_blastp_tabular_hit_lists(
                 part,
                 outfmt,
                 &mut writer,
@@ -1642,7 +1660,15 @@ pub(super) fn write_phi_text(
                 0,
                 Some(1),
                 None,
-            )?;
+                (&stopped, view.args.app.name()),
+            ) {
+                if err.is::<crate::report::tabular::FailedLookupRefusal>() {
+                    if let Some(warnings) = warnings.as_mut() {
+                        warnings.end_run();
+                    }
+                }
+                return Err(err);
+            }
         }
     }
     if reports.epilog && outfmt == OutputFormat::TabularWithComments {
@@ -1677,6 +1703,7 @@ pub(super) fn write_text(
         ..
     } = *view;
     let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+    let stopped = |s_idx: usize| stopped_subject(view, s_idx);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
     write_blastp_tabular_hit_lists(
         hit_lists,
@@ -1701,6 +1728,7 @@ pub(super) fn write_text(
         args.psi_search
             .as_ref()
             .and_then(|search| search.query_other_coding),
+        (&stopped, args.app.name()),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

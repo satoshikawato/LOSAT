@@ -122,3 +122,40 @@ fn the_buffers_end_where_ncbi_s_do() {
         (b"10 20 1".to_vec(), &b"m"[..])
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:130-171 (cited at
+// `parse_window_masker_options`). Not a port of an NCBI unit case.
+#[test]
+fn the_window_masker_command_keeps_its_database_or_taxid() {
+    let w = |text: &str| {
+        filtering_options_from_string(text.as_bytes(), true)
+            .unwrap()
+            .window_masker
+    };
+    let masker = |database: Option<&[u8]>, taxid| {
+        Some(WindowMaskerFilter {
+            database: database.map(<[u8]>::to_vec),
+            taxid,
+        })
+    };
+    assert_eq!(w("L;m;"), None);
+    assert_eq!(w("W;"), masker(None, 0));
+    assert_eq!(w("W -t 9606;m"), masker(None, 9606));
+    assert_eq!(w("W -t\t 10090x"), masker(None, 10090));
+    assert_eq!(w("W -t abc"), masker(None, 0));
+    // The database is cut at a blank or a tab, and wins over a taxid.
+    assert_eq!(w("W -d my wm -t 9606;"), masker(Some(b"my"), 0));
+    assert_eq!(
+        w("W -t 9606 -d\twm.obinary;"),
+        masker(Some(b"wm.obinary"), 0)
+    );
+    // The last command's options.
+    assert_eq!(w("W -d one;W -t 7;"), masker(None, 7));
+    // Not BLASTN's: the window masker's options are read all the same.
+    assert_eq!(
+        filtering_options_from_string(b"W -t 9606", false)
+            .unwrap()
+            .window_masker,
+        masker(None, 9606)
+    );
+}

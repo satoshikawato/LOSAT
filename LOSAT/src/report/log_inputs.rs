@@ -817,8 +817,8 @@ impl RunInputs {
     }
 
     /// The names that an imported strategy makes the run read (`reads`): its database as the type
-    /// of its program's subjects, the repeat filter's database and the window masker's counts of
-    /// its taxid. Its MegaBLAST index is the run's unless the command line names one
+    /// of its program's subjects, the repeat filter's database and the window masker's database or
+    /// counts of its taxid. Its MegaBLAST index is the run's unless the command line names one
     /// (`add_run_index`).
     fn add_strategy(&mut self, reads: &StrategyReads, start: &ApplicationStart) {
         if let Some(database) = &reads.database {
@@ -829,6 +829,9 @@ impl RunInputs {
         }
         if let Some(taxid) = reads.window_masker_taxid {
             self.add_window_masker_taxid(taxid, start);
+        }
+        if let Some(database) = &reads.window_masker_db {
+            self.add_file(OsStr::new(database));
         }
     }
 

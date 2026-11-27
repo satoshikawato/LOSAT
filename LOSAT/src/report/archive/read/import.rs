@@ -114,11 +114,15 @@ pub struct StrategyReads {
     /// Whether the strategy's program is BLASTN's (blastn, megablast, dc-megablast: a task that
     /// BLASTN runs, whose database may be searched with its MegaBLAST index).
     pub blastn_task: bool,
-    /// The repeat filter's database (`RepeatFiltering`, `RepeatFilteringDB`), BLASTN's
-    /// `-filtering_db`: a nucleotide database.
+    /// The repeat filter's database (`RepeatFiltering`, `RepeatFilteringDB`, a `FilterString`'s
+    /// `R`), BLASTN's `-filtering_db`: a nucleotide database.
     pub filtering_db: Option<String>,
-    /// `WindowMaskerTaxId`, BLASTN's `-window_masker_taxid` (0 masks nothing).
+    /// The window masker's taxid (`WindowMaskerTaxId`, a `FilterString`'s `W -t`), BLASTN's
+    /// `-window_masker_taxid` (0 masks nothing), where no database is named.
     pub window_masker_taxid: Option<i32>,
+    /// The window masker's database (a `FilterString`'s `W -d`), BLASTN's `-window_masker_db`,
+    /// which the run reads in the place of the taxid's counts.
+    pub window_masker_db: Option<String>,
     /// The MegaBLAST index that the strategy forces (`ForceMbIndex` with `MbIndexName`), which
     /// BLASTN opens as the database of that name (a new-style index) or the old-style index
     /// files of the name, unless the command line names its own (`MbIndexRequest::run_index`).
@@ -127,22 +131,56 @@ pub struct StrategyReads {
 
 impl StrategyReads {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-579
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:239-241
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1042-1051
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:695-730
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:971-998
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:190-224
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:216-226
     /// The names of the strategy whose options are `options` and whose subject is the database
     /// `database` (`None`: its subjects are Bioseqs, or the command line overrides them): the
-    /// setters read as the import reads them (`Collected::take`: the last repeat filter setter
-    /// and the forced index), the database's type that of the options' program type.
+    /// setters read as the run's local options take them, in their order (`Collected::take`: the
+    /// last repeat filter setter and the forced index; `WindowMaskerTaxId`; a `FilterString`,
+    /// which clears the filters and sets those of the string, `filter_string`'s reading, as
+    /// `RemoteOptions` reads it), the database's type that of the options' program type. The
+    /// repeat filter and the window masker read their files only for a query that is nucleotide
+    /// and not translated (`CBlastQuerySourceOM`), the window masker its database in the place of
+    /// its taxid's counts.
     pub(crate) fn of(database: Option<&str>, options: &ImportedOptions) -> Self {
+        use crate::report::archive::filter_string::{
+            filtering_options_from_string, WindowMaskerFilter,
+        };
+        let program = options.options.program;
         let mut collected = Collected::default();
-        let mut window_masker_taxid = None;
+        let mut window_masker: Option<WindowMaskerFilter> = None;
         for setter in &options.options.setters {
             match setter {
-                Setter::WindowMaskerTaxId(taxid) => window_masker_taxid = Some(*taxid),
+                Setter::WindowMaskerTaxId(taxid) => {
+                    window_masker.get_or_insert_default().taxid = *taxid;
+                }
+                Setter::FilterString(text) => {
+                    let blastn = program.blastn_or_mapping();
+                    let local =
+                        filtering_options_from_string(text.as_bytes(), blastn).unwrap_or_default();
+                    collected.repeat = Some(
+                        local
+                            .repeat_db
+                            .filter(|_| blastn)
+                            .map(|name| String::from_utf8_lossy(&name).into_owned()),
+                    );
+                    window_masker = Some(local.window_masker.unwrap_or_default());
+                }
                 other => {
                     collected.take(other);
                 }
             }
         }
-        let program = options.options.program;
+        let filters_query = program.query_is_nucleotide() && !program.query_is_translated();
+        let window_masker = window_masker.filter(|_| filters_query);
+        let window_masker_db = window_masker
+            .as_ref()
+            .and_then(|masker| masker.database.as_deref())
+            .map(|name| String::from_utf8_lossy(name).into_owned());
         Self {
             database: database.map(str::to_string),
             database_type: if program.subject_is_nucleotide() {
@@ -154,8 +192,11 @@ impl StrategyReads {
                 program,
                 EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
             ),
-            filtering_db: collected.repeat.flatten(),
-            window_masker_taxid,
+            filtering_db: collected.repeat.flatten().filter(|_| filters_query),
+            window_masker_taxid: window_masker
+                .filter(|masker| masker.database.is_none())
+                .map(|masker| masker.taxid),
+            window_masker_db,
             mb_index: collected.index,
         }
     }

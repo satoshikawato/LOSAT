@@ -531,6 +531,77 @@ fn the_xml_reference_follows_the_options_and_the_pairwise_one_the_application() 
     }
 }
 
+/// Line RG-F item F2f: a strategy's `FilterString` clears the filters and sets those of the string,
+/// in the setters' order (`StrategyReads::of`, `filter_string`'s reading), and the repeat filter
+/// and the window masker read nothing for a translated query. The strategies are committed ones
+/// with a `FilterString` put before the parameter `anchor` of their first request.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:695-730
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:190-224
+#[test]
+fn a_strategy_s_filter_string_names_what_its_run_reads() {
+    use super::import::{strategy_reads, StrategyReads};
+    let edited = |program: &str, file: &str, anchor: &str, filter: &str| -> StrategyReads {
+        let text = std::fs::read_to_string(fixtures("strategy/import/ss").join(file)).unwrap();
+        let at = format!("{{\n        name \"{anchor}\",");
+        assert!(text.contains(&at), "{file} {anchor}");
+        let param = format!(
+            "{{\n        name \"FilterString\",\n        value string \"{filter}\"\n      }},\n      {at}"
+        );
+        let text = text.replacen(&at, &param, 1);
+        strategy_reads(program, std::io::Cursor::new(text.into_bytes()), false).unwrap()
+    };
+    let names = |reads: &StrategyReads| {
+        (
+            reads.filtering_db.clone(),
+            reads.window_masker_taxid,
+            reads.window_masker_db.clone(),
+        )
+    };
+    // After `RepeatFilteringDB`: the string's repeat database and taxid.
+    let after = edited(
+        "blastn",
+        "bn_rpt.ss",
+        "UngappedMode",
+        "L;R -d tests/db_search/rpt_x;W -t 9606;m;",
+    );
+    assert_eq!(
+        names(&after),
+        (Some("tests/db_search/rpt_x".into()), Some(9606), None)
+    );
+    // A string without them clears the repeat filter.
+    let cleared = edited("blastn", "bn_rpt.ss", "UngappedMode", "L;");
+    assert_eq!(names(&cleared), (None, Some(0), None));
+    // Before `RepeatFilteringDB`, which names its database again; the window masker's database
+    // is read in the place of the taxid's counts.
+    let before = edited(
+        "blastn",
+        "bn_rpt.ss",
+        "RepeatFilteringDB",
+        "W -d wm.obinary -t 9606",
+    );
+    assert_eq!(
+        names(&before),
+        (
+            Some("tests/db_search/rpt_d4".into()),
+            None,
+            Some("wm.obinary".into())
+        )
+    );
+    // TBLASTX's query is translated: no filter reads a file.
+    let translated = edited(
+        "tblastx",
+        "tblastx.db.ss",
+        "WindowSize",
+        "L;W -t 9606;R -d rpt",
+    );
+    assert_eq!(names(&translated), (None, None, None));
+    assert_eq!(
+        translated.database.as_deref(),
+        Some("tests/db_search/arch_tbx_snucl")
+    );
+}
+
 /// Line RG-F item F2f: what a strategy makes the run read, which `-logfile` must not name
 /// (`report::log_inputs`, line WQA D23): the strategy reader's names (`import::strategy_reads`, read
 /// before the file of `-logfile` is opened) equal those that the import keeps for the run
@@ -552,6 +623,7 @@ fn a_strategy_names_what_its_run_reads() {
         blastn_task: false,
         filtering_db: None,
         window_masker_taxid: None,
+        window_masker_db: None,
         mb_index: None,
     };
     assert_eq!(

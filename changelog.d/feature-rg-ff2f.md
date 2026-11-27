@@ -1,7 +1,8 @@
 - All programs (command line, library API and LOSAT Web): a `-logfile` naming a file that the strategy
   of `-import_search_strategy` makes the run read (its database, or the command line's `-db`, opened as
-  the type of the strategy program's subjects; its repeat filter database; the counts of its window
-  masker taxid; on the command line and in the library API also its forced MegaBLAST index) is now
+  the type of the strategy program's subjects; for a strategy of a nucleotide query that is not
+  translated, its repeat filter database and its window masker's database or taxid counts, also those
+  of its `FilterString`; on the command line and in the library API also its forced MegaBLAST index) is now
   refused as the run's other inputs are, with exit status 1 before the file is opened or created;
   NCBI BLAST+ 2.17.0 opens the log before it reads the strategy and appends its messages to that file.
   A strategy read from the standard input or a pipe is not checked: it is read once, by the import. In

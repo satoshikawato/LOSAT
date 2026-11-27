@@ -31,8 +31,9 @@ pub(crate) struct Seg {
     pub(crate) hicut: Option<f64>,
 }
 
-/// The filtering options of a `FilterString` (`SBlastFilterOptions`), as far as an options
-/// handle's remote options read them (the window masker's are not).
+/// The filtering options of a `FilterString` (`SBlastFilterOptions`): those that an options
+/// handle's remote options record (`options::RemoteOptions`), and the window masker's, which no
+/// remote option records but the run reads (`import::StrategyReads`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct FilterOptions {
     pub(crate) mask_at_hash: bool,
@@ -41,6 +42,16 @@ pub(crate) struct FilterOptions {
     pub(crate) seg: Option<Seg>,
     /// The repeat filter's database.
     pub(crate) repeat_db: Option<Vec<u8>>,
+    /// The window masker's options (`W`), the last command's.
+    pub(crate) window_masker: Option<WindowMaskerFilter>,
+}
+
+/// The window masker's options of a `W` command (`SWindowMaskerOptions`): its database, or none
+/// and its taxid (0: none).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct WindowMaskerFilter {
+    pub(crate) database: Option<Vec<u8>>,
+    pub(crate) taxid: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:435-605
@@ -88,8 +99,16 @@ pub(crate) fn filtering_options_from_string(
                                 .unwrap_or_else(|| DEFAULT_REPEAT_FILTER_DB.to_vec()),
                         )
                     }
-                    // The window masker's options, which no remote option records.
-                    _ => {}
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:543-570
+                    // Each `W` makes new options (`SWindowMaskerOptionsNew`), which a command
+                    // without bytes leaves as made.
+                    _ => {
+                        options.window_masker = Some(if buffer.is_empty() {
+                            WindowMaskerFilter::default()
+                        } else {
+                            parse_window_masker_options(&buffer)
+                        })
+                    }
                 }
             }
             b'L' | b'T' => {
@@ -202,6 +221,36 @@ fn parse_repeat_options(buffer: &[u8]) -> Option<Vec<u8>> {
         .take_while(|&&c| matches!(c, b' ' | b'\t'))
         .count();
     Some(name[blanks..].to_vec())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:130-171
+/// `s_ParseWindowMaskerOptions`: the database after the first `-d` and its blanks and tabs, up to
+/// the next blank or tab; without a `-d`, the taxid after the first `-t` and its blanks and tabs
+/// (`atoi`), 0 without one.
+fn parse_window_masker_options(buffer: &[u8]) -> WindowMaskerFilter {
+    let after = |flag: &[u8]| {
+        let at = buffer.windows(2).position(|pair| pair == flag)?;
+        let rest = &buffer[at + 2..];
+        let blanks = rest
+            .iter()
+            .take_while(|&&c| matches!(c, b' ' | b'\t'))
+            .count();
+        Some(&rest[blanks..])
+    };
+    if let Some(rest) = after(b"-d") {
+        let end = rest
+            .iter()
+            .position(|&c| matches!(c, b' ' | b'\t'))
+            .unwrap_or(rest.len());
+        return WindowMaskerFilter {
+            database: Some(rest[..end].to_vec()),
+            taxid: 0,
+        };
+    }
+    WindowMaskerFilter {
+        database: None,
+        taxid: after(b"-t").map_or(0, crate::ncbi_str::c_atoi),
+    }
 }
 
 #[cfg(test)]

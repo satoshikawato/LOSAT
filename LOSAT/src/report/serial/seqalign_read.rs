@@ -44,6 +44,9 @@ pub(crate) struct ReadAlign<'a> {
     /// The archive's Seq-align (for a piece, the one it was cut from).
     pub(crate) align: V<'a>,
     piece: Option<V<'a>>,
+    /// The Seq-align's `segs` (the CHOICE's variant and value), read once where the set is read:
+    /// every method reads the segments through it.
+    segs: (&'static str, V<'a>),
 }
 
 /// What `GetAlnScores` reads (align_format_util.cpp:811-848): each -1 where the list has none.
@@ -84,14 +87,19 @@ pub(crate) struct PairDenseg {
 pub(crate) fn read_set<'a>(set: &[V<'a>], ungapped: bool) -> Vec<ReadAlign<'a>> {
     let mut out = Vec::with_capacity(set.len());
     for &align in set {
-        let (variant, segs) = align.field("segs").choice();
-        if ungapped && matches!(variant, "dendiag" | "std") && segs.len() > 1 {
-            out.extend(segs.items().map(|piece| ReadAlign {
+        let segs = align.field("segs").choice();
+        if ungapped && matches!(segs.0, "dendiag" | "std") && segs.1.len() > 1 {
+            out.extend(segs.1.items().map(|piece| ReadAlign {
                 align,
                 piece: Some(piece),
+                segs,
             }));
         } else {
-            out.push(ReadAlign { align, piece: None });
+            out.push(ReadAlign {
+                align,
+                piece: None,
+                segs,
+            });
         }
     }
     out
@@ -110,14 +118,14 @@ fn strand(value: i64) -> Strand {
 impl<'a> ReadAlign<'a> {
     /// The variant of the segments (`segs.Which()`): a piece's is `dendiag` or `std`.
     pub(crate) fn variant(&self) -> &'static str {
-        self.align.field("segs").choice().0
+        self.segs.0
     }
 
     /// The Dense-diags of a `dendiag` Seq-align: the piece's, else every one.
     fn diags(&self) -> Vec<V<'a>> {
         match self.piece {
             Some(piece) => vec![piece],
-            None => self.align.field("segs").choice().1.items().collect(),
+            None => self.segs.1.items().collect(),
         }
     }
 
@@ -168,7 +176,7 @@ impl<'a> ReadAlign<'a> {
                 return Ok(scores);
             }
         }
-        let (variant, segs) = self.align.field("segs").choice();
+        let (variant, segs) = self.segs;
         let first = match (self.piece, variant) {
             (Some(piece), _) => Some(piece),
             (None, "std" | "dendiag") => match segs.item(0) {
@@ -252,7 +260,7 @@ impl<'a> ReadAlign<'a> {
         let mut strands: Vec<i64> = Vec::new();
         match self.variant() {
             "denseg" => {
-                let ds = self.align.field("segs").choice().1;
+                let ds = self.segs.1;
                 check_rows(ds)?;
                 let numseg = ds.field("numseg").int();
                 for len in ds.field("lens").ints() {
@@ -326,7 +334,7 @@ impl<'a> ReadAlign<'a> {
     fn std_segs(&self) -> Vec<V<'a>> {
         match self.piece {
             Some(piece) => vec![piece],
-            None => self.align.field("segs").choice().1.items().collect(),
+            None => self.segs.1.items().collect(),
         }
     }
 

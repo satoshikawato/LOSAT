@@ -710,6 +710,32 @@ fn protein_records(seed: u64, count: usize) -> Vec<FastaRecord> {
         .collect()
 }
 
+/// `protein_records` with a query of 20,000 letters in their middle, which NCBI splits (19,800
+/// letters or more at the default CHUNK_SIZE, `split_protein_batch`): the table of the block holds
+/// no word of its batch (`CallTableWords`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn protein_records_with_split(seed: u64, count: usize) -> Vec<FastaRecord> {
+    let letters = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut records = protein_records(seed, count);
+    let mut state = seed ^ 0x5851_f42d_4c95_7f2d;
+    let sequence: Vec<u8> = (0..20_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            letters[(state % 20) as usize]
+        })
+        .collect();
+    records.insert(
+        count / 2,
+        FastaRecord::new(format!("Query_{}", count + 1), b"q", &sequence),
+    );
+    records
+}
+
 /// The table and contexts of a block as its own search builds them (`run_resolved_in_pool`):
 /// `blastp_aa_lookup` for exact blastp, `blastp_compressed_lookup` with the block's batches and
 /// lengths for blastp-fast.
@@ -757,7 +783,8 @@ fn own_build(
 // stage (`x_make_room_flat`; the table holds its `starts` buffer): part 1 before the vectors,
 // the vectors before part 1, and both through `x_run_with_split_build_ahead`; for BLOSUM62 and
 // (item SC2d-2) for other search matrices, whose contexts have their Karlin blocks before the
-// build.
+// build. The next block holds a batch that NCBI splits, whose words neither table holds
+// (`CallTableWords`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -777,7 +804,15 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
         let args = test_args_of(task, matrix);
         let task = format!("{task} {matrix:?}");
         let first = protein_records(0x9e37_79b9_7f4a_7c15, 24);
-        let next = protein_records(0xd1b5_4a32_d192_ed03, 30);
+        let next = protein_records_with_split(0xd1b5_4a32_d192_ed03, 30);
+        let next_lengths: Vec<usize> = next.iter().map(|record| record.seq().len()).collect();
+        let next_batches = seq_range::QueryInput::whole(&next).batches(batch_size);
+        assert!(
+            super::super::CallTableWords::of(&args, &next_batches, &next_lengths, false)
+                .expect("split sizes")
+                .splits(),
+            "{task}: no split batch in the fixture"
+        );
         crate::utils::threading::with_search_pool(3, "blastp", |pool| {
             let subjects = XBlockSubjects::new(&[], Vec::new());
             let pool = pool.x_with_ext(&subjects);

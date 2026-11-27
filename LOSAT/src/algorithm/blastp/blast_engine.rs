@@ -7019,6 +7019,7 @@ fn search(
                     &query_input,
                     batch_size,
                     &blocks,
+                    true,
                     pool,
                 )
                 .filter(|(blocks, _)| blocks.len() > 1) else {
@@ -7746,9 +7747,12 @@ fn x_batch_blocks(
 // are those of one table. The set-up's errors and refusals come before the first block: the call
 // of all queries makes them, but it builds no table, so a refusal of a table's build (a compressed
 // table that fills NCBI's overflow banks) cannot come first in a block only because
-// `x_word_blocks` plans no blocks wherever a batch's table could fill them. Only blastp: psiblast
-// searches one query per batch (its `-in_pssm`, `-sum_stats` and rounds), and rpsblast scans with
-// the database's table.
+// `x_word_blocks` plans no blocks wherever a batch's table could fill them. A split batch's chunks
+// are searched after the blocks, in the call of all queries, as without blocks
+// (`search_split_query_batches`), so the refusal of a chunk's table comes where it comes without
+// blocks and the plan does not test the chunks (`x_word_blocks`' `chunks_in_blocks`). Only blastp:
+// psiblast searches one query per batch (its `-in_pssm`, `-sum_stats` and rounds), and rpsblast
+// scans with the database's table.
 // No NCBI counterpart: chooses LOSAT's blocks; it does not change any value NCBI computes.
 fn x_prelim_block_plan(
     args: &ResolvedBlastpArgs,
@@ -7775,7 +7779,7 @@ fn x_prelim_block_plan(
         return (blocks.len() > 1).then_some(blocks);
     }
     let blocks = x_batch_blocks(args, queries, &query_batches)?;
-    let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, pool)?;
+    let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, false, pool)?;
     (blocks.len() > 1).then_some(blocks)
 }
 
@@ -7867,9 +7871,16 @@ fn x_block_search_refuses_nothing(
 //   overflow cells, and a batch's table has no more words than the batch's offsets add
 //   (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot
 //   fill them; a batch with more leaves the search to the reference path (`None`), which tests the
-//   batch exactly. A batch that NCBI splits is not tested: no block's table holds its words, and
-//   its chunks' builds test their own tables in the chunks' searches, which follow the blocks as
-//   they follow the search of all queries (`search_split_query_batches`).
+//   batch exactly. A batch that NCBI splits has no table and no block's table holds its words, but
+//   each of its query chunks has a table (`search_split_query_batches`), whose words are at most
+//   those of the chunk's letters. Where the chunks run decides whether they are tested here
+//   (`chunks_in_blocks`): in the block search (`x_query_block_plan`) a block is a whole call, its
+//   split batches' chunks are searched in it, and a chunk's refusal there would leave out the
+//   reports of the block's batches before it, so each chunk is tested as a batch is (a chunk that
+//   could fill the banks leaves the search to the search of all queries); in the preliminary-stage
+//   plan (`x_prelim_block_plan`) the chunks are searched after the blocks, in the call of all
+//   queries, where a chunk's refusal comes after the reports of the batches before it, so the
+//   chunks' builds test their own tables and the plan does not count their words.
 // - the blocks closed also on their words (`x_query_blocks`). NCBI builds the table of one batch,
 //   searches the batch and frees the table before the next batch (above), so its largest table is
 //   that of the batch with the most words (of those it does not split, which have no table:
@@ -7897,8 +7908,10 @@ fn x_word_blocks(
     query_input: &seq_range::QueryInput,
     batch_size: u32,
     blocks: &[std::ops::Range<usize>],
+    chunks_in_blocks: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Option<(Vec<std::ops::Range<usize>>, Vec<u64>)> {
+    use crate::algorithm::blastp::protein_query_split::split_protein_batch;
     use crate::algorithm::tblastx::lookup::compressed::{
         CompressedWordCount, COMPRESSED_HITS_PER_BACKBONE_CELL,
     };
@@ -7919,28 +7932,42 @@ fn x_word_blocks(
     let query_batches = query_input.batches(batch_size);
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     // A batch that NCBI splits has no table, and no block's table holds its words
-    // (`CallTableWords`): it counts no word. Its chunks' tables are tested by their own builds,
-    // in the chunks' searches that follow the blocks as they follow the search of all queries
-    // (`search_split_query_batches`).
+    // (`CallTableWords`): it counts no word. In the block search each of its chunks is tested
+    // (the chunks of `split_protein_batch` with the sizes that `CallTableWords::of` read; a
+    // chunk's letters are pieces of the batch's queries, `split_steps::chunk_parts`); in the
+    // preliminary-stage plan none is (above).
     let tabled = CallTableWords::of(args, &query_batches, &lengths, false).ok()?;
+    let sizes = protein_query_split_sizes(10000).ok()?;
     // The words of all letters of the queries: the lookup query
     // (`encode_protein_query_frame_with_seg`) has the same letters, and its lookup segments
     // (`build_lookup_segments_for_context`) leave out those that SEG or `-lcase_masking` mask, so
-    // a block's table holds at most these words (all of them without masks). Counting the masked
-    // letters too only closes such a block earlier and reserves room that its table does not fill
-    // (`x_block_appends`) and never touches.
+    // a block's table (or a chunk's) holds at most these words (all of them without masks).
+    // Counting the masked letters too only closes such a block earlier and reserves room that its
+    // table does not fill (`x_block_appends`) and never touches.
+    fn letters(query: &EncodedProtein) -> &[u8] {
+        &query.aa_seq[1..query.aa_seq.len() - 1]
+    }
     let words = |searched: &std::ops::Range<usize>| {
-        if !tabled.holds_batch(searched) {
+        let held = tabled.holds_batch(searched);
+        if !held && !chunks_in_blocks {
             return Some(0);
         }
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
             .map(|record| encode_protein_sequence(record.seq()))
             .collect();
-        let mut letters = encoded
-            .iter()
-            .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
-        counter.batch_words(&mut letters)
+        if held {
+            return counter.batch_words(&mut encoded.iter().map(letters));
+        }
+        for chunk in split_protein_batch(&lengths[searched.clone()], sizes)? {
+            counter.batch_words(
+                &mut chunk
+                    .queries
+                    .iter()
+                    .map(|part| &letters(&encoded[part.query])[part.from..part.to]),
+            )?;
+        }
+        Some(0)
     };
     let batch_words: Vec<u64> = x_each_batch_on(&query_batches, pool, &words)
         .into_iter()

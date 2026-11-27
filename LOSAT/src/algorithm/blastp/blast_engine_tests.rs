@@ -2545,17 +2545,30 @@ fn test_x_block_search_refusals_of_the_search_of_all_queries() {
                     &input,
                     batch_size,
                     &letter_blocks,
+                    true,
                     pool
                 )
                 .is_some());
-                assert!(
-                    x_word_blocks(&low, &records, &input, batch_size, &letter_blocks, pool)
-                        .is_none()
-                );
-                assert!(
-                    x_word_blocks(&low_aa, &records, &input, batch_size, &letter_blocks, pool)
-                        .is_some()
-                );
+                assert!(x_word_blocks(
+                    &low,
+                    &records,
+                    &input,
+                    batch_size,
+                    &letter_blocks,
+                    true,
+                    pool
+                )
+                .is_none());
+                assert!(x_word_blocks(
+                    &low_aa,
+                    &records,
+                    &input,
+                    batch_size,
+                    &letter_blocks,
+                    true,
+                    pool
+                )
+                .is_some());
             }
             assert!(x_word_blocks(
                 &low,
@@ -2563,6 +2576,7 @@ fn test_x_block_search_refusals_of_the_search_of_all_queries() {
                 &seq_range::QueryInput::whole(&records[2..]),
                 1,
                 &[0..1],
+                true,
                 pool
             )
             .is_some());
@@ -2997,12 +3011,13 @@ fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
     for threads in [1, 3] {
         crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
             assert_eq!(
-                x_word_blocks(&resolved, &records, &input, batch_size, &whole, pool)
+                x_word_blocks(&resolved, &records, &input, batch_size, &whole, true, pool)
                     .map(|(blocks, _)| blocks),
                 Some(whole.to_vec())
             );
             let (blocks, block_words) =
-                x_word_blocks(&low, &records, &input, batch_size, &whole, pool).expect("blocks");
+                x_word_blocks(&low, &records, &input, batch_size, &whole, true, pool)
+                    .expect("blocks");
             // Each block's words are its batches' (one batch per query here).
             assert_eq!(
                 block_words,
@@ -3029,7 +3044,7 @@ fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
                 );
             }
             assert_eq!(
-                x_word_blocks(&low_aa, &records, &input, batch_size, &whole, pool),
+                x_word_blocks(&low_aa, &records, &input, batch_size, &whole, true, pool),
                 Some((whole.to_vec(), Vec::new()))
             );
             Ok(())
@@ -3040,9 +3055,11 @@ fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a batch that NCBI splits adds no word to a block's table
-// (`CallTableWords`): the blocks' words are those of the other batches, on one thread and on
-// three, and its words are not tested against the banks; an ungapped search splits no batch and
-// counts them all.
+// (`CallTableWords`): the blocks' words are those of the other batches, in the block search and
+// in the preliminary-stage plan, on one thread and on three; an ungapped search splits no batch
+// and counts them all. With every word a neighbor, the block search (whose blocks search the
+// chunks) leaves a chunk that could fill the banks to the search of all queries, and the
+// preliminary-stage plan (whose chunks are searched after the blocks) plans the blocks.
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -3081,31 +3098,150 @@ fn test_x_word_blocks_leave_out_the_words_of_a_split_batch() {
     assert!(words[1] > 0);
     for threads in [1, 3] {
         crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-            let total = |args: &ResolvedBlastpArgs| {
-                let (blocks, block_words) =
-                    x_word_blocks(args, &records, &input, batch_size, &whole, pool)
-                        .expect("blocks");
-                assert_eq!(blocks, whole.to_vec());
-                block_words.iter().sum::<u64>()
+            let plan = |args: &ResolvedBlastpArgs, chunks_in_blocks: bool| {
+                x_word_blocks(
+                    args,
+                    &records,
+                    &input,
+                    batch_size,
+                    &whole,
+                    chunks_in_blocks,
+                    pool,
+                )
             };
-            assert_eq!(total(&gapped), words[0] + words[2] + words[3]);
-            assert_eq!(total(&ungapped), words.iter().sum::<u64>());
-            // Every word a neighbor (`-threshold` 1e10): the split batch's words would fill the
-            // banks, but no block's table holds them (its chunks' builds test their own tables),
-            // so the blocks are planned; unsplit, the batch leaves the search to the reference
-            // path.
+            for chunks_in_blocks in [true, false] {
+                let total = |args: &ResolvedBlastpArgs| {
+                    let (blocks, block_words) = plan(args, chunks_in_blocks).expect("blocks");
+                    assert_eq!(blocks, whole.to_vec());
+                    block_words.iter().sum::<u64>()
+                };
+                assert_eq!(total(&gapped), words[0] + words[2] + words[3]);
+                assert_eq!(total(&ungapped), words.iter().sum::<u64>());
+            }
+            // Every word a neighbor (`-threshold` 1e10): each chunk of the split batch has more
+            // words than the banks can be shown to take. The block search, whose block would
+            // build the chunks' tables after the reports of its batches before, leaves the search
+            // to the search of all queries; the preliminary-stage plan, whose chunks build their
+            // tables after the blocks in the call of all queries, plans the blocks. Unsplit, the
+            // batch leaves the search to the reference path in both.
             let mut every = gapped.clone();
             every.threshold = 1e10;
             let mut every_ungapped = ungapped.clone();
             every_ungapped.threshold = 1e10;
-            assert!(x_word_blocks(&every, &records, &input, batch_size, &whole, pool).is_some());
-            assert!(
-                x_word_blocks(&every_ungapped, &records, &input, batch_size, &whole, pool)
-                    .is_none()
-            );
+            assert!(plan(&every, true).is_none());
+            assert!(plan(&every, false).is_some());
+            assert!(plan(&every_ungapped, true).is_none());
+            assert!(plan(&every_ungapped, false).is_none());
             Ok(())
         })
         .expect("pool");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:188-202
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the block search tests each chunk of a split batch as a table of
+// its own, the shape of review 1's input (two short queries around a long one, batches of one
+// query, every word a neighbor): a long query whose two runs of W, at its two ends with X's
+// between (letters without a compressed letter, no word), would fill the banks as one table, but
+// each chunk holds one run, whose words the banks take, so the blocks are planned with the split
+// batch counting no word; a long query of W's only has chunks that could fill them, and the block
+// search leaves it to the search of all queries. The preliminary-stage plan plans both; unsplit
+// (an ungapped search), both long queries leave the search to the reference path.
+#[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
+fn test_x_word_blocks_test_each_chunk_that_a_block_searches() {
+    use crate::algorithm::blastp::protein_query_split::split_protein_batch;
+    use crate::algorithm::tblastx::lookup::compressed::{
+        CompressedWordCount, COMPRESSED_HITS_PER_OVERFLOW_CELL, COMPRESSED_OVERFLOW_CELLS_IN_BANK,
+        COMPRESSED_OVERFLOW_MAX_BANKS,
+    };
+    let mut args = make_blastp_args();
+    args.task = "blastp-fast".to_string();
+    args.comp_based_stats = std::ffi::OsString::from("0");
+    let mut every = args.resolve().expect("resolved blastp-fast args");
+    every.threshold = 1e10;
+    args.ungapped = true;
+    let mut every_ungapped = args.resolve().expect("ungapped blastp-fast args");
+    every_ungapped.threshold = 1e10;
+    let word_size = every.word_size;
+    let counter = CompressedWordCount::new_of(
+        every.scoring.matrix,
+        word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * every.threshold),
+    )
+    .expect("a compressed word size");
+    let aa_letters = |sequence: &[u8]| {
+        let encoded = encode_protein_sequence(sequence);
+        encoded.aa_seq[1..encoded.aa_seq.len() - 1].to_vec()
+    };
+    let words = |letters: &[u8]| counter.batch_words(&mut std::iter::once(letters));
+    // The most words that the banks are shown to take, and a run of W with as many windows of
+    // them as that allows.
+    let most = (COMPRESSED_HITS_PER_OVERFLOW_CELL
+        * COMPRESSED_OVERFLOW_CELLS_IN_BANK
+        * COMPRESSED_OVERFLOW_MAX_BANKS) as u64;
+    let window_words = words(&aa_letters(&vec![b'W'; word_size])).expect("one window");
+    let run = (most / window_words) as usize + word_size - 1;
+    let length = 20000;
+    let mut two_runs = vec![b'W'; run];
+    two_runs.resize(length - run, b'X');
+    two_runs.extend(std::iter::repeat_n(b'W', run));
+    let all_w = vec![b'W'; length];
+    let sizes = protein_query_split_sizes(10000).expect("split sizes");
+    let chunks = split_protein_batch(&[length], sizes).expect("a split query");
+    let in_chunks = |sequence: &[u8]| {
+        let letters = aa_letters(sequence);
+        assert!(
+            words(&letters).is_none(),
+            "one table of the long query fits"
+        );
+        chunks
+            .iter()
+            .map(|chunk| {
+                let [part] = chunk.queries.as_slice() else {
+                    panic!("a chunk of one query has one part");
+                };
+                words(&letters[part.from..part.to]).is_some()
+            })
+            .collect::<Vec<bool>>()
+    };
+    assert!(in_chunks(&two_runs).iter().all(|&fits| fits));
+    assert!(in_chunks(&all_w).iter().all(|&fits| !fits));
+    let short = x_block_test_records(&[31, 31]);
+    let short_words: u64 = short
+        .iter()
+        .map(|record| words(&aa_letters(record.seq())).expect("a short query fits"))
+        .sum();
+    for (long, chunks_fit) in [(&two_runs, true), (&all_w, false)] {
+        let records = vec![
+            short[0].clone(),
+            FastaRecord::new("", b"long", long),
+            short[1].clone(),
+        ];
+        let input = seq_range::QueryInput::whole(&records);
+        let blocks = [0..2, 2..3];
+        for threads in [1, 3] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let plan = |args: &ResolvedBlastpArgs, chunks_in_blocks: bool| {
+                    x_word_blocks(args, &records, &input, 1, &blocks, chunks_in_blocks, pool)
+                };
+                let block_search = plan(&every, true);
+                assert_eq!(block_search.is_some(), chunks_fit, "threads {threads}");
+                if let Some((_, block_words)) = block_search {
+                    assert_eq!(block_words.iter().sum::<u64>(), short_words);
+                }
+                let (_, block_words) = plan(&every, false).expect("the preliminary-stage plan");
+                assert_eq!(block_words.iter().sum::<u64>(), short_words);
+                assert!(plan(&every_ungapped, true).is_none());
+                assert!(plan(&every_ungapped, false).is_none());
+                Ok(())
+            })
+            .expect("pool");
+        }
     }
 }
 

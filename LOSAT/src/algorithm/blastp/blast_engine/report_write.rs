@@ -763,7 +763,7 @@ pub(super) fn write_xml(
 /// 5's (`blast_xml2::Xml2Run`): the search's target (a `database`, else the `-subject` records
 /// `subject_records`), the gap costs of a gapped search, `cbs` when the composition-based
 /// statistics are on (blastxml2_format.cpp:531-546), psiblast's iterative search
-/// (`ProgramType::is_iterative`), and whether NCBI's formatter dropped its queries
+/// (`ResolvedBlastpArgs::xml2_program_type`: not PHI-BLAST's), and whether NCBI's formatter dropped its queries
 /// (`blast_xml2::queries_dropped`; `fasta_queries`: not the PSSM's query of `-in_pssm` or
 /// `-in_msa`).
 pub(super) fn blastp_xml2_run(
@@ -772,7 +772,7 @@ pub(super) fn blastp_xml2_run(
     subject_records: &[FastaRecord],
     fasta_queries: bool,
 ) -> crate::report::blast_xml2::Xml2Run {
-    let program_type = args.app.program_type();
+    let program_type = args.xml2_program_type();
     crate::report::blast_xml2::Xml2Run {
         target: if database {
             crate::report::blast_xml2::Xml2Target::Database

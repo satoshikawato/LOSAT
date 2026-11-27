@@ -381,3 +381,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "blast_xml_tests.rs"]
+mod tests;

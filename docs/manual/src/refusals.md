@@ -54,7 +54,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
-| `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `16`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10` and `20`) |
+| `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `16`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10`, `13` to `16` and `20`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast` | Standalone executable | Not yet provided |
 
@@ -225,7 +225,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | Option or value | What happens |
 | :--- | :--- |
 | `-phi_pattern` with `-num_iterations` other than 1 | Refused: not yet supported. With a matrix and gap costs that have no pattern statistics, NCBI searches nothing and LOSAT gives its answer of one round. |
-| `-phi_pattern` with `-outfmt` 1 to 5, 11, 13 to 16 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
+| `-phi_pattern` with `-outfmt` 1 to 5, 11 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
 | `-phi_pattern` with `-html` | Refused: not yet supported. |
 | `-phi_pattern` with `-sum_stats true` | Refused: not yet supported. |
 | `-phi_pattern` with a subject longer than 5,000,000 residues | Refused: not yet supported. NCBI searches such a sequence in overlapping parts. |
@@ -536,7 +536,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 
 - The program `deltablast`.
 - `makeprofiledb -dbtype cobalt`.
-- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
+- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10`, `13` to `16` and `20`, and in
   the library and pylosat.
 - `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.

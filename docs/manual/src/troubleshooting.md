@@ -105,7 +105,7 @@ First check [Differences from NCBI BLAST+](differences.md). A few differences ar
 
 `psiblast` writes `-outfmt 0` to `16`, `18` and `20` from a FASTA query, `-in_pssm` or `-in_msa`, at any `-num_iterations`. `tblastn -in_pssm` writes every format but `11`.
 
-- With `-phi_pattern`, a `psiblast` format other than `0`, `6`, `7`, `10` and `20` stops with LOSAT's refusal, such as `Error: output format 15 is not supported by LOSAT's PSIBLAST yet` (`8`, `9` and `12` get NCBI's own error where an alignment is found).
+- With `-phi_pattern`, a `psiblast` format other than `0`, `6`, `7`, `10`, `13` to `16` and `20` stops with LOSAT's refusal, such as `Error: output format 18 is not supported by LOSAT's PSIBLAST yet` (`8`, `9` and `12` get NCBI's own error where an alignment is found).
 - Formats `13` and `14` without `-out` get NCBI BLAST+'s own error (`Please provide a file name for outfmt 13.`).
 - `tblastn -in_pssm -outfmt 11` stops after the PSSM is read, because NCBI's own run of it stops with a C++ exception whose report changes from run to run.
 - Each exits with status 1.

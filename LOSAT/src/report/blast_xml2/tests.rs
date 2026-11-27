@@ -1715,3 +1715,45 @@ fn a_joined_result_is_the_next_search_of_the_held_report() {
         assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
     }
 }
+
+// Line PS, PS15b-4: PHI-BLAST's pattern as read is the `pattern` of `Parameters`, after `filter` in
+// blastxml2.asn's order (NCBI BLAST+ 2.17.0 `psiblast -phi_pattern ploop.pat -outfmt 16 / 15`).
+#[test]
+fn a_phi_pattern_follows_the_filter_in_the_parameters() {
+    let message = invalid_message();
+    for (kind, filter, pattern) in [
+        (
+            Xml2Kind::Single16,
+            "          <filter>F</filter>\n",
+            "          <pattern>[AG]-x(4)-G-K-[ST]&lt;</pattern>\n",
+        ),
+        (
+            Xml2Kind::Single15,
+            "        \"filter\": \"F\",\n",
+            "        \"pattern\": \"[AG]-x(4)-G-K-[ST]<\",\n",
+        ),
+    ] {
+        let run = XmlRun {
+            pattern: Some(b"[AG]-x(4)-G-K-[ST]<"),
+            ..run(None, "")
+        };
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&message), &mut out, |_| {
+                panic!("a query of an unsearched batch has no hits")
+            })
+            .unwrap();
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let plain = match kind {
+            Xml2Kind::Single16 => INVALID_ONLY_16,
+            _ => INVALID_ONLY_15,
+        };
+        assert_eq!(
+            text,
+            plain.replacen(filter, &format!("{filter}{pattern}"), 1),
+            "{kind:?}"
+        );
+    }
+}

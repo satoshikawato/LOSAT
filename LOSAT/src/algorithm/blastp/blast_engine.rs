@@ -6451,8 +6451,7 @@ fn refuse_found_dropped_queries(
         return Ok(());
     };
     let iterative = args
-        .app
-        .program_type()
+        .xml2_program_type()
         .is_some_and(crate::report::record::ProgramType::is_iterative);
     let xml2 = outputs.formats.iter().any(|format| {
         format

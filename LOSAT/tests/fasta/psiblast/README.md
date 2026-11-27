@@ -119,3 +119,6 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   subject and letters 101-192 with a `W` after letter 132 (with `-evalue 1e-10`, the two HSPs order their shared
   segments in two ways), `tk195` letters 195-313 (at `-num_iterations 2`, round 2's two HSPs leave a segment's
   start behind its row's end when NCBI orders the segments: NCBI reads past the row's end, `CObject is corrupted`).
+- `ps8b_tk30.faa` (line PS, PS8b): letters 1-30 of `tk.faa` (one place of `tests/fixtures/phi/ploop.pat`), the query of
+  rows `db.phi.b.tk30.*` against `tests/db_search/ps8b_qid`: PHI-BLAST's rounds in outfmt 11, whose archive of round 2
+  stays under 64 KB.

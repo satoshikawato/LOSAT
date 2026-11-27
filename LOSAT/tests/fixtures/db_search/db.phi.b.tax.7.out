@@ -1,0 +1,24 @@
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query id, subject id, subject sci names, evalue
+# 5 hits found
+YP_009220601.1	BDT63550.1	N/A	1.55e-34
+YP_009220601.1	BDT63556.1	N/A	1.2
+YP_009220601.1	BDT63556.1	N/A	5.6
+YP_009220601.1	BDT63554.1	N/A	2.1
+YP_009220601.1	BDT63566.1	N/A	5.6
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query id, subject id, subject sci names, evalue
+# 6 hits found
+YP_009220601.1	BDT63556.1	N/A	0.25
+YP_009220601.1	BDT63556.1	N/A	0.62
+YP_009220601.1	BDT63554.1	N/A	0.50
+YP_009220601.1	BDT63550.1	N/A	0.94
+YP_009220601.1	BDT63523.1	N/A	2.1
+YP_009220601.1	BDT63510.1	N/A	5.6
+# BLAST processed 0 queries

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.124
+- Version: 1.126
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1008,7 +1008,17 @@
   that brought line RG item F2's 1.118 and 1.119 and line RG-KB item 9(b)'s 1.120, then 1.122 at
   the merge of dev of 2026-11-27 that brought line RG-KB item 12's 1.121, then 1.123 at the merge
   of dev of 2026-11-27 that brought line NP item M4b-3d's 1.122);
-  1.124 2026-11-27 (rule 2's explicit rejection of a reported database sequence whose Seq-align id
+  1.124 2026-11-26 (approved exception 35, `losat blastdbcheck` alias count checks and
+  `-ends` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow,
+  line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
+  JST, Q-D2b-OV=A; numbered after 1.123 at the merge of dev c66bea41b that brought 1.123
+  (line RG-KB item 18b); first 1.109, then 1.110, then 1.113, then 1.114, then 1.115, then 1.116,
+  then 1.117, then 1.118, then 1.120, then 1.121, then 1.122, then 1.123; exception 31 until 1.111 took 31,
+  exception 32 until 1.115 took 32, and exception 33 until 1.118/1.119 took 33 and 34);
+  1.125 2026-11-27 (approved exception 36, a protein database with a sequence of length 0
+  searched at more than one thread, line RG-D2, found in review R4 of PR #1660; Owner 2026-11-27
+  09:25 JST, Q-DBA0-MT=KEEP; first 1.124);
+  1.126 2026-11-27 (rule 2's explicit rejection of a reported database sequence whose Seq-align id
   NCBI's scope finds as the generated id `lcl|Query_N` of a query of its batch, or the id of a PSSM
   query, widened from outfmt 1 to 4 of five programs to every format that shows that query in its
   place in all eight search programs, and its display id to outfmt 0: 153 outputs that differed from
@@ -1017,7 +1027,8 @@
   round 2 of 2026-11-28 (review 1) the letters and the length are compared over the HSPs, SAM,
   psiblast's saved PSSM and a damaged taxonomy database's texts refuse, the organism report only
   with a taxonomy database found, decisions XT-X7-1n to XT-X7-1t; numbered after
-  1.123 at the merge of dev of 2026-11-27 that brought line RG-KB item 18b's 1.123; first 1.123)
+  1.125 at the merge of dev of 2026-11-28 that brought line RG-D2's 1.124 and 1.125; first 1.123,
+  then 1.124 at the merge of dev of 2026-11-27 that brought line RG-KB item 18b's 1.123)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -5246,6 +5257,64 @@ and their values of a nearby input are deterministic).
     `the_longest_intron_of_a_translated_search_follows_ncbis_branches`
     (`LOSAT/src/core/link_hsps_tests.rs`).
 
+## Approved exception 35 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.124)
+
+Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
+Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
+The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さない（PD に新例外）」. Not taken: (B) reproducing
+NCBI's signed wraparound; (C) refusing overflowing inputs.
+
+35. **`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed 32-bit or
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.124).** NCBI BLAST+ 2.17.0
+    computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
+    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends` OID bounds
+    (`blastdbcheck.cpp:666-682`) in signed 32-bit `int` and 64-bit `Int8`, where
+    products such as `(FIRST_OID + 1) * (LAST_OID + 1)` (e.g. `65535 * 65535`) or `num_oids - n`
+    for `-ends -2147483648` overflow signed integer arithmetic (undefined behavior in C++): NCBI's
+    x86-64 build wraps them to negative or zero values, emitting false alias errors (rows `a_ov1`,
+    `a_ov2`, and `-dir .` rows `a_dir` and `a_dir_v1` that visit them) or wrapping `-ends -2147483648`
+    back into the valid OID range (row `ends_intmin`, passing exit 0 while nearby `-ends -2147483638`
+    jumps to `oid 2147483647` and fails with `OID not found`). LOSAT computes the alias count
+    expressions in 128-bit signed integers (`blastdbcheck::alias::check_values`) and
+    `-ends` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
+    signed overflow and producing exact results (`a_ov1` and `a_ov2` pass with exit 0 while keeping
+    non-overflow warnings such as `.msk` extension warnings; `a_dir` and `a_dir_v1` drop those two
+    false errors and report 19 alias errors and 37 total errors instead of 21 and 39; `ends_intmin`
+    jumps past the volume to `oid 2147483657` and fails with `OID not found`, matching nearby
+    `-ends -2147483638`).
+
+## Approved exception 36 (a protein database with a sequence of length 0 at more than one thread, version 1.125)
+
+Decided by the Owner on 2026-11-27 at 09:25 JST, in the Antigravity (Gemini) session that recorded it
+(`gemini-collab-20261122/DECISIONS.md` 48; `remaining-gaps-20261112/DECISIONS.md` OQ-1127), with the words
+「dev 既存の「長さ 0 protein DB の MT abort」の扱い（後続項目）：有効な出力をそのまま残す」 ("keep the valid output as it
+is"). Not taken: a refusal (rule 3) of the searches where NCBI aborts.
+
+36. **A protein database with a sequence of length 0, searched at more than one thread (Owner
+    2026-11-27 09:25 JST, Q-DBA0-MT=KEEP, version 1.125).** At `-num_threads` 2 or more NCBI BLAST+
+    2.17.0 reads the database through one buffer per thread. `GetSequence` checks a sequence out of the
+    thread's buffer (`CSeqDBImpl::x_GetSeqBuffer`, NCBI reference (598d8ae6):
+    c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:667-681). For a length of 0 the search's reader
+    returns an error without giving the sequence back (`s_SeqDbGetSequence`, NCBI reference (598d8ae6):
+    c++/src/algo/blast/api/seqsrc_seqdb.cpp:378), the engine goes on to the next sequence (NCBI
+    reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1427), and the thread's next fill
+    of its buffer throws `Sequence not returned.` (NCBI reference (598d8ae6):
+    c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:656-661). In our runs `blastp` (gapped and
+    `-ungapped`), `blastx` and `psiblast` at 2, 4 and 8 threads stopped in each of 3 runs on each of 8
+    databases: the sequence of length 0 first, in the middle or last of one volume of 2, 3 or 300
+    sequences, or in the first, the last or the middle volume of an alias of 2 or 3 volumes. Each printed
+    `BLAST engine error: Database memory map file error` (`psiblast`: `BLAST Database error: Sequence
+    not returned.`), then ended on the uncaught `CSeqDBException` with SIGABRT (exit 134) and no output.
+    At 1 thread each search finished with exit 0. LOSAT skips a sequence of length 0 at every thread
+    count, as NCBI does at 1 thread (`seqdb::Volume::read_protein_search_block`), and prints NCBI's
+    `-num_threads 1` output at any thread count, with no warning and no refusal. Evidence:
+    [`docs/evidence/zero_length_protein_mt/`](../evidence/zero_length_protein_mt/README.md) (the probe
+    and its rows, NCBI BLAST+ 2.17.0). Fixture rows: `LOSAT/tests/fixtures/zero_length_mt/` holds
+    NCBI's `-num_threads 1` output of `blastp`, `blastp -ungapped`, `blastx`, `blastx -ungapped` and
+    `psiblast` on `dba0` (a volume whose one sequence has length 0, then a volume of one sequence); the
+    test `a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count`
+    (`LOSAT/tests/protein_db_32bit_lengths.rs`) runs them at 1, 2 and 4 threads against those bytes.
+
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 
 On a database with parsed Seq-ids NCBI gives these results without failing, and they look wrong
@@ -5275,7 +5344,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   TBLASTX since version 1.39), of a query read with `-parse_deflines` in the query batch that
   reports it (with outfmt 5, in any batch), and with the id `lcl|Query_N` of a query read without
   it (any letter case) or the id of a PSSM query (`-in_pssm`) in the formats that show that query
-  in its place (version 1.124, line RG item X7-1, which widened outfmt 1 to 4 of BLASTP, BLASTN,
+  in its place (version 1.126, line RG item X7-1, which widened outfmt 1 to 4 of BLASTP, BLASTN,
   BLASTX, TBLASTN and TBLASTX to every program with `-db`, `rpsblast` and `rpstblastn` included):
   as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
   the run, also the id of a later batch's query, which NCBI then searches as the database

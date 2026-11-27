@@ -890,7 +890,7 @@ fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
 // `lcl|Query_1`) or display id (`bnqgi`: `gi|777|lcl|Query_1`) is the id NCBI BLAST+ gives the first
 // query read without `-parse_deflines`: NCBI's formats 1 to 4 show that query's title in its
 // description line (and its letters in the rows of the Seq-align id; probes `bn.t3b.d.qid.f1`,
-// `bn.t3b.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.124): so does its outfmt 0 (NCBI
+// `bn.t3b.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.126): so does its outfmt 0 (NCBI
 // BLAST+ 2.17.0, exit 0: `Query_1 bnq query` in the description line and the alignment's title,
 // identities of 299 of 299 where the sequence's own letters give 274 of 299; probe `bn.qid.f0` of
 // `x71/probe2` and `x71/fix2/of0`; rows `db.x7.bn.qid.f0.reject`, `db.x7.bn.qgi.f0.reject` hold
@@ -926,7 +926,7 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
 // Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.39): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
 // proteins) and TBLASTX (`txqid`, `txqgi`). NCBI's merge of the Seq-align id throws (exit 255, probes
 // `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`), and for the display id its description line shows the query's
-// title (`tx.t3c.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.124): their outfmt 0 shows
+// title (`tx.t3c.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.126): their outfmt 0 shows
 // the query in the sequence's place (NCBI BLAST+ 2.17.0, exit 0: BLASTX `Query_1 bxq coding query
 // in six frames`, `Length=1229` for the protein of 125 letters; TBLASTX the query's title; probes
 // `bx.qid.f0`, `tx.qid.f0` of `x71/probe2` and `x71/fix2/of0`; rows `db.x7.bx.qid.f0.reject`,

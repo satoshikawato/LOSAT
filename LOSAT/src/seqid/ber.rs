@@ -39,6 +39,7 @@ use crate::report::serial::asn_ber_reader::{
 pub(crate) use crate::report::serial::asn_ber_reader::{
     CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
+use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:464-477
 // `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`) call it for a
@@ -179,7 +180,7 @@ const END_OF_FILE: ThrowSite = site(
 /// (`AddFrameInfo`); the end of the record becomes NCBI's exception in the innermost frame
 /// (`HandleEOF`, whose text is the frame's `GetFrameInfo`).
 #[derive(Clone, Copy, Debug)]
-enum Frame {
+pub(crate) enum Frame {
     /// `eFrameNamed`: the root, `Blast-def-line-set`.
     Root,
     /// `eFrameArray` of the set, the second frame of the stack: there `HandleEOF` rethrows the
@@ -494,30 +495,125 @@ impl Tag {
     }
 }
 
+/// Sink for cold-path `Error: (803.7)` `Bad char [0x..]` diagnostic collection.
+///
+/// The hot decode path uses [`NoPosts`], a zero-sized no-op type so the decoder compiles with no
+/// frame-stack branches, no extra closures, and no size overhead on [`Reader`]; only
+/// [`replaced_char_posts`] instantiates [`PostCollector`].
+pub(crate) trait PostSink {
+    #[inline(always)]
+    fn push_frame(&mut self, _frame: Frame) {}
+    #[inline(always)]
+    fn pop_frame(&mut self) {}
+    #[inline(always)]
+    fn pop_frames(&mut self, _n: usize) {}
+    #[inline(always)]
+    fn set_top_frame(&mut self, _frame: Frame) {}
+    #[inline(always)]
+    fn fix_string(&mut self, stored: &[u8], _pos_after: usize, value: &mut Vec<u8>) -> usize {
+        fix_visible_chars(stored, value)
+    }
+}
+
+/// Zero-sized no-op [`PostSink`] for the hot decode path.
+pub(crate) struct NoPosts;
+
+impl PostSink for NoPosts {}
+
+/// Cold-path [`PostSink`] for collecting NCBI's `Bad char [0x..]` (`Error: (803.7)`) posts in
+/// exact `CObjectIStreamAsnBinary::FixVisibleChars` order.
+struct PostCollector {
+    stack: Vec<Frame>,
+    posts: Vec<ReplacedChar>,
+}
+
+impl PostCollector {
+    fn trace(&self) -> String {
+        let mut out = String::new();
+        for &frame in &self.stack {
+            if let Some(name) = frame.trace_name() {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(name);
+            }
+        }
+        out
+    }
+}
+
+impl PostSink for PostCollector {
+    fn push_frame(&mut self, frame: Frame) {
+        self.stack.push(frame);
+    }
+
+    fn pop_frame(&mut self) {
+        self.stack.pop();
+    }
+
+    fn pop_frames(&mut self, n: usize) {
+        self.stack.truncate(self.stack.len().saturating_sub(n));
+    }
+
+    fn set_top_frame(&mut self, frame: Frame) {
+        if let Some(top) = self.stack.last_mut() {
+            *top = frame;
+        }
+    }
+
+    fn fix_string(&mut self, stored: &[u8], pos_after: usize, value: &mut Vec<u8>) -> usize {
+        value.clear();
+        value.extend_from_slice(stored);
+        let mut count = 0usize;
+        let position = StreamPosition::Byte(pos_after as u64);
+        let mut trace: Option<String> = None;
+        for i in 0..value.len() {
+            let byte = value[i];
+            if !(b' '..=b'~').contains(&byte) {
+                let trace_str = trace.get_or_insert_with(|| self.trace()).clone();
+                self.posts.push(ReplacedChar {
+                    trace: trace_str,
+                    byte,
+                    position,
+                    string: value.clone().into(),
+                });
+                value[i] = b'#';
+                count += 1;
+            }
+        }
+        count
+    }
+}
+
 /// A reader of one BER-encoded record.
-pub(crate) struct Reader<'a> {
+pub(crate) struct Reader<'a, P = NoPosts> {
     data: &'a [u8],
     pos: usize,
     /// Whether a UTF8String was read where a VisibleString is expected (`visible_string`).
     utf8: bool,
     /// Whether such a string stops the read (`Failure::Utf8`; `utf8_string_path`).
     find_utf8: bool,
+    /// Zero-sized [`NoPosts`] on the hot path; [`PostCollector`] inside [`replaced_char_posts`].
+    posts: P,
     /// Where the read keeps the titles that hold a byte outside ' ' ..= '~' (the range of each
     /// stored string in the record; `title_replaced_chars`), else `None`.
     replaced_titles: Option<Vec<std::ops::Range<usize>>>,
 }
 
-impl<'a> Reader<'a> {
+impl<'a> Reader<'a, NoPosts> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         Reader {
             data,
             pos: 0,
             utf8: false,
             find_utf8: false,
+            posts: NoPosts,
             replaced_titles: None,
         }
     }
+}
 
+impl<'a, P: PostSink> Reader<'a, P> {
     /// The title just read (`length` bytes before the position) holds a byte that its read
     /// replaced: kept where the read keeps such titles (`title_replaced_chars`).
     #[cold]
@@ -528,7 +624,6 @@ impl<'a> Reader<'a> {
             titles.push(end - length..end);
         }
     }
-
     /// Whether the reader read a UTF8String where a VisibleString is expected, which NCBI's
     /// read takes with a warning (`visible_string`; `utf8_string_path` names the member).
     pub(crate) fn read_utf8(&self) -> bool {
@@ -930,7 +1025,8 @@ impl<'a> Reader<'a> {
     /// (whose buffer is kept), and the number of bytes it replaced.
     fn fixed_string_in(&mut self, value: &mut Vec<u8>) -> Result<usize, BerError> {
         let stored = self.visible_string()?;
-        Ok(fix_visible_chars(stored, value))
+        let pos_after = self.pos;
+        Ok(self.posts.fix_string(stored, pos_after, value))
     }
 
     /// Opens a SEQUENCE value of `type_name` (the ordinal-id decoder's lists).
@@ -1125,22 +1221,41 @@ fn visible_byte(c: u8) -> (u8, bool) {
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:955-1000
 /// `ReadContainer` of a SEQUENCE OF whose array frame is `array`: each element read by
 /// `element` in the element frame.
-fn read_container<'a>(
-    ber: &mut Reader<'a>,
+fn read_container<'a, P: PostSink>(
+    ber: &mut Reader<'a, P>,
     array: Frame,
-    mut element: impl FnMut(&mut Reader<'a>) -> Result<(), BerError>,
+    mut element: impl FnMut(&mut Reader<'a, P>) -> Result<(), BerError>,
 ) -> Result<(), BerError> {
-    let end = ber.begin_sequence().map_err(|e| e.left(array))?;
+    ber.posts.push_frame(array);
+    let end = match ber.begin_sequence() {
+        Ok(end) => end,
+        Err(e) => {
+            ber.posts.pop_frame();
+            return Err(e.left(array));
+        }
+    };
     loop {
-        let more = ber
-            .more(end)
-            .map_err(|e| e.left(Frame::ArrayElement).left(array))?;
+        ber.posts.push_frame(Frame::ArrayElement);
+        let more = match ber.more(end) {
+            Ok(more) => more,
+            Err(e) => {
+                ber.posts.pop_frames(2);
+                return Err(e.left(Frame::ArrayElement).left(array));
+            }
+        };
         if !more {
+            ber.posts.pop_frame();
             break;
         }
-        element(ber).map_err(|e| e.left(Frame::ArrayElement).left(array))?;
+        if let Err(e) = element(ber) {
+            ber.posts.pop_frames(2);
+            return Err(e.left(Frame::ArrayElement).left(array));
+        }
+        ber.posts.pop_frame();
     }
-    ber.end_of_content(end).map_err(|e| e.left(array))
+    let res = ber.end_of_content(end);
+    ber.posts.pop_frame();
+    res.map_err(|e| e.left(array))
 }
 
 /// The members of a class type that its read checks (generated `*_.cpp` of NCBI 598d8ae6, each
@@ -1163,51 +1278,75 @@ struct Class {
 // sequential.
 /// `ReadClassSequential` of `class`: each member present read by `member` (with its tag) in the
 /// member frame, the mandatory members checked, the frames and backlogs of NCBI's read.
-fn read_class<'a>(
-    ber: &mut Reader<'a>,
+fn read_class<'a, P: PostSink>(
+    ber: &mut Reader<'a, P>,
     class: &Class,
-    mut member: impl FnMut(&mut Reader<'a>, u8) -> Result<(), BerError>,
+    mut member: impl FnMut(&mut Reader<'a, P>, u8) -> Result<(), BerError>,
 ) -> Result<(), BerError> {
     let frame = Frame::Class(class.name);
-    let end = ber.begin_sequence().map_err(|e| e.left(frame))?;
+    ber.posts.push_frame(frame);
+    let end = match ber.begin_sequence() {
+        Ok(end) => end,
+        Err(e) => {
+            ber.posts.pop_frame();
+            return Err(e.left(frame));
+        }
+    };
     let mut next = 0u8;
     let mut current = None;
     loop {
-        let begun = begin_class_member(ber, end, class.members, next)
-            .map_err(|e| e.left(Frame::Member(current)).left(frame))?;
-        let Some((number, member_end)) = begun else {
-            break;
+        ber.posts.push_frame(Frame::Member(current));
+        let (number, member_end) = match begin_class_member(ber, end, class.members, next) {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                ber.posts.pop_frame();
+                break;
+            }
+            Err(e) => {
+                ber.posts.pop_frames(2);
+                return Err(e.left(Frame::Member(current)).left(frame));
+            }
         };
         let name = class.members[usize::from(number)];
         current = Some(name);
+        ber.posts.set_top_frame(Frame::Member(Some(name)));
         let in_member = |e: BerError| e.left(Frame::Member(Some(name))).left(frame);
         if let Some(skipped) = (next..number).find(|&at| class.mandatory & (1 << at) != 0) {
-            return Err(in_member(
-                ber.expected_member(class.members[usize::from(skipped)]),
-            ));
+            let err = ber.expected_member(class.members[usize::from(skipped)]);
+            ber.posts.pop_frames(2);
+            return Err(in_member(err));
         }
-        member(ber, number).map_err(|e| {
-            in_member(if class.set_flag & (1 << number) != 0 {
+        if let Err(e) = member(ber, number) {
+            ber.posts.pop_frames(2);
+            return Err(in_member(if class.set_flag & (1 << number) != 0 {
                 e.member_read(name)
             } else {
                 e
-            })
-        })?;
-        ber.end_of_content(member_end).map_err(in_member)?;
+            }));
+        }
+        if let Err(e) = ber.end_of_content(member_end) {
+            ber.posts.pop_frames(2);
+            return Err(in_member(e));
+        }
+        ber.posts.pop_frame();
         next = number + 1;
     }
     let count = class.members.len() as u8;
     if let Some(skipped) = (next..count).find(|&at| class.mandatory & (1 << at) != 0) {
         let name = class.members[usize::from(skipped)];
-        return Err(ber.expected_member(name).left(frame));
+        let err = ber.expected_member(name);
+        ber.posts.pop_frame();
+        return Err(err.left(frame));
     }
-    ber.end_of_content(end).map_err(|e| e.left(frame))
+    let res = ber.end_of_content(end);
+    ber.posts.pop_frame();
+    res.map_err(|e| e.left(frame))
 }
 
 /// `BeginClassMember` of a class with the members `names` whose next member is `next` (NCBI's
 /// `pos`): the member's tag and end, `None` at the end of the members.
-fn begin_class_member(
-    ber: &mut Reader<'_>,
+fn begin_class_member<P: PostSink>(
+    ber: &mut Reader<'_, P>,
     end: End,
     names: &[&str],
     next: u8,
@@ -1233,21 +1372,39 @@ fn member_index(number: u32, names: &[&str]) -> Option<u8> {
 // tag and length as `BeginClassMember` does and finds the variant by its tag alone.
 /// `ReadChoice` of the CHOICE whose variants are `names`: the variant read by `variant` (with
 /// its tag) in the variant frame.
-fn read_choice<'a, T>(
-    ber: &mut Reader<'a>,
+fn read_choice<'a, P: PostSink, T>(
+    ber: &mut Reader<'a, P>,
     names: &'static [&'static str],
-    variant: impl FnOnce(&mut Reader<'a>, u8) -> Result<T, BerError>,
+    variant: impl FnOnce(&mut Reader<'a, P>, u8) -> Result<T, BerError>,
 ) -> Result<T, BerError> {
-    let (number, end) =
-        begin_choice_variant(ber, names).map_err(|e| e.left(Frame::Variant(None)))?;
+    ber.posts.push_frame(Frame::Variant(None));
+    let (number, end) = match begin_choice_variant(ber, names) {
+        Ok(found) => found,
+        Err(e) => {
+            ber.posts.pop_frame();
+            return Err(e.left(Frame::Variant(None)));
+        }
+    };
     let frame = Frame::Variant(Some(names[usize::from(number)]));
-    let value = variant(ber, number).map_err(|e| e.left(frame))?;
-    ber.end_of_content(end).map_err(|e| e.left(frame))?;
+    ber.posts.set_top_frame(frame);
+    let value = match variant(ber, number) {
+        Ok(value) => value,
+        Err(e) => {
+            ber.posts.pop_frame();
+            return Err(e.left(frame));
+        }
+    };
+    let res = ber.end_of_content(end);
+    ber.posts.pop_frame();
+    res.map_err(|e| e.left(frame))?;
     Ok(value)
 }
 
 /// `BeginChoiceVariant` of a CHOICE whose variants are `names`.
-fn begin_choice_variant(ber: &mut Reader<'_>, names: &[&str]) -> Result<(u8, End), BerError> {
+fn begin_choice_variant<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    names: &[&str],
+) -> Result<(u8, End), BerError> {
     let (number, end) = ber.context_tag()?;
     match member_index(number, names) {
         Some(variant) => Ok((variant, end)),
@@ -1290,19 +1447,67 @@ pub fn decode_full_set_in(record: &[u8], set: &mut DeflineSet) -> Result<(), Ber
 
 /// `CObjectIStream::Read` of the root `Blast-def-line-set` (cited at `decode_full_set`), written
 /// over `deflines`.
-fn read_set(ber: &mut Reader<'_>, deflines: &mut Vec<BlastDefline>) -> Result<(), BerError> {
+fn read_set<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    deflines: &mut Vec<BlastDefline>,
+) -> Result<(), BerError> {
     let mut count = 0;
-    read_container(ber, Frame::SetArray, |ber| {
+    ber.posts.push_frame(Frame::Root);
+    let result = read_container(ber, Frame::SetArray, |ber| {
         if count == deflines.len() {
             deflines.push(BlastDefline::default());
         }
         decode_defline(ber, &mut deflines[count])?;
         count += 1;
         Ok(())
-    })
-    .map_err(|e| e.left(Frame::Root))?;
+    });
+    ber.posts.pop_frame();
+    result.map_err(|e| e.left(Frame::Root))?;
     deflines.truncate(count);
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:703-749
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1898
+/// Cold-path re-decode of `record` that collects every `Error: (803.7)` `Bad char [0x..]` post
+/// emitted by NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` in exact order up to either full
+/// decoding or the first BER error (such as `ExpectedMember` after a NUL-padded title).
+#[cold]
+#[inline(never)]
+pub fn replaced_char_posts(record: &[u8]) -> Vec<ReplacedChar> {
+    if record.is_empty() {
+        return Vec::new();
+    }
+    let mut ber = Reader {
+        data: record,
+        pos: 0,
+        utf8: false,
+        find_utf8: false,
+        posts: PostCollector {
+            stack: Vec::new(),
+            posts: Vec::new(),
+        },
+        replaced_titles: None,
+    };
+    let _ = read_set(&mut ber, &mut Vec::new());
+    ber.posts.posts
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2220
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:352-358
+/// The `CEofException` that NCBI's `x_GetHdrAsn1` throws when header offsets are non-ascending
+/// (`end < start`): `raw_data.size()` is non-zero (negative length cast to size), so
+/// `CObjectIStreamAsnBinary` runs and immediately hits EOF inside the root `Blast-def-line-set`
+/// frame (`Frame type= eFrameNamed, Object type= Blast-def-line-set`).
+pub(crate) fn negative_length_eof() -> NcbiException {
+    let (file, line, function) = HANDLE_EOF_RETHROW;
+    NcbiException::new(END_OF_FILE, "end of file").rethrow_same(
+        file,
+        line,
+        function,
+        Frame::Root.info(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:298-309
@@ -1405,7 +1610,10 @@ const BLAST_DEF_LINE: Class = Class {
 
 /// Decodes one `Blast-def-line` over `defline`, whose title, Seq-id list and Seq-id strings keep
 /// their buffers (`IdStrings`).
-fn decode_defline(ber: &mut Reader<'_>, defline: &mut BlastDefline) -> Result<(), BerError> {
+fn decode_defline<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    defline: &mut BlastDefline,
+) -> Result<(), BerError> {
     let mut title = defline.title.take().unwrap_or_default();
     let mut has_title = false;
     defline.replaced_title_bytes = 0;
@@ -1454,7 +1662,7 @@ fn decode_defline(ber: &mut Reader<'_>, defline: &mut BlastDefline) -> Result<()
 }
 
 /// A `SEQUENCE OF INTEGER` member of `Blast-def-line` (NCBI's `list<int>`).
-fn read_int_list(ber: &mut Reader<'_>) -> Result<Vec<i32>, BerError> {
+fn read_int_list<P: PostSink>(ber: &mut Reader<'_, P>) -> Result<Vec<i32>, BerError> {
     let mut values = Vec::new();
     read_container(ber, Frame::Array, |ber| {
         values.push(ber.int()?);
@@ -1506,8 +1714,8 @@ const SEQ_ID: [&str; 20] = [
 /// out of `decode_full_set`, with a 1.3 KiB frame: about 100 instructions more per record
 /// (callgrind of `blastdbcmd -entry all`, RG-T5c fix 2).
 #[inline(never)]
-pub(crate) fn decode_seq_id(
-    ber: &mut Reader<'_>,
+pub(crate) fn decode_seq_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
     strings: &mut IdStrings,
 ) -> Result<ParsedSeqId, BerError> {
     read_choice(ber, &SEQ_ID, |ber, alternative| {
@@ -1558,7 +1766,7 @@ const ID_STRINGS: usize = 3;
 impl IdStrings {
     /// A VisibleString member of a Seq-id (`Reader::fixed_string_in`), read into a spare buffer.
     #[inline]
-    fn read(&mut self, ber: &mut Reader<'_>) -> Result<Vec<u8>, BerError> {
+    fn read<P: PostSink>(&mut self, ber: &mut Reader<'_, P>) -> Result<Vec<u8>, BerError> {
         let mut value = if self.next < self.count {
             self.next += 1;
             std::mem::take(&mut self.spare[self.next - 1])
@@ -1648,7 +1856,10 @@ impl IdStrings {
 /// Object_id_.cpp:108-115.
 const OBJECT_ID: [&str; 2] = ["id", "str"];
 
-fn decode_object_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<ObjectId, BerError> {
+fn decode_object_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<ObjectId, BerError> {
     read_choice(ber, &OBJECT_ID, |ber, alternative| {
         Ok(match alternative {
             0 => ObjectId::Id(ber.int()?),
@@ -1666,7 +1877,10 @@ const DBTAG: Class = Class {
     set_flag: 0b01,
 };
 
-fn decode_dbtag(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<Dbtag, BerError> {
+fn decode_dbtag<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<Dbtag, BerError> {
     let (mut db, mut tag) = (Vec::new(), ObjectId::Id(0));
     read_class(ber, &DBTAG, |ber, member| {
         match member {
@@ -1686,7 +1900,10 @@ const TEXTSEQ_ID: Class = Class {
     set_flag: 0b1111,
 };
 
-fn decode_textseq_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<TextseqId, BerError> {
+fn decode_textseq_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<TextseqId, BerError> {
     let mut id = TextseqId::default();
     read_class(ber, &TEXTSEQ_ID, |ber, member| {
         match member {
@@ -1708,8 +1925,8 @@ const GIIMPORT_ID: Class = Class {
     set_flag: 0b111,
 };
 
-fn decode_giimport_id(
-    ber: &mut Reader<'_>,
+fn decode_giimport_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
     strings: &mut IdStrings,
 ) -> Result<GiimportId, BerError> {
     let (mut id, mut db, mut release) = (0, None, None);
@@ -1732,8 +1949,8 @@ const PATENT_SEQ_ID: Class = Class {
     set_flag: 0b01,
 };
 
-fn decode_patent_seq_id(
-    ber: &mut Reader<'_>,
+fn decode_patent_seq_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
     strings: &mut IdStrings,
 ) -> Result<PatentSeqId, BerError> {
     let (mut seqid, mut cit) = (0, None);
@@ -1760,7 +1977,10 @@ const ID_PAT: Class = Class {
 /// The variants of `Id-pat.id` (Id_pat_.cpp:113-121).
 const ID_PAT_ID: [&str; 2] = ["number", "app-number"];
 
-fn decode_id_pat(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<IdPat, BerError> {
+fn decode_id_pat<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<IdPat, BerError> {
     let (mut country, mut id, mut doc_type) = (Vec::new(), None, None);
     read_class(ber, &ID_PAT, |ber, member| {
         match member {
@@ -1795,7 +2015,10 @@ const PDB_SEQ_ID: Class = Class {
     set_flag: 0b1011,
 };
 
-fn decode_pdb_seq_id(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<PdbSeqId, BerError> {
+fn decode_pdb_seq_id<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<PdbSeqId, BerError> {
     let (mut mol, mut chain, mut rel, mut chain_id) = (Vec::new(), None, None, None);
     read_class(ber, &PDB_SEQ_ID, |ber, member| {
         match member {
@@ -1825,7 +2048,10 @@ const DATE_STD: Class = Class {
     set_flag: 0b111_1111,
 };
 
-fn decode_date(ber: &mut Reader<'_>, strings: &mut IdStrings) -> Result<Date, BerError> {
+fn decode_date<P: PostSink>(
+    ber: &mut Reader<'_, P>,
+    strings: &mut IdStrings,
+) -> Result<Date, BerError> {
     read_choice(ber, &DATE, |ber, alternative| {
         Ok(match alternative {
             0 => Date::Str(strings.read(ber)?),

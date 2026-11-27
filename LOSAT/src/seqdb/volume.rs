@@ -415,13 +415,11 @@ impl Volume {
             let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
             let last_pos = i64::from(start) + i64::from(whole_bytes);
             if last_pos < 0 {
-                return crash(
-                    format!(
-                        "sequence {}: ambiguity offset {amb} causes NCBI to read before the \
+                return crash(format!(
+                    "sequence {}: ambiguity offset {amb} causes NCBI to read before the \
                          start of the sequence file mapping",
-                        u64::from(first_oid) + i as u64
-                    ),
-                );
+                    u64::from(first_oid) + i as u64
+                ));
             }
             if (last_pos as u64) >= readable {
                 if let Err(error) = file.x_check_range(last_pos as u64, last_pos as u64 + 1) {
@@ -471,7 +469,7 @@ impl Volume {
         first_ordinal: u32,
         first_oid: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        let path = self.open_non_empty_seq_file()?.path().to_path_buf();
+        let path = self.seq_file()?.path().to_path_buf();
         Ok(SequenceBlock::empty_stopped(
             self.index.seqtype,
             first_ordinal,
@@ -1057,6 +1055,18 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        // A sequence file of no bytes: the multithreaded scan stops at a first sequence that
+        // starts at offset 0 (the null pointer's length is -1) and reads nothing of it; any
+        // other start crashes in NCBI and keeps the refusals below.
+        if stop_at_negative
+            && self.seq_file()?.is_empty()
+            && matches!(
+                self.x_first_scan_problem_in(first, end, first_oid)?,
+                Some(ScanProblem::Negative(0))
+            )
+        {
+            return self.empty_stopped_block(first_ordinal, first_oid);
+        }
         // `seq_offsets[i] < amb <= seq_offsets[i + 1]` for every `i` implies `seq_offsets` is
         // strictly ascending, so one pass validates both offset arrays for the contiguous fast path.
         let all_regular = amb_offsets

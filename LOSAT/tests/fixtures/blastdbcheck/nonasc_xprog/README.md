@@ -62,3 +62,24 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
   one, up to the iteration range's end, every OID of a list that includes none, and the OID at
   the range's end when it is inside a volume (it reads the next OID before it compares it with
   the end) (frozen 2026-11-27 for review R5 F1 of PR #1660).
+- `n6db` (PR #1660 review R6 probe 2; test `nonasc_gap_stop_before_crash_parity`): six
+  sequences made with NCBI `makeblastdb` (v4, GIs 601..606), `n6.nin` poked so that OID 1 has
+  `amb == start` (signed length `-4`) and OID 5 has `amb = 2^28` (last byte far past the file).
+  `n6_<row>.{out,err,rc}` are NCBI BLAST+ 2.17.0 rows (`impl_r6/probe/probe2.py`):
+  `t1` (one thread, no list) crashes (`rc=-11`, refused by LOSAT); `t4` (OID 0 rows only: the
+  scan stops at OID 1), `neg135_t1`, `neg135_t4`, `neg35_t4`, `neg5_t4` and `neg5_t1` complete
+  and LOSAT matches them byte-for-byte (frozen 2026-11-27, RG-D2 tail item 4).
+- `mv3db` (RG-D2 tail items 2 and 3, 2026-11-27): three volumes `v0` (5 OIDs), `v1` (6),
+  `v2` (4), GIs 601..615, made with NCBI `makeblastdb`.
+  - `mv3_reach.tsv` and `mv3_E<E>.out` (test `nonasc_mt_reads_past_range_end_in_later_volume`):
+    three copies of `n4` as volumes `m0..m2` of an alias `n`, an alias `r` (`FIRST_OID 1`,
+    `LAST_OID E`, E inside volume 1 or 2), alias files padded to 1500 or 4000 bytes, and one OID
+    past `E` poked to crash (`amb = 2^28`); the table gives NCBI's status per (pad, E, threads,
+    poked OID): `-11` where the multithreaded scan reads that OID, `0` otherwise (the output is
+    `mv3_E<E>.out`). LOSAT refuses the `-11` rows and matches the others.
+  - `mv3e_rows.tsv` and `mv3e_o*.out`, `mv3e_e6.err` (test
+    `nonasc_empty_later_volume_sequence_file_parity`): `v1.nsq` of 0 bytes (`empty`), also OID 2
+    of `v0` with signed length `-4` (`neg`), also the first sequence offset of `v1` 0 (`zero`,
+    `negzero`); aliases `n`, `r_head`, `r_tail`, `r_pre`; lists none/GI lists; 1, 2 and 4
+    threads. NCBI stops the scan at an OID of the empty file that starts at 0 and crashes
+    (`SIGSEGV`) at any other start; LOSAT matches all 192 rows (52 refused, 140 identical).

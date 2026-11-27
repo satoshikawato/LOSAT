@@ -1027,3 +1027,173 @@ fn mt_scan_reads_the_excluded_oids_after_the_last_included_one() {
     assert!(block.stopped_at_negative());
     assert_eq!(block.len(), 1);
 }
+
+/// Writes a version-4 nucleotide volume `stem` of sequences of `lens` bases (packed bytes of
+/// zeros, the last byte of each holding the remainder) with an empty header file, and returns the
+/// byte offsets of its sequences and their ambiguity starts (the ends of their data).
+fn write_nucleotide_volume(
+    root: &std::path::Path,
+    stem: &str,
+    lens: &[u32],
+) -> (Vec<u32>, Vec<u32>) {
+    let mut data = vec![0u8];
+    let (mut seq, mut amb) = (Vec::new(), Vec::new());
+    for &len in lens {
+        seq.push(data.len() as u32);
+        data.extend(std::iter::repeat_n(0u8, (len / 4) as usize));
+        data.push((len % 4) as u8);
+        amb.push(data.len() as u32);
+    }
+    seq.push(data.len() as u32);
+    amb.push(data.len() as u32);
+    write_v4_index(
+        &root.join(format!("{stem}.nin")),
+        SeqType::Nucleotide,
+        lens.iter().map(|&len| u64::from(len)).sum(),
+        lens.iter().copied().max().unwrap_or(0),
+        &seq,
+        Some(&amb),
+    );
+    std::fs::write(root.join(format!("{stem}.nsq")), data).unwrap();
+    std::fs::write(root.join(format!("{stem}.nhr")), b"").unwrap();
+    (seq, amb)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
+/// NCBI's DB-split scan of a database whose alias file sets an iteration range that ends inside a
+/// volume after the first: `x_FillSeqBuffer` compares the volume-relative OID with the range's
+/// end, so its chunks read on past the end as far as their byte budget (a quarter of the largest
+/// file the atlas measured over the threads, plus one) goes, and a read of a nucleotide whose last
+/// byte lies past the mapping crashes. The reference below is NCBI's loop written out over the
+/// database-wide OIDs; the test pokes each OID past the end in turn and compares where LOSAT
+/// refuses with the reads of the reference.
+#[test]
+fn mt_scan_reads_past_the_range_end_in_a_later_volume() {
+    use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let lens0 = [10u32, 12, 14];
+    let lens1: Vec<u32> = (0..30).map(|i| 10 + (i * 7) % 13).collect();
+    let all: Vec<u32> = lens0.iter().chain(&lens1).copied().collect();
+    let starts = [0usize, 3];
+    let dir = TempDir::unique("mt-past-end-unit");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+    let size = |name: &str| std::fs::metadata(root.join(name)).unwrap().len();
+    let mut amb1 = Vec::new();
+    for pad in [0usize, 700, 2000] {
+        let mut text = String::new();
+        let alias = |range_end: u32, text: &mut String| {
+            text.clear();
+            text.push_str(&format!(
+                "TITLE r\nDBLIST n\nFIRST_OID 1\nLAST_OID {range_end}\n"
+            ));
+            while text.len() < pad {
+                text.push_str("# padding\n");
+            }
+        };
+        write_nucleotide_volume(root, "m0", &lens0);
+        let (_, amb) = write_nucleotide_volume(root, "m1", &lens1);
+        amb1 = amb;
+        let mut nal = String::from("TITLE n\nDBLIST m0 m1\n");
+        while nal.len() < pad {
+            nal.push_str("# padding\n");
+        }
+        std::fs::write(root.join("n.nal"), &nal).unwrap();
+        for range_end in [6u32, 12, 20, 25] {
+            alias(range_end, &mut text);
+            std::fs::write(root.join("r.nal"), &text).unwrap();
+            let largest = [size("m0.nin"), size("m1.nin"), size("n.nal"), size("r.nal")]
+                .into_iter()
+                .max()
+                .unwrap();
+            for threads in [2usize, 3, 8] {
+                // The reference: chunks of database-wide OIDs, volume-relative comparison.
+                let reads = {
+                    let mut reads = std::collections::BTreeSet::new();
+                    let mut state = 0usize;
+                    let mut opened = [false; 2];
+                    let sizes = [size("m0.nsq"), size("m1.nsq")];
+                    let mut file = largest;
+                    while state < range_end as usize {
+                        let vol = usize::from(state >= starts[1]);
+                        let budget = file.min(1 << 30) / (4 * threads as u64) + 1;
+                        let mut room = budget as i64;
+                        let mut rel = state - starts[vol];
+                        let mut read = |rel: usize, opened: &mut [bool; 2], file: &mut u64| {
+                            if !opened[vol] {
+                                opened[vol] = true;
+                                *file = (*file).max(sizes[vol]);
+                            }
+                            let n = if vol == 0 { lens0.len() } else { lens1.len() };
+                            if rel >= n {
+                                return -1i64;
+                            }
+                            reads.insert(starts[vol] + rel);
+                            i64::from(all[starts[vol] + rel])
+                        };
+                        let mut len = read(rel, &mut opened, &mut file);
+                        rel += 1;
+                        let mut taken = 0;
+                        if len >= 0 {
+                            loop {
+                                room -= len;
+                                taken += 1;
+                                len = read(rel, &mut opened, &mut file);
+                                rel += 1;
+                                if !(len >= 0 && room >= len && rel < range_end as usize) {
+                                    break;
+                                }
+                            }
+                        }
+                        assert!(taken > 0);
+                        state = (state + taken).min(range_end as usize);
+                    }
+                    reads
+                };
+                for poked in range_end as usize..all.len() {
+                    // The poked OID's last byte lies 256 MiB past the sequence file.
+                    let vol = usize::from(poked >= starts[1]);
+                    if vol == 1 {
+                        let (seq, _) = write_nucleotide_volume(root, "m1", &lens1);
+                        let mut bad = amb1.clone();
+                        bad[poked - starts[1]] = 0x1000_0000;
+                        write_v4_index(
+                            &root.join("m1.nin"),
+                            SeqType::Nucleotide,
+                            lens1.iter().map(|&len| u64::from(len)).sum(),
+                            lens1.iter().copied().max().unwrap(),
+                            &seq,
+                            Some(&bad),
+                        );
+                    } else {
+                        continue;
+                    }
+                    let mut db = SeqDb::open_search_in(b"r", SeqType::Nucleotide, &path).unwrap();
+                    db.set_mt_stop_at_negative(true);
+                    db.set_mt_threads(threads);
+                    let mut refused = false;
+                    let mut first = 0;
+                    while let Some(range) = db.next_block(first, 1 << 20) {
+                        first = range.end_ordinal();
+                        if let Err(error) = db.read_nucleotide_search_block(range) {
+                            assert!(
+                                matches!(&error, SeqDbError::Format { message, .. }
+                                    if message.contains("passes the end of the file")),
+                                "{error:?}"
+                            );
+                            refused = true;
+                        }
+                    }
+                    assert_eq!(
+                        refused,
+                        reads.contains(&poked),
+                        "pad {pad} end {range_end} threads {threads} poked OID {poked}"
+                    );
+                }
+                write_nucleotide_volume(root, "m1", &lens1);
+            }
+        }
+    }
+}

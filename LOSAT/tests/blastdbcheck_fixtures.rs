@@ -1806,3 +1806,353 @@ fn nonasc_cross_program_parity() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// LOSAT's refusal where NCBI crashes (exit status 1, `Error: ...not supported by LOSAT`, no
+/// standard output).
+fn assert_tail_refusal(label: &str, got: &(Vec<u8>, Vec<u8>, i32)) {
+    assert!(got.0.is_empty(), "{label}: stdout {:?}", text(&got.0));
+    assert_eq!(got.2, 1, "{label}: expected rc=1, err={:?}", text(&got.1));
+    assert!(
+        got.1.starts_with(b"Error: ") && text(&got.1).contains("not supported by LOSAT"),
+        "{label}: expected LOSAT refusal, got stderr={:?}",
+        text(&got.1)
+    );
+}
+
+/// What a row of NCBI's frozen results asks of LOSAT: a crash (`SIGSEGV`, `rc=-11`) is refused,
+/// anything else is byte-identical (standard output, standard error in LOSAT's words, status).
+fn assert_tail_row(label: &str, got: &(Vec<u8>, Vec<u8>, i32), ncbi: (i32, &[u8], &[u8])) {
+    if ncbi.0 == -11 {
+        assert_tail_refusal(label, got);
+        return;
+    }
+    let out = losat::wording::losat_output_bytes(ncbi.1).into_owned();
+    let err = losat::wording::losat_bytes(ncbi.2).into_owned();
+    assert_eq!(got, &(out, err, ncbi.0), "{label}");
+}
+
+/// The offsets of the arrays of a version 4 nucleotide `.nin`: (number of OIDs, header offsets,
+/// sequence offsets, ambiguity offsets), each as a byte position in the file.
+fn nin_v4_layout(nin: &[u8]) -> (usize, usize, usize, usize) {
+    let be = |at: usize| u32::from_be_bytes(nin[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 8;
+    at += 4 + be(at);
+    at += 4 + be(at);
+    let count = be(at);
+    at += 4 + 8 + 4;
+    let seq = at + 4 * (count + 1);
+    (count, at, seq, seq + 4 * (count + 1))
+}
+
+/// Sets the ambiguity offset of OID `oid` of `nin`: `2^28` makes NCBI read the last byte of the
+/// sequence far past its file (`SIGSEGV`), the sequence's own start gives the signed length `-4`.
+fn poke_amb_offset(nin: &Path, oid: usize, crash: bool) {
+    let mut bytes = fs::read(nin).unwrap();
+    let (count, _, seq, amb) = nin_v4_layout(&bytes);
+    assert!(oid < count);
+    let value: [u8; 4] = if crash {
+        0x1000_0000u32.to_be_bytes()
+    } else {
+        bytes[seq + 4 * oid..seq + 4 * oid + 4].try_into().unwrap()
+    };
+    bytes[amb + 4 * oid..amb + 4 * oid + 4].copy_from_slice(&value);
+    fs::write(nin, bytes).unwrap();
+}
+
+/// An alias file that starts with `head` and is padded with comment lines to `size` bytes (NCBI's
+/// atlas measures every file it opens, and its chunk budget is a fraction of the largest).
+fn write_padded_alias(path: &Path, head: &str, size: usize) {
+    let mut text = head.to_string();
+    while text.len() < size {
+        text.push_str("# padding of the alias file, which the atlas measures\n");
+    }
+    fs::write(path, text).unwrap();
+}
+
+/// PR #1660 review R6 probe 2 (`n6db/`: six sequences, OID 1 with the signed length `-4`, OID 5
+/// with its last byte `2^28` past the file): a block that the scan's own gap stops, before a
+/// last block whose trailing excluded OID would crash. NCBI's results (`n6_<row>.{out,err,rc}`)
+/// are `SIGSEGV` at one thread without a list, and rows without a crash otherwise (OID 0's rows
+/// only with `-num_threads 4`); LOSAT is byte-identical, and refuses the crash.
+#[test]
+fn nonasc_gap_stop_before_crash_parity() {
+    let root = scratch("n6-gapstop");
+    let _ = fs::remove_dir_all(&root);
+    let db = root.join("db");
+    fs::create_dir_all(&db).unwrap();
+    let root = root.canonicalize().unwrap();
+    let db = db.canonicalize().unwrap();
+    let source = fixtures().join("nonasc_xprog/n6db");
+    for entry in fs::read_dir(&source).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(entry.path(), db.join(entry.file_name())).unwrap();
+    }
+    let query = root.join("q.fna");
+    fs::write(
+        &query,
+        b">q\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+    let lists = [
+        ("neg135", "602\n604\n606\n"),
+        ("neg35", "604\n606\n"),
+        ("neg5", "606\n"),
+    ];
+    for (name, gis) in lists {
+        fs::write(root.join(format!("{name}.txt")), gis).unwrap();
+    }
+    let query = query.to_str().unwrap().to_string();
+    for (label, list, threads) in [
+        ("t1", None, "1"),
+        ("t4", None, "4"),
+        ("neg135_t1", Some("neg135"), "1"),
+        ("neg135_t4", Some("neg135"), "4"),
+        ("neg35_t4", Some("neg35"), "4"),
+        ("neg5_t4", Some("neg5"), "4"),
+        ("neg5_t1", Some("neg5"), "1"),
+    ] {
+        let mut args = vec!["-query", &query, "-db", "n6", "-outfmt", "6"];
+        let list_path;
+        if let Some(list) = list {
+            list_path = root
+                .join(format!("{list}.txt"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            args.extend(["-negative_gilist", &list_path]);
+        }
+        args.extend(["-num_threads", threads]);
+        let got = run_losat_sub(&root, &db, "blastn", &args);
+        let base = fixtures().join("nonasc_xprog");
+        let read = |ext: &str| fs::read(base.join(format!("n6_{label}.{ext}"))).unwrap();
+        let rc: i32 = String::from_utf8(read("rc"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_tail_row(
+            &format!("n6_{label}"),
+            &got,
+            (rc, &read("out"), &read("err")),
+        );
+    }
+    // NCBI's results: one thread without a list crashes; the others complete.
+    let rc = |label: &str| load_nonasc_expected(&format!("n6_{label}")).2;
+    assert_eq!((rc("t1"), rc("t4"), rc("neg5_t4")), (-11, 0, 0));
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The reads past an alias OID range's end in a later volume (RG-D2 tail, item 2). `mv3_reach.tsv`
+/// holds NCBI's exit status for three copies of the `n4` database as volumes `m0..m2` (an alias
+/// `n`, an alias `r` of `FIRST_OID 1`, `LAST_OID E`, both padded to `pad` bytes so that the
+/// largest file the atlas measures gives chunks of several OIDs) with the OID `poked_oid`
+/// (past `E`) made to crash when read: NCBI's multithreaded scan reads the OIDs of the chunks
+/// that begin inside the range, in the volume that holds `E`, as far as its budget goes
+/// (`seqdbimpl.cpp:301-373, 684-710`). LOSAT refuses exactly where NCBI crashes.
+#[test]
+fn nonasc_mt_reads_past_range_end_in_later_volume() {
+    let root = scratch("mv3-reach");
+    let _ = fs::remove_dir_all(&root);
+    let run_dir = root.join("run");
+    fs::create_dir_all(&run_dir).unwrap();
+    let root = root.canonicalize().unwrap();
+    let run_dir = run_dir.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    let query = root.join("qn.fna");
+    fs::write(
+        &query,
+        b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+    let query = query.to_str().unwrap().to_string();
+    let copy_volumes = || {
+        for volume in 0..3 {
+            copy_base_db(&root.join("n4"), "n4");
+            for entry in fs::read_dir(root.join("n4")).unwrap() {
+                let entry = entry.unwrap();
+                let name = entry.file_name().into_string().unwrap();
+                let suffix = name.strip_prefix("n4.").unwrap();
+                fs::copy(entry.path(), run_dir.join(format!("m{volume}.{suffix}"))).unwrap();
+            }
+        }
+    };
+    copy_volumes();
+    let n4_nin = fs::read(root.join("n4/n4.nin")).unwrap();
+    let (oids, ..) = nin_v4_layout(&n4_nin);
+    let table = fs::read_to_string(base.join("mv3_reach.tsv")).unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut completed = 0;
+    let mut refused = 0;
+    for line in table.lines().skip(1) {
+        let cell: Vec<i64> = line.split('\t').map(|c| c.parse().unwrap()).collect();
+        let (pad, end, threads, poked, ncbi_rc) = (
+            cell[0] as usize,
+            cell[1],
+            cell[2],
+            cell[3] as usize,
+            cell[4] as i32,
+        );
+        write_padded_alias(&run_dir.join("n.nal"), "TITLE n\nDBLIST m0 m1 m2\n", pad);
+        write_padded_alias(
+            &run_dir.join("r.nal"),
+            &format!("TITLE r\nDBLIST n\nFIRST_OID 1\nLAST_OID {end}\n"),
+            pad,
+        );
+        let (volume, within) = (poked / oids, poked % oids);
+        let nin = run_dir.join(format!("m{volume}.nin"));
+        poke_amb_offset(&nin, within, true);
+        let args = [
+            "-query",
+            &query,
+            "-db",
+            "r",
+            "-outfmt",
+            "6",
+            "-num_threads",
+            &threads.to_string(),
+        ];
+        let got = run_losat_sub(&root, &run_dir, "blastn", &args);
+        fs::copy(root.join("n4/n4.nin"), &nin).unwrap();
+        let label = format!("pad {pad} E {end} threads {threads} poke {poked}");
+        if ncbi_rc == -11 {
+            refused += 1;
+            assert_tail_refusal(&label, &got);
+        } else {
+            completed += 1;
+            let out = fs::read(base.join(format!("mv3_E{end}.out"))).unwrap();
+            assert_tail_row(&label, &got, (ncbi_rc, &out, b""));
+        }
+        seen.insert((pad, end, threads));
+    }
+    // The table covers both pads, five ends, and the one-thread rows that complete.
+    assert!(seen.len() >= 30, "{} (pad, E, threads) cells", seen.len());
+    assert!(
+        refused >= 20 && completed >= 20,
+        "{refused} refused, {completed} completed"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// A later volume whose sequence file has no bytes (RG-D2 tail, item 3). `mv3db/` has three
+/// volumes `v0` (5 OIDs), `v1` (6) and `v2` (4); `mv3e_rows.tsv` holds NCBI's results for
+/// four kinds of the database (`empty`: `v1.nsq` of 0 bytes; `neg`: and OID 2 of `v0` with the
+/// signed length `-4`; `zero`: and the first sequence offset of `v1` 0; `negzero`: both), the
+/// aliases `n` (the three volumes), `r_head`, `r_tail` and `r_pre` (OID ranges), with or without
+/// a GI list, at 1, 2 and 4 threads. NCBI stops its scan where an empty file's sequence offset
+/// is 0 (a null pointer) and crashes where it reads another offset; LOSAT matches both.
+#[test]
+fn nonasc_empty_later_volume_sequence_file_parity() {
+    let root = scratch("mv3-empty");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    let query = root.join("qn.fna");
+    fs::write(
+        &query,
+        b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+    let query = query.to_str().unwrap().to_string();
+    let gis = |oids: &[u32]| {
+        oids.iter()
+            .map(|o| format!("{}\n", 601 + o))
+            .collect::<String>()
+    };
+    let all_v1: Vec<u32> = (5..11).collect();
+    let all_v0: Vec<u32> = (0..5).collect();
+    let all_v2: Vec<u32> = (11..15).collect();
+    let v0_v2: Vec<u32> = all_v0.iter().chain(&all_v2).copied().collect();
+    let list_of = |name: &str| -> Option<(&'static str, String)> {
+        match name {
+            "none" => None,
+            "negv1" => Some(("-negative_gilist", gis(&all_v1))),
+            "negv1first" => Some(("-negative_gilist", gis(&[5]))),
+            "negv0" => Some(("-negative_gilist", gis(&[0]))),
+            "posv0v2" => Some(("-gilist", gis(&v0_v2))),
+            "posv0" => Some(("-gilist", gis(&all_v0))),
+            "negoid2" => Some(("-negative_gilist", gis(&[2]))),
+            other => panic!("unknown list {other}"),
+        }
+    };
+    let setup = |kind: &str| -> PathBuf {
+        let dir = root.join(format!("run_{kind}"));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(base.join("mv3db")).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        fs::write(dir.join("n.nal"), "TITLE n\nDBLIST v0 v1 v2\n").unwrap();
+        for (name, first, last) in [("r_head", 1, 7), ("r_tail", 12, 15), ("r_pre", 1, 5)] {
+            let head = format!("TITLE r\nDBLIST n\nFIRST_OID {first}\nLAST_OID {last}\n");
+            fs::write(dir.join(format!("{name}.nal")), head).unwrap();
+        }
+        fs::write(dir.join("v1.nsq"), b"").unwrap();
+        if kind == "neg" || kind == "negzero" {
+            poke_amb_offset(&dir.join("v0.nin"), 2, false);
+        }
+        if kind == "zero" || kind == "negzero" {
+            let mut nin = fs::read(dir.join("v1.nin")).unwrap();
+            let (_, _, seq, _) = nin_v4_layout(&nin);
+            nin[seq..seq + 4].copy_from_slice(&0u32.to_be_bytes());
+            fs::write(dir.join("v1.nin"), nin).unwrap();
+        }
+        dir
+    };
+    let dirs: Vec<(String, PathBuf)> = ["empty", "neg", "zero", "negzero"]
+        .iter()
+        .map(|kind| (kind.to_string(), setup(kind)))
+        .collect();
+    let table = fs::read_to_string(base.join("mv3e_rows.tsv")).unwrap();
+    let (mut refused, mut completed) = (0, 0);
+    for line in table.lines().skip(1) {
+        let cell: Vec<&str> = line.split('\t').collect();
+        let label = cell[0];
+        let ncbi_rc: i32 = cell[1].parse().unwrap();
+        let rest = label.strip_prefix("mv3e_").unwrap();
+        let (kind, rest) = rest.split_once('_').unwrap();
+        let (rest, threads) = rest.rsplit_once("_t").unwrap();
+        let (db, list) = ["r_head_", "r_tail_", "r_pre_", "n_"]
+            .iter()
+            .find_map(|prefix| {
+                rest.strip_prefix(prefix)
+                    .map(|l| (prefix.trim_end_matches('_'), l))
+            })
+            .unwrap();
+        let dir = &dirs.iter().find(|(k, _)| k == kind).unwrap().1;
+        let mut args = vec![
+            "-query",
+            &query,
+            "-db",
+            db,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            threads,
+        ];
+        let list_path = dir.join(format!("{list}.txt"));
+        if let Some((flag, content)) = list_of(list) {
+            fs::write(&list_path, content).unwrap();
+            args.extend([flag, list_path.to_str().unwrap()]);
+        }
+        let got = run_losat_sub(&root, dir, "blastn", &args);
+        let file = |name: &str| {
+            if name == "-" {
+                Vec::new()
+            } else {
+                fs::read(base.join(name)).unwrap()
+            }
+        };
+        assert_tail_row(label, &got, (ncbi_rc, &file(cell[2]), &file(cell[3])));
+        if ncbi_rc == -11 {
+            refused += 1;
+        } else {
+            completed += 1;
+        }
+    }
+    assert!(
+        refused >= 20 && completed >= 80,
+        "{refused} refused, {completed} completed"
+    );
+    let _ = fs::remove_dir_all(&root);
+}

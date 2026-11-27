@@ -177,8 +177,7 @@ impl SeqDb {
         }
         // The walk needs the lengths of the OIDs from the volume's first chunk on: only a crash
         // past the range's end can change the outcome.
-        let Some(ScanProblem::Crash(_)) = self.first_scan_problem_from(at, end + 1 - start)?
-        else {
+        let Some(ScanProblem::Crash(_)) = self.first_scan_problem_from(at, end + 1 - start)? else {
             return Ok(());
         };
         let first_file = self.largest_file_before_chunks(begin, at)?;
@@ -192,5 +191,99 @@ impl SeqDb {
             range_end: end,
         };
         last_chunk_reach(&walk, |oid| volume.x_scan_length_i32(oid, start + oid)).map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{last_chunk_reach, mt_chunk_budget, ChunkWalk};
+
+    /// The lengths of the 30 OIDs of the volume after the first (3 OIDs) in the cases below.
+    fn lens() -> Vec<i32> {
+        (0..30).map(|i| 10 + (i * 7) % 13).collect()
+    }
+
+    /// `last_chunk_reach` on the volume after a 3-OID volume, as a database-wide OID.
+    fn reach(range_end: u32, threads: usize, files: (u64, u64), begin: u32) -> u32 {
+        let lens = lens();
+        let walk = ChunkWalk {
+            threads,
+            first_file: files.0,
+            later_file: files.1,
+            start: begin.max(3) - 3,
+            num_oids: 30,
+            volume_start: 3,
+            range_end,
+        };
+        3 + last_chunk_reach(&walk, |oid| Ok::<_, ()>(lens[oid as usize])).unwrap()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+    /// The highest OID read, with the cases of the probes of line RG D2 (tail): the expected
+    /// numbers are those of NCBI's loop, which compares the volume-relative OID with the range's
+    /// end (the model in the probes' `sim.py` agreed with NCBI BLAST+ 2.17.0 on 150 databases).
+    #[test]
+    fn chunks_read_past_the_range_end_in_a_volume_after_the_first() {
+        // A budget of 251 bases takes about 14 of the OIDs of 10..22 bases, but the volume-relative
+        // OID stops each chunk at 5 (end 6): the OID of rank 5 is the last read, database OID 8.
+        assert_eq!(reach(6, 2, (2000, 2000), 0), 8);
+        assert_eq!(reach(20, 2, (2000, 2000), 0), 22);
+        assert_eq!(reach(20, 4, (2000, 2000), 0), 22);
+        assert_eq!(reach(20, 8, (2000, 2000), 0), 21);
+        // The volume's sequence file counts from the second chunk on: 3000 bytes raise the
+        // budget of the chunks after the first.
+        assert_eq!(reach(12, 2, (500, 3000), 0), 14);
+        assert_eq!(reach(12, 2, (500, 500), 0), 13);
+        // Chunks too small to take a second OID read the OID after the first one only.
+        assert_eq!(reach(8, 2, (160, 160), 0), 8);
+        assert_eq!(reach(25, 2, (60, 60), 0), 25);
+        // A scan that starts inside the volume (range begin 5).
+        assert_eq!(reach(8, 2, (300, 300), 5), 9);
+    }
+
+    #[test]
+    fn a_negative_length_ends_the_reads_and_a_crash_is_the_error() {
+        let lens = lens();
+        let walk = ChunkWalk {
+            threads: 2,
+            first_file: 2000,
+            later_file: 2000,
+            start: 0,
+            num_oids: 30,
+            volume_start: 3,
+            range_end: 20,
+        };
+        // OID 4 of the volume is negative: nothing after it is read.
+        let at = last_chunk_reach(&walk, |oid| {
+            Ok::<_, ()>(if oid == 4 { -1 } else { lens[oid as usize] })
+        });
+        assert_eq!(at, Ok(4));
+        // A read that crashes is reached by the chunk (range end 20, reach 22: volume OID 19).
+        let at = last_chunk_reach(&walk, |oid| {
+            if oid == 19 {
+                Err(oid)
+            } else {
+                Ok(lens[oid as usize])
+            }
+        });
+        assert_eq!(at, Err(19));
+        // And one past the reach is not.
+        let at = last_chunk_reach(&walk, |oid| {
+            if oid == 20 {
+                Err(oid)
+            } else {
+                Ok(lens[oid as usize])
+            }
+        });
+        assert_eq!(at, Ok(19));
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
+    #[test]
+    fn the_budget_is_the_slice_over_four_times_the_threads_plus_one() {
+        assert_eq!(mt_chunk_budget(2, 4000), 501);
+        assert_eq!(mt_chunk_budget(8, 163), 6);
+        assert_eq!(mt_chunk_budget(4, 0), 1);
+        assert_eq!(mt_chunk_budget(4, u64::MAX), (1 << 30) / 16 + 1);
     }
 }

@@ -194,8 +194,7 @@ impl OidFilter {
         self
     }
 
-    /// The iteration range `(begin, end)` (of `SeqDb::included_length`).
-    #[cfg(any(test, feature = "parallel"))]
+    /// The iteration range `(begin, end)` (NCBI's `m_RestrictBegin..m_RestrictEnd`).
     pub(crate) fn range(&self) -> (u32, u32) {
         (self.begin, self.end)
     }
@@ -2498,22 +2497,16 @@ impl SeqDb {
         for oid in filter.walk(true).oids(filter) {
             let at = self.locate_oid(oid)?;
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1557-1610
-            // Protein lengths are signed 32-bit `int`s sign-extended into `Uint8` `base_count`, and
-            // `max_count` starts at `0`, so a protein of `>= 2^31` residues wraps `total` and does
-            // not raise `longest`. Nucleotide lengths stay widened.
-            match self.seqtype {
-                SeqType::Protein => {
-                    let length = self.volumes[at.volume].protein_length_i32(at.vol_oid)?;
-                    total = total.wrapping_add(i64::from(length) as u64);
-                    if length > 0 {
-                        longest = longest.max(length as u32);
-                    }
-                }
-                SeqType::Nucleotide => {
-                    let length = self.nucleotide_length_at(at)? as u32;
-                    total += u64::from(length);
-                    longest = longest.max(length);
-                }
+            // Both protein (`GetSeqLengthProt`) and nucleotide (`GetSeqLengthExact`) lengths are
+            // signed 32-bit `int`s sign-extended into `Uint8` `base_count`, and `max_count` starts
+            // at `0`, so negative lengths wrap `total` and do not raise `longest`.
+            let length = match self.seqtype {
+                SeqType::Protein => self.volumes[at.volume].protein_length_i32(at.vol_oid)?,
+                SeqType::Nucleotide => self.nucleotide_length_i32_at(at)?,
+            };
+            total = total.wrapping_add(i64::from(length) as u64);
+            if length > 0 {
+                longest = longest.max(length as u32);
             }
         }
         Ok((total, longest))

@@ -326,9 +326,11 @@ fn a_damaged_sequence_of_its_own_block_fails_or_reports_the_same_at_every_thread
         ),
         ("remainder", remainder, None),
         (
+            // Dropping ~12 bytes stays inside the last 4 KiB page, so NCBI reads zero-filled
+            // trailing ambiguity words and completes without error.
             "cut in the ambiguity data",
             original[..ambiguity + 8].to_vec(),
-            Some("passes the end of the file"),
+            None,
         ),
         (
             "cut in the 2-bit data",

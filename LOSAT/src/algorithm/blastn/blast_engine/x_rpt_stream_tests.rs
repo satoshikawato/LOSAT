@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::local_blast::FormatOutput;
+use crate::api::local_blast::{FormatOutput, OutputSink};
 use crate::blastinput::seq_range::RecordPlacement;
 
 // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from
@@ -102,7 +102,6 @@ fn checked_as(
         .map(|index| record(index, b"q", 1000))
         .collect();
     let query_input = QueryInput::whole(&query_records);
-    let lengths: Vec<usize> = query_records.iter().map(|q| q.sequence.len()).collect();
     let prepared = super::super::PreparedSubjects {
         records: subjects,
         stores: None,
@@ -127,15 +126,14 @@ fn checked_as(
             records: None,
         },
         &query_input,
-        &lengths,
         batching,
     )
 }
 
 // EXPERIMENT (LOSAT_X_RPTSTREAM): where the switch acts, and why not elsewhere: one format of
 // the command line's kind only; with one batch no refusal is checked (and nothing is made
-// ahead); with more, the refusals of the options and the query lengths that could come after
-// the first batch are, and a subject set's refused ids are left to the batches' reports.
+// ahead); with more, a subject set's refused ids are left to the batches' reports, and the
+// refusals of the options and the query lengths come after the reports of the batches before.
 #[test]
 fn the_switch_acts_where_the_outputs_and_options_allow() {
     use crate::algorithm::blastn::query_split::SplitSizes;
@@ -209,8 +207,8 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
     let ready = checked(true, &[], &refused, 10, 4000, plain, &mut outputs).expect("acts");
     assert!(!ready.one_batch);
     assert!(ready.cache.is_some_and(|cache| cache.ids.is_none()));
-    // Several batches: the refusals of the options and the query lengths that could come
-    // after the first batch.
+    // Several batches: scoring options without Karlin-Altschul values stream (their error comes
+    // after the reports of the batches before in both paths, `after_batch_reports`).
     let scoring = [
         "-task",
         "blastn",
@@ -223,10 +221,8 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         "-gapextend",
         "1",
     ];
-    assert_eq!(
-        checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
-        Some(Off::Scoring)
-    );
+    let ready = checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).expect("acts");
+    assert!(!ready.one_batch);
     // A `-dbsize` whose product could overflow 64-bit search space still streams: search space
     // overflow fails the batch after earlier reports (`setup_failure` -> `ErrorAfterBatchReports`)
     // in both stream on and stream off paths.

@@ -7,7 +7,7 @@
 import { computed, ref, useId } from 'vue';
 import type { SequenceKind } from 'losat/domain';
 import type { DatabasePickDraft } from '../application/draft';
-import { databaseTaxonomy, matchingDatabases, noMatchingDatabaseMessage } from '../domain/blast-db';
+import { chooseAgainMessage, databaseTaxonomy, defaultDatabase, matchingDatabases, noMatchingDatabaseMessage, rememberedPickKind } from '../domain/blast-db';
 import { formatBytes } from './format';
 import LosatLoader from './LosatLoader.vue';
 
@@ -34,7 +34,7 @@ const filesInput = ref<HTMLInputElement | null>(null);
 
 const discovery = computed(() => props.pick.discovery);
 const matches = computed(() => matchingDatabases(discovery.value, props.moleculeKind));
-const selected = computed(() => matches.value.find((db) => db.name === props.pick.selected) ?? matches.value[0]);
+const selected = computed(() => matches.value.find((db) => db.name === props.pick.selected) ?? defaultDatabase(matches.value));
 const mismatch = computed(() =>
   discovery.value !== undefined && !props.pick.scanning && matches.value.length === 0
     ? noMatchingDatabaseMessage(discovery.value, props.moleculeKind, props.contextLabel)
@@ -114,7 +114,7 @@ function optionText(db: (typeof matches.value)[number]): string {
     </p>
 
     <p v-else-if="discovery === undefined && pick.remembered !== undefined" class="note db-reload" role="status" :data-testid="`${testIdPrefix}-reload`">
-      Previous database: <code>{{ pick.remembered.name }}</code>. Choose the folder again.
+      Previous database: <code>{{ pick.remembered.name }}</code>. {{ chooseAgainMessage(rememberedPickKind(pick.remembered)) }}
     </p>
 
     <template v-else-if="discovery !== undefined">

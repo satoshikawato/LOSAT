@@ -147,9 +147,11 @@ pub fn try_compute_eff_lengths_tblastx(
 /// CRITICAL: Uses GAPPED params (kbp_gap/kbp_gap_std).
 /// CRITICAL: Uses ceil() rounding, NOT trunc.
 ///
-/// NCBI's guard (`Lambda < 0. || K < 0. || H < 0.0`: `BLAST_SCORE_MIN`, c++/src/algo/blast/core/blast_stat.c:4054-4057) is
-/// not here: the callers pass valid blocks (`pssm_search::evalue::EvalueStats::hit_cutoff`, which
-/// may get a profile's block, has it).
+/// `BlastKarlinEtoS_simple`, with its check of the block: a negative Lambda, K or H gives
+/// `BLAST_SCORE_MIN`, below the cutoff of 1 that `BLAST_Cutoffs` starts from, so the cutoff stays 1
+/// (blast_stat.c:4126-4129). Such a block comes from a PSSM's file (`-in_pssm` of TBLASTN and
+/// PSI-BLAST) or from the failed Karlin calculation of a PSI-BLAST round (the hit-saving and the
+/// sum statistics' cutoffs of `pssm_search` and `sum_stats_hit_cutoff`); the other blocks are valid.
 ///
 /// # Arguments
 /// * `evalue` - Expected value threshold
@@ -163,6 +165,10 @@ pub fn cutoff_score_from_evalue(
     eff_searchsp: i64,
     karlin_params: &KarlinParams, // Named generically - can be gapped or ungapped depending on program
 ) -> i32 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4051-4057
+    if karlin_params.lambda < 0.0 || karlin_params.k < 0.0 || karlin_params.h < 0.0 {
+        return crate::core::blast_util::BLAST_SCORE_MIN;
+    }
     // Clamp the E-value below at `kSmallFloat`.
     let e = evalue.max(K_SMALL_FLOAT);
 

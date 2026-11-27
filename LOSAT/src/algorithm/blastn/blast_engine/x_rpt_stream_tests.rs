@@ -102,7 +102,6 @@ fn checked_as(
         .map(|index| record(index, b"q", 1000))
         .collect();
     let query_input = QueryInput::whole(&query_records);
-    let lengths: Vec<usize> = query_records.iter().map(|q| q.sequence.len()).collect();
     let prepared = super::super::PreparedSubjects {
         records: subjects,
         stores: None,
@@ -127,7 +126,6 @@ fn checked_as(
             records: None,
         },
         &query_input,
-        &lengths,
         batching,
     )
 }

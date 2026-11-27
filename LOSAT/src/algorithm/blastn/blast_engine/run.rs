@@ -9001,7 +9001,6 @@ fn run_in_pool(
             .into());
         }
         warnings[start].append(&batch_title_warnings);
-        check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
         // them (`query_split::restrict_masks_with_letter_before`); WindowMasker replaces the
@@ -9031,6 +9030,12 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err($error);
             }};
+        }
+        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in the
+        // batch whose concatenated query is too long, after the reports of the batches before (in
+        // both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
+        if let Err(error) = check_batch_window(&args, batch_records.batch_queries().records()) {
+            fail_batch!(error);
         }
         // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
         // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,

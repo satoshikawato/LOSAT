@@ -345,6 +345,29 @@ pub trait StructuredXml {
         anyhow::bail!("the document writes the report of every query")
     }
 
+    /// The arrival of a query's result whose report the document holds back (`holds_back`) for a
+    /// later report call of the run to write, and that LOSAT refuses (`refusal`): NCBI makes that
+    /// report, and crashes on it, only where it writes it, so the refusal is held in its place
+    /// (`Xml2Document::hold_refused`) and the call that writes it returns it first
+    /// (`take_held_refusal`). `out` gets what the document writes at the arrival (the report held
+    /// before it, unless the result joins it, `joins_held`). A document that writes every report
+    /// at once refuses at once.
+    fn hold_refused(
+        &mut self,
+        out: &mut Vec<u8>,
+        joins_held: bool,
+        refusal: anyhow::Error,
+    ) -> Result<()> {
+        let _ = (out, joins_held);
+        Err(refusal)
+    }
+
+    /// The refusal of the report that the document holds back (`hold_refused`), taken by the call
+    /// that writes that report; `None` where it holds no refused report.
+    fn take_held_refusal(&mut self) -> Option<anyhow::Error> {
+        None
+    }
+
     /// What NCBI posted while the calls since the last `take_posts` wrote to their `out`
     /// (`DocumentPost`, at offsets of that buffer), in order, with the cut of the last query's
     /// loads and the exception that ends the run (`DocumentPosts`); the caller writes each post

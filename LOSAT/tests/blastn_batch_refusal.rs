@@ -67,7 +67,7 @@ const STOPS: [(&str, &str, &str, &str, bool); 3] = [
     ),
 ];
 
-/// The formats of the rows: the pairwise report, BLAST XML (never streamed), the tabular reports
+/// The formats of the rows: the pairwise report, BLAST XML, the tabular reports
 /// and the archive (one Blast4 archive per batch).
 const FORMATS: [&str; 5] = ["0", "5", "6", "7", "11"];
 

@@ -1,7 +1,8 @@
 //! BLAST XML (outfmt 5) of BLASTP and BLASTN: the one title that NCBI BLAST+ 2.17.0 cannot make (a
 //! protein or nucleotide title of punctuation alone, such as `, ,`, on which `x_CleanAndCompress`
 //! reads past the end of the string: NCBI crashes) is refused (PD-LOSAT-NCBI-DEFECTS) and the refusal
-//! comes before the first byte, also when only a later batch of queries has the title.
+//! comes before the first byte (for BLASTN, of the query batch that has the title: after the
+//! output of the batches before, where a later batch has it).
 //!
 //! The titles NCBI does write (a byte >= 0x80, a control byte, a title whose encoding NCBI cannot
 //! guess; the `-db` name) are not refused: their documents, cut where NCBI's XML stream fails, and
@@ -102,13 +103,18 @@ fn many_queries(path: &Path, bad_title: Option<(usize, &[u8])>, hit: &[u8]) {
     fs::write(path, text).expect("write queries");
 }
 
-/// With more than one report batch (NCBI's `BATCH_SIZE` here, the default batch size of 300
-/// queries of 400 letters in the other) a refusal that only a later batch finds must still come
-/// before the first byte: BLAST XML is not streamed batch by batch (`x_rpt_stream`, `Off::Xml`).
-/// Standard output and the `-out` file stay empty. (A title NCBI writes does not make a later
-/// batch refuse: its document is the one of `db.xb.*`.)
+/// With more than one query batch (NCBI's `BATCH_SIZE` of 2,000 letters here, the default batch
+/// sizes of BLASTN's application for 300 queries of 400 letters in the other) a refusal that only a
+/// later batch finds comes after the output of the batches before, as NCBI's formatter writes each
+/// batch's reports before it reads the next (the Owner's decision of 2026-11-16 on line RG's Q-X2c,
+/// "the results of the query batches before are written"; remaining-gaps DECISIONS D-SO-2):
+/// standard output (or the `-out` file) is the start of the document that the same search without
+/// the refused title writes, to the end of an `Iteration` before the refused query's batch, without
+/// the document's end. With the reports written after the loop (`LOSAT_X_RPTSTREAM=0`) the refusal
+/// comes before the first byte. (A title NCBI writes does not make a later batch refuse: its
+/// document is the one of `db.xb.*`.)
 #[test]
-fn a_refusal_in_a_later_batch_writes_nothing() {
+fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
     let dir = temp_dir("batches");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     let hit: Vec<u8> = {
@@ -120,45 +126,84 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
             })
             .collect()
     };
+    let out = dir.join("o.xml");
+    let args_of = |with_out: bool| {
+        let mut args = vec![
+            "blastn",
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-task",
+            "blastn",
+            "-outfmt",
+            "5",
+        ];
+        if with_out {
+            args.extend(["-out", out.to_str().unwrap()]);
+        }
+        args.into_iter()
+            .map(std::ffi::OsStr::new)
+            .collect::<Vec<_>>()
+    };
     for batch_size in [Some("2000"), None] {
-        let env: Vec<(&str, &str)> = batch_size
-            .map(|size| ("BATCH_SIZE", size))
-            .into_iter()
-            .collect();
-        for what in ["a query title", "a subject title"] {
-            // a query title: the 291st query; a subject title: the subject of the last query's
-            // hit (the only query with one)
-            if what == "a query title" {
-                many_queries(&query, Some((290, PUNCTUATION)), &hit);
-                fasta(&subject, &[(b"s1 subject", &hit)]);
-            } else {
-                many_queries(&query, None, &hit);
-                fasta(&subject, &[(PUNCTUATION, &hit)]);
+        for streamed in [true, false] {
+            let mut env: Vec<(&str, &str)> = batch_size
+                .map(|size| ("BATCH_SIZE", size))
+                .into_iter()
+                .collect();
+            if !streamed {
+                env.push(("LOSAT_X_RPTSTREAM", "0"));
             }
-            let out = dir.join("o.xml");
-            fs::remove_file(&out).ok();
-            for with_out in [false, true] {
-                let mut args = vec![
-                    "blastn",
-                    "-query",
-                    query.to_str().unwrap(),
-                    "-subject",
-                    subject.to_str().unwrap(),
-                    "-task",
-                    "blastn",
-                    "-outfmt",
-                    "5",
-                ];
-                if with_out {
-                    args.extend(["-out", out.to_str().unwrap()]);
+            for what in ["a query title", "a subject title"] {
+                // The search without the refused title: its whole document.
+                many_queries(&query, None, &hit);
+                fasta(&subject, &[(b"s1 subject", &hit)]);
+                let whole = run_with(&args_of(false), &env);
+                assert_eq!(whole.status.code(), Some(0), "{what}");
+                // a query title: the 291st query; a subject title: the subject of the last
+                // query's hit (the only query with one)
+                if what == "a query title" {
+                    many_queries(&query, Some((290, PUNCTUATION)), &hit);
+                } else {
+                    fasta(&subject, &[(PUNCTUATION, &hit)]);
                 }
-                let args: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsStr::new).collect();
-                let output = run_with(&args, &env);
-                refused(&output, "BLASTN", what);
-                if with_out {
+                for with_out in [false, true] {
+                    let what = format!(
+                        "{what}, BATCH_SIZE {batch_size:?}, streamed {streamed}, -out {with_out}"
+                    );
+                    fs::remove_file(&out).ok();
+                    let output = run_with(&args_of(with_out), &env);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
+                    let program = "BLASTN";
+                    let title = what.split(',').next().unwrap();
                     assert!(
-                        !out.exists() || fs::read(&out).unwrap().is_empty(),
-                        "{what}: the -out file holds part of a document"
+                        stderr.contains(&format!(
+                            "{title} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's {program}"
+                        )),
+                        "{what}: {stderr}"
+                    );
+                    let written = if with_out {
+                        assert!(output.stdout.is_empty(), "{what}: output beside -out");
+                        fs::read(&out).unwrap_or_default()
+                    } else {
+                        output.stdout.clone()
+                    };
+                    if !streamed {
+                        assert!(written.is_empty(), "{what}: part of a document is written");
+                        continue;
+                    }
+                    let iterations = written
+                        .windows(b"</Iteration>".len())
+                        .filter(|window| *window == b"</Iteration>")
+                        .count();
+                    assert!(
+                        whole.stdout.starts_with(&written)
+                            && written.ends_with(b"</Iteration>")
+                            && (1..=290).contains(&iterations),
+                        "{what}: {iterations} iterations of\n{}",
+                        String::from_utf8_lossy(&written)
                     );
                 }
             }

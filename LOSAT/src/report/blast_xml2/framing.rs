@@ -20,6 +20,13 @@
 //! A result whose query's Seq-id matches that of the held report's first result joins the held
 //! report (`XmlQuery::joins_held`): NCBI accumulates it, and writes the results of one Seq-id as
 //! one report whose `bl2seq` list has a `Search` for each (`Xml2Writer`'s join, `HeldSearches`).
+//!
+//! A held report that LOSAT refuses (a title that NCBI's definition line generator reads past the
+//! end of, `blast_xml::names::Refusal`), where a later call of the run writes it (BLASTN's report
+//! stream: the next query batch, or the epilog), is not made: its refusal is held in its place
+//! (`Xml2Document::hold_refused`) and returned where the document would write it, since NCBI makes
+//! that report, and crashes on it, only when it writes it, and a run that a later batch stops never
+//! makes it (it is dropped with the report).
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -262,6 +269,8 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     pending_failure: Option<crate::ncbi_exception::NcbiException>,
     /// The `Search`es of the held report (`HeldSearches`).
     held: HeldSearches,
+    /// LOSAT's refusal of the held report (`hold_refused`), returned where it would be written.
+    held_refusal: Option<anyhow::Error>,
     files: F,
     /// The posts of the reports written to the output buffers since `take_posts`, and the
     /// exception of a 14 side file that ends the run after them.
@@ -293,8 +302,10 @@ impl Xml2Document<RunSideFiles> {
 }
 
 /// The framing state that one report call hands to the next when a run's reports are written by
-/// several calls (the BLASTP block search, `x_query_blocks.rs`): the count of reports written, whether
-/// the start of the document has been written, and the held report of a `-subject` run.
+/// several calls (the BLASTP block search, `x_query_blocks.rs`; BLASTN's report stream,
+/// `blastn::blast_engine::x_rpt_stream`): the count of reports written, whether the start of the
+/// document has been written, and the held report of a `-subject` run (with its refusal,
+/// `Xml2Document::hold_refused`).
 #[derive(Default)]
 pub struct Xml2Carry {
     written: u32,
@@ -304,6 +315,7 @@ pub struct Xml2Carry {
     has_pending: bool,
     pending_failure: Option<crate::ncbi_exception::NcbiException>,
     held: HeldSearches,
+    held_refusal: Option<anyhow::Error>,
 }
 
 impl<F: SideFiles> Xml2Document<F> {
@@ -318,6 +330,7 @@ impl<F: SideFiles> Xml2Document<F> {
             has_pending: std::mem::take(&mut self.has_pending),
             pending_failure: self.pending_failure.take(),
             held: std::mem::take(&mut self.held),
+            held_refusal: self.held_refusal.take(),
         }
     }
 
@@ -332,6 +345,7 @@ impl<F: SideFiles> Xml2Document<F> {
         self.has_pending = carry.has_pending;
         self.pending_failure = carry.pending_failure;
         self.held = carry.held;
+        self.held_refusal = carry.held_refusal;
     }
 
     /// The posts of the reports written since the last call, at offsets of the output buffers of
@@ -352,6 +366,7 @@ impl<F: SideFiles> Xml2Document<F> {
             has_pending: false,
             pending_failure: None,
             held: HeldSearches::default(),
+            held_refusal: None,
             files,
             posts: DocumentPosts::default(),
         }
@@ -395,6 +410,8 @@ impl<F: SideFiles> Xml2Document<F> {
         out: &mut Vec<u8>,
         make: impl FnOnce(usize, &mut Vec<u8>) -> Result<MadeReport>,
     ) -> Result<()> {
+        // NCBI makes the held report when this result arrives, before it accumulates this one.
+        self.release_held()?;
         self.prolog(out);
         // The report written now: this one, or for a `-subject` run the one held before it.
         if !self.delayed || self.has_pending {
@@ -472,6 +489,61 @@ impl<F: SideFiles> Xml2Document<F> {
         self.delayed
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
+    /// The arrival of a result whose report LOSAT refuses (`refusal`) where the document holds that
+    /// report back and a later call of the run writes it (BLASTN's report stream): NCBI makes the
+    /// accumulated report, and crashes on it, only where it writes it (the next query's result, in
+    /// a later batch too, or the epilog), so the refusal is held in the report's place and returned
+    /// there (`release_held`, `take_held_refusal`); a run that stops before never makes it. As at
+    /// a report's arrival, `out` gets the report held before it (`unwritten`), unless the result
+    /// joins it (`joins_held`): then the held report is refused (its first refusal kept).
+    pub fn hold_refused(
+        &mut self,
+        out: &mut Vec<u8>,
+        joins_held: bool,
+        refusal: anyhow::Error,
+    ) -> Result<()> {
+        debug_assert!(
+            self.delayed,
+            "only a held report is refused where it is written"
+        );
+        if joins_held && self.has_pending {
+            self.held_refusal.get_or_insert(refusal);
+            return Ok(());
+        }
+        self.unwritten(out, false)?;
+        self.has_pending = true;
+        self.pending.clear();
+        self.pending_made = MadeReport::default();
+        self.pending_failure = None;
+        self.held = HeldSearches::default();
+        self.held_refusal = Some(refusal);
+        Ok(())
+    }
+
+    /// The refusal of the held report (`hold_refused`), for the call that writes that report,
+    /// which returns it before its first byte; `None` where no held report is refused.
+    pub fn take_held_refusal(&mut self) -> Option<anyhow::Error> {
+        if self.has_pending {
+            self.held_refusal.take()
+        } else {
+            None
+        }
+    }
+
+    /// Whether the held report is refused (`hold_refused`): a result that joins it adds nothing.
+    pub fn held_refused(&self) -> bool {
+        self.has_pending && self.held_refusal.is_some()
+    }
+
+    /// Where the document writes the held report: its refusal (`hold_refused`), if it has one.
+    fn release_held(&mut self) -> Result<()> {
+        match self.held_refusal.take() {
+            Some(refusal) if self.has_pending => Err(refusal),
+            _ => Ok(()),
+        }
+    }
+
     /// The `Search`es of the report that the next report call holds (`HeldSearches`), which its
     /// writer sets for the report it makes.
     pub(super) fn held_searches_mut(&mut self) -> &mut HeldSearches {
@@ -497,9 +569,14 @@ impl<F: SideFiles> Xml2Document<F> {
     pub fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {
         debug_assert!(self.delayed, "only a held report is never written");
         self.prolog(out);
-        if !std::mem::replace(&mut self.has_pending, false) || joins_held {
+        if !self.has_pending || joins_held {
+            // Never written, so never made: nor is its refusal.
+            self.has_pending = false;
+            self.held_refusal = None;
             return Ok(());
         }
+        self.release_held()?;
+        self.has_pending = false;
         let pending = std::mem::take(&mut self.pending);
         let made = std::mem::take(&mut self.pending_made);
         self.separator(out);
@@ -570,7 +647,9 @@ impl<F: SideFiles> Xml2Document<F> {
         // The held report that fails: the end of a stream form follows its message
         // (`CaughtException`, returned after the end); a file form stops here.
         let mut caught = None;
-        if std::mem::replace(&mut self.has_pending, false) {
+        if self.has_pending {
+            self.release_held()?;
+            self.has_pending = false;
             let pending = std::mem::take(&mut self.pending);
             let made = std::mem::take(&mut self.pending_made);
             self.separator(out);

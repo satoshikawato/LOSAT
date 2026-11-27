@@ -611,6 +611,74 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
     }
 }
 
+#[test]
+fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_not() {
+    // BLASTN's report stream (`x_rpt_stream`): the held report of a `-subject` run is made by the
+    // call that writes it (the next batch's, or the epilog), so its refusal waits there.
+    let refusal = |text: &'static str| anyhow::anyhow!(text);
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        // `{2}` arrives refused: the report held before it is written as at an arrival.
+        let mut plain = Xml2Document::new(kind, true);
+        let mut expected = Vec::new();
+        put(&mut plain, b"{1}\n", &mut expected).unwrap();
+        put(&mut plain, b"{2}\n", &mut expected).unwrap();
+        let mut doc = Xml2Document::new(kind, true);
+        let mut out = Vec::new();
+        put(&mut doc, b"{1}\n", &mut out).unwrap();
+        doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+        assert_eq!(out, expected, "{kind:?}");
+        assert!(doc.held_refused(), "{kind:?}");
+        // The refusal moves with the held report to the next call, and a result that joins the
+        // refused report adds nothing (the first refusal stays).
+        let mut next = Xml2Document::new(kind, true);
+        next.resume(doc.take_carry());
+        assert!(next.held_refused() && !doc.held_refused(), "{kind:?}");
+        next.hold_refused(&mut out, true, refusal("second"))
+            .unwrap();
+        assert_eq!(out, expected, "{kind:?}");
+        // The next report's arrival returns it before any byte.
+        let error = put(&mut next, b"{3}\n", &mut out).unwrap_err();
+        assert_eq!(error.to_string(), "first", "{kind:?}");
+        assert_eq!(out, expected, "{kind:?}");
+        // So does the epilog, and so does a stop that writes the held report.
+        for ends in ["epilog", "unwritten"] {
+            let mut doc = Xml2Document::new(kind, true);
+            let mut out = Vec::new();
+            put(&mut doc, b"{1}\n", &mut out).unwrap();
+            doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+            let written = out.clone();
+            let error = match ends {
+                "epilog" => doc.epilog(&mut out),
+                _ => doc.unwritten(&mut out, false),
+            }
+            .unwrap_err();
+            assert_eq!(error.to_string(), "first", "{kind:?} {ends}");
+            assert_eq!(out, written, "{kind:?} {ends}");
+        }
+        // The call that writes it takes the refusal first (`take_held_refusal`), once.
+        let mut doc = Xml2Document::new(kind, true);
+        let mut out = Vec::new();
+        doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        assert_eq!(
+            doc.take_held_refusal().map(|error| error.to_string()),
+            Some("first".to_string())
+        );
+        assert!(doc.take_held_refusal().is_none() && !doc.held_refused());
+        // Where the held report is never written (a last result that joins it, at a stop), its
+        // refusal is dropped with it, and a later report is written.
+        let mut doc = Xml2Document::new(kind, true);
+        let mut out = Vec::new();
+        put(&mut doc, b"{1}\n", &mut out).unwrap();
+        doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+        doc.unwritten(&mut out, true).unwrap();
+        assert!(!doc.held_refused() && doc.take_held_refusal().is_none());
+        assert_eq!(out, expected, "{kind:?}");
+        // A document without a held report has no refusal to take.
+        assert!(Xml2Document::new(kind, true).take_held_refusal().is_none());
+    }
+}
+
 fn one_hsp(hits_title: &'static [u8], target: Xml2Target, taxid: i32, kind: Xml2Kind) -> String {
     one_hsp_named(
         hits_title,

@@ -821,6 +821,11 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         let (params, scratch) = (&self.params, &mut self.scratch);
         let kind = self.document.kind();
         if query.joins_held {
+            // The held report is refused (`Xml2Document::hold_refused`): never written, so a result
+            // that joins it adds nothing.
+            if self.document.held_refused() {
+                return Ok(());
+            }
             if let Some(held) = self.document.held_report() {
                 let report = &mut self.report;
                 return join_search(
@@ -944,5 +949,18 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
 
     fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {
         self.document.unwritten(out, joins_held)
+    }
+
+    fn hold_refused(
+        &mut self,
+        out: &mut Vec<u8>,
+        joins_held: bool,
+        refusal: anyhow::Error,
+    ) -> Result<()> {
+        self.document.hold_refused(out, joins_held, refusal)
+    }
+
+    fn take_held_refusal(&mut self) -> Option<anyhow::Error> {
+        self.document.take_held_refusal()
     }
 }

@@ -5386,8 +5386,14 @@ Scheduling (each value computed by one thread with the original function; order 
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
-  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16);
-  the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`,
+  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`);
+  the reasons `xml` (outfmt 5, 15 and 16, until 2026-11-27: since line RG series D, remaining-gaps DECISIONS
+  D-SO-2, BLAST XML and the XML2 and JSON documents of outfmt 5 and 13 to 16 are written batch by batch as NCBI's
+  formatter writes them, the header or start with the first report, the end and the 13/14 master file in the
+  epilog, the document's state of 13 to 16 handed from call to call (`Xml2Carry`); their refusals of a title NCBI
+  crashes on come after the output of the batches before (the Owner's Q-X2c of 2026-11-16), and the refusal of the
+  held report of a `-subject` XML2 or JSON search comes from the call that writes it, the next batch's or the
+  epilog's, or not at all where an error of NCBI's stops the run first), `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`,
   `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches before
   in both paths since line RG item X-short-bat-2), `scoring` and `ungapped_cutoff` (no Karlin-Altschul
   values, matrix-only scoring with the greedy extension, and `-ungapped` or matrix-only scoring with a
@@ -5510,7 +5516,7 @@ Scheduling (each value computed by one thread with the original function; order 
   part per thread is read (the size mixer's first batches are smaller than a part), and the records after the batch
   wait for the next batches. The switch also does not act (`off=reports`) where `LOSAT_X_RPTSTREAM` keeps the reports
   after the loop for a reason the search shows before the reading (several formats or a file sink, verbose or debug
-  output, BLAST XML: `x_rpt_stream::refused_before_reading`): every record would be kept
+  output: `x_rpt_stream::refused_before_reading`; BLAST XML until 2026-11-27): every record would be kept
   for those reports, so reading twice would only cost time. A file changed between the readings so that a part no longer starts
   at a record start, ends elsewhere or has other lines is LOSAT's error at the batch that needs the part's first
   record. Without it the second reading ran on the loop's thread between the batches while the search's threads

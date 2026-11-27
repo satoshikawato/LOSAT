@@ -392,16 +392,18 @@ fn every_task_format_thread_count_and_report_mode_gives_the_off_bytes() {
 }
 
 /// Where LOSAT_X_RPTSTREAM keeps the reports after the loop for a reason the search shows before
-/// the reading (here BLAST XML, `x_rpt_stream::refused_before_reading`), the records are read once,
-/// before the search (`off=reports`), as with LOSAT_X_RPTSTREAM off: the off bytes, for megablast
-/// and blastn.
+/// the reading (here the debug output, `x_rpt_stream::refused_before_reading`), the records are
+/// read once, before the search (`off=reports`), as with LOSAT_X_RPTSTREAM off: the off bytes, for
+/// megablast and blastn. BLAST XML and the XML2 and JSON documents (outfmt 5, 16 and 15) are
+/// written batch by batch like outfmt 6 (line RG series D, remaining-gaps DECISIONS D-SO-2), so
+/// the switch reads every batch again for them.
 #[test]
 fn reports_after_the_loop_for_a_reason_known_before_the_reading_read_the_records_once() {
     let dir = TempDir::new("xml");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
     for task in ["megablast", "blastn"] {
-        let args = [
+        let mut args = vec![
             "-task",
             task,
             "-query",
@@ -409,15 +411,23 @@ fn reports_after_the_loop_for_a_reason_known_before_the_reading_read_the_records
             "-subject",
             subject.to_str().unwrap(),
             "-outfmt",
-            "5",
+            "6",
         ];
-        let what = format!("{task} outfmt 5");
-        let (off, numbers) = same_two(&what, &args, 4, &[RPTSTREAM], None);
+        let what = format!("{task} debug output");
+        let debug = [RPTSTREAM, ("LOSAT_DEBUG_COORDS", "1")];
+        let (off, numbers) = same_two(&what, &args, 1, &debug, None);
         assert_eq!(off.status, Some(0), "{what}");
         assert!(
             numbers.off == "reports" && numbers.batches == 0 && numbers.read == 0,
             "{what}: {numbers:?}"
         );
+        for outfmt in ["5", "16", "15"] {
+            args[7] = outfmt;
+            let what = format!("{task} outfmt {outfmt}");
+            let (off, numbers) = same_two(&what, &args, 4, &[RPTSTREAM], None);
+            assert_eq!(off.status, Some(0), "{what}");
+            read_batch_by_batch(&what, &numbers);
+        }
     }
 }
 

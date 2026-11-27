@@ -248,23 +248,38 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         &mut outputs
     )
     .is_ok_and(|ready| !ready.one_batch));
-    // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
-    // (20,000 letters) or several.
-    for batch_size in [20_000, 4000] {
-        for xml in [
-            [BlastnOutputFormat::Xml],
-            [BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single16,
-            )],
-            [BlastnOutputFormat::Xml2(
-                crate::report::blast_xml2::Xml2Kind::Single15,
-            )],
-        ] {
-            assert_eq!(
-                checked_as(&xml, true, &[], &good, 10, batch_size, plain, &mut outputs).err(),
-                Some(Off::Xml)
-            );
-        }
+    // BLAST XML, XML2 and JSON (outfmt 5, 13 to 16) are streamed as NCBI writes them, with
+    // several batches (4,000 letters) or one (20,000 letters); they read no tabular id of a
+    // subject set.
+    for xml in [
+        [BlastnOutputFormat::Xml],
+        [BlastnOutputFormat::Xml2(
+            crate::report::blast_xml2::Xml2Kind::Single16,
+        )],
+        [BlastnOutputFormat::Xml2(
+            crate::report::blast_xml2::Xml2Kind::Single15,
+        )],
+        [BlastnOutputFormat::Xml2(
+            crate::report::blast_xml2::Xml2Kind::Files14,
+        )],
+        [BlastnOutputFormat::Xml2(
+            crate::report::blast_xml2::Xml2Kind::Files13,
+        )],
+    ] {
+        let several = checked_as(&xml, true, &[], &good, 10, 4000, plain, &mut outputs);
+        assert!(
+            several.as_ref().is_ok_and(|ready| !ready.one_batch
+                && ready
+                    .cache
+                    .as_ref()
+                    .is_some_and(|cache| cache.ids.is_none())),
+            "{xml:?}"
+        );
+        assert!(
+            checked_as(&xml, true, &[], &good, 10, 20_000, plain, &mut outputs)
+                .is_ok_and(|ready| ready.one_batch),
+            "{xml:?}"
+        );
     }
     // The BLAST archive (outfmt 11) is streamed, with several batches (4,000 letters) or one
     // (20,000 letters).

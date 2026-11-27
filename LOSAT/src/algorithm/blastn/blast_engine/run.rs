@@ -4899,6 +4899,10 @@ struct BlastnReportInputs<'a> {
     /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
     /// follows the reports; an error in a later batch skips it.
     epilog: bool,
+    /// Whether the run stops after this call without the epilog: the reports of the batches
+    /// before a failed batch (`write_before_failed_batch`); a streamed batch's call, which a later
+    /// call follows, does not stop it (`x_rpt_stream::Written::continues`).
+    stops: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
@@ -4917,6 +4921,10 @@ struct BlastnReportInputs<'a> {
     /// EXPERIMENT (LOSAT_X_RPTSTREAM): the report values of a subject set's subjects, made once
     /// for the reports of all batches (`x_rpt_stream::SubjectCache`); `None`: made here.
     subject_cache: Option<&'a x_rpt_stream::SubjectCache>,
+    /// EXPERIMENT (LOSAT_X_RPTSTREAM): the framing state of the XML2 and JSON documents (outfmt 13
+    /// to 16) that the stream's calls hand on (`x_rpt_stream::Written::xml2`); `None`: the call
+    /// writes the whole document.
+    xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
@@ -6874,13 +6882,8 @@ fn search_cli(
     // written batch by batch (LOSAT_X_RPTSTREAM, unless it keeps them after the loop for a reason
     // known before the reading).
     let x_reports_streamed = !args.parse_deflines
-        && x_rpt_stream::refused_before_reading(
-            x_rpt_stream::switch_on(),
-            &args,
-            outputs,
-            &output_formats,
-        )
-        .is_none();
+        && x_rpt_stream::refused_before_reading(x_rpt_stream::switch_on(), &args, outputs)
+            .is_none();
     let mut x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,
@@ -9732,7 +9735,9 @@ fn run_in_pool(
                         context_karlin: &batch_karlin,
                         query_eff_searchsp: &batch_searchsp,
                         batches: &[],
-                        query_scopes: None,
+                        // How the XML family shows each result under `-parse_deflines`, the run's
+                        // scopes numbered from the batch's first query (`Written::queries`).
+                        query_scopes: query_scopes.as_ref(),
                     },
                     false,
                     written,
@@ -10431,6 +10436,7 @@ fn write_reports_untimed(
         database_seen: subjects.seen.numbered_from(written.queries),
         finished_hit_lists: reported.is_some(),
         epilog,
+        stops: !epilog && !written.continues,
         show_gis: args.show_gis,
         html: args.html_links.clone(),
         is_html: args.html,
@@ -10443,6 +10449,7 @@ fn write_reports_untimed(
             }),
         queries_before: written.queries,
         subject_cache: written.subjects,
+        xml2_carry: written.xml2,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
         x_tab_pool: x_pool.and_then(crate::algorithm::blastn::x_tab_par::pool),
         out: args.out.as_deref(),

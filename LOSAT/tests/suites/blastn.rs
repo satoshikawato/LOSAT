@@ -100,5 +100,7 @@ mod blastn_subject_stream;
 mod blastn_tab_par;
 #[path = "../blastn_window_masker.rs"]
 mod blastn_window_masker;
+#[path = "../blastn_xml_stream.rs"]
+mod blastn_xml_stream;
 #[path = "../run_local_blastn.rs"]
 mod run_local_blastn;

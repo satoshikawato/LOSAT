@@ -36,8 +36,18 @@
 //!   outfmt 0 epilog (the database lines and the options, fixed inputs), outfmt 7's last line
 //!   (the number of queries formatted, NCBI's `m_QueriesFormatted`: the last call counts the
 //!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. The
-//!   formats 8, 9 and 12 (OF3) write per query like 6; BLAST XML (5, OF4a) is not argued here
-//!   and is never streamed (`Off::Xml`, below). The tabular reports with a field list or a
+//!   formats 8, 9 and 12 (OF3) write per query like 6. BLAST XML (5) and the XML2 and JSON
+//!   documents (16 and 15 on the output, 14 and 13 in side files) write per query as NCBI's
+//!   formatter writes them (NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-748):
+//!   outfmt 5's header comes with the run's first report (`queries_before` 0) and its iterations
+//!   are numbered over the run (`BlastXmlWriter::new`); the document's state of 13 to 16 (its
+//!   start, the number of its reports, which JSON's separator and the side files' names read, and
+//!   the held report of a `-subject` run, which NCBI makes when the next query's result arrives, in
+//!   the next batch or in the epilog: blast_format.cpp:2362-2403) is handed from call to call
+//!   (`Xml2Carry`, `Stream::xml2`), as the BLASTP block search hands it; the footer, the end and
+//!   the master file come with the epilog call. Under `-parse_deflines` each call shows its
+//!   queries by the run's scopes (`QueryScopes::numbered_from`: which results join the held
+//!   report is the run's, the labels the call's). The tabular reports with a field list or a
 //!   delimiter and outfmt 10 and 20 (`algorithm::blastn::tabular`) write per query like 6 and 7
 //!   (the delimiter and the kind change only how a row is written; `qcovs` and `qcovus` are a
 //!   query's and a subject's; the texts of the rows' lookups of the taxonomy database are a
@@ -85,9 +95,17 @@
 //!   input that LOSAT does not refuse gives the same bytes either way. Outfmt 17 writes its
 //!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
 //!   written there either.
-//!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
-//!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
-//!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
+//!   The XML family has refusals of its own (a `-db` name, query title or id, or a title of a
+//!   subject with a hit that cannot be written, `blast_xml.rs`), made by the report call of the
+//!   batch that holds the query or the subject before its first byte, so they come after the
+//!   reports of the batches before, without the footer, the end or the master file (the Owner's
+//!   decision of 2026-11-16 on line RG's Q-X2c, "the results of the query batches before are
+//!   written"; remaining-gaps DECISIONS D-SO-2). The held report of a `-subject` XML2 or JSON run
+//!   belongs to the call that writes it (NCBI makes it while it formats the next batch): a
+//!   refusal of its query or of a subject of its hits is held with it
+//!   (`Xml2Document::hold_refused`) and comes from that call before its first byte, and where an
+//!   error stops the run first the report and its refusal are dropped, as NCBI never makes the
+//!   report (the off path's `write_before_failed_batch` drops them alike). The refusals of the options and the
 //!   query lengths that a later batch can meet come after the reports of the batches before in
 //!   both paths (`after_batch_reports`, through `context_statistics::setup_failure`): scoring
 //!   options without Karlin-Altschul values and matrix-only scoring with the greedy extension (in
@@ -115,7 +133,7 @@
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`); and BLAST XML. The command line (`-out` file or standard output) and ABI
+//! them); and `-verbose` and the debug output (`x_debug_output`). The command line (`-out` file or standard output) and ABI
 //! v1 are streamed (an ABI caller gets the reports of the batches before a refusal, then its
 //! error).
 //!
@@ -148,12 +166,13 @@
 //! `check`).
 
 use std::ops::Range;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
 
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
+use crate::report::blast_xml2::Xml2Carry;
 use crate::report::sam::SamDocument;
 use crate::utils::dust::MaskedInterval;
 
@@ -182,9 +201,6 @@ pub(super) enum Off {
     Outputs,
     /// `-verbose`, the debug variables, the blastn trace or the thread diagnostics.
     Debug,
-    /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
-    /// the loop (the module doc has the reason).
-    Xml,
 }
 
 impl Off {
@@ -193,7 +209,6 @@ impl Off {
             Off::NotSet => "not_set",
             Off::Outputs => "outputs",
             Off::Debug => "debug",
-            Off::Xml => "xml",
         }
     }
 }
@@ -210,14 +225,19 @@ pub(super) struct SubjectCache {
 }
 
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
-/// queries whose reports were written, the subject values made once, and the SAM document that
-/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`). The default is
-/// the off path's single call.
+/// queries whose reports were written, the subject values made once, the SAM document that
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`), the framing state
+/// of the XML2 and JSON documents that the calls hand on (outfmt 13 to 16: `Xml2Carry`), and
+/// whether a later call follows this one. The default is the off path's single call.
 #[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
     pub(super) sam: Option<&'a mut SamDocument>,
+    pub(super) xml2: Option<&'a Mutex<Xml2Carry>>,
+    /// A later call of the stream writes more of the run's reports (a batch's call): a call
+    /// without the epilog does not end the run (`BlastnReportInputs::stops`).
+    pub(super) continues: bool,
 }
 
 /// What `check` found where the switch acts: the subject values made once (a subject set of a
@@ -235,6 +255,10 @@ pub(super) struct Stream {
     /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
     /// rendered bytes until the last call, or an NCBI error, writes it).
     sam: Option<SamDocument>,
+    /// The framing state of the run's XML2 or JSON document (outfmt 13 to 16), which each call
+    /// takes up from the call before and hands on (`Xml2Carry`: the reports written, the start,
+    /// the held report of a `-subject` run and its refusal).
+    xml2: Option<Mutex<Xml2Carry>>,
     batches: u64,
     queries: usize,
     one_batch: bool,
@@ -280,10 +304,19 @@ impl Stream {
             .find_map(|format| format.sam_spec())
             .filter(|_| off.is_none())
             .map(|spec| sam_document(args, spec));
+        // NCBI's formatter keeps the document's state for the run (`m_XMLFileCount`, the
+        // accumulated results of a `-subject` run, blast_format.cpp:2332-2417): the stream holds it
+        // between the calls.
+        let xml2 = output_formats
+            .iter()
+            .any(|format| format.xml2_kind().is_some())
+            .then(Mutex::default)
+            .filter(|_| off.is_none());
         Stream {
             off,
             cache,
             sam,
+            xml2,
             batches: 0,
             queries: 0,
             one_batch,
@@ -313,6 +346,8 @@ impl Stream {
             queries: self.queries,
             subjects: self.cache.as_ref(),
             sam: self.sam.as_mut(),
+            xml2: self.xml2.as_ref(),
+            continues: !epilog,
         };
         let result = write(outputs, written);
         if !epilog {
@@ -391,7 +426,7 @@ pub(super) fn batch_input(query_input: &QueryInput, searched: Range<usize>) -> Q
 }
 
 /// The reasons of `check` that need neither the query records nor the subjects: the switch off,
-/// the outputs, the verbose and debug output and BLAST XML. Where one
+/// the outputs, and the verbose and debug output. Where one
 /// applies the reports are written after the loop whatever the query file holds, so
 /// LOSAT_X_QSTREAM reads the records before the search (its `off=reports`) instead of reading them
 /// twice to keep them all for those reports. `on` is `switch_on()`.
@@ -399,7 +434,6 @@ pub(super) fn refused_before_reading(
     on: bool,
     args: &BlastnArgs,
     outputs: &ReportOutputs<'_>,
-    output_formats: &[BlastnOutputFormat],
 ) -> Option<Off> {
     if !on {
         return Some(Off::NotSet);
@@ -417,19 +451,6 @@ pub(super) fn refused_before_reading(
     if x_debug_output(args) {
         return Some(Off::Debug);
     }
-    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20; OWNER_DECISIONS 20): the XML writer
-    // refuses a query title or the title of a subject with a hit that NCBI's definition line
-    // generator reads past the end of (`names::Refusal`; every other text is written as NCBI's
-    // stream writes it, since line RG item K4h), and that check is made by the report call of the
-    // batch that holds the query or the subject. With several batches a later batch's refusal
-    // would come after the first batch's Iterations were written, so outfmt 5 is never streamed:
-    // the one report call after the search finds every refusal before the first byte.
-    if output_formats
-        .iter()
-        .any(|format| format.is_structured_xml())
-    {
-        return Some(Off::Xml);
-    }
     None
 }
 
@@ -446,7 +467,7 @@ fn check(
     query_input: &QueryInput,
     batching: QueryBatching,
 ) -> std::result::Result<Ready, Off> {
-    if let Some(off) = refused_before_reading(on, args, outputs, output_formats) {
+    if let Some(off) = refused_before_reading(on, args, outputs) {
         return Err(off);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -475,18 +496,25 @@ fn check(
     // module doc).
     let cache = match source {
         SubjectSource::Prepared(prepared) => {
-            // `tabular_subject_ids` of every subject, where every lookup finds its id.
-            let ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>> = prepared
-                .records
-                .iter()
-                .map(|subject| {
-                    subject
-                        .subject_tabular_id(false)
-                        .ok()
-                        .flatten()
-                        .map(|id| Some(Arc::from(id)))
+            // `tabular_subject_ids` of every subject, where every lookup finds its id; only the
+            // tabular reports read them (`post_process_hits_and_write`), so none is made for the
+            // others.
+            let tabular = output_formats.iter().any(|format| format.is_tabular());
+            let ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>> = tabular
+                .then(|| {
+                    prepared
+                        .records
+                        .iter()
+                        .map(|subject| {
+                            subject
+                                .subject_tabular_id(false)
+                                .ok()
+                                .flatten()
+                                .map(|id| Some(Arc::from(id)))
+                        })
+                        .collect()
                 })
-                .collect();
+                .flatten();
             let pairwise = output_formats.iter().any(|format| format.is_pairwise());
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
             // The records as read with `-subject_loc` (never packed), else the searched ones.

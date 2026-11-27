@@ -1036,6 +1036,8 @@ fn write_blastx_tax_report(
                 &mut *writer,
                 &mut *stderr,
                 reads.as_mut().map(|cursor| (cursor, 0)),
+                // NCBI's posts of each read of a reported sequence's definition lines.
+                shown.title_decodes(),
                 tax_query.title,
                 tax_query.length,
             )?;

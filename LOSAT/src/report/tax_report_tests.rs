@@ -87,7 +87,7 @@ fn looked_up(steps: &[Step]) -> Vec<i32> {
         .iter()
         .filter_map(|step| match step {
             Step::LookUp(taxid) => Some(*taxid),
-            Step::Read(_) => None,
+            Step::Read(_) | Step::Title(_) => None,
         })
         .collect()
 }
@@ -204,9 +204,14 @@ fn rows_group_by_taxid_in_first_seen_order_with_ncbi_widths() {
         looked_up(&steps),
         [9606, 8888, 10090, 32630, 777, 4932, 12908]
     );
+    // Each read of a subject reads its definition lines again at the first (`Step::Title`).
     assert_eq!(
-        steps.iter().step_by(2).copied().collect::<Vec<_>>(),
+        steps.iter().step_by(3).copied().collect::<Vec<_>>(),
         (0..7).map(Step::Read).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        steps.iter().skip(1).step_by(3).copied().collect::<Vec<_>>(),
+        (0..7).map(Step::Title).collect::<Vec<_>>()
     );
 }
 
@@ -247,9 +252,11 @@ fn a_subject_whose_lookup_throws_feeds_every_hsp_and_keeps_earlier_rows() {
         steps,
         [
             Step::Read(0),
+            Step::Title(0),
             Step::LookUp(9606),
             Step::LookUp(777),
             Step::Read(0),
+            Step::Title(0),
             Step::LookUp(777)
         ]
     );
@@ -308,7 +315,7 @@ fn a_description_width_that_wraps_pads_with_ncbis_runs() {
         false,
     )
     .unwrap();
-    assert_eq!(steps, [Step::Read(0), Step::LookUp(0)]);
+    assert_eq!(steps, [Step::Read(0), Step::Title(0), Step::LookUp(0)]);
     let row = format!(" {label} {title}<SP*4294967262>180   7e-63   \n");
     assert_eq!(
         String::from_utf8(squeezed(&text)).unwrap(),
@@ -445,10 +452,17 @@ fn a_title_that_throws_drops_its_subject_before_it_widens() {
         String::from_utf8_lossy(&out),
         String::from_utf8_lossy(&want)
     );
-    // Each HSP of the first subject reads it again.
+    // Each HSP of the first subject reads it again; its title throws before the read again of
+    // its definition lines (`Step::Title`).
     assert_eq!(
         steps,
-        [Step::Read(0), Step::Read(0), Step::Read(1), Step::LookUp(0)]
+        [
+            Step::Read(0),
+            Step::Read(0),
+            Step::Read(1),
+            Step::Title(1),
+            Step::LookUp(0)
+        ]
     );
 }
 
@@ -497,6 +511,7 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
                 .unwrap(),
             &mut merged.clone(),
             Some((&mut cursor, 0)),
+            None,
             b"q",
             250,
         )
@@ -509,6 +524,59 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
     assert_eq!(
         &merged[start..end],
         "read A\nread B\nError: [blastp] Error: Offset error at end of taxdb file.\n"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997-1019
+#[test]
+fn a_subjects_definition_lines_are_read_twice_before_its_lookups() {
+    // RG-KB 9b-2 (probe `K/kb/i9b2/probe`, `blastp.base.f18`): each read of a subject (its load,
+    // `ExtractBlastDefline`) and the read again at its first line (`GetDisplayIds`) post the title's
+    // replaced bytes, after the load's texts and before the line's lookup; the second HSP of A,
+    // after B's, reads A again.
+    let subjects = Subjects(vec![
+        vec![line("AAA00001", "a_title", 9606)],
+        vec![line("BBB00001", "b_title", 99990)],
+    ]);
+    let names = names(Some("offset_last_past_end"));
+    let queries = [TaxQuery {
+        title: b"q",
+        length: 250,
+        hsps: Some(vec![
+            hsp(0, 3e-171, 461.0),
+            hsp(1, 1e-3, 30.0),
+            hsp(0, 1e-2, 28.0),
+        ]),
+    }];
+    let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref()), false).unwrap();
+    let reads = vec![vec![crate::report::query_warnings::SubjectRead::of_text(
+        0,
+        b"read A\n",
+    )]];
+    let mut cursor = ReadCursor::new(&reads).unwrap();
+    let mut titles = crate::report::query_warnings::TitleDecodes::default();
+    titles.insert(0, b"title A\n".to_vec());
+    let merged = Merged::default();
+    report
+        .write_query(
+            0,
+            &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut merged.clone()))
+                .unwrap(),
+            &mut merged.clone(),
+            Some((&mut cursor, 0)),
+            Some(&titles),
+            b"q",
+            250,
+        )
+        .unwrap();
+    let merged = String::from_utf8(std::mem::take(&mut *merged.0.lock().unwrap())).unwrap();
+    let start = merged.find("Length=250\n").unwrap() + "Length=250\n".len();
+    let end = merged
+        .find(&format!("\n{}Organism Report", " ".repeat(43)))
+        .unwrap();
+    assert_eq!(
+        &merged[start..end],
+        "read A\ntitle A\ntitle A\nError: [blastp] Error: Offset error at end of taxdb file.\ntitle A\ntitle A\n"
     );
 }
 
@@ -621,6 +689,7 @@ fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
             &mut crate::cli::NcbiOstream::sink(&mut sink).unwrap(),
             &mut io::sink(),
             None,
+            None,
             queries[q_idx].title,
             queries[q_idx].length,
         );
@@ -691,7 +760,7 @@ fn the_hsps_of_a_subject_whose_load_throws_are_left_out() {
         organism_report(&hsps, &subjects, &mut lookups(names.as_ref()), false).unwrap();
     // 0's HSPs read and look nothing up and leave the previous id (1) as it was, so 1's second
     // HSP is skipped as the previous id's.
-    assert_eq!(steps, [Step::Read(1), Step::LookUp(10090)]);
+    assert_eq!(steps, [Step::Read(1), Step::Title(1), Step::LookUp(10090)]);
 }
 
 /// The HTML organism report (`-html`) of `subjects`' `hsps` read through `lookups`.
@@ -890,14 +959,16 @@ fn loads_that_throw_at_a_positive_taxid_leave_its_subjects_out() {
     };
     let hsps = queries[0].hsps.as_deref().unwrap();
     let (steps, _) = organism_report(hsps, &table(true), &mut lookups(None), false).unwrap();
-    assert_eq!(steps, [Step::Read(1), Step::LookUp(0)]);
+    assert_eq!(steps, [Step::Read(1), Step::Title(1), Step::LookUp(0)]);
     let (steps, _) = organism_report(hsps, &table(false), &mut lookups(None), false).unwrap();
     assert_eq!(
         steps,
         [
             Step::Read(0),
+            Step::Title(0),
             Step::LookUp(9606),
             Step::Read(1),
+            Step::Title(1),
             Step::LookUp(0)
         ]
     );

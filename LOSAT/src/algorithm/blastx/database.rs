@@ -94,8 +94,9 @@ impl BlastxDatabase {
     }
 
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
-    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
-    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    /// set_keeps_scope`, `SeqDb::set_formatter_keeps_scope`: BLAST XML, outfmt 5), and whether
+    /// XML2/JSON taxonomy reads belong to a secondary format
+    /// (`shared::TaxdbRun::set_separate_xml2`).
     pub(crate) fn keeping_scope(
         mut self,
         keeps: bool,
@@ -103,6 +104,7 @@ impl BlastxDatabase {
         record_keeps: Option<bool>,
     ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
+        self.db.set_formatter_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
         self.taxdb.set_record_keeps_scope(record_keeps);
         self
@@ -758,7 +760,10 @@ impl ReportedSubjects {
     /// subject's Seq-align id (`report::tabular::reads_subject`), the only kind that refuses the
     /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
     /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
-    /// `ParsedSubject::fetched`). `prefetched`: whether the batch's prefetch reads the subjects
+    /// `ParsedSubject::fetched`). `title_decodes`: whether a report reads the definition lines
+    /// where LOSAT writes NCBI's posts of each read (`shared::FormatterTitleReads::takes_decodes`;
+    /// `ReportedSubjects::title_decodes`).
+    /// `prefetched`: whether the batch's prefetch reads the subjects
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
@@ -797,6 +802,7 @@ impl ReportedSubjects {
         joined: bool,
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
+        title_decodes: bool,
         prefetched: bool,
         read: crate::report::db_subject::ReportRead,
         cut: usize,
@@ -1107,10 +1113,10 @@ impl ReportedSubjects {
                     .collect(),
             );
         }
-        // NCBI's posts of each read of a reported sequence's definition line by a table's rows or
-        // the pairwise report, by rank (`shared::title_decodes`,
-        // `report::query_warnings::ReadCursor::title_read`, `QueryWarnings::title_read`).
-        if reports && (tabular_reads || pairwise) {
+        // NCBI's posts of each read of a reported sequence's definition line by a report's
+        // formatter (`title_decodes`: `shared::FormatterTitleReads::takes_decodes`), by rank
+        // (`shared::title_decodes`, `QueryWarnings::title_read`).
+        if reports && title_decodes {
             reported.title_decodes =
                 shared::title_decodes(&database.db, &reported.ordinals, database.program);
         }

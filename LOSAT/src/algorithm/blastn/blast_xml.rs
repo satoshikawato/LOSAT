@@ -177,6 +177,10 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
         );
         let posting = warnings.is_some();
+        // NCBI's posts of the formatter's read of each `Hit`'s definition line.
+        let titles = warnings
+            .as_deref()
+            .and_then(crate::report::query_warnings::QueryWarnings::titles);
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
             let Some(hit_list) = hit_list else {
                 return Ok(());
@@ -194,13 +198,19 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
-                posts.hit(sink.position(), &hit, lists[range.start].oid, |texts| {
-                    if posting {
-                        taxdb_printer.at_names(subject, texts)
-                    } else {
-                        Ok(())
-                    }
-                })?;
+                posts.hit(
+                    sink.position(),
+                    &hit,
+                    lists[range.start].oid,
+                    titles,
+                    |texts| {
+                        if posting {
+                            taxdb_printer.at_names(subject, texts)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                )?;
                 sink.hit(&hit, |hsps| {
                     let q_offset = xml.query_records.record(q_idx).map_or(0, |r| r.offset);
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {

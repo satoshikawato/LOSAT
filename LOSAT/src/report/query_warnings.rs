@@ -736,8 +736,9 @@ pub fn write_marked_cuts(
 /// The places in a query's report, formatted into a buffer, where NCBI loads a subject and posts
 /// texts: a structured report's `Hit` (BLAST XML, XML2, JSON; `HitSink::position`) or a tabular
 /// row's or pairwise line's read (`write_marked`). At each, the text of the subject's read in the
-/// program's model (`ReadCursor::subject_read`) and the texts that the report's writer makes there
-/// (the taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
+/// program's model (`ReadCursor::subject_read`), then the posts of the formatter's read of its
+/// definition line (`TitleDecodes`) and the texts that the report's writer makes there (the
+/// taxonomy database's messages of the XML2 and JSON documents' `Hit`s, `TaxdbPrinter`).
 /// NCBI posts them on `cerr`, which flushes the report written before them (`QueryWarnings`);
 /// `write` writes them so. Dropping it loses them and the exception that ends the run, so it is
 /// `must_use`.
@@ -777,20 +778,30 @@ impl HitPosts {
         }
     }
 
-    /// The `Hit` `hit` of subject `subject` loads it at `at` (`HitSink::position`); `post` writes
-    /// the texts that the writer makes there. A `Hit` whose subject's lookup throws
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:375-385
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:360-388
+    /// The `Hit` `hit` of subject `subject` loads it at `at` (`HitSink::position`), then reads its
+    /// definition line (the posts of that read: `titles`, by the key of the report's writer,
+    /// `QueryWarnings::titles`), then `post` writes the texts that the writer makes there (the
+    /// lookups of the line's taxids). A `Hit` whose subject's lookup throws
     /// (`XmlHit::lookup_throws`) loads nothing: no read and no text of it (`post` is not called).
     pub fn hit(
         &mut self,
         at: usize,
         hit: &crate::report::blast_xml::XmlHit<'_>,
         subject: u32,
+        titles: Option<&TitleDecodes>,
         post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
     ) -> io::Result<()> {
         if hit.lookup_throws.is_some() {
             return Ok(());
         }
-        self.mark(at, subject, post)
+        self.mark(at, subject, |texts| {
+            if let Some(titles) = titles {
+                texts.extend_from_slice(titles.of(subject));
+            }
+            post(texts)
+        })
     }
 
     /// `hit` of a `Hit` that loads its subject.
@@ -1271,6 +1282,13 @@ impl<'a> QueryWarnings<'a> {
     /// writer that formats into buffers marks where it reads them only then.
     pub fn reads_titles(&self) -> bool {
         self.titles.is_some()
+    }
+
+    /// The posts of each read of a subject's definition line (`with_title_decodes`; `None`: no
+    /// read posts), for a writer that places them itself (`HitPosts::hit`,
+    /// `tax_report::TaxReport::write_query`).
+    pub fn titles(&self) -> Option<&'a TitleDecodes> {
+        self.titles
     }
 
     /// Whether a read of the definition line of the subject `subject` (the key of the report's

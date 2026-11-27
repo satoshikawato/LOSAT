@@ -599,6 +599,10 @@ impl PreparedXml {
                     .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
             );
             let posting = warnings.is_some();
+            // NCBI's posts of the formatter's read of each `Hit`'s definition line.
+            let titles = warnings
+                .as_deref()
+                .and_then(crate::report::query_warnings::QueryWarnings::titles);
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(
@@ -626,7 +630,7 @@ impl PreparedXml {
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time (nothing for the other formats).
-                    posts.hit(sink.position(), &hit, first as u32, |texts| {
+                    posts.hit(sink.position(), &hit, first as u32, titles, |texts| {
                         if posting {
                             taxdb_printer.at_names(names, texts)
                         } else {

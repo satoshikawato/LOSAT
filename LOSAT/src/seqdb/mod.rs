@@ -1355,6 +1355,10 @@ pub struct SeqDb {
     /// Whether a batch's prefetch loaded its subjects before that model started
     /// (`SeqDb::note_unmodelled_prefetch`).
     unmodelled_prefetch: AtomicBool,
+    /// Whether NCBI's formatter keeps its scope across the query batches (BLAST XML, outfmt 5;
+    /// `SeqDb::set_formatter_keeps_scope`), so that no release reaches the cache of
+    /// `blob_cache`.
+    formatter_keeps_scope: bool,
 }
 
 /// The blobs that NCBI's data source keeps after the formatter's scope released them
@@ -1385,6 +1389,9 @@ struct BlobCache {
     unmodelled: usize,
     /// Whether the model started (its first batch).
     started: bool,
+    /// The subjects that a batch's prefetch loaded in a run whose formatter keeps its scope
+    /// (`batch_kept`).
+    kept: std::collections::HashSet<u32>,
 }
 
 /// The subjects of one batch's release that NCBI's cache of released blobs may still hold
@@ -1438,6 +1445,28 @@ impl BlobCache {
             }
         }
         states
+    }
+
+    /// [`SeqDb::batch_blobs`] of a run whose formatter keeps its scope: a subject that a batch's
+    /// prefetch loaded before is held; one never loaded is not, unless a batch before the model
+    /// may have loaded it (`unmodelled`, a subject whose title does not post).
+    fn batch_kept(&mut self, subjects: &[(u32, bool)], unmodelled: bool) -> Vec<BlobHeld> {
+        if !self.started {
+            self.started = true;
+            self.unmodelled = if unmodelled { RELEASED_BLOBS } else { 0 };
+        }
+        subjects
+            .iter()
+            .map(|&(ordinal, posts)| {
+                if !self.kept.insert(ordinal) {
+                    BlobHeld::Held
+                } else if self.unmodelled > 0 && !posts {
+                    BlobHeld::Unsure
+                } else {
+                    BlobHeld::Out
+                }
+            })
+            .collect()
     }
 
     /// Where the cache holds the blob of `ordinal`, whose title posts or not (`posts`), as a
@@ -2144,6 +2173,7 @@ impl SeqDb {
             header_cache: Default::default(),
             blob_cache: Default::default(),
             unmodelled_prefetch: AtomicBool::new(false),
+            formatter_keeps_scope: false,
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2968,6 +2998,14 @@ impl SeqDb {
         self.mt_stop_at_negative = stop;
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    /// Sets whether NCBI's formatter keeps its scope across the query batches (`keeps`: BLAST XML,
+    /// outfmt 5, which does not call `ResetScopeHistory`; `report::db_subject::FormatThrow::
+    /// scope_flags`), for the model of the blobs that a batch's prefetch meets (`batch_blobs`).
+    pub fn set_formatter_keeps_scope(&mut self, keeps: bool) {
+        self.formatter_keeps_scope = keeps;
+    }
+
     /// Whether multithreaded DB-split scans stop at the first negative-length OID
     /// (`Self::set_mt_stop_at_negative`).
     pub fn mt_stop_at_negative(&self) -> bool {
@@ -3722,7 +3760,9 @@ impl SeqDb {
     /// holds more. A subject that the cache held leaves it (`x_SetLock`). The model starts at the
     /// first batch whose title posts were asked (`replaced_titles`): a subject whose title posts
     /// was never loaded before it, any other may be held where a batch before prefetched
-    /// (`note_unmodelled_prefetch`). Not for a run that keeps its scope (BLAST XML).
+    /// (`note_unmodelled_prefetch`). In a run whose formatter keeps its scope
+    /// (`set_formatter_keeps_scope`: BLAST XML), the prefetch links what it loads to that scope,
+    /// which no batch resets: a subject loaded once is held to the run's end.
     pub fn batch_blobs(&self, subjects: &[(u32, bool)]) -> Vec<BlobHeld> {
         let unmodelled = self
             .unmodelled_prefetch
@@ -3731,7 +3771,11 @@ impl SeqDb {
             .blob_cache
             .lock()
             .expect("the blob cache is not poisoned");
-        cache.batch(subjects, unmodelled)
+        if self.formatter_keeps_scope {
+            cache.batch_kept(subjects, unmodelled)
+        } else {
+            cache.batch(subjects, unmodelled)
+        }
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to

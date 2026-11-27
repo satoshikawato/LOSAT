@@ -243,6 +243,64 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     assert_eq!(alone, b"<H5><H6>");
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:360-388
+// RG-KB 9b-2 (probe `K/kb/i9b2/probe`, `blastp.base.f5`): a `Hit` that loads its subject posts the
+// formatter's read of its definition line (`TitleDecodes`, by the writer's key) after the load's
+// text and before the writer's texts there (the lookups of its taxids); a `Hit` whose lookup
+// throws reads nothing.
+#[test]
+fn a_hits_title_read_posts_after_its_load_and_before_its_lookups() {
+    let reads: Vec<QueryReads> = vec![vec![SubjectRead::of_text(5, b"A\n")]];
+    let mut decodes = TitleDecodes::default();
+    decodes.insert(5, b"T5\n".to_vec());
+    decodes.insert(7, b"T7\n".to_vec());
+    let log = Log::default();
+    let (mut report, mut sink) = (log.clone(), log.clone());
+    let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink)
+        .with_subject_reads(&reads)
+        .with_title_decodes(Some(&decodes));
+    assert!(warnings.reads_titles());
+    let titles = warnings.titles();
+    let exception =
+        crate::report::db_subject::LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO)
+            .exception()
+            .unwrap();
+    let hit = |throws: bool| crate::report::blast_xml::XmlHit {
+        id: b"gnl|BL_ORD_ID|5",
+        title: b"t",
+        accession: b"5",
+        len: 10,
+        taxid: 0,
+        taxonomy: crate::report::blast_xml::records::UNNAMED,
+        descriptions: &[],
+        defline_thrown: false,
+        unloaded: false,
+        lookup_throws: throws.then_some(&exception),
+    };
+    let mut posts = HitPosts::new(false);
+    posts
+        .hit(0, &hit(false), 5, titles, |texts| texts.write_all(b"P5\n"))
+        .unwrap();
+    posts.hit(4, &hit(false), 6, titles, |_| Ok(())).unwrap();
+    posts
+        .hit(8, &hit(true), 7, titles, |_| {
+            unreachable!("no text at a throwing Hit")
+        })
+        .unwrap();
+    posts.hit(12, &hit(false), 7, titles, |_| Ok(())).unwrap();
+    write_hit_posts(
+        b"<H5><H6><H7><H7>",
+        &posts,
+        0,
+        &mut report,
+        Some(&mut warnings),
+    )
+    .unwrap();
+    drop(warnings);
+    let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    assert_eq!(text, "A\nT5\nP5\n<H5><H6><H7>T7\n<H7>");
+}
+
 /// A JSON report that raised an exception its report function catches (line DBID pfoff-1: the
 /// `Hit` of a subject whose lookup throws): the separator before it stays, the texts of the
 /// loads of the `Hit`s before it come after it, the read of the subject that throws and those

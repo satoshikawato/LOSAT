@@ -4945,11 +4945,11 @@ pub(crate) enum TitleReads {
     /// `tblastn`, `tblastx`; not `psiblast`, `rpsblast` or `rpstblastn`).
     SeqAligns,
     /// Each batch's prefetch loads the subjects (`PRE_FETCH_SEQS_LIMIT` turns it off for no
-    /// batch: [`prefetch_may_be_off`]; `prefetch_title_posts`), and the run's one format reads the
-    /// definition line where LOSAT writes NCBI's posts of it ([`FormatterTitleReads::written`]).
+    /// batch: [`prefetch_may_be_off`]; `prefetch_title_posts`), and the run has one format, whose
+    /// formatter's reads LOSAT writes NCBI's posts of ([`FormatterTitleReads`]).
     Prefetched,
-    /// A formatter that LOSAT does not write the posts of, a prefetch that may be off, several
-    /// formats, `psiblast`, `rpsblast`, or `rpstblastn` reads it too.
+    /// A prefetch that may be off, several formats, `psiblast`, `rpsblast`, or `rpstblastn` reads
+    /// it too.
     #[default]
     Reports,
 }
@@ -4996,12 +4996,14 @@ impl TitleReads {
             return TitleReads::Reports;
         };
         let second = outfmts.next();
-        // `s_IsPrefetchFormat` takes the tables 10 and 20 as 6 (cited at `PrefetchFormat`).
+        // `s_IsPrefetchFormat` takes the tables 10 and 20 and the organism report 18 as 6 (cited at
+        // `PrefetchFormat`), as each program's prefetch does.
         let prefetch = PrefetchFormat::of(
             match ReportFormat::from_number(first) {
                 Some(
                     ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader,
+                    | ReportFormat::CommaSeparatedValuesWithHeader
+                    | ReportFormat::TaxFormat,
                 ) => ReportFormat::Tabular as i32,
                 _ => first,
             },
@@ -5017,10 +5019,8 @@ impl TitleReads {
         {
             return TitleReads::SeqAligns;
         }
-        let written = ReportFormat::from_number(first)
-            .is_some_and(|format| FormatterTitleReads::of(format).written());
         if second.is_none()
-            && written
+            && ReportFormat::from_number(first).is_some()
             && prefetches_subjects(Some(prefetch))
             && !prefetch_may_be_off(prefetch)
         {
@@ -5033,6 +5033,10 @@ impl TitleReads {
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:809-842
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1231-1268
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:375-385
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:360-388
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997-1019
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4735-4736
 // Every read of a formatter decodes the header that the subject's Bioseq holds
 // (`CSeqDB::ExtractBlastDefline`), not through the volume's cache: one that holds the stored bytes
 // posts each time (`SeqDb::rewrites_header_at`). Counted by the probes of line RG-KB 9(b) (the
@@ -5050,10 +5054,14 @@ pub(crate) enum FormatterTitleReads {
     /// Two at each description line, and one at each alignment heading where `headings`: outfmt
     /// 0 (`headings`), 1 to 4.
     Pairwise { headings: bool },
-    /// One at each `Hit`: BLAST XML (5), and the XML2 and JSON formats (13 to 16), which read
-    /// all of a query's before its report.
+    /// One at each `Hit` that loads its subject, after the load (`GetBioseqHandle`), before the
+    /// taxonomy lookups of its definition lines: BLAST XML (5), and the XML2 and JSON formats (13
+    /// to 16), which read all of a query's before its report.
     Hits,
-    /// Two at each Seq-align of a subject: the organism report (18).
+    /// Two at each Seq-align of a subject that the organism report (18) does not skip (one of the
+    /// subject of the Seq-align before it): `ExtractBlastDefline` after the load, then
+    /// `GetDisplayIds` at its first definition line, before that line's lookup, unless its title
+    /// throws first.
     Hsps,
 }
 
@@ -5077,30 +5085,22 @@ impl FormatterTitleReads {
         }
     }
 
-    /// Whether LOSAT writes NCBI's posts of these reads ([`TitleReads::Prefetched`]): the tables'
-    /// rows, the pairwise reports' description lines and headings, and the formats that read
-    /// nothing.
-    pub(crate) fn written(self) -> bool {
-        matches!(
-            self,
-            FormatterTitleReads::None
-                | FormatterTitleReads::Rows
-                | FormatterTitleReads::Pairwise { .. }
-        )
-    }
-
     /// Whether the report of `format` (`None`: a value that NCBI's reading refuses) reads the
-    /// definition lines of the subjects it reports where LOSAT writes NCBI's posts of each read
-    /// ([`title_decodes`]): the pairwise reports, and the tables whose fields read them
-    /// (`reads_defline`: `report::tabular::TabularSpec::reads_defline` of the table's fields).
+    /// definition lines of the subjects it reports, where LOSAT writes NCBI's posts of each read
+    /// ([`title_decodes`]): every format whose formatter reads them, the tables where their fields
+    /// do (`reads_defline`: `report::tabular::TabularSpec::reads_defline` of the table's fields).
     pub(crate) fn takes_decodes(
         format: Option<crate::blastinput::app::ReportFormat>,
         reads_defline: bool,
     ) -> bool {
         match format.map(Self::of) {
-            Some(FormatterTitleReads::Pairwise { .. }) => true,
+            Some(
+                FormatterTitleReads::Pairwise { .. }
+                | FormatterTitleReads::Hits
+                | FormatterTitleReads::Hsps,
+            ) => true,
             Some(FormatterTitleReads::Rows) => reads_defline,
-            _ => false,
+            Some(FormatterTitleReads::None) | None => false,
         }
     }
 }

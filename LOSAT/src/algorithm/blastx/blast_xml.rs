@@ -1688,7 +1688,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let mut reads = crate::report::query_warnings::ReadCursor::new(std::slice::from_ref(
                 shown.query_reads(batch.query_ordinal + qidx),
             ));
-            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts
+            // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): those texts,
+            // the posts of its read of the `Hit`'s definition line (`ShownSubjects::title_decodes`)
             // and the taxonomy database's messages.
             let mut posts = crate::report::query_warnings::HitPosts::new(reads.is_some());
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
@@ -1722,9 +1723,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    posts.hit(sink.position(), &hit, first as u32, |texts| {
-                        taxdb_printer.at_names(names, texts)
-                    })?;
+                    posts.hit(
+                        sink.position(),
+                        &hit,
+                        first as u32,
+                        shown.title_decodes(),
+                        |texts| taxdb_printer.at_names(names, texts),
+                    )?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]
                             .iter()

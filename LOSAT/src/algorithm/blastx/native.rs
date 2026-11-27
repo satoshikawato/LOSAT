@@ -1082,6 +1082,9 @@ pub(super) struct ReportedAsks {
     /// What the reports read of a definition line besides the Seq-aligns
     /// (`common::database::TitleReads`; by default the prefetch or a formatter).
     titles: crate::algorithm::common::database::TitleReads,
+    /// Whether a report reads the definition lines of the sequences it reports where LOSAT writes
+    /// NCBI's posts of each read (`common::database::FormatterTitleReads::takes_decodes`).
+    title_decodes: bool,
 }
 
 impl ReportedAsks {
@@ -1148,6 +1151,12 @@ impl ReportedAsks {
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
                 options.request_kind(),
                 [i32::from(options.outfmt)],
+            ),
+            title_decodes: crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
+                crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt)),
+                options
+                    .tabular
+                    .is_some_and(crate::report::tabular::TabularSpec::reads_defline),
             ),
         }
     }
@@ -1221,6 +1230,7 @@ impl ReportedAsks {
             } else {
                 crate::algorithm::common::database::TitleReads::Reports
             },
+            title_decodes: self.title_decodes || other.title_decodes,
         }
     }
 }
@@ -1556,6 +1566,7 @@ pub(super) fn reported_batch(
         asks.joined,
         asks.taxonomy,
         asks.words,
+        asks.title_decodes,
         asks.prefetched && !unfetched,
         read,
         options.shown_lists(),

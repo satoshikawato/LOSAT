@@ -914,15 +914,23 @@ pub struct TaxQuery<'a> {
     pub hsps: Option<Vec<TaxHsp>>,
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997-1019
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4735-4736
 /// What NCBI's report of a query does that can write to standard error, in its order
 /// (`organism_report`): the read of a subject's Bioseq at each Seq-align it does not skip
 /// (`GetBioseqHandle`: where the batch's prefetch is off, the first load of a blob writes the texts
-/// of its taxonomy lookups, `QueryWarnings::subject_read`) and the lookup of a taxid
-/// (`GetTaxInfo`, `TaxLookups::messages`).
+/// of its taxonomy lookups, `QueryWarnings::subject_read`) and of its definition lines
+/// (`ExtractBlastDefline`), their read again at the first line that the report shows
+/// (`GetDisplayIds`, after that line's title), and the lookup of a taxid (`GetTaxInfo`,
+/// `TaxLookups::messages`). Each read of the definition lines posts for a stored title with a
+/// byte outside ' ' ..= '~' (`QueryWarnings::titles`); a sequence that the scope finds as a query
+/// (`TaxSubjects::loads`) is neither loaded nor read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
-    /// The read of the subject (`TaxHsp::subject`).
+    /// The read of the subject (`TaxHsp::subject`) and of its definition lines.
     Read(usize),
+    /// The read again of the subject's definition lines at the first that the report shows.
+    Title(usize),
     /// The lookup of the taxid.
     LookUp(i32),
 }
@@ -999,14 +1007,18 @@ impl TaxReport {
     /// of `./.ncbirc`, of its subjects' reads and of its lookups go to `diagnostics` (after `out`
     /// is flushed), in the order of NCBI's report (`Step`). `reads`: where the batch's prefetch is
     /// off, the texts of the subjects that the report reads one by one and the query's index among
-    /// them (`ReadCursor::subject_read`). A query that NCBI did not search (`TaxQuery::hsps`) is
-    /// refused after its `Query=` block (`TaxReportRefusal`), where NCBI's report stops.
+    /// them (`ReadCursor::subject_read`); `titles`: the posts of each read of a subject's
+    /// definition lines (`QueryWarnings::titles`). A query that NCBI did not search
+    /// (`TaxQuery::hsps`) is refused after its `Query=` block (`TaxReportRefusal`), where NCBI's
+    /// report stops.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_query(
         &self,
         q_idx: usize,
         out: &mut crate::cli::NcbiOstream<'_>,
         diagnostics: &mut dyn Write,
         mut reads: Option<(&mut ReadCursor<'_>, usize)>,
+        titles: Option<&crate::report::query_warnings::TitleDecodes>,
         title: &[u8],
         length: usize,
     ) -> Result<()> {
@@ -1066,6 +1078,14 @@ impl TaxReport {
                     if let Some((cursor, query)) = reads.as_mut() {
                         cursor.subject_read(*query, subject as u32, out, diagnostics)?;
                     }
+                    if let Some(titles) = titles {
+                        titles.write_read(subject as u32, out, diagnostics)?;
+                    }
+                }
+                Step::Title(subject) => {
+                    if let Some(titles) = titles {
+                        titles.write_read(subject as u32, out, diagnostics)?;
+                    }
                 }
                 Step::LookUp(taxid) => {
                     let text = lookups.messages(taxid, !self.wrote_first.replace(true));
@@ -1096,12 +1116,14 @@ pub fn write_report(
         match warnings.as_deref_mut() {
             Some(warnings) => {
                 warnings.before_query(q_idx, &mut *writer)?;
+                let titles = warnings.titles();
                 let (reads, sink) = warnings.reads_and_sink();
                 report.write_query(
                     q_idx,
                     &mut *writer,
                     sink,
                     reads.map(|cursor| (cursor, q_idx)),
+                    titles,
                     query.title,
                     query.length,
                 )?;
@@ -1110,6 +1132,7 @@ pub fn write_report(
                 q_idx,
                 &mut *writer,
                 &mut io::sink(),
+                None,
                 None,
                 query.title,
                 query.length,
@@ -1203,7 +1226,7 @@ fn organism_report(
         let evalue: std::rc::Rc<[u8]> = format_evalue_ncbi(hsp.evalue).into_bytes().into();
         let bit_score: std::rc::Rc<[u8]> = format_bitscore_ncbi(hsp.bit_score).into_bytes().into();
         let mut threw = false;
-        for defline in subjects.deflines(hsp.subject) {
+        for (line, defline) in subjects.deflines(hsp.subject).iter().enumerate() {
             // The title, or the refusal of a title that the report shows.
             let (title, refused_if_shown) = match &defline.title {
                 TaxTitle::Text(title) => (title.as_slice(), None),
@@ -1217,6 +1240,9 @@ fn organism_report(
                 } => return Err(subjects.refused(hsp.subject, reason)),
                 TaxTitle::Refused { reason, .. } => (&[][..], Some(reason)),
             };
+            if line == 0 && subjects.loads(hsp.subject) {
+                steps.push(Step::Title(hsp.subject));
+            }
             widths.take(&defline.label, &bit_score, &evalue);
             let index = match group_of.get(&defline.taxid) {
                 Some(&index) => index,

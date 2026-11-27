@@ -11,7 +11,8 @@
 //! blastp's search of the FASTA query (with `-in_pssm` the PSSM search of the input PSSM), a later
 //! round the PSSM search (`algorithm::pssm_search`) of the PSSM that the engine made from the round
 //! before (`PsiSearch::from_engine`), whose query stays the round-1 query. The outfmt 0
-//! prolog comes with the first call; every call writes no epilog, which the driver writes after
+//! prolog comes with the first call (with `-in_pssm` before round 1's request and PSSM files);
+//! every call writes no epilog, which the driver writes after
 //! the last query (outfmt 7's count is that of the rounds). The PSSM files are written between
 //! the calls, where NCBI writes them, after the report of the round before (with `-in_pssm` the
 //! input PSSM before round 1, `algorithm::psiblast::in_pssm_files`).
@@ -256,6 +257,11 @@ fn run_queries(
     };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506-553
+    // Whether NCBI's prolog (`PrintProlog`, before the rounds of every query) is written: by the
+    // first call (`x_prolog`), or before the request of a PSSM query's round 1, which comes first
+    // (`write_pairwise_prologs` below).
+    let mut prolog_written = false;
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
@@ -340,25 +346,28 @@ fn run_queries(
             match (&pssm, input_files.as_mut()) {
                 (Some(current), _) => write_round_pssm(args, &mut files, current, outputs)?,
                 (None, Some(input)) if round == 1 => {
-                    // NCBI's posts of the bytes replaced in the search strategy request (written
-                    // above, before round 1) come before those of the PSSM file that round 1
-                    // writes.
+                    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506-553 (cited
+                    // at `prolog_written`: `PrintProlog`, then `DoIterations`' request at :340)
+                    // NCBI's prolog comes before the rounds (`PrintProlog`), so before the
+                    // query's search strategy request (written above, which its mark releases
+                    // here: on `-export_search_strategy -` into the report's stream, on
+                    // `/dev/stdout` after what the prolog flushed), before the PSSM files that
+                    // round 1 writes, and before a file that cannot be written, or NCBI's throw in
+                    // it, stops the run here; round 1's report does not write it again.
+                    if !prolog_written {
+                        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                        prolog_written = true;
+                    }
+                    // NCBI's posts of the bytes replaced in the search strategy request come
+                    // before those of the PSSM file that round 1 writes.
                     super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     write_file_posts(args, &input.posts, outputs)?;
-                    // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
-                    // that cannot be written, or NCBI's throw in it, stops the run here.
-                    let written = files
+                    files
                         .write(input.asn.as_deref(), input.ascii.as_deref())
                         .and_then(|()| match input.thrown.take() {
                             Some(thrown) => Err(thrown.into()),
                             None => Ok(()),
-                        });
-                    if let Err(error) = written {
-                        if calls == 0 {
-                            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
-                        }
-                        return Err(error);
-                    }
+                        })?;
                     // Only the ASCII PSSM is written again (after a round 1 without alignments;
                     // the ASN.1 text is then made with the write-back).
                     input.asn = None;
@@ -484,7 +493,7 @@ fn run_queries(
                     reader_warnings,
                     identity_warned: 0,
                     epilog: false,
-                    x_prolog: calls == 0,
+                    x_prolog: !prolog_written,
                     // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
                     // each round's `Iteration` after them and writes its header with the first.
                     x_queries_before: calls,
@@ -530,7 +539,7 @@ fn run_queries(
                         Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
                         None => Default::default(),
                     };
-                    if calls == 0 {
+                    if !prolog_written {
                         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
                     }
                     if round == 1 {
@@ -553,6 +562,7 @@ fn run_queries(
                 return Err(error);
             }
             calls += 1;
+            prolog_written = true;
             let outcome = io
                 .outcome
                 .lock()

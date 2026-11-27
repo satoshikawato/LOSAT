@@ -895,8 +895,20 @@ impl<S: AsnSource> XmlReader<S> {
         self.begin_data()?;
         let mut cr = false;
         loop {
-            // The bytes read are not asked for again: a long text is held in `out` alone, not in
-            // the stream's buffer as well (`StreamSource::release_before`).
+            // The bytes that `read_encoded_char` gives as they are and that this loop appends as
+            // they are (printable ASCII but `&` and `<`, while no UTF-8 bytes of a character are
+            // being given; a `\r` before them changes none of them) are appended as one run of the
+            // kept bytes. The bytes read are not asked for again: a long text is held in `out`
+            // alone, not in the stream's buffer as well (`StreamSource::release_before`).
+            if self.utf8.is_empty() {
+                let rest = self.src.rest(self.pos);
+                let run = rest
+                    .iter()
+                    .position(|&c| !(b' '..=b'~').contains(&c) || c == b'&' || c == b'<')
+                    .unwrap_or(rest.len());
+                out.extend_from_slice(&rest[..run]);
+                self.pos += run;
+            }
             self.src.release_before(self.pos);
             let c = self.read_encoded_char(b'<')?;
             if c < 0 {

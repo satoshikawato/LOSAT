@@ -293,7 +293,7 @@ fn long_character_data_is_not_kept_by_the_stream() {
     let mut body = String::new();
     for i in 0..60_000 {
         body.push_str(match i % 7 {
-            0 => "&amp;&#65;&#x42;",
+            0 => "&amp;&#65;&#x42;&#x3b1;z",
             1 => "\r\n",
             2 => "\r\r\n",
             3 => "<![CDATA[<x>]]>",

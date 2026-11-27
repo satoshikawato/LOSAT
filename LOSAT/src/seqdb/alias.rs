@@ -999,6 +999,25 @@ pub(crate) fn database_lookup_files(
     out
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-195
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:556-558,665-667
+/// The size of the largest file that NCBI's atlas measures while it resolves `dbname` and reads
+/// the alias files' keys (`CSeqDBAtlas::GetFileSizeL`, which `DoesFileExist` and the reads of an
+/// alias file call): the files [`resolve_in_recording`] and [`compute_masks_recording`] check or
+/// open, those that exist. 0 where none does or the name does not resolve.
+pub(super) fn largest_resolution_file(dbname: &[u8], seqtype: SeqType, search: &SearchPath) -> u64 {
+    let mut raw = Vec::new();
+    if let Ok(mut tree) = resolve_in_recording(dbname, seqtype, search, Some(&mut raw)) {
+        let _ = compute_masks_recording(&mut tree.root, Some(&mut raw));
+    }
+    raw.iter()
+        .filter_map(|path| std::fs::metadata(path_of_bytes(path)).ok())
+        .filter(|meta| meta.is_file())
+        .map(|meta| meta.len())
+        .max()
+        .unwrap_or(0)
+}
+
 fn collect_volumes(node: &AliasNode, out: &mut Vec<Vec<u8>>) {
     out.extend(node.vol_names.iter().cloned());
     for subnode in &node.subnodes {

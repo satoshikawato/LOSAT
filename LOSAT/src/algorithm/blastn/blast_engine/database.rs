@@ -435,6 +435,9 @@ impl BlastnDatabase {
             min_q,
         );
         self.db.set_mt_stop_at_negative(stop);
+        if stop {
+            self.db.set_mt_threads(self.mt_threads);
+        }
         self
     }
 

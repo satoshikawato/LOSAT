@@ -2467,12 +2467,7 @@ fn note_first_fetched(fetches: BatchFetches<'_>, fetched: &[FetchedRead], until:
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk of subjects may hold.
 #[cfg(feature = "parallel")]
 fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
-    // NCBI's Int8: `GetSliceSize()` divided by the product of 4 and `m_NumThreads`, plus 1; usize
-    // fits u64 on every target.
-    let divisor = u64::try_from(threads.max(1))
-        .unwrap_or(u64::MAX)
-        .saturating_mul(4);
-    largest_file.min(1 << 30) / divisor + 1
+    crate::seqdb::mt_chunk_budget(threads, largest_file)
 }
 
 // No NCBI counterpart: the size of the `.nsq` file that `makeblastdb` writes for the subjects,

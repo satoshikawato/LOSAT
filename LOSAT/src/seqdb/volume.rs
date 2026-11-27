@@ -94,6 +94,17 @@ pub(super) fn with_extension(base: &Path, seqtype: SeqType, ext: &str) -> PathBu
     PathBuf::from(name)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:694-710
+/// What stops or crashes NCBI's scan at a nucleotide OID (`Volume::x_first_scan_problem_in`);
+/// the number is the OID's index from the first scanned.
+#[derive(Debug)]
+pub(super) enum ScanProblem {
+    /// `x_GetSequence` returns a negative length: `x_FillSeqBuffer` stops there.
+    Negative(u32),
+    /// NCBI's read of the sequence file crashes; the error is the refusal.
+    Crash(SeqDbError),
+}
+
 /// The header of a sequence of a volume, with its ordinal ids still relative to the volume
 /// (`Volume::header`, `SeqDb::read_header`).
 #[derive(Debug)]
@@ -355,6 +366,27 @@ impl Volume {
         end: u32,
         first_oid: u32,
     ) -> Result<Option<u32>, SeqDbError> {
+        match self.x_first_scan_problem_in(first, end, first_oid)? {
+            None => Ok(None),
+            Some(ScanProblem::Negative(at)) => Ok(Some(at)),
+            Some(ScanProblem::Crash(error)) => Err(error),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:694-710
+    /// The first nucleotide in `first..end` (volume-relative; `first_oid` the OID of `first`)
+    /// that stops or crashes NCBI's scan, in OID order: a negative `x_GetSequence` length, or a
+    /// read of the sequence file that NCBI cannot make (`ScanProblem`); `None` where every
+    /// length is read. A volume whose sequence file has no bytes maps a null pointer: an OID that
+    /// starts at offset 0 gets the null pointer itself, which is a length of -1, any other adds its
+    /// offset to it and reads address `start + whole_bytes` of the process, which crashes.
+    pub(super) fn x_first_scan_problem_in(
+        &self,
+        first: u32,
+        end: u32,
+        first_oid: u32,
+    ) -> Result<Option<ScanProblem>, SeqDbError> {
         assert!(
             self.index.seqtype == SeqType::Nucleotide,
             "nucleotide lengths of a protein volume"
@@ -362,39 +394,73 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
-        let file = self.open_non_empty_seq_file()?;
+        let file = self.seq_file()?;
         let readable = file.readable_len();
+        let crash = |message: String| {
+            Ok(Some(ScanProblem::Crash(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message,
+            })))
+        };
         for (i, &amb) in amb_offsets.iter().enumerate() {
             let start = seq_offsets[i];
+            if file.is_empty() {
+                if start == 0 {
+                    return Ok(Some(ScanProblem::Negative(i as u32)));
+                }
+                return crash(
+                    "the sequence file has no bytes, which NCBI maps as a null pointer".to_string(),
+                );
+            }
             let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
             let last_pos = i64::from(start) + i64::from(whole_bytes);
             if last_pos < 0 {
-                return Err(SeqDbError::NcbiCrashes {
-                    path: file.path().to_path_buf(),
-                    message: format!(
+                return crash(
+                    format!(
                         "sequence {}: ambiguity offset {amb} causes NCBI to read before the \
                          start of the sequence file mapping",
                         u64::from(first_oid) + i as u64
                     ),
-                });
+                );
             }
             if (last_pos as u64) >= readable {
-                file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
+                if let Err(error) = file.x_check_range(last_pos as u64, last_pos as u64 + 1) {
+                    return Ok(Some(ScanProblem::Crash(error)));
+                }
             }
             if !(0..(1 << 29)).contains(&whole_bytes) {
                 if whole_bytes < 0 {
-                    return Ok(Some(i as u32));
+                    return Ok(Some(ScanProblem::Negative(i as u32)));
                 }
                 let last = file.with_range(last_pos as u64, last_pos as u64 + 1, |b| b[0])?;
                 let len_i32 = whole_bytes
                     .wrapping_mul(4)
                     .wrapping_add(i32::from(last & 3));
                 if len_i32 < 0 {
-                    return Ok(Some(i as u32));
+                    return Ok(Some(ScanProblem::Negative(i as u32)));
                 }
             }
         }
         Ok(None)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1841
+    /// The length of nucleotide `oid` (volume-relative; `named` its OID in the database) as
+    /// NCBI's `x_GetSequence` returns it to `x_FillSeqBuffer`, where only the sign of a negative
+    /// one matters (-1 here): the refusal where NCBI crashes reading it
+    /// (`x_first_scan_problem_in`).
+    pub(super) fn x_scan_length_i32(&self, oid: u32, named: u32) -> Result<i32, SeqDbError> {
+        match self.x_first_scan_problem_in(oid, oid + 1, named)? {
+            Some(ScanProblem::Negative(_)) => Ok(-1),
+            Some(ScanProblem::Crash(error)) => Err(error),
+            None => self.nucleotide_length_i32(oid, named),
+        }
+    }
+
+    /// The size of the volume's sequence file, which NCBI's atlas measures when the volume's
+    /// first sequence is read (`x_OpenSeqFile`).
+    pub(super) fn sequence_file_len(&self) -> Result<u64, SeqDbError> {
+        self.seq_file().map(DbFile::len)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785

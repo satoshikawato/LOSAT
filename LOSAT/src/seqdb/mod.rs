@@ -61,6 +61,8 @@ pub mod taxdb;
 
 /// Result of reading a [`SequenceBlock`].
 pub type SeqBlockResult = Result<SequenceBlock, SeqDbError>;
+mod mt_scan;
+pub(crate) use mt_scan::mt_chunk_budget;
 pub mod volume;
 
 pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
@@ -1340,6 +1342,12 @@ pub struct SeqDb {
     /// when true, preliminary block reads stop at the first OID whose `GetSequence` length is
     /// negative.
     mt_stop_at_negative: bool,
+    /// The threads of that scan (`m_NumThreads`; 0 where the search does not set it), which size
+    /// the chunks of `x_FillSeqBuffer` (`SeqDb::mt_check_past_range_end`).
+    mt_threads: usize,
+    /// The `-db` value the database was opened with, which the files NCBI's atlas measured while
+    /// it resolved the name are looked up from (`alias::largest_resolution_file`).
+    db_name: Vec<u8>,
     /// Whether a reader read the title of a reported sequence that holds a byte outside
     /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's cache of
     /// header records modelled (`header_cache`).
@@ -2022,6 +2030,8 @@ impl SeqDb {
             utf8_claimed: AtomicBool::new(false),
             scope_utf8_held: AtomicBool::new(false),
             mt_stop_at_negative: false,
+            mt_threads: 0,
+            db_name: name.to_vec(),
             replaced_titles: AtomicBool::new(false),
             header_cache: Default::default(),
         };
@@ -2848,6 +2858,14 @@ impl SeqDb {
         self.mt_stop_at_negative = stop;
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,697
+    /// Sets the threads of the multithreaded DB-split scan (`m_NumThreads`), which size the chunks
+    /// that `x_FillSeqBuffer` cuts: the effective `-num_threads` of a search that splits the
+    /// database (`Self::set_mt_stop_at_negative` is then true).
+    pub fn set_mt_threads(&mut self, threads: usize) {
+        self.mt_threads = threads;
+    }
+
     /// Whether multithreaded DB-split scans stop at the first negative-length OID
     /// (`Self::set_mt_stop_at_negative`).
     pub fn mt_stop_at_negative(&self) -> bool {
@@ -2946,12 +2964,13 @@ impl SeqDb {
     // (`Volume::x_first_negative_nucleotide_in`). A protein's read reads no byte of the sequence
     // file (pointer arithmetic on the index's offsets), so a protein database has nothing to
     // check here. In a volume after the first, NCBI's loop compares the volume-relative OID with
-    // the range's end, so it reads on past the end as far as the chunk's byte budget goes; LOSAT
-    // does not model those reads.
+    // the range's end, so it reads on past the end as far as the chunk's byte budget goes
+    // (`mt_scan::last_chunk_reach`).
     /// The errors of NCBI's reads of the excluded OIDs from `from_oid` to the end of the
     /// iteration range of a list-filtered nucleotide database (and the OID at the end, when it is
-    /// inside a volume), up to the first negative length, when [`Self::mt_stop_at_negative`] is
-    /// enabled; `Ok` in every other case.
+    /// inside a volume, and the OIDs past it that a chunk in a volume after the first reads),
+    /// up to the first negative length, when [`Self::mt_stop_at_negative`] is enabled; `Ok` in
+    /// every other case.
     fn mt_check_trailing_excluded(&self, from_oid: u32) -> Result<(), SeqDbError> {
         if !self.mt_stop_at_negative || self.seqtype != SeqType::Nucleotide {
             return Ok(());
@@ -2966,8 +2985,10 @@ impl SeqDb {
         let inside_volume =
             end < self.num_oids() && self.volume_starts.binary_search(&end).is_err();
         let scan_end = if inside_volume { end + 1 } else { end };
-        self.x_has_negative_in_oid_range(from_oid, scan_end)
-            .map(|_| ())
+        if self.x_has_negative_in_oid_range(from_oid, scan_end)? {
+            return Ok(());
+        }
+        self.mt_check_past_range_end(begin, end)
     }
 
     /// [`Self::mt_check_trailing_excluded`] after the block `range` that holds the last included

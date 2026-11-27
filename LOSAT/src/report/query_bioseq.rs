@@ -454,6 +454,43 @@ pub(crate) fn note_or_refuse(
     crate::algorithm::common::database::refuse_id_of_a_query(subject, oid, scope, program)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:903-916
+/// The other side of a database sequence with the id of a query (module docs): the XML2 and JSON
+/// reports (outfmt 13 to 16) of psiblast's FASTA queries against a database are made after NCBI's
+/// loop has dropped each query from its scope (`blast_xml2::Xml2Run::query_dropped`), with the
+/// next query in it. A lookup of the query's Seq-id (`query_id`, the Seq-id of its Seq-loc: the
+/// generated `lcl|Query_N` or the best of the ids that `-parse_deflines` read) then reaches the
+/// BLAST database data loader, which serves the database sequence that the database's lookup gives
+/// (`lookup`, `SeqidLookup::seqid_to_oid`): NCBI's report shows that sequence's id, title and
+/// letters for the query, and the report of the query before shows its hit with that id as this
+/// query (NCBI BLAST+ 2.17.0, probes `x.ps.qid`, `x.ps.q2n`, `x.pd.nohitE` of line PS item
+/// PS15b-4). LOSAT refuses such a query (`Err` with the refusal), and one whose lookup fails or
+/// whose database's lookup files do not open (`lookup` `None`); a query that the lookup does not
+/// find is `Ok`. The callers ask for every searched FASTA query of a run that writes those reports
+/// (`blast_xml2::queries_dropped`) before its search.
+pub(crate) fn refuse_found_dropped_query(
+    query_id: &crate::seqid::ParsedSeqId,
+    lookup: Option<&crate::seqdb::lookup::SeqidLookup<'_>>,
+    program: &str,
+) -> anyhow::Result<()> {
+    let mut id = Vec::new();
+    crate::seqid::label::fasta(query_id, &mut id);
+    let id = String::from_utf8_lossy(&id);
+    let found = match lookup.map(|lookup| lookup.seqid_to_oid(query_id)) {
+        Some(Ok(None)) => return Ok(()),
+        Some(Ok(Some(oid))) => format!("the database sequence {oid}"),
+        Some(Err(_)) | None => "a database sequence (the lookup of the id fails)".to_string(),
+    };
+    anyhow::bail!(
+        "the query {id} has the Seq-id of {found}: NCBI BLAST+ makes psiblast's XML2 and JSON \
+         reports (outfmt 13 to 16) of FASTA queries against a database after it drops the \
+         query from its scope, and shows that database sequence for the query; this is not \
+         supported by LOSAT's {program}"
+    )
+}
+
 #[cfg(test)]
 #[path = "query_bioseq_tests.rs"]
 mod tests;

@@ -6435,6 +6435,50 @@ fn blastp_xml_failing_query(
     })
 }
 
+/// psiblast's XML2 and JSON documents (outfmt 13 to 16) of FASTA queries against a database,
+/// whose reports NCBI makes after it drops each query from its scope
+/// (`blast_xml2::queries_dropped`): LOSAT's refusal of a searched query `queries` whose Seq-id the
+/// database holds (`report::query_bioseq::refuse_found_dropped_query`), before the search.
+#[cold]
+#[inline(never)]
+fn refuse_found_dropped_queries(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: Option<&database::BlastpDatabase>,
+    queries: &[FastaRecord],
+) -> Result<()> {
+    let Some(database) = database else {
+        return Ok(());
+    };
+    let iterative = args
+        .app
+        .program_type()
+        .is_some_and(crate::report::record::ProgramType::is_iterative);
+    let xml2 = outputs.formats.iter().any(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::blast_xml2::Xml2Kind::of)
+            .is_some()
+    });
+    if !xml2
+        || !crate::report::blast_xml2::queries_dropped(false, iterative, args.psi_search.is_none())
+    {
+        return Ok(());
+    }
+    let program = args.app.name();
+    let lookup = database.seqdb().seqid_lookup().ok();
+    for record in queries {
+        let id = match record.believed() {
+            Some(ids) => ids.best.clone(),
+            None => crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                record.local_id.as_bytes().to_vec(),
+            )),
+        };
+        crate::report::query_bioseq::refuse_found_dropped_query(&id, lookup.as_ref(), program)?;
+    }
+    Ok(())
+}
+
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
 /// the reading of the subjects: `Query is Empty!` for records without a query, the query
 /// batch size, the subjects without letters, the XInclude formats (`xinclude`, the CLI's
@@ -6675,6 +6719,16 @@ fn search(
     if !batches.starts.is_empty() {
         validate_requested_blastp_support(&args)?;
         check_identity_compressed_lookup_of(&args)?;
+        // psiblast's XML2 and JSON reports of FASTA queries against a database are made after
+        // NCBI drops each query from its scope (`refuse_found_dropped_queries`).
+        if args.app == BlastpApp::Psiblast {
+            refuse_found_dropped_queries(
+                &args,
+                outputs,
+                database,
+                &searched_queries[..batches.searched_done],
+            )?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,

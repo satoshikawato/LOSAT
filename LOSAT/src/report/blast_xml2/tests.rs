@@ -275,6 +275,85 @@ fn an_iterative_database_report_is_held_and_lists_its_round() {
     }
 }
 
+// Line PS, PS15b-4: psiblast's rounds (each a report call of its own) join the held report of
+// their query, each the `Iteration` after the ones before, as the writers of the calls hand the
+// document on (`Xml2Carries`); the report is written at the epilog, once.
+#[test]
+fn the_rounds_of_an_iterative_report_are_its_iterations() {
+    let message = invalid_message();
+    let run = run(None, "");
+    let iterative = Xml2Run {
+        program_type: Some(crate::report::record::ProgramType::PsiBlast),
+        ..params(Xml2Target::Database)
+    };
+    for (kind, numbers, report) in [
+        (
+            Xml2Kind::Single16,
+            [
+                "<iter-num>1</iter-num>",
+                "<iter-num>2</iter-num>",
+                "<iter-num>3</iter-num>",
+            ],
+            "<BlastOutput2>",
+        ),
+        (
+            Xml2Kind::Single15,
+            ["\"iter_num\": 1,", "\"iter_num\": 2,", "\"iter_num\": 3,"],
+            "\"report\"",
+        ),
+    ] {
+        let carries = Xml2Carries::default();
+        let mut out = Vec::new();
+        for round in 1..=3 {
+            let mut writer = Xml2Writer::new(kind, iterative.clone());
+            writer.document_mut().resume(carries.take(1));
+            let query = XmlQuery {
+                joins_held: round > 1,
+                ..invalid_query(&message)
+            };
+            writer
+                .query(&run, &query, &mut out, |_| {
+                    panic!("a query of an unsearched batch has no hits")
+                })
+                .unwrap();
+            carries.put(1, writer.document_mut().take_carry());
+        }
+        // Held: the prolog alone so far, written once.
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        // The format at another place of the run's outputs has a document of its own: none
+        // of these reports.
+        let mut other = Xml2Writer::new(kind, iterative.clone());
+        other.document_mut().resume(carries.take(0));
+        let (mut empty, mut expected) = (Vec::new(), Vec::new());
+        other.finish(&mut empty).unwrap();
+        Xml2Document::new(kind, true).epilog(&mut expected).unwrap();
+        assert_eq!(empty, expected, "{kind:?}");
+        let mut writer = Xml2Writer::new(kind, iterative.clone());
+        writer.document_mut().resume(carries.take(1));
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.matches(report).count(), 1, "{kind:?}: {text}");
+        let places: Vec<usize> = numbers
+            .iter()
+            .map(|number| text.find(number).expect(number))
+            .collect();
+        assert!(
+            places.windows(2).all(|pair| pair[0] < pair[1]),
+            "{kind:?}: {text}"
+        );
+    }
+}
+
+// Line PS, PS15b-4: the reports whose queries NCBI's formatter dropped from its scope are
+// psiblast's FASTA queries against a database alone.
+#[test]
+fn queries_are_dropped_for_the_fasta_queries_of_an_iterative_database_search() {
+    assert!(queries_dropped(false, true, true));
+    assert!(!queries_dropped(true, true, true), "-subject");
+    assert!(!queries_dropped(false, true, false), "-in_pssm, -in_msa");
+    assert!(!queries_dropped(false, false, true), "blastp");
+}
+
 #[test]
 fn a_subject_report_is_held_until_the_epilog() {
     // `-subject` keeps the last report back (blast_format.cpp:2363-2404): without the epilog

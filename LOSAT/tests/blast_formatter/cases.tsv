@@ -223,3 +223,48 @@ of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver q
 of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
 of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
 of7_two_ids	-archive in/two_ids.asn -outfmt 7
+# Rows from of7_ver_db on (line RG item F3 PR 3a, review R1, agent E3 of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and databases by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tmp/e3/tools/fixE3.py (rows of7_ver_* and *_self_lcl_db*) and fixE3b.py (the others), every NCBI run under unshare -rn. New inputs: in/vq.fa, vs.fa, vq2.fa, vs2.fa, vq3.fa, vs3.fa (accessions with and without a version) and in/vdb, vdb2, vdb3 (makeblastdb -parse_seqids -blastdb_version 4 of in/vs.fa, vs2.fa, vs3.fa); in/ver_db.asn, ver_db2.asn, ver_db3.asn (blastn -query in/vq*.fa -db in/vdb*/v* -parse_deflines -outfmt 11) and in/ver_subj.asn, ver_subj2.asn, ver_subj3.asn (the same with -subject in/vs*.fa); in/m3.faa (in/ps.faa, a copy with a change every 7 residues under a swissprot id, and its residues 6-40 with MKVL) and in/m3db (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 4), in/self_lcl_db.asn (blastp -query in/m3.faa -db in/m3db/m3 -parse_deflines -outfmt 11); in/qlen_huge.asn, qlen_big.asn, qlen_short.asn and in/slen_huge.asn, slen_big.asn, slen_short.asn: in/bn.asn with its query Bioseq's or its -subject Bioseq's length 4294967295, 4294967294 or 1500 (it holds 120 and 400 letters); in/ps_none.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2 -evalue 1e-50 -outfmt 11: no hits) and in/ps_none_step_str.asn (its Web_StepNumber a string). The rows refused_tabular_qlen_short, refused_tabular_slen_short_legacy_sseq and refused_tabular_slen_huge_legacy keep NCBI's record of the rows of6_qlen_short, of6_slen_short_legacy_sseq and of6_slen_huge_legacy of fixE3b.py.
+of7_ver_db	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_db_pd	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_ver_subj	-archive in/ver_subj.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_subj_pd	-archive in/ver_subj.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_ver_db2	-archive in/ver_db2.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_db2_pd	-archive in/ver_db2.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_ver_subj2	-archive in/ver_subj2.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_subj2_pd	-archive in/ver_subj2.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_ver_db3	-archive in/ver_db3.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_db3_pd	-archive in/ver_db3.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_ver_subj3	-archive in/ver_subj3.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
+of7_ver_subj3_pd	-archive in/ver_subj3.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
+of7_self_lcl_db	-archive in/self_lcl_db.asn -outfmt '7 std sseqid sallseqid stitle staxid sseq'
+of7_self_lcl_db_pd	-archive in/self_lcl_db.asn -outfmt '7 std sseqid sallseqid stitle staxid sseq' -parse_deflines
+of6_self_lcl_db_all	-archive in/self_lcl_db.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_self_lcl_db_all_pd	-archive in/self_lcl_db.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles' -parse_deflines
+of6_qlen_huge	-archive in/qlen_huge.asn -outfmt '6 std qlen qseq'
+of6_qlen_huge_std	-archive in/qlen_huge.asn -outfmt '6 std qlen'
+of7_qlen_huge	-archive in/qlen_huge.asn -outfmt '7 std qseq'
+of8_qlen_huge	-archive in/qlen_huge.asn -outfmt 8
+of6_qlen_big_std	-archive in/qlen_big.asn -outfmt '6 std qlen'
+of8_qlen_big	-archive in/qlen_big.asn -outfmt 8
+of6_qlen_short_std	-archive in/qlen_short.asn -outfmt '6 std qlen'
+of8_qlen_short	-archive in/qlen_short.asn -outfmt 8
+of6_slen_huge	-archive in/slen_huge.asn -outfmt '6 std slen sseq'
+of6_slen_huge_std	-archive in/slen_huge.asn -outfmt '6 std slen'
+of7_slen_huge	-archive in/slen_huge.asn -outfmt 7
+of8_slen_huge	-archive in/slen_huge.asn -outfmt 8
+of6_slen_big	-archive in/slen_big.asn -outfmt '6 std slen sseq'
+of8_slen_big	-archive in/slen_big.asn -outfmt 8
+of6_slen_short	-archive in/slen_short.asn -outfmt '6 std slen sseq'
+of6_slen_short_std	-archive in/slen_short.asn -outfmt '6 std slen'
+of7_slen_short	-archive in/slen_short.asn -outfmt 7
+of8_slen_short	-archive in/slen_short.asn -outfmt 8
+of6_slen_big_legacy	BL2SEQ_LEGACY=1 -archive in/slen_big.asn -outfmt '6 std slen'
+of6_slen_short_legacy	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt '6 std slen'
+of7_ps_none	-archive in/ps_none.asn -outfmt 7
+of7_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 7
+of6_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 6
+of20_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 20
+of8_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 8
+refused_tabular_qlen_short	-archive in/qlen_short.asn -outfmt '6 std qlen qseq'
+refused_tabular_slen_short_legacy_sseq	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt '6 std slen sseq'
+refused_tabular_slen_huge_legacy	BL2SEQ_LEGACY=1 -archive in/slen_huge.asn -outfmt '6 std slen'

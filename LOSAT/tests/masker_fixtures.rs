@@ -516,7 +516,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 7] = [
+const REFUSED_ROWS: [RefusedRow; 10] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -586,6 +586,38 @@ const REFUSED_ROWS: [RefusedRow; 7] = [
         ncbi_status: 1,
         ncbi_err: "invalid double: not a number",
         losat_err: "output format 12 of a BLAST archive with a NaN or an infinite real number",
+    },
+    // A query Bioseq that holds fewer letters than it declares, in a field of its letters: NCBI's
+    // read of the row's range throws where its cache passes the data, which depends on the range
+    // (review R1 of PR 1683, agent E3, 2026-11-27).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_qlen_short",
+        kind: "Tabular",
+        ncbi_status: 255,
+        ncbi_err: "reference out of range of Seq-inst data: 1024",
+        losat_err: "a query Bioseq with letters that do not all read",
+    },
+    // The same of a -subject Bioseq with BL2SEQ_LEGACY (without it the setup reads it first): the
+    // row from the subject's letter 101 throws at 1124, where a read from its first letter
+    // throws at 1024.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_slen_short_legacy_sseq",
+        kind: "Tabular",
+        ncbi_status: 255,
+        ncbi_err: "reference out of range of Seq-inst data: 1124",
+        losat_err: "a -subject Bioseq with letters that do not all read",
+    },
+    // A -subject Bioseq of 4294967295 letters with BL2SEQ_LEGACY: NCBI's row of it has no fields
+    // but the ids and the scores, and a subject length of 0.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_slen_huge_legacy",
+        kind: "Tabular",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a subject Bioseq of 4294967295 letters",
     },
 ];
 

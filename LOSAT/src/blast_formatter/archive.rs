@@ -37,6 +37,7 @@ use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions, EProgram};
+use crate::report::archive::read::queries::{check_setup_letters, RenderError};
 use crate::report::archive::read::request::{ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
@@ -570,6 +571,9 @@ impl<'r, 'o> Run<'r, 'o> {
         };
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:402-422
         self.output.begin_object()?;
+        if database.is_none() {
+            setup_subjects(&request.subject, search_options.program)?;
+        }
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
             return Err(refusal.into());
@@ -628,11 +632,7 @@ impl<'r, 'o> Run<'r, 'o> {
             };
             return super::tabular::print_object(&inputs, request, &sets, &alignments, &mut sink);
         }
-        // A `Web_StepNumber` that is no integer throws where the first query's report is
-        // formatted (probe E1 probe1 O8, `-outfmt 8`).
-        if iteration.is_err() && !sets.is_empty() {
-            return Err(invalid_archive());
-        }
+        psi_round(iteration, sets.len())?;
         let format = match formatting.choice.number {
             output_format::ASN_TEXT => SerialFormat::AsnText,
             output_format::ASN_BINARY => SerialFormat::AsnBinary,
@@ -1044,6 +1044,71 @@ fn check_subjects(subject: &Subject) -> anyhow::Result<()> {
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:270-283
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-140
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:107-148
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:510-526
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:732-797
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1124-1152
+/// The formatter's constructor of an object of subject sequences in its scan mode
+/// (`BL2SEQ_LEGACY` unset, `s_InitializeSubject`): `MakeSeqSrc` sets up the subjects
+/// (`SetupSubjects_OMF`), which reads each subject Bioseq whole, in order
+/// (`queries::check_setup_letters`, by the program's subject molecule, `GetSubjectEncoding`;
+/// the programs for which that function aborts set up nothing here). The first exception
+/// (rethrown at the setup with its message, `NCBI_RETHROW_SAME`) is the report of the chain
+/// (`ReportAll`) in a `CBlastException` `eSeqSrcInit`, NCBI's engine error (exit status 3), in
+/// every output format, before the object's first byte (probes `of6_slen_huge`, `of6_slen_short`,
+/// `of8_slen_big` of agent E3, 2026-11-27); a read that LOSAT does not reproduce is refused.
+fn setup_subjects(subject: &Subject, program: EProgram) -> anyhow::Result<()> {
+    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        return Ok(());
+    }
+    let protein = match program {
+        EProgram::Blastn
+        | EProgram::Megablast
+        | EProgram::DiscMegablast
+        | EProgram::VecScreen
+        | EProgram::Mapper
+        | EProgram::Tblastn
+        | EProgram::PsiTblastn
+        | EProgram::Tblastx => false,
+        EProgram::Blastp
+        | EProgram::Blastx
+        | EProgram::PsiBlast
+        | EProgram::DeltaBlast
+        | EProgram::PhiBlastp => true,
+        EProgram::RpsBlast | EProgram::RpsTblastn | EProgram::PhiBlastn => return Ok(()),
+    };
+    for bioseq in subject.bioseqs() {
+        match check_setup_letters(bioseq, protein) {
+            Ok(()) => {}
+            Err(RenderError::Exception(exception)) => {
+                let message = exception.get_msg().to_vec();
+                let setup = exception.rethrow_same(
+                    "src/algo/blast/api/blast_setup_cxx.cpp",
+                    797,
+                    "BLAST::ncbi::blast::SetupSubjects_OMF",
+                    message,
+                );
+                // The message is the chain's report (`ReportAll`), in LOSAT's words (`what`).
+                let seq_src = NcbiException::new(SEQ_SRC_INIT, setup.what());
+                return Err(NativeError::exception(&seq_src).into());
+            }
+            Err(RenderError::Unsupported(what)) => return Err(Refusal::SubjectSetup(what).into()),
+            Err(RenderError::Write(error)) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+/// Where `s_CheckForBlastSeqSrcErrors` throws the error of a sequence source's setup.
+const SEQ_SRC_INIT: ThrowSite = ThrowSite {
+    file: "src/algo/blast/api/local_db_adapter.cpp",
+    line: 120,
+    kind: "CBlastException::eSeqSrcInit",
+    function: Some("BLAST::ncbi::blast::s_CheckForBlastSeqSrcErrors"),
+};
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:374-385
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:100-106
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:124-131
@@ -1182,6 +1247,24 @@ fn remote_database(error: &SeqDbError, name: &str) -> anyhow::Error {
         Some(_) => Refusal::Database(name.to_string()).into(),
         None if error.ncbi_message().is_some() => Refusal::Database(name.to_string()).into(),
         None => database_error_of(error, PROGRAM),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:456-462
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2645-2662
+/// The round that `PrintOneResultSet` takes of each of an object's `sets` result sets, of its
+/// `iteration` (as `Run::print` reads it, `Err` for a `Web_StepNumber` that is no integer): the
+/// formats' one owner of the check. `GetPsiNumberOfIterations` is called in the loop over the
+/// result sets, so such a step throws at the first set (`GetInteger`, a serial exception: probe
+/// E1 probe1 O8 in 6, 7, 20 and 8) and not where there is none.
+pub(super) fn psi_round(
+    iteration: Result<Option<u32>, ()>,
+    sets: usize,
+) -> anyhow::Result<Option<u32>> {
+    match iteration {
+        Ok(round) => Ok(round),
+        Err(()) if sets == 0 => Ok(None),
+        Err(()) => Err(invalid_archive()),
     }
 }
 

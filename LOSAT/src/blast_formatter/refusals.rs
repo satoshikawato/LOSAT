@@ -68,6 +68,10 @@ pub(crate) enum Refusal {
     /// translated programs, queries given as locations, and the forms whose subjects or rows
     /// NCBI's scope may find otherwise than LOSAT (decision F3-13 of line RG). What it is.
     Tabular(String),
+    /// A subject sequence of an archive of `-subject` sequences (`BL2SEQ_LEGACY` unset) whose
+    /// letters NCBI's formatter reads in its search setup in a way that LOSAT does not reproduce
+    /// (`archive::setup_subjects`): what it holds.
+    SubjectSetup(String),
 }
 
 impl Refusal {
@@ -131,6 +135,11 @@ impl Refusal {
                  not supported by LOSAT's {}",
                 super::PROGRAM
             ),
+            Refusal::SubjectSetup(what) => format!(
+                "a BLAST archive with a -subject sequence with {what}, which NCBI BLAST+ reads \
+                 when it sets up the subject sequences, is not supported by LOSAT's {}",
+                super::PROGRAM
+            ),
         }
     }
 
@@ -157,6 +166,7 @@ impl Refusal {
             Refusal::Program(_) => "mapper".to_string(),
             Refusal::Unwritable(..) => "an archive's results".to_string(),
             Refusal::Tabular(_) => "tabular output formats".to_string(),
+            Refusal::SubjectSetup(_) => "sets up the subject sequences".to_string(),
         }
     }
 }
@@ -203,6 +213,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::Program("mapr2g"),
         Refusal::Unwritable("", 12),
         Refusal::Tabular(String::new()),
+        Refusal::SubjectSetup(String::new()),
     ]);
     refusals
 }

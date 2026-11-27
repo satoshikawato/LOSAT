@@ -288,3 +288,19 @@ fn non_utf8_outfmt_argument_preserves_raw_bytes_in_error() {
         assert_eq!((status, out, err), (1, Vec::new(), expected), "{bad:?}");
     }
 }
+
+/// `psi_round`, the one check of the round of the formats: a `Web_StepNumber` that is no integer
+/// throws at the first result set (NCBI rows of7_psiblast_step_string and of7/of6/of20/of8
+/// _ps_zero_step_str, a query without hits), and not where an object has no result set.
+#[test]
+fn a_step_that_is_no_integer_throws_at_the_first_result_set() {
+    assert_eq!(psi_round(Ok(Some(2)), 1).unwrap(), Some(2));
+    assert_eq!(psi_round(Ok(None), 3).unwrap(), None);
+    assert_eq!(psi_round(Err(()), 0).unwrap(), None);
+    let error = psi_round(Err(()), 1).unwrap_err();
+    assert_eq!(
+        format!("{error}"),
+        format!("{}", invalid_archive()),
+        "the archive's error"
+    );
+}

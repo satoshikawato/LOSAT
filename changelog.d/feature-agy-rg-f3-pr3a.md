@@ -7,3 +7,7 @@
   and error prefixes). Archives of translated searches (`blastx`, `tblastn`, `tblastx`,
   `rpstblastn`), queries stored as `seq-loc-list`, and `-subject` with `BL2SEQ_LEGACY` in
   `-outfmt 7` remain refused by name.
+- `losat blast_formatter`: in every output format, an archive of `-subject` sequences (without
+  `BL2SEQ_LEGACY`) whose subject sequence does not read (more letters declared than held, a length
+  of 4294967295) ends with NCBI BLAST+'s engine error before any output, as NCBI's sets up the
+  subject sequences.

@@ -1,0 +1,1 @@
+Error: the tabular output formats (6, 7, 10 and 20) of a BLAST archive with -subject sequences, BL2SEQ_LEGACY set and a subject Bioseq of 4294967295 letters are not supported by LOSAT's BLAST_FORMATTER

@@ -23,12 +23,13 @@
 //!
 //! An owner (a subject's thread with its units, a chain's thread with its groups, a batch's thread
 //! with its contexts) puts an item set on the board and takes its set's items only, until none is
-//! left to take, then blocks until the items others took have run. A helper (a thread of the batch's
-//! subject loop without a subject; a `rayon::spawn` job of the set or of the board) takes items until
-//! there is nothing left it may take. Items are pure work: they make no pool call and wait for
-//! nothing, so an item that was taken always ends, and a blocked owner always wakes. Taking an item
-//! never runs a pool job, so no long task runs nested inside an owner's wait (the problem of
-//! `tblastx/x_batch_pipe.rs` item 6).
+//! left to take, then blocks until the items others took have run. A helper of the board (a thread
+//! of the batch's subject loop without a subject) takes items until there is nothing left it may
+//! take, and a `rayon::spawn` job of the board takes one group; a helper job of an `x_each` set
+//! queues the set's next helper job and takes one item. Items are pure work: they make no pool call
+//! and wait for nothing, so an item that was taken always ends, and a blocked owner always wakes.
+//! Taking an item never runs a pool job, so no long task runs nested inside an owner's wait (the
+//! problem of `tblastx/x_batch_pipe.rs` item 6).
 //!
 //! Lifetimes: an item set's closure borrows its owner's frame; the set holds it as a raw pointer
 //! that is read only for an index below the set's length, after a successful take, and the owner
@@ -76,30 +77,47 @@ impl XSet {
         })
     }
 
-    /// Takes and runs one item; false when none was left to take.
-    pub(crate) fn run_one(&self, taker: &mut XTaker) -> bool {
+    /// Takes the next index; None when none was left to take.
+    fn take(&self) -> Option<usize> {
         if self.next.load(Ordering::Acquire) >= self.n {
-            return false;
+            return None;
         }
         let i = self.next.fetch_add(1, Ordering::AcqRel);
-        if i >= self.n {
+        (i < self.n).then_some(i)
+    }
+
+    /// Takes and runs one item; false when none was left to take.
+    pub(crate) fn run_one(&self, taker: &mut XTaker) -> bool {
+        let Some(i) = self.take() else {
             return false;
-        }
-        // The item counts as run when it returns or panics, so its owner never waits for it forever.
-        struct Ran<'a>(&'a XSet, bool);
-        impl Drop for Ran<'_> {
-            fn drop(&mut self) {
-                IN_ITEM.with(|flag| flag.set(self.1));
-                let mut done = self.0.done.lock().unwrap_or_else(|e| e.into_inner());
-                *done += 1;
-                if *done == self.0.n {
-                    self.0.all_done.notify_all();
-                }
-            }
-        }
-        let _ran = Ran(self, IN_ITEM.with(|flag| flag.replace(true)));
+        };
+        let _ran = XRan::start(self);
         // SAFETY: see the type's `Send` / `Sync`.
         unsafe { (*self.run)(i, taker) };
+        true
+    }
+
+    /// `run_one` for a helper job, which must not unwind: a panic of the item goes to `on_panic`
+    /// before the item counts as run, so an owner that wakes because every item has run finds it.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn run_one_catching(
+        &self,
+        taker: &mut XTaker,
+        on_panic: impl FnOnce(Box<dyn Any + Send>),
+    ) -> bool {
+        let Some(i) = self.take() else {
+            return false;
+        };
+        let _ran = XRan::start(self);
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: see the type's `Send` / `Sync`.
+            unsafe { (*self.run)(i, taker) }
+        })) {
+            on_panic(panic);
+        }
         true
     }
 
@@ -126,6 +144,27 @@ impl XSet {
                 .wait_timeout(done, std::time::Duration::from_millis(1))
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
+        }
+    }
+}
+
+/// An item being run: it counts as run when it returns or panics (the drop), so its owner never
+/// waits for it forever, and `in_item` holds on its thread meanwhile.
+struct XRan<'a>(&'a XSet, bool);
+
+impl<'a> XRan<'a> {
+    fn start(set: &'a XSet) -> Self {
+        Self(set, IN_ITEM.with(|flag| flag.replace(true)))
+    }
+}
+
+impl Drop for XRan<'_> {
+    fn drop(&mut self) {
+        IN_ITEM.with(|flag| flag.set(self.1));
+        let mut done = self.0.done.lock().unwrap_or_else(|e| e.into_inner());
+        *done += 1;
+        if *done == self.0.n {
+            self.0.all_done.notify_all();
         }
     }
 }
@@ -190,15 +229,15 @@ fn x_spawn_helper(helped: &Arc<XHelped>) {
         helped.queued.store(false, Ordering::Release);
         x_spawn_helper(&helped);
         let mut taker = XTaker::default();
-        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            helped.set.run_one(&mut taker)
-        })) {
+        // The payload is stored before the item counts as run (`run_one_catching`), so the owner,
+        // which reads it once every item has run, cannot miss it.
+        helped.set.run_one_catching(&mut taker, |panic| {
             helped
                 .panic
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get_or_insert(panic);
-        }
+        });
     });
 }
 

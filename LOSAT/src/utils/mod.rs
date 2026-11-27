@@ -49,11 +49,11 @@ pub(crate) mod x_mapped;
 pub(crate) mod x_order;
 pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
-// No NCBI counterpart: item sets run by their owner and the pool's idle threads, no thread waiting
-// in the pool (scheduling only, cited in the module).
 pub mod xdiag;
 pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;
+// No NCBI counterpart: item sets run by their owner and the pool's idle threads, no thread waiting
+// in the pool (scheduling only, cited in the module).
 pub(crate) mod xitems;
 pub mod xreach;
 pub mod xstats;

@@ -354,15 +354,17 @@ pub(crate) fn prepare_unit_queries(
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
-    // so in a pool of 2+ threads the contexts are filtered before the loop consumes the intervals in
-    // context order.
+    // so for a batch searched with a pool of 2+ threads inside (not one batch per thread,
+    // `runtime::x_inner_serial`) the contexts are filtered before the loop consumes the intervals
+    // in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with a pool of 2+ threads this thread filters the contexts in context order and
-    // the pool's idle threads filter the next ones (`utils::xitems::x_map`: this thread runs no
-    // other job of the pool meanwhile, so the batch's setup never waits for another batch's search
-    // or helper); the intervals are kept in seg_ready and the loop below still consumes them in
-    // context order.
+    // context, so for such a batch this thread filters the contexts in context order and the
+    // pool's idle threads filter the next ones (`utils::xitems::x_map`: this thread runs no other
+    // job of the pool meanwhile, so this step never waits for another batch's search or helper);
+    // the intervals are kept in seg_ready and the loop below still consumes them in context order.
+    // Inside an item (a chunk of a split query, `split.rs`) the set runs its contexts in a loop on
+    // the item's thread (`xitems::in_item`), though `LOSAT_X_REACH` counts this rule's side.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]

@@ -43,10 +43,12 @@ fn every_item_runs_once_in_index_order() {
     }
 }
 
-// Item 1 is taken by the other thread of a pool of two and runs for a while; meanwhile the owner,
-// which has run item 0, has a job of the pool in its own queue (pushed by item 0). A thread that
-// waited in the pool (`join`, `par_iter`) would run that job before it returned; the owner blocks
-// instead, and the job runs on the other thread once item 1 has ended (or after the owner returned).
+// The other thread of a pool of two takes one of the two items and runs it for a while; meanwhile
+// the owner, which has run the other item, has a job of the pool in its own queue (pushed by its
+// item). A thread that waited in the pool (`join`, `par_iter`) would run that job before it
+// returned; the owner blocks instead, and the job runs on the other thread once its item has ended
+// (or after the owner returned). The roles go by thread, not by index: the helper job is queued
+// before the owner's first take, so either thread may take item 0.
 #[test]
 fn the_owner_runs_no_pool_job_while_it_waits() {
     let pool = pool(2);
@@ -54,74 +56,73 @@ fn the_owner_runs_no_pool_job_while_it_waits() {
         let owner = rayon::current_thread_index();
         let in_map = Arc::new(AtomicBool::new(false));
         let ran_on_owner_in_map = Arc::new(AtomicBool::new(false));
-        let item1_started = AtomicBool::new(false);
+        let helper_started = AtomicBool::new(false);
         let job_spawned = AtomicBool::new(false);
         in_map.store(true, Ordering::SeqCst);
         let got = x_map(2, |i| {
-            if i == 0 {
-                // Wait (up to 10 s) for the other thread to take item 1, then push a job of the
-                // pool on this thread's queue.
-                let start = Instant::now();
-                while !item1_started.load(Ordering::SeqCst)
-                    && start.elapsed() < Duration::from_secs(10)
-                {
-                    std::thread::yield_now();
-                }
-                let (in_map, ran) = (Arc::clone(&in_map), Arc::clone(&ran_on_owner_in_map));
-                rayon::spawn(move || {
-                    if rayon::current_thread_index() == owner && in_map.load(Ordering::SeqCst) {
-                        ran.store(true, Ordering::SeqCst);
+            if rayon::current_thread_index() == owner {
+                if !job_spawned.load(Ordering::SeqCst) {
+                    // Wait (up to 10 s) for the other thread to take the other item, then push a
+                    // job of the pool on this thread's queue.
+                    let start = Instant::now();
+                    while !helper_started.load(Ordering::SeqCst)
+                        && start.elapsed() < Duration::from_secs(10)
+                    {
+                        std::thread::yield_now();
                     }
-                });
-                job_spawned.store(true, Ordering::SeqCst);
+                    let (in_map, ran) = (Arc::clone(&in_map), Arc::clone(&ran_on_owner_in_map));
+                    rayon::spawn(move || {
+                        if rayon::current_thread_index() == owner && in_map.load(Ordering::SeqCst) {
+                            ran.store(true, Ordering::SeqCst);
+                        }
+                    });
+                    job_spawned.store(true, Ordering::SeqCst);
+                }
             } else {
-                assert_ne!(rayon::current_thread_index(), owner);
-                item1_started.store(true, Ordering::SeqCst);
+                helper_started.store(true, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(100));
             }
             i
         });
         in_map.store(false, Ordering::SeqCst);
         assert_eq!(got, vec![0, 1]);
-        assert!(item1_started.load(Ordering::SeqCst) && job_spawned.load(Ordering::SeqCst));
+        assert!(helper_started.load(Ordering::SeqCst) && job_spawned.load(Ordering::SeqCst));
         assert!(!ran_on_owner_in_map.load(Ordering::SeqCst));
     });
 }
 
-// A panic of an item is raised by the owner, whether the owner ran the item (item 0) or a helper
-// job did (item 1, taken by the other thread while the owner runs item 0); the owner waits for
-// the items the helpers took before it raises it.
+// A panic of an item is raised by the owner, whether the owner ran the item or a helper job did
+// (the item the other thread takes while the owner's item waits for it); the owner waits for the
+// items the helpers took before it raises it, and the payload is the item's own. The roles go by
+// thread, not by index (either thread may take item 0).
 #[test]
 fn a_panicking_item_is_raised_by_the_owner() {
     let pool = pool(2);
     pool.install(|| {
         let result =
             std::panic::catch_unwind(|| x_map(4, |i| if i == 0 { panic!("item 0") } else { i }));
-        let panic = result.expect_err("the owner's item panicked");
+        let panic = result.expect_err("item 0 panicked");
         assert_eq!(panic.downcast_ref::<&str>(), Some(&"item 0"));
         let owner = rayon::current_thread_index();
-        let item1_started = AtomicBool::new(false);
+        let helper_started = AtomicBool::new(false);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             x_map(2, |i| {
-                if i == 0 {
+                if rayon::current_thread_index() == owner {
                     let start = Instant::now();
-                    while !item1_started.load(Ordering::SeqCst)
+                    while !helper_started.load(Ordering::SeqCst)
                         && start.elapsed() < Duration::from_secs(10)
                     {
                         std::thread::yield_now();
                     }
-                    0
                 } else {
-                    item1_started.store(true, Ordering::SeqCst);
-                    if rayon::current_thread_index() != owner {
-                        panic!("item 1 on a helper");
-                    }
-                    1
+                    helper_started.store(true, Ordering::SeqCst);
+                    panic!("an item on a helper");
                 }
+                i
             })
         }));
         let panic = result.expect_err("the helper's item panicked");
-        assert_eq!(panic.downcast_ref::<&str>(), Some(&"item 1 on a helper"));
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"an item on a helper"));
     });
 }
 

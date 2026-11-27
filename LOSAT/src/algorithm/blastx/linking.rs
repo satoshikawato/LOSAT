@@ -11,7 +11,7 @@ use crate::core::link_hsps::{
     LinkHsp,
 };
 use crate::stats::{
-    karlin::evalue_from_raw_score,
+    karlin::evalue_from_raw_score_with_log_k,
     spouge::{blast_spouge_stoe, BlastGumbelBlk},
     sum_statistics::{gap_decay_divisor, uneven_gap_sum_e},
     tables::KarlinParams,
@@ -284,6 +284,8 @@ pub fn link_uneven(
             let context = hsp.context;
             let hsp = hsp.clone();
             let kbp = &gapped_params[context];
+            // ln K once for the e-value without a Gumbel block and the sum score below.
+            let log_k = kbp.k.glibc_ln();
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1851-1896
             let evalue = if let Some(gumbel) = gumbel {
                 blast_spouge_stoe(
@@ -294,9 +296,14 @@ pub fn link_uneven(
                     subject_length,
                 )
             } else {
-                evalue_from_raw_score(hsp.score, kbp, lengths[context].search_space as f64)
+                evalue_from_raw_score_with_log_k(
+                    hsp.score,
+                    kbp,
+                    log_k,
+                    lengths[context].search_space as f64,
+                )
             } / gap_decay_divisor(link.gap_decay_rate, 1);
-            let sum_score = kbp.lambda * hsp.score as f64 - kbp.k.glibc_ln();
+            let sum_score = kbp.lambda * hsp.score as f64 - log_k;
             WorkHsp {
                 value: LinkedHsp {
                     hsp,

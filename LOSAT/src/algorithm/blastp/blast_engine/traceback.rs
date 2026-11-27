@@ -41,7 +41,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::blast_hits::reap_by_query_coverage;
-use crate::stats::karlin::evalue_from_raw_score;
+use crate::stats::karlin::evalue_from_raw_score_with_log_k;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::standard_score;
 
@@ -293,8 +293,14 @@ impl OrdinaryTraceback<'_> {
             None => {
                 let search_space =
                     self.search_spaces[hsp_list.query_index as usize].effective_space;
+                let log_k = self.karlin.k.glibc_ln();
                 for hsp in &mut hsp_list.hsps {
-                    hsp.e_value = evalue_from_raw_score(hsp.raw_score, self.karlin, search_space);
+                    hsp.e_value = evalue_from_raw_score_with_log_k(
+                        hsp.raw_score,
+                        self.karlin,
+                        log_k,
+                        search_space,
+                    );
                 }
             }
         }

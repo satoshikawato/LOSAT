@@ -149,8 +149,9 @@ pub fn try_compute_eff_lengths_tblastx(
 ///
 /// `BlastKarlinEtoS_simple`, with its check of the block: a negative Lambda, K or H gives
 /// `BLAST_SCORE_MIN`, below the cutoff of 1 that `BLAST_Cutoffs` starts from, so the cutoff stays 1
-/// (blast_stat.c:4126-4129). A PSSM's file can give such a block (`tblastn -in_pssm`, psiblast's
-/// `-in_pssm`); the other blocks are valid.
+/// (blast_stat.c:4126-4129). Such a block comes from a PSSM's file (`-in_pssm` of TBLASTN and
+/// PSI-BLAST) or from the failed Karlin calculation of a PSI-BLAST round (the hit-saving and the
+/// sum statistics' cutoffs of `pssm_search` and `sum_stats_hit_cutoff`); the other blocks are valid.
 ///
 /// # Arguments
 /// * `evalue` - Expected value threshold

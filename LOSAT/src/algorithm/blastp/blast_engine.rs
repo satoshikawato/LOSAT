@@ -51,7 +51,7 @@ use crate::report::{
     PairwiseHit, ReportContext,
 };
 use crate::stats::compute_blosum62_ideal_karlin_params;
-use crate::stats::karlin::evalue_from_raw_score;
+use crate::stats::karlin::evalue_from_raw_score_with_log_k;
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
     blast_spouge_etos, blast_spouge_stoe, lookup_protein_gumbel_params,
@@ -1437,12 +1437,20 @@ fn x_build_compact_preliminary_hsp_list<'h>(
             })
             .collect(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
-        None => preliminary_hits
-            .map(|hit| XPrelimHsp {
-                hsp: *hit,
-                e_value: evalue_from_raw_score(hit.raw_score, karlin_params, search_space),
-            })
-            .collect(),
+        None => {
+            let log_k = karlin_params.k.glibc_ln();
+            preliminary_hits
+                .map(|hit| XPrelimHsp {
+                    hsp: *hit,
+                    e_value: evalue_from_raw_score_with_log_k(
+                        hit.raw_score,
+                        karlin_params,
+                        log_k,
+                        search_space,
+                    ),
+                })
+                .collect()
+        }
     };
     let mut hsp_list = BlastpHspList {
         oid,

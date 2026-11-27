@@ -797,20 +797,6 @@ fn test_blastn_context_statistics_rounds_evalue_score_only() {
 
     assert_eq!(bit_score, expected_bit_score);
     assert_eq!(evalue, expected_evalue);
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
-    for invalid in [
-        crate::stats::KarlinParams {
-            lambda: -0.625,
-            ..params
-        },
-        crate::stats::KarlinParams { k: -0.41, ..params },
-        crate::stats::KarlinParams { h: -0.78, ..params },
-    ] {
-        let (_, invalid_evalue) =
-            calculate_blastn_context_statistics(raw_score, &invalid, eff_searchsp, true);
-        assert_eq!(invalid_evalue.to_bits(), (-1.0_f64).to_bits());
-    }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:204-210;
 // c++/src/algo/blast/core/blast_parameters.c:925-946

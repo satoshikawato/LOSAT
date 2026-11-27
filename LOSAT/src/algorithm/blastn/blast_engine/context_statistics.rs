@@ -275,7 +275,10 @@ pub(super) fn gap_align_setup_error(
 /// query. A 64-bit effective search space overflow (`effective_search_spaces`,
 /// `batch_setup::batch_spaces`, or mid-search at `subject_space_overflow.check()` in `run.rs`;
 /// D1a-6 review A F2) depends on the query length (and subject length for per-subject spaces), so
-/// valid earlier batches with hits may precede it; the handler writes their reports alike.
+/// valid earlier batches with hits may precede it; the handler writes their reports alike. So does
+/// the refusal of the ungapped word cutoff (`batch_setup::batch_cutoff_set`: a context of 2^30
+/// letters or more, or an average subject length whose search space overflows), which a batch with a
+/// long query meets after batches with shorter ones.
 pub(super) fn setup_failure(
     error: anyhow::Error,
     first_batch: bool,

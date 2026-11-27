@@ -7717,7 +7717,8 @@ fn search(
 /// prologs that come with the reports). Its errors: of a batch after the first that do not depend on
 /// the batch's queries (the Karlin-Altschul error of the scoring options, the average subject length,
 /// in `context_statistics`), which the first batch with a valid query meets after the reports of the
-/// batches before, whose queries were all invalid; and the stops of NCBI's search of the batch that
+/// batches before, whose queries were all invalid; those that do (a search space overflow, the
+/// ungapped word cutoff of a long query), after the reports of batches with hits; and the stops of NCBI's search of the batch that
 /// LOSAT refuses where NCBI meets them (the query chunks of a split batch, `search_query_chunks`; a
 /// header that the fetch under a negative seqid list cannot read, `database::fetch_refusal`), after
 /// the reports that NCBI's batch loop has printed (line RG item X-short-bat-2). The one place that
@@ -8637,7 +8638,6 @@ fn run_in_pool(
         source,
         subject_ranges,
         query_input,
-        &lengths,
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -11654,7 +11654,17 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
         prelim: x_prelim_cutoffs_owned,
-    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())?;
+    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())
+        .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let prelim_eff_searchsp_ref: &Vec<i64> =
         prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
     let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);

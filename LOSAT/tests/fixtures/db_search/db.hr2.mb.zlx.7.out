@@ -1,0 +1,14 @@
+# BLASTN 2.17.0+
+# Query: qnX holder letters 0-200
+# Database: tests/db_search/multidb/nP tests/db_search/multidb/zlxL
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qnX	XM_000061.1	100.000	200	0	0	1	200	1	200	7.06e-107	370
+# BLASTN 2.17.0+
+# Query: qnB NM_100001.1 0-150 + NM_100000.1 0-150
+# Database: tests/db_search/multidb/nP tests/db_search/multidb/zlxL
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qnB	NM_100001.1	100.000	150	0	0	1	150	1	150	6.69e-79	278
+qnB	NM_100000.1	100.000	150	0	0	151	300	1	150	6.69e-79	278
+# BLAST processed 2 queries

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/pP tests/db_search/multidb/zpApP</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qp2 protein query two</query-title>
+              <query-len>150</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>ref|XP_000050.1|</id>
+                      <accession>XP_000050</accession>
+                      <title>p4 first line</title>
+                    </HitDescr>
+                    <HitDescr>
+                      <id>ref|NP_100001.1|</id>
+                      <accession>NP_100001</accession>
+                      <title>p4 second line</title>
+                    </HitDescr>
+                  </description>
+                  <len>140</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>139.813</bit-score>
+                      <score>351</score>
+                      <evalue>6.87379e-48</evalue>
+                      <identity>66</identity>
+                      <positive>66</positive>
+                      <query-from>81</query-from>
+                      <query-to>150</query-to>
+                      <hit-from>61</hit-from>
+                      <hit-to>130</hit-to>
+                      <align-len>70</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNPLYSVRFGKAI</qseq>
+                      <hseq>NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNPLYSVRFGKAI</hseq>
+                      <midline>NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NPLYSVRFGKAI</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>ref|XP_000050.1|</id>
+                      <accession>XP_000050</accession>
+                      <title>p4 first line</title>
+                    </HitDescr>
+                    <HitDescr>
+                      <id>ref|NP_100001.1|</id>
+                      <accession>NP_100001</accession>
+                      <title>p4 second line</title>
+                    </HitDescr>
+                  </description>
+                  <len>140</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>139.813</bit-score>
+                      <score>351</score>
+                      <evalue>6.87379e-48</evalue>
+                      <identity>66</identity>
+                      <positive>66</positive>
+                      <query-from>81</query-from>
+                      <query-to>150</query-to>
+                      <hit-from>61</hit-from>
+                      <hit-to>130</hit-to>
+                      <align-len>70</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNPLYSVRFGKAI</qseq>
+                      <hseq>NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNPLYSVRFGKAI</hseq>
+                      <midline>NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NPLYSVRFGKAI</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>3</num>
+                  <description>
+                    <HitDescr>
+                      <id>ref|NP_100000.1|</id>
+                      <accession>NP_100000</accession>
+                      <title>ptitle 0 of the protein set</title>
+                      <taxid>100001</taxid>
+                    </HitDescr>
+                  </description>
+                  <len>140</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>14.6234</bit-score>
+                      <score>26</score>
+                      <evalue>1.72858</evalue>
+                      <identity>5</identity>
+                      <positive>7</positive>
+                      <query-from>1</query-from>
+                      <query-to>15</query-to>
+                      <hit-from>59</hit-from>
+                      <hit-to>73</hit-to>
+                      <align-len>15</align-len>
+                      <gaps>0</gaps>
+                      <qseq>LSCSNIGNSPQFGYN</qseq>
+                      <hseq>IGCFQSTQNPYFMYN</hseq>
+                      <midline>+ C     +P F YN</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>3</db-num>
+                  <db-len>420</db-len>
+                  <hsp-len>23</hsp-len>
+                  <eff-space>44577</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

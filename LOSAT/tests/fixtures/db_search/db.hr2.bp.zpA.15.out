@@ -1,0 +1,141 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/multidb/pP tests/db_search/multidb/zpApP"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp2 protein query two",
+          "query_len": 150,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "ref|XP_000050.1|",
+                  "accession": "XP_000050",
+                  "title": "p4 first line"
+                },
+                {
+                  "id": "ref|NP_100001.1|",
+                  "accession": "NP_100001",
+                  "title": "p4 second line"
+                }
+              ],
+              "len": 140,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.813,
+                  "score": 351,
+                  "evalue": 6.87379e-48,
+                  "identity": 66,
+                  "positive": 66,
+                  "query_from": 81,
+                  "query_to": 150,
+                  "hit_from": 61,
+                  "hit_to": 130,
+                  "align_len": 70,
+                  "gaps": 0,
+                  "qseq": "NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNPLYSVRFGKAI",
+                  "hseq": "NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNPLYSVRFGKAI",
+                  "midline": "NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NPLYSVRFGKAI"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "ref|XP_000050.1|",
+                  "accession": "XP_000050",
+                  "title": "p4 first line"
+                },
+                {
+                  "id": "ref|NP_100001.1|",
+                  "accession": "NP_100001",
+                  "title": "p4 second line"
+                }
+              ],
+              "len": 140,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.813,
+                  "score": 351,
+                  "evalue": 6.87379e-48,
+                  "identity": 66,
+                  "positive": 66,
+                  "query_from": 81,
+                  "query_to": 150,
+                  "hit_from": 61,
+                  "hit_to": 130,
+                  "align_len": 70,
+                  "gaps": 0,
+                  "qseq": "NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNPLYSVRFGKAI",
+                  "hseq": "NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNPLYSVRFGKAI",
+                  "midline": "NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NPLYSVRFGKAI"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "ref|NP_100000.1|",
+                  "accession": "NP_100000",
+                  "title": "ptitle 0 of the protein set",
+                  "taxid": 100001
+                }
+              ],
+              "len": 140,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.6234,
+                  "score": 26,
+                  "evalue": 1.72858,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 1,
+                  "query_to": 15,
+                  "hit_from": 59,
+                  "hit_to": 73,
+                  "align_len": 15,
+                  "gaps": 0,
+                  "qseq": "LSCSNIGNSPQFGYN",
+                  "hseq": "IGCFQSTQNPYFMYN",
+                  "midline": "+ C     +P F YN"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 420,
+            "hsp_len": 23,
+            "eff_space": 44577,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -7,3 +7,7 @@
   e-value from one query context to the next as NCBI does, also across the parts of a BLASTX
   query batch of more than 10002 letters (`BATCH_SIZE`) that LOSAT searches apart (line RG,
   X-etos-owner).
+- Fixed: blastp and psiblast with an `-evalue` of NaN (`-nan`, which NCBI BLAST+ accepts) and
+  `-searchsp` write NCBI's hits: the score cutoff of such an e-value is 1, so every HSP is kept,
+  where LOSAT wrote none; with the composition-based redo no match is kept, as in NCBI (rows
+  `db.etos.*`; line RG, X-etos-owner).

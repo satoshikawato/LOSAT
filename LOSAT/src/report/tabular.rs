@@ -1984,6 +1984,15 @@ impl TabularRows {
     }
 }
 
+/// What outfmt 7's header names after the query (`TabularWriter::header_of`).
+#[derive(Clone, Copy, Debug)]
+pub enum HeaderTarget<'a> {
+    /// The database's name (or `-subject`'s `User specified sequence set (Input: ...)`).
+    Database(&'a [u8]),
+    /// The subject Bioseq's text before its spaces are cut.
+    Subject(&'a [u8]),
+}
+
 /// An HSP of the report, with the values as NCBI's tabular report shows them.
 #[derive(Clone, Copy, Debug)]
 pub struct TabularHsp<'a> {
@@ -2210,6 +2219,28 @@ impl<'a> TabularWriter<'a> {
         database: &[u8],
         num_hits: Option<usize>,
     ) -> io::Result<()> {
+        self.header_of(
+            out,
+            iteration,
+            query_title,
+            HeaderTarget::Database(database),
+            num_hits,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1287-1320
+    /// `round_query_header` with the line of `target` after the query's: `# Database:` and the
+    /// database's name, or where the formatter has no database name (blast_formatter's `-subject`
+    /// archives with `BL2SEQ_LEGACY`) `# Subject:` and the subject Bioseq's text
+    /// (`AcknowledgeBlastSubject`: its spaces cut, as the query's).
+    pub fn header_of(
+        &self,
+        out: &mut dyn Write,
+        iteration: Option<u32>,
+        query_title: &[u8],
+        target: HeaderTarget<'_>,
+        num_hits: Option<usize>,
+    ) -> io::Result<()> {
         if self.spec.kind != TabularKind::Commented {
             return Ok(());
         }
@@ -2218,8 +2249,16 @@ impl<'a> TabularWriter<'a> {
             writeln!(out, "# Iteration: {iteration}")?;
         }
         write_outfmt7_query_line(out, query_title)?;
-        out.write_all(b"# Database: ")?;
-        out.write_all(database)?;
+        match target {
+            HeaderTarget::Database(database) => {
+                out.write_all(b"# Database: ")?;
+                out.write_all(database)?;
+            }
+            HeaderTarget::Subject(text) => {
+                out.write_all(b"# Subject: ")?;
+                out.write_all(crate::ncbi_str::truncate_spaces(text))?;
+            }
+        }
         out.write_all(b"\n")?;
         let Some(num_hits) = num_hits else {
             return Ok(());

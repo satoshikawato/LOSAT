@@ -36,6 +36,22 @@ fn hsp<'r>(
     row_hsp(&plan, ctx, sequences, buffers)
 }
 
+/// The genetic codes of a BLASTN formatter (`m_QueryGenCode` 1, `m_DbGenCode` 0).
+static BLASTN_CODES: std::sync::LazyLock<GeneticCodes> =
+    std::sync::LazyLock::new(|| GeneticCodes::new(1, 0));
+
+/// What a BLASTN row of a query of 10 letters and a subject of 20 reads besides its Seq-align.
+fn blastn_context(spec: &TabularSpec) -> RowContext<'_> {
+    RowContext {
+        spec,
+        no_fetch: true,
+        query_length: 10,
+        subject_length: 20,
+        nucleotide: [true, true],
+        codes: &BLASTN_CODES,
+    }
+}
+
 /// A gapped Seq-align of `q1` (letters 0..=9) on the minus strand of `s1` (10..=19).
 const MINUS: &str = "Seq-align ::= { type partial, dim 2, score { { id str \"score\", value int 8 }, \
     { id str \"e_value\", value real { 2, 10, -3 } }, { id str \"bit_score\", value real { 165, 10, -1 } }, \
@@ -48,11 +64,7 @@ fn a_row_of_the_minus_strand_counts_its_columns() {
     let align = value(MINUS);
     let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
     let spec = spec("qstart qend sstart send length gaps gapopen evalue bitscore score qseq sseq");
-    let ctx = RowContext {
-        spec: &spec,
-        no_fetch: true,
-        query_length: 10,
-    };
+    let ctx = blastn_context(&spec);
     // The subject's letters of the row's range only (10..=19), as the driver reads them.
     let scores = row_scores(&read[0], &spec).unwrap();
     let plan = row_plan(&read[0], scores, &ctx).unwrap();
@@ -61,6 +73,7 @@ fn a_row_of_the_minus_strand_counts_its_columns() {
         query: b"ACGTACGTAC",
         subject: b"AAAAAAAAAA",
         subject_from: 10,
+        codes: &BLASTN_CODES,
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
@@ -80,15 +93,12 @@ fn a_row_without_counted_fields_reads_no_letters() {
     let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
     let spec = spec("qseqid sseqid evalue");
     assert!(!reads_letters(&spec, true));
-    let ctx = RowContext {
-        spec: &spec,
-        no_fetch: true,
-        query_length: 10,
-    };
+    let ctx = blastn_context(&spec);
     let empty = RowLetters {
         query: b"",
         subject: b"",
         subject_from: 0,
+        codes: &BLASTN_CODES,
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &empty, &mut buffers).unwrap();
@@ -113,4 +123,176 @@ fn qcovs_is_set_on_the_first_row_of_each_subject() {
     // The union of the query's ranges, 0..=11 of 20 letters: 60 %.
     assert_eq!(scores[0].0, 60);
     assert_eq!(scores[1].0, 60);
+}
+
+/// A Std-seg Seq-align of one segment whose query row is `query` and subject row `subject`.
+fn std_seg(query: &str, subject: &str) -> Value {
+    value(&format!(
+        "Seq-align ::= {{ type partial, dim 2, score {{ {{ id str \"score\", value int 20 }}, \
+         {{ id str \"e_value\", value real {{ 1, 10, -5 }} }}, {{ id str \"bit_score\", value \
+         real {{ 120, 10, -1 }} }}, {{ id str \"num_ident\", value int 3 }} }}, segs std {{ {{ \
+         dim 2, loc {{ {query}, {subject} }} }} }} }}"
+    ))
+}
+
+/// What a row of a translated search reads besides its Seq-align: a query of 12 letters and a
+/// subject of `subject_length`, of the molecules `nucleotide`, with `codes`.
+fn translated_context<'s>(
+    spec: &'s TabularSpec,
+    subject_length: i64,
+    nucleotide: [bool; 2],
+    codes: &'s GeneticCodes,
+) -> RowContext<'s> {
+    RowContext {
+        spec,
+        no_fetch: false,
+        query_length: 12,
+        subject_length,
+        nucleotide,
+        codes,
+    }
+}
+
+const FIELDS: &str = "qstart qend sstart send qframe sframe frames length nident qseq sseq";
+
+#[test]
+fn a_blastx_std_seg_reads_its_query_translated_in_its_frame() {
+    let align = std_seg(
+        "int { from 0, to 8, strand plus, id local str \"q1\" }",
+        "int { from 0, to 2, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let spec = spec(FIELDS);
+    let codes = GeneticCodes::new(1, 0);
+    let ctx = translated_context(&spec, 4, [true, false], &codes);
+    let letters = RowLetters {
+        query: b"ATGGCCTTTAAA",
+        subject: b"MAFK",
+        subject_from: 0,
+        codes: &codes,
+    };
+    let mut buffers = RowBuffers::default();
+    let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
+    assert_eq!((row.q_start, row.q_end, row.s_start, row.s_end), (1, 9, 1, 3));
+    // The query's frame of its start; a protein row's frame 0.
+    assert_eq!((row.q_frame, row.s_frame), (1, 0));
+    assert_eq!(row.length, 3);
+    let (query, subject) = row.rows.expect("the rows' letters");
+    assert_eq!((query, subject), (&b"MAF"[..], &b"MAF"[..]));
+}
+
+#[test]
+fn a_minus_strand_query_row_runs_down_in_a_negative_frame() {
+    let align = std_seg(
+        "int { from 3, to 11, strand minus, id local str \"q1\" }",
+        "int { from 0, to 2, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let spec = spec(FIELDS);
+    let codes = GeneticCodes::new(1, 0);
+    let ctx = translated_context(&spec, 4, [true, false], &codes);
+    // Letters 3..=11 are AAAGGCCAT, whose reverse complement is ATGGCCTTT (MAF).
+    let letters = RowLetters {
+        query: b"CCCAAAGGCCAT",
+        subject: b"MAFK",
+        subject_from: 0,
+        codes: &codes,
+    };
+    let mut buffers = RowBuffers::default();
+    let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
+    assert_eq!((row.q_start, row.q_end), (12, 4));
+    // `GetFrame` of start 11 on the minus strand of 12 letters: -((12 - 11 - 1) % 3 + 1).
+    assert_eq!(row.q_frame, -1);
+    assert_eq!(row.rows.expect("the rows' letters").0, b"MAF");
+}
+
+#[test]
+fn a_query_row_without_letters_ends_the_row_at_the_query_block() {
+    let align = std_seg(
+        "empty local str \"q1\"",
+        "int { from 0, to 2, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let spec = spec("qseqid sseqid evalue qstart length qcovhsp");
+    let codes = GeneticCodes::new(1, 0);
+    let ctx = translated_context(&spec, 4, [true, false], &codes);
+    let scores = row_scores(&read[0], &spec).unwrap();
+    let plan = row_plan(&read[0], scores, &ctx).unwrap();
+    // `GetSeqRange(0)` throws "Row is empty", which the query block catches.
+    assert!(plan.leaves);
+    let mut buffers = RowBuffers::default();
+    let empty = RowLetters {
+        query: b"",
+        subject: b"",
+        subject_from: 0,
+        codes: &codes,
+    };
+    let row = row_hsp(&plan, &ctx, &empty, &mut buffers).unwrap();
+    assert_eq!((row.q_start, row.length, row.qcovhsp), (0, 0, -1));
+    assert_eq!(row.score, 20);
+}
+
+#[test]
+fn a_tblastx_std_seg_is_a_dense_seg_of_codons_on_both_rows() {
+    let align = std_seg(
+        "int { from 0, to 8, strand plus, id local str \"q1\" }",
+        "int { from 3, to 11, strand minus, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let ds = read[0].dense_seg(true).unwrap();
+    assert_eq!((ds.lens.clone(), ds.widths), (vec![3], [3, 3]));
+    assert_eq!(ds.strands, [Strand::Plus, Strand::Minus]);
+    // A segment of letters that are no whole codons.
+    let uneven = std_seg(
+        "int { from 0, to 9, strand plus, id local str \"q1\" }",
+        "int { from 0, to 9, strand plus, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &uneven)], false);
+    match read[0].dense_seg(true) {
+        Err(ReadStop::Stop(Stop::Exception(exception))) => {
+            assert_eq!(exception.site().line, 985);
+            assert!(exception.get_msg().ends_with(b"Length of segment 0 is not divisible by 3."));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_translated_row_whose_genetic_code_ncbi_lacks_throws_before_its_letters() {
+    // A TBLASTN row (query protein, subject translated) formatted with the db code 0.
+    let align = std_seg(
+        "int { from 0, to 2, id local str \"q1\" }",
+        "int { from 0, to 8, strand plus, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let spec = spec("qseq sseq");
+    let codes = GeneticCodes::new(1, 0);
+    let ctx = translated_context(&spec, 9, [false, true], &codes);
+    let scores = row_scores(&read[0], &spec).unwrap();
+    let plan = row_plan(&read[0], scores, &ctx).unwrap();
+    assert!(plan.translation_stop(&ctx, 0).unwrap().is_none());
+    let exception = plan.translation_stop(&ctx, 1).unwrap().expect("GetTransTable's exception");
+    assert_eq!(exception.get_msg(), b"Unable to find genetic code number 0");
+    // With code 1 the row reads.
+    let codes = GeneticCodes::new(1, 1);
+    let ctx = translated_context(&spec, 9, [false, true], &codes);
+    assert!(plan.translation_stop(&ctx, 1).unwrap().is_none());
+}
+
+#[test]
+fn a_translated_row_past_its_sequence_leaves_a_segment_without_whole_codons() {
+    // A BLASTX query row of 9 letters on a query of 7 (its Bioseq shorter than the row).
+    let align = std_seg(
+        "int { from 0, to 8, strand plus, id local str \"q1\" }",
+        "int { from 0, to 2, id local str \"s1\" }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let spec = spec("qseq");
+    let codes = GeneticCodes::new(1, 0);
+    let mut ctx = translated_context(&spec, 3, [true, false], &codes);
+    ctx.query_length = 7;
+    let scores = row_scores(&read[0], &spec).unwrap();
+    let plan = row_plan(&read[0], scores, &ctx).unwrap();
+    let exception = plan.translation_stop(&ctx, 0).unwrap().expect("TranslateNAToAA's exception");
+    assert_eq!(exception.site().line, 898);
 }

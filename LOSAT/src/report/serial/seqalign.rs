@@ -1416,6 +1416,17 @@ pub(crate) fn row_range_exception(error: RowRangeError) -> NcbiException {
             "CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range.",
         ),
     };
+    seq_align_exception(line, kind, message)
+}
+
+/// A `CSeqalignException` that `Seq_align.cpp` throws at `line`, of the error code `kind`
+/// (`CSeqalignException::eInvalidAlignment` ...), with `message` (no function in the report:
+/// `CSeq_align`'s methods throw with the method's name in the message).
+pub(crate) fn seq_align_exception(
+    line: u32,
+    kind: &'static str,
+    message: impl Into<Vec<u8>>,
+) -> NcbiException {
     NcbiException::new(
         ThrowSite {
             file: SEQ_ALIGN_CPP,
@@ -1433,13 +1444,9 @@ pub(crate) fn row_range_exception(error: RowRangeError) -> NcbiException {
 /// nucleotide and an empty subject row (0 is neither 3 nor a third of 1, nor 1), where a formatter
 /// makes a Dense-seg of it (the tabular rows' alignment block, BLAST XML).
 pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
-    NcbiException::new(
-        ThrowSite {
-            file: SEQ_ALIGN_CPP,
-            line: 801,
-            kind: "CSeqalignException::eInvalidInputAlignment",
-            function: None,
-        },
+    seq_align_exception(
+        801,
+        "CSeqalignException::eInvalidInputAlignment",
         "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!",
     )
 }
@@ -1458,6 +1465,23 @@ pub(crate) fn translate_na_to_aa_exception() -> NcbiException {
             function: Some("ncbi::objects::CAlnVec::TranslateNAToAA"),
         },
         "CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3",
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:507-557
+/// `CGen_code_table_imp::GetTransTable(): Unable to find genetic code number <code>`
+/// (Genetic_code_table.cpp:555, `CException::eUnknown`): the translation of a row with a genetic
+/// code that NCBI's table does not have (BLASTX's database code 0 on a nucleotide row of an
+/// archive's other object, blast_formatter's tabular formats).
+pub(crate) fn unknown_genetic_code_exception(code: i32) -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objects/seq/../seqfeat/Genetic_code_table.cpp",
+            line: 555,
+            kind: "CException::eUnknown",
+            function: Some("ncbi::objects::CGen_code_table_imp::GetTransTable"),
+        },
+        format!("Unable to find genetic code number {code}"),
     )
 }
 

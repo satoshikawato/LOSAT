@@ -10,8 +10,10 @@
 //! request's `-subject` Bioseqs. What LOSAT does not find as NCBI's scope would is refused by name
 //! before the object's first byte: a subject that the database does not hold (NCBI asks its
 //! servers, `Refusal::Database`), and the forms that this driver does not cover
-//! (`Refusal::Tabular`): the translated programs, queries given as locations, `-subject` with
-//! `BL2SEQ_LEGACY` in outfmt 7, and ids that NCBI's scope could find elsewhere.
+//! (`Refusal::Tabular`): queries given as locations, and ids that NCBI's scope could find
+//! elsewhere. The translated programs' Std-seg Seq-aligns are read as the others
+//! (`report::tabular_seqalign`, PR 3b of line RG item F3), and `-subject` with `BL2SEQ_LEGACY` in
+//! outfmt 7 names each query's subject (`Bl2seqSubjects`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -41,11 +43,11 @@ use crate::report::serial::asn_types::view::V;
 use crate::report::serial::seqalign_read::{read_set, ReadAlign, ReadStop};
 use crate::report::tabular::{
     check_failed_lookups, failed_database_title, failed_record_title, taxdb_warning_line_of,
-    LookupFailure, SubjectLookup, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularTaxonomy, TabularWriter,
+    HeaderTarget, LookupFailure, SubjectLookup, TabularKind, TabularNames, TabularQuery,
+    TabularRows, TabularSpec, TabularTaxonomy, TabularWriter,
 };
 use crate::report::tabular_seqalign::{
-    reads_letters, row_hsp, row_plan, row_scores, subject_scores, RowBuffers, RowContext,
+    row_hsp, row_plan, row_scores, subject_scores, GeneticCodes, RowBuffers, RowContext,
     RowLetters, RowPlan, SubjectScores,
 };
 use crate::seqdb::lookup::SeqidLookup;
@@ -87,6 +89,10 @@ pub(super) struct ObjectInputs<'a> {
     /// run's task is psiblast; `numeric_limits<unsigned int>::max()`, no line, otherwise), `Err`
     /// where its `Web_StepNumber` is no integer.
     pub(super) iteration: std::result::Result<Option<u32>, ()>,
+    /// The run's index of the next subject that outfmt 7's header names where the formatter has
+    /// no database name (`x_CreateSubjectBioseq`'s static `subj_index`: `-subject` archives with
+    /// `BL2SEQ_LEGACY` set), kept across the objects.
+    pub(super) subject_index: &'a std::cell::Cell<u32>,
 }
 
 /// The refusal of a form that the tabular formats do not write yet.
@@ -169,7 +175,8 @@ pub(super) fn options_matrix_name(options: &BuiltOptions) -> Option<Vec<u8>> {
 
 /// The programs whose Seq-aligns the tabular formats write: those of one Dense-seg or Dense-diag
 /// per HSP (blastn's tasks, blastp, PSI-BLAST, DELTA-BLAST, PHI-BLAST of a protein query,
-/// RPS-BLAST); the translated programs come with their Std-segs (PR 3b of line RG item F3).
+/// RPS-BLAST) and the translated ones of Std-segs (BLASTX, TBLASTN, TBLASTX, RPSTBLASTN,
+/// PSI-TBLASTN).
 fn covered(program: EProgram) -> bool {
     matches!(
         program,
@@ -181,15 +188,76 @@ fn covered(program: EProgram) -> bool {
             | EProgram::DeltaBlast
             | EProgram::PhiBlastp
             | EProgram::RpsBlast
+            | EProgram::Blastx
+            | EProgram::Tblastn
+            | EProgram::Tblastx
+            | EProgram::RpsTblastn
+            | EProgram::PsiTblastn
     )
 }
 
-/// One query Bioseq of the request as the rows show it.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:237
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/tblastx_options.cpp:73
+/// `m_IsUngappedSearch` (`!opts.GetGappedMode()`): the last `GappedMode` call of the options,
+/// else the factory's: TBLASTX's handle is ungapped, every other one gapped.
+fn ungapped_search(options: &BuiltOptions) -> bool {
+    options
+        .setters
+        .iter()
+        .rev()
+        .find_map(|setter| match setter {
+            Setter::GappedMode(gapped) => Some(!gapped),
+            _ => None,
+        })
+        .unwrap_or(options.program == EProgram::Tblastx)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:233-234
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:526, 1621
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:556-559
+/// The formatter's genetic codes (`GetQueryGeneticCode`, `GetDbGeneticCode`): the last setter of
+/// each, else the factory's: `BLAST_GENETIC_CODE` (1) for the query; for the database 1 where the
+/// program's subjects are translated (TBLASTN, TBLASTX, PSI-TBLASTN), else 0 (`SetProgram`
+/// clears it).
+fn genetic_codes(options: &BuiltOptions) -> GeneticCodes {
+    let last = |query: bool| {
+        options.setters.iter().rev().find_map(|setter| match setter {
+            Setter::QueryGeneticCode(code) if query => Some(*code),
+            Setter::DbGeneticCode(code) if !query => Some(*code),
+            _ => None,
+        })
+    };
+    let translated_subjects = matches!(
+        options.program,
+        EProgram::Tblastn | EProgram::Tblastx | EProgram::PsiTblastn
+    );
+    GeneticCodes::new(
+        last(true).unwrap_or(1),
+        last(false).unwrap_or(i32::from(translated_subjects)),
+    )
+}
+
+/// Where a query's letters are: its Bioseq in the request, or for a query given as a location
+/// the database sequence (its ordinal id) that the scope's loader of the database gives for its
+/// Seq-id (the queries' own scope has no loader, blast_formatter.cpp:197).
+#[derive(Clone, Copy)]
+enum QuerySequence<'r> {
+    Bioseq(Bioseq<'r>),
+    Database(u32),
+}
+
+/// One query of the request as the rows show it: its Bioseq, or the database's Bioseq of a query
+/// given as a location (`located_query`).
 struct QueryEntry<'r> {
-    bioseq: Bioseq<'r>,
+    sequence: QuerySequence<'r>,
+    /// The ids of a database query's Bioseq (its definition line's, `GetId()`), by which the rows'
+    /// query ids find it; empty for a query Bioseq of the request (its own ids).
+    located_ids: Vec<ParsedSeqId>,
     /// `SetQueryId`: the ids after `s_ReplaceLocalId`, whose tabular ids and GI the rows print.
     ids: BelievedIds,
     length: i64,
+    /// Whether the query is a nucleotide sequence (`bioseq_protein` false).
+    nucleotide: bool,
     /// outfmt 7's `# Query:` text before its spaces are cut (`x_AcknowledgeBlastSequence`).
     title: Vec<u8>,
 }
@@ -225,31 +293,25 @@ fn replaced_ids<'i>(
 }
 
 impl<'r> QueryEntry<'r> {
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:629-664
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:713-740
     /// The query Bioseq `bioseq` (at least one id, `check_queries`) of a formatter whose
-    /// `-parse_deflines` is `believe`. The `# Query:` text is `GetSeqIdString` (the id that
-    /// `FindBestChoice` with `WorstRank` picks, by `GetBareId`, unless it is local and the ids are
-    /// not believed; `[BLAST] LONG_SEQID` is refused by every program), a space and every title
-    /// joined (`GetSeqDescrString`).
+    /// `-parse_deflines` is `believe`, with its `# Query:` text (`acknowledged_title`).
     fn new(bioseq: Bioseq<'r>, believe: bool) -> Self {
-        let titles: Vec<u8> = bioseq.titles().flatten().copied().collect();
         let shown = replaced_ids(bioseq.ids(), bioseq.title().unwrap_or_default(), believe);
-        let mut title = Vec::new();
-        let best = crate::seqid::rank::find_best(bioseq.ids(), crate::seqid::rank::text_score);
-        if let Some(id) = best {
-            if !matches!(id, ParsedSeqId::Local(_)) || believe {
-                crate::seqid::label::bare(id, &mut title);
-            }
-        }
-        title.push(b' ');
-        title.extend_from_slice(&titles);
         QueryEntry {
-            bioseq,
+            sequence: QuerySequence::Bioseq(bioseq),
+            located_ids: Vec::new(),
             ids: BelievedIds::of_bioseq(shown, SeqLocStrand::Unknown),
             length: bioseq.length().unwrap_or(0),
-            title,
+            nucleotide: !bioseq_protein(bioseq),
+            title: acknowledged_title(bioseq, believe),
+        }
+    }
+
+    /// The query's Bioseq in the request (`None` for a query given as a location).
+    fn bioseq(&self) -> Option<Bioseq<'r>> {
+        match self.sequence {
+            QuerySequence::Bioseq(bioseq) => Some(bioseq),
+            QuerySequence::Database(_) => None,
         }
     }
 
@@ -262,6 +324,38 @@ impl<'r> QueryEntry<'r> {
             length: usize::try_from(self.length).unwrap_or(0),
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:629-664
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:669-683
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:713-740
+/// outfmt 7's text of the Bioseq `bioseq` (`x_AcknowledgeBlastSequence`, `# Query:` and
+/// `# Subject:`) before its spaces are cut, of a formatter whose `-parse_deflines` is `believe`:
+/// `GetSeqIdString` (the id that `FindBestChoice` with `WorstRank` picks, by `GetBareId`, unless
+/// it is local and the ids are not believed; `[BLAST] LONG_SEQID` is refused by every program), a
+/// space and every title joined (`GetSeqDescrString`).
+fn acknowledged_title(bioseq: Bioseq<'_>, believe: bool) -> Vec<u8> {
+    acknowledged_text(bioseq.ids(), bioseq.titles(), believe)
+}
+
+/// `acknowledged_title` of a Bioseq of the ids `ids` and the titles `titles`.
+fn acknowledged_text<'i>(
+    ids: impl IntoIterator<Item = &'i ParsedSeqId>,
+    titles: impl IntoIterator<Item = &'i [u8]>,
+    believe: bool,
+) -> Vec<u8> {
+    let mut title = Vec::new();
+    let best = crate::seqid::rank::find_best(ids, crate::seqid::rank::text_score);
+    if let Some(id) = best {
+        if !matches!(id, ParsedSeqId::Local(_)) || believe {
+            crate::seqid::label::bare(id, &mut title);
+        }
+    }
+    title.push(b' ');
+    for each in titles {
+        title.extend_from_slice(each);
+    }
+    title
 }
 
 /// The items of a list (the queries, the `-subject` Bioseqs, the Seq-align subject ids found) by
@@ -332,16 +426,50 @@ impl IdIndex {
 /// `kSubjectsDataLoaderPriority`), so that a query Bioseq is found first.
 struct ScopeBioseqs<'b, 'r> {
     queries: &'b [QueryEntry<'r>],
+    /// The ids of the query Bioseqs of the request (none where the queries are locations).
     query_ids: IdIndex,
+    /// The ids of the database's Bioseqs of the queries given as locations.
+    located_ids: IdIndex,
     subjects: &'b [Bioseq<'r>],
     subject_ids: IdIndex,
 }
 
-impl ScopeBioseqs<'_, '_> {
-    /// The queries that hold `id`, in order.
+impl<'r> ScopeBioseqs<'_, 'r> {
+    /// The scope of the queries `queries` and the `-subject` Bioseqs `subjects`.
+    fn new<'b>(queries: &'b [QueryEntry<'r>], subjects: &'b [Bioseq<'r>]) -> ScopeBioseqs<'b, 'r> {
+        let mut located_ids = IdIndex::default();
+        for (at, query) in queries.iter().enumerate() {
+            for id in &query.located_ids {
+                located_ids.add(at, id);
+            }
+        }
+        ScopeBioseqs {
+            queries,
+            query_ids: IdIndex::of_bioseqs(queries.iter().filter_map(QueryEntry::bioseq)),
+            located_ids,
+            subjects,
+            subject_ids: IdIndex::of_bioseqs(subjects.iter().copied()),
+        }
+    }
+
+    /// The query Bioseqs of the request that hold `id`, in order (none where the queries are
+    /// locations, which only the database's loader gives).
     fn queries_holding(&self, id: &ParsedSeqId) -> Vec<usize> {
-        self.query_ids
-            .holders(id, |at| holds(self.queries[at].bioseq.ids(), id))
+        self.query_ids.holders(id, |at| {
+            holds(self.queries[at].bioseq().expect("a query Bioseq").ids(), id)
+        })
+    }
+
+    /// The queries whose Bioseq the scope gives for a row's query id `id`: the request's query
+    /// Bioseqs that hold it, or where the queries are locations those whose database Bioseq
+    /// does.
+    fn row_queries(&self, id: &ParsedSeqId) -> Vec<usize> {
+        if self.queries.iter().any(|query| query.bioseq().is_none()) {
+            self.located_ids
+                .holders(id, |at| holds(&self.queries[at].located_ids, id))
+        } else {
+            self.queries_holding(id)
+        }
     }
 
     /// The `-subject` Bioseqs that hold `id`, in order.
@@ -396,6 +524,9 @@ struct Subjects<'db> {
     last: Option<usize>,
     /// One `SeqidLookup`, `HeaderReader` and `ScopeWalk` opened lazily for the whole object.
     db_readers: Option<(SeqidLookup<'db>, HeaderReader<'db>, ScopeWalk)>,
+    /// Whether each subject is a nucleotide sequence and its length (`GetSequenceType`,
+    /// `GetBioseqLength`), by subject index.
+    facts: Vec<(bool, i64)>,
     scratch_keys: Vec<u64>,
     scratch_found: Vec<usize>,
 }
@@ -456,20 +587,53 @@ impl<'db> Subjects<'db> {
                 }
             },
         };
-        let sources = &mut self.sources;
-        let index = *self
-            .by_sequence
-            .entry(source.sequence())
-            .or_insert_with(|| {
-                sources.push(source);
-                sources.len() - 1
-            });
+        let index = match self.by_sequence.get(&source.sequence()) {
+            Some(&index) => index,
+            None => {
+                let facts = source_facts(inputs, scope, &source)?;
+                self.by_sequence
+                    .insert(source.sequence(), self.sources.len());
+                self.sources.push(source);
+                self.facts.push(facts);
+                self.sources.len() - 1
+            }
+        };
         let key_at = self.keys.len();
         self.key_ids.add(key_at, id);
         self.keys.push((id.clone(), index));
         self.last = Some(key_at);
         Ok(index)
     }
+}
+
+/// Whether the subject `source` is a nucleotide sequence and its length (`GetSequenceType`,
+/// `GetBioseqLength`): the database's residue type and the sequence's length, or the Bioseq's.
+fn source_facts(
+    inputs: &ObjectInputs<'_>,
+    scope: &ScopeBioseqs<'_, '_>,
+    source: &SubjectSource,
+) -> Result<(bool, i64)> {
+    Ok(match *source {
+        SubjectSource::Database { ordinal, .. } => {
+            let (_, db) = inputs.database.expect("a database subject");
+            let nucleotide = db.seqtype() != SeqType::Protein;
+            let length = if nucleotide {
+                db.nucleotide_length(ordinal).map(|length| length as i64)
+            } else {
+                db.protein_length(ordinal).map(i64::from)
+            }
+            .map_err(|error| database_error(error, PROGRAM))?;
+            (nucleotide, length)
+        }
+        SubjectSource::Bioseq(at) => {
+            let bioseq = scope.subjects[at];
+            (!bioseq_protein(bioseq), bioseq.length().unwrap_or(0))
+        }
+        SubjectSource::Query(at) => {
+            let query = &scope.queries[at];
+            (query.nucleotide, query.length)
+        }
+    })
 }
 
 /// Whether one of `ids` is `id` for NCBI's scope (`Sic::Yes`).
@@ -635,9 +799,11 @@ impl BioseqRecords {
                     continue;
                 }
                 SubjectSource::Bioseq(at) => (scope.subjects[at], believe, false),
-                SubjectSource::Query(at) => {
-                    (scope.queries[at].bioseq, database || believe, sets_taxon)
-                }
+                SubjectSource::Query(at) => (
+                    scope.queries[at].bioseq().expect("a query Bioseq"),
+                    database || believe,
+                    sets_taxon,
+                ),
             };
             if taxonomy && (in_taxon_set || taxon_descriptor(bioseq.value().get("descr"))) {
                 return Err(refused(
@@ -870,13 +1036,8 @@ pub(super) fn print_object(
     let options = inputs.options;
     if !covered(options.program) {
         return Err(refused(
-            "a translated search or a program other than blastn, blastp, psiblast, deltablast, \
-             PHI-BLAST of a protein query and rpsblast",
-        ));
-    }
-    if matches!(request.queries, Queries::SeqLocList(_)) {
-        return Err(refused(
-            "queries given as locations, whose sequences NCBI BLAST+ reads from the database",
+            "a program other than blastn, blastp, blastx, tblastn, tblastx, psiblast, \
+             deltablast, PHI-BLAST of a protein query, rpsblast and rpstblastn",
         ));
     }
     if set_titles(&request.queries) {
@@ -884,24 +1045,10 @@ pub(super) fn print_object(
     }
     let spec = TabularSpec::of_formatter(inputs.choice).expect("a tabular format");
     let commented = spec.kind == TabularKind::Commented;
-    if inputs.database.is_none() && commented && std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        return Err(refused(
-            "-subject sequences, BL2SEQ_LEGACY set and outfmt 7, whose lines NCBI BLAST+ writes \
-             for each subject",
-        ));
-    }
     let program = super::search_program::program_type(options.program);
     let blastn = program.blastn;
-    // `m_IsUngappedSearch`: the last `GappedMode` call of the options (gapped by default).
-    let ungapped = options
-        .setters
-        .iter()
-        .rev()
-        .find_map(|setter| match setter {
-            Setter::GappedMode(gapped) => Some(!gapped),
-            _ => None,
-        })
-        .unwrap_or(false);
+    let ungapped = ungapped_search(options);
+    let codes = genetic_codes(options);
     let matrix = formatter_matrix(inputs.matrix_name);
     let version = format!(
         "{} {}",
@@ -948,22 +1095,20 @@ pub(super) fn print_object(
         }
     };
 
-    let queries: Vec<QueryEntry<'_>> = request
-        .queries
-        .bioseqs()
-        .into_iter()
-        .map(|bioseq| QueryEntry::new(bioseq, inputs.believe))
-        .collect();
+    let queries: Vec<QueryEntry<'_>> = match &request.queries {
+        Queries::SeqLocList(_) => located_queries(inputs, &request.queries)?,
+        _ => request
+            .queries
+            .bioseqs()
+            .into_iter()
+            .map(|bioseq| QueryEntry::new(bioseq, inputs.believe))
+            .collect(),
+    };
     let subject_bioseqs = request.subject.bioseqs();
     if sets.len() > queries.len() {
         return Err(refused("a result set without its query Bioseq"));
     }
-    let scope = ScopeBioseqs {
-        query_ids: IdIndex::of_bioseqs(queries.iter().map(|query| query.bioseq)),
-        queries: &queries,
-        subject_ids: IdIndex::of_bioseqs(subject_bioseqs.iter().copied()),
-        subjects: &subject_bioseqs,
-    };
+    let scope = ScopeBioseqs::new(&queries, &subject_bioseqs);
     let mut subjects = Subjects::default();
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:658-690, 725-786
@@ -1000,6 +1145,7 @@ pub(super) fn print_object(
         scope: &scope,
         spec: &spec,
         blastn,
+        codes: &codes,
         checked: HashSet::new(),
     };
     let mut plans: Vec<QueryPlan<'_>> = Vec::with_capacity(sets.len());
@@ -1151,6 +1297,21 @@ pub(super) fn print_object(
         ));
     }
 
+    // outfmt 7's `# Subject:` line of each query where the formatter has no database name.
+    let subject_headers = if commented
+        && inputs.database.is_none()
+        && std::env::var_os("BL2SEQ_LEGACY").is_some()
+    {
+        Some(subject_header_texts(
+            inputs,
+            &scope,
+            &subject_bioseqs,
+            plans.len(),
+        )?)
+    } else {
+        None
+    };
+
     print_prolog(sink)?;
     if prefetches && !prefetched {
         sink.post(&prefetch_warning_of(None));
@@ -1165,12 +1326,24 @@ pub(super) fn print_object(
     let last = plans.len().saturating_sub(1);
     for (q, plan) in plans.iter().enumerate() {
         post_warning(sink);
+        let target = match &subject_headers {
+            None => HeaderTarget::Database(database_text),
+            Some(texts) => match texts.get(q) {
+                Some(text) => HeaderTarget::Subject(text),
+                // `CSeqVecSeqInfoSrc::GetId` of an index past the object's subjects.
+                None => {
+                    return Err(crate::blastinput::app::engine_error(
+                        "Index out of range for id retrieval",
+                    ))
+                }
+            },
+        };
         let mut out = Vec::new();
-        writer.round_query_header(
+        writer.header_of(
             &mut out,
             iteration,
             &queries[q].title,
-            database_text,
+            target,
             Some(plan.count),
         )?;
         let mut rows = TabularRows::default();
@@ -1179,11 +1352,7 @@ pub(super) fn print_object(
             let (qcovs, qcovus) = plan.scores.get(n).copied().unwrap_or((-1, -1));
             let align = &plan.aligns[n];
             let query = &queries[q_idx];
-            let ctx = RowContext {
-                spec: &spec,
-                no_fetch: blastn,
-                query_length: query.length,
-            };
+            let ctx = row_context(&spec, blastn, &codes, query, subjects.facts[s_idx]);
             let planned = row_scores(align, &spec)
                 .and_then(|scores| row_plan(align, scores, &ctx))
                 .map_err(read_stop)?;
@@ -1200,7 +1369,7 @@ pub(super) fn print_object(
             };
             let hsp = row_hsp(&planned, &ctx, &sequences, &mut buffers).map_err(read_stop)?;
             let entry = entry_of(&entries, s_idx);
-            let subject = entry
+            let mut subject = entry
                 .values
                 .subject(names.as_ref(), entry.nucleotide, qcovs, qcovus);
             let kept = rows.last_found().map(|kept| {
@@ -1208,12 +1377,34 @@ pub(super) fn print_object(
                 kept.values
                     .subject(names.as_ref(), kept.nucleotide, qcovs, qcovus)
             });
+            // A row that ends at the query block's `catch` (`RowPlan::leaves`) shows the
+            // Seq-align's query id as it is (`SetQueryId` of `GetSeq_id(0)`), no subject strand
+            // (`m_SubjectStrand` empty: `N/A`), and the subject's length only where the subject
+            // block read it.
+            let caught;
+            let shown_query = if planned.leaves {
+                subject.nucleotide = false;
+                if !spec.reads_subject_bioseq() {
+                    subject.length = 0;
+                }
+                let id = align.seq_id(0).map_err(super::archive::stop_error)?;
+                caught = BelievedIds::of_bioseq(vec![id.clone()], SeqLocStrand::Unknown);
+                TabularQuery {
+                    id: &caught.tabular[0],
+                    accession: &caught.tabular[1],
+                    accession_version: &caught.tabular[2],
+                    gi: caught.gi,
+                    length: usize::try_from(query.length).unwrap_or(0),
+                }
+            } else {
+                query.query()
+            };
             // The texts of the row's lookups of the taxonomy database follow the rows before it.
             post_row_texts(sink, &mut out, names.as_ref(), &spec, &writer, &subject)?;
             writer.row(
                 &mut out,
                 &mut rows,
-                &query.query(),
+                &shown_query,
                 &subject,
                 kept.as_ref(),
                 &hsp,
@@ -1249,6 +1440,153 @@ pub(super) fn print_object(
     Ok(())
 }
 
+/// The refusal of queries given as locations that NCBI BLAST+ asks its servers for.
+const LOCATED_ELSEWHERE: &str =
+    "queries given as locations that the database does not hold, whose sequences NCBI BLAST+ \
+     asks its servers for";
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:180-221
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1310-1470
+/// The queries of a `seq-loc-list` (each a whole sequence or an interval, `check_queries`): the
+/// queries' scope has no loader, so the scope's loader of the database gives each Seq-id's
+/// sequence (`database_subject`, the subjects' lookup), whose Bioseq is the query: its
+/// definition line's ids and title, the whole sequence's length and letters, the database's
+/// residue type. A Seq-id that the database does not hold, or a `-subject` object, is NCBI's ask
+/// of its servers (refused). A sequence of several definition lines, of taxids (the texts of
+/// its load) or of a title or id that the reader repairs is refused.
+fn located_queries<'r>(
+    inputs: &ObjectInputs<'_>,
+    queries: &'r Queries,
+) -> Result<Vec<QueryEntry<'r>>> {
+    let Some((name, db)) = inputs.database else {
+        return Err(refused(LOCATED_ELSEWHERE));
+    };
+    let lookup = db
+        .seqid_lookup()
+        .map_err(|error| database_error(error, PROGRAM))?;
+    let headers = HeaderReader::new(db, false);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    let protein = db.seqtype() == SeqType::Protein;
+    let mut out = Vec::new();
+    for loc in queries.seq_locs() {
+        let id = match loc.choice() {
+            ("whole", id) => id.seq_id(),
+            ("int", int) => int.field("id").seq_id(),
+            _ => return Err(refused("a query location other than a whole sequence or an interval")),
+        };
+        if !matches!(lookup.seqid_to_oid(id), Ok(Some(_))) {
+            return Err(refused(LOCATED_ELSEWHERE));
+        }
+        let SubjectSource::Database {
+            ordinal, header, ..
+        } = database_subject(name, db, &lookup, &headers, &mut walk, id)?
+        else {
+            unreachable!("a database sequence");
+        };
+        let ReportedHeader::Parsed(subject) = header else {
+            return Err(refused(
+                "a query location whose database sequence has no parsed definition line",
+            ));
+        };
+        let [defline] = subject.deflines() else {
+            return Err(refused(
+                "a query location whose database sequence has several definition lines",
+            ));
+        };
+        if !subject.volume_lookups().is_empty()
+            || defline.replaced_title_bytes > 0
+            || defline.replaced_id_bytes > 0
+        {
+            return Err(refused(
+                "a query location whose database sequence has taxids or a definition line that \
+                 NCBI BLAST+ repairs",
+            ));
+        }
+        let title = defline.title.as_deref().unwrap_or_default();
+        let length = if protein {
+            db.protein_length(ordinal).map(i64::from)
+        } else {
+            db.nucleotide_length(ordinal).map(|length| length as i64)
+        }
+        .map_err(|error| database_error(error, PROGRAM))?;
+        let shown = replaced_ids(&defline.ids, title, inputs.believe);
+        out.push(QueryEntry {
+            sequence: QuerySequence::Database(ordinal),
+            located_ids: defline.ids.clone(),
+            ids: BelievedIds::of_bioseq(shown, SeqLocStrand::Unknown),
+            length,
+            nucleotide: !protein,
+            title: acknowledged_text(&defline.ids, [title], inputs.believe),
+        });
+    }
+    Ok(out)
+}
+
+/// The letters of the database sequence `ordinal` as a row reads them (IUPAC, or the protein's
+/// FASTA letters).
+fn database_letters(
+    db: &SeqDb,
+    ordinal: u32,
+) -> std::result::Result<Vec<u8>, crate::seqdb::SeqDbError> {
+    if db.seqtype() == SeqType::Protein {
+        let block = db.read_sequence(ordinal)?;
+        return Ok(crate::sequence::stdaa_letters::protein_fasta_letters(
+            block.protein(0),
+        ));
+    }
+    let ambiguity = db.nucleotide_ambiguity(ordinal)?;
+    let length = ambiguity.length();
+    db.nucleotide_iupac_range_with(ordinal, 0, length, &ambiguity)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-808, 1024-1047
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:232-246, 276-279
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:61-77
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:700-746
+/// `x_CreateSubjectBioseq` for the headers of `count` queries of a `-subject` object whose
+/// formatter has no database name (`BL2SEQ_LEGACY` set: the subjects' adapter is not in its
+/// scan mode): the text of `AcknowledgeBlastSubject` (`acknowledged_title`) of the Bioseq that
+/// the scope finds for the id of the subject at the run's index (`FindBestChoice` of its ids by
+/// `BestRank`; the query Bioseqs before the subjects), the index then moving on and starting
+/// again at 0 past the object's last subject. The texts stop before the query whose index is
+/// past the object's subjects (an index kept from an object of more subjects), where NCBI's
+/// `GetId` throws (the run's engine error).
+fn subject_header_texts(
+    inputs: &ObjectInputs<'_>,
+    scope: &ScopeBioseqs<'_, '_>,
+    subjects: &[Bioseq<'_>],
+    count: usize,
+) -> Result<Vec<Vec<u8>>> {
+    if subjects.is_empty() {
+        return Err(refused("-subject archives without subject Bioseqs"));
+    }
+    let mut texts = Vec::with_capacity(count);
+    let mut index = inputs.subject_index.get();
+    for _ in 0..count {
+        let Some(&subject) = subjects.get(index as usize) else {
+            break;
+        };
+        index += 1;
+        if index as usize >= subjects.len() {
+            index = 0;
+        }
+        let Some(id) = subject.best_id() else {
+            return Err(refused("a subject Bioseq without an id that FindBestChoice ranks"));
+        };
+        let shown = match scope.queries_holding(id).as_slice() {
+            [at] => scope.queries[*at].bioseq().expect("a query Bioseq"),
+            [] => match scope.subjects_holding(id).as_slice() {
+                [at] => scope.subjects[*at],
+                _ => return Err(refused("a subject id that names several -subject Bioseqs")),
+            },
+            _ => return Err(refused("a subject id that names several query Bioseqs")),
+        };
+        texts.push(acknowledged_title(shown, inputs.believe));
+    }
+    inputs.subject_index.set(index);
+    Ok(texts)
+}
+
 /// The entry of the printed subject `s_idx`.
 fn entry_of<'e, 'd>(entries: &'e [Option<SubjectEntry<'d>>], s_idx: usize) -> &'e SubjectEntry<'d> {
     entries[s_idx].as_ref().expect("a printed subject")
@@ -1280,7 +1618,8 @@ fn post_row_texts(
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:165-270
 /// `s_ExtractSeqidsAndRanges` over the Seq-aligns of `sets` (`alignments`) as the archive holds
 /// them: `GetSeq_id` and `GetSeqRange` of the subject's row and `GetSeqStrand` of the query's (a
-/// Dense-seg's or Dense-diags', as the tabular formats read them, `ReadAlign::dense_seg`).
+/// Dense-seg's or Dense-diags', as the tabular formats read them, `ReadAlign::dense_seg`; a
+/// Std-seg's own range, `ReadAlign::std_range`, after which its strands read).
 /// `Ok(false)` where one of NCBI's exceptions ends them (the prefetch's warning); a stop that
 /// NCBI has no result for, and a form that LOSAT does not read as NCBI, is refused.
 fn prefetch_reads(sets: &[std::ops::Range<usize>], alignments: &[V<'_>]) -> Result<bool> {
@@ -1289,12 +1628,11 @@ fn prefetch_reads(sets: &[std::ops::Range<usize>], alignments: &[V<'_>]) -> Resu
             let read = seq_align_id(align.align, 1)
                 .map_err(ReadStop::Stop)
                 .and_then(|_| match align.variant() {
-                    "denseg" | "dendiag" => align.dense_seg().map(|_| ()),
-                    "std" | "disc" => Err(ReadStop::Unsupported(
-                        "Std-seg or discontinuous Seq-aligns (those of a translated search)",
-                    )),
+                    "denseg" | "dendiag" => align.dense_seg(false).map(|_| ()),
+                    "std" => align.std_range(1).map(|_| ()),
+                    "disc" => Err(ReadStop::Unsupported(DISC_SEG)),
                     _ => Err(ReadStop::Unsupported(
-                        "segments other than a Dense-seg or Dense-diags",
+                        "segments other than a Dense-seg, Dense-diags or Std-segs",
                     )),
                 });
             match read.map_err(end_of) {
@@ -1306,6 +1644,9 @@ fn prefetch_reads(sets: &[std::ops::Range<usize>], alignments: &[V<'_>]) -> Resu
     }
     Ok(true)
 }
+
+/// The refusal of a Seq-align of discontinuous segments, which no BLAST search writes.
+const DISC_SEG: &str = "discontinuous Seq-aligns (Disc-seg)";
 
 /// How a stop on a Seq-align ends the object (`archive::stop_error`): NCBI's exceptions
 /// (`Ncbi`, a `CException` or a serial exception) where NCBI meets them, after the bytes before;
@@ -1367,32 +1708,34 @@ struct PrePass<'p, 'b, 'r> {
     scope: &'p ScopeBioseqs<'b, 'r>,
     spec: &'p TabularSpec,
     blastn: bool,
+    codes: &'p GeneticCodes,
     /// The Bioseqs whose letters read (`LetterCache::sequence` keys).
     checked: HashSet<(u8, usize)>,
 }
 
 impl<'p> PrePass<'p, '_, '_> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:749-1096
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-904
     /// The reads of the row of `align` in `SetFields`' order: its scores, its query (`GetSeq_id`
     /// of row 0, among the request's queries), its subject (row 1, `Subjects::index_of`), the
-    /// coverage and Dense-seg that it reads (`row_plan`), and where it reads letters
-    /// (`reads_letters`) those of its query and of a subject that is a Bioseq of the request
-    /// (each Bioseq once; a database subject's at the row). The row's query and subject index.
+    /// coverage and Dense-seg that it reads (`row_plan`; a Std-seg's Dense-seg is made after its
+    /// subject's values are read), and where it reads letters (`GetWholeAlnSeqString` of row 0,
+    /// then of row 1) those of each row's Bioseq (a query's, or a subject that is a Bioseq of the
+    /// request; each Bioseq once; a database subject's at the row) and their translation
+    /// (`RowPlan::translation_stop`). The row's query and subject index.
     fn row(
         &mut self,
         align: &ReadAlign<'_>,
         subjects: &mut Subjects<'p>,
     ) -> Result<(u32, u32), RowEnd> {
-        if matches!(align.variant(), "std" | "disc") {
-            return Err(RowEnd::Refusal(refused(
-                "Std-seg or discontinuous Seq-aligns (those of a translated search)",
-            )));
+        if align.variant() == "disc" {
+            return Err(RowEnd::Refusal(refused(DISC_SEG)));
         }
         let scores = row_scores(align, self.spec).map_err(end_of)?;
         let query_id = align
             .seq_id(0)
             .map_err(|stop| end_of(ReadStop::Stop(stop)))?;
-        let q_idx = match self.scope.queries_holding(query_id).as_slice() {
+        let q_idx = match self.scope.row_queries(query_id).as_slice() {
             [at] => *at,
             _ => {
                 return Err(RowEnd::Refusal(refused(
@@ -1406,42 +1749,79 @@ impl<'p> PrePass<'p, '_, '_> {
         let s_idx = subjects
             .index_of(self.inputs, self.scope, id)
             .map_err(RowEnd::Refusal)?;
-        let ctx = RowContext {
-            spec: self.spec,
-            no_fetch: self.blastn,
-            query_length: self.scope.queries[q_idx].length,
+        let query = &self.scope.queries[q_idx];
+        let ctx = row_context(self.spec, self.blastn, self.codes, query, subjects.facts[s_idx]);
+        let at_row = |error| {
+            RowEnd::Ncbi(NcbiStop {
+                error,
+                subject: Some(s_idx),
+            })
         };
-        row_plan(align, scores, &ctx).map_err(end_of)?;
-        if reads_letters(self.spec, self.blastn) {
-            let query = (2, q_idx, self.scope.queries[q_idx].bioseq, "a query Bioseq");
-            let subject = match subjects.sources[s_idx] {
-                SubjectSource::Database { .. } => None,
-                SubjectSource::Bioseq(at) => {
-                    Some((1, at, self.scope.subjects[at], "a -subject Bioseq"))
-                }
-                SubjectSource::Query(at) => {
-                    Some((2, at, self.scope.queries[at].bioseq, "a query Bioseq"))
-                }
-            };
-            for (kind, at, bioseq, what) in std::iter::once(query).chain(subject) {
-                if self.checked.contains(&(kind, at)) {
-                    continue;
-                }
-                match read_bioseq(bioseq, what) {
-                    Ok(_) => {
-                        self.checked.insert((kind, at));
+        let translated = align.variant() == "std";
+        let plan = row_plan(align, scores, &ctx).map_err(|stop| match end_of(stop) {
+            End::Ncbi(error) if translated => at_row(error),
+            other => other.into(),
+        })?;
+        if plan.subject_range(&ctx).is_none() {
+            return Ok((q_idx as u32, s_idx as u32));
+        }
+        let subject = match subjects.sources[s_idx] {
+            SubjectSource::Database { .. } => None,
+            SubjectSource::Bioseq(at) => Some((1, at, self.scope.subjects[at], "a -subject Bioseq")),
+            SubjectSource::Query(at) => Some((
+                2,
+                at,
+                self.scope.queries[at].bioseq().expect("a query Bioseq"),
+                "a query Bioseq",
+            )),
+        };
+        // A database query's letters do not throw (`LetterCache::row` reads them).
+        let query_bioseq = query
+            .bioseq()
+            .map(|bioseq| (2, q_idx, bioseq, "a query Bioseq"));
+        let rows = [query_bioseq, subject];
+        for (row, bioseq) in rows.into_iter().enumerate() {
+            if let Some((kind, at, bioseq, what)) = bioseq {
+                if !self.checked.contains(&(kind, at)) {
+                    match read_bioseq(bioseq, what) {
+                        Ok(_) => {
+                            self.checked.insert((kind, at));
+                        }
+                        Err(LetterEnd::Exception(exception)) => {
+                            return Err(at_row(crate::cli::NativeError::exception(&exception).into()))
+                        }
+                        Err(LetterEnd::Refusal(error)) => return Err(RowEnd::Refusal(error)),
                     }
-                    Err(LetterEnd::Exception(exception)) => {
-                        return Err(RowEnd::Ncbi(NcbiStop {
-                            error: crate::cli::NativeError::exception(&exception).into(),
-                            subject: Some(s_idx),
-                        }))
-                    }
-                    Err(LetterEnd::Refusal(error)) => return Err(RowEnd::Refusal(error)),
                 }
+            }
+            match plan.translation_stop(&ctx, row) {
+                Ok(None) => {}
+                Ok(Some(exception)) => {
+                    return Err(at_row(crate::cli::NativeError::exception(&exception).into()))
+                }
+                Err(stop) => return Err(end_of(stop).into()),
             }
         }
         Ok((q_idx as u32, s_idx as u32))
+    }
+}
+
+/// What the row of the query `query` and a subject of `facts` (`Subjects::facts`) reads besides
+/// its Seq-align (`RowContext`).
+fn row_context<'s>(
+    spec: &'s TabularSpec,
+    blastn: bool,
+    codes: &'s GeneticCodes,
+    query: &QueryEntry<'_>,
+    (subject_nucleotide, subject_length): (bool, i64),
+) -> RowContext<'s> {
+    RowContext {
+        spec,
+        no_fetch: blastn,
+        query_length: query.length,
+        subject_length,
+        nucleotide: [query.nucleotide, subject_nucleotide],
+        codes,
     }
 }
 
@@ -1497,27 +1877,34 @@ struct LetterCache {
 impl LetterCache {
     /// The letters of the row whose plan is `plan` (`RowLetters`), of the query `q_idx` and the
     /// subject `source`; none where the row reads none.
-    fn row(
-        &mut self,
+    fn row<'c>(
+        &'c mut self,
         plan: &RowPlan,
-        ctx: &RowContext<'_>,
+        ctx: &RowContext<'c>,
         scope: &ScopeBioseqs<'_, '_>,
         inputs: &ObjectInputs<'_>,
         source: &SubjectSource,
         q_idx: usize,
-    ) -> std::result::Result<RowLetters<'_>, LetterEnd> {
+    ) -> std::result::Result<RowLetters<'c>, LetterEnd> {
         let Some((from, to)) = plan.subject_range(ctx) else {
             return Ok(RowLetters {
                 query: &[],
                 subject: &[],
                 subject_from: 0,
+                codes: ctx.codes,
             });
         };
+        let db_failed = |error| LetterEnd::Refusal(database_error(error, PROGRAM));
         if self.query.as_ref().is_none_or(|(at, _)| *at != q_idx) {
-            let letters = read_bioseq(scope.queries[q_idx].bioseq, "a query Bioseq")?;
+            let letters = match scope.queries[q_idx].sequence {
+                QuerySequence::Bioseq(bioseq) => read_bioseq(bioseq, "a query Bioseq")?,
+                QuerySequence::Database(ordinal) => {
+                    let (_, db) = inputs.database.expect("a database query");
+                    database_letters(db, ordinal).map_err(db_failed)?
+                }
+            };
             self.query = Some((q_idx, letters));
         }
-        let db_failed = |error| LetterEnd::Refusal(database_error(error, PROGRAM));
         let whole = match *source {
             SubjectSource::Database { ordinal, .. } => {
                 let (_, db) = inputs.database.expect("a database subject");
@@ -1545,7 +1932,10 @@ impl LetterCache {
                 }
             }
             SubjectSource::Bioseq(at) => Some(((1, at), Some(scope.subjects[at]))),
-            SubjectSource::Query(at) => Some(((2, at), Some(scope.queries[at].bioseq))),
+            SubjectSource::Query(at) => Some((
+                (2, at),
+                Some(scope.queries[at].bioseq().expect("a query Bioseq")),
+            )),
         };
         let (subject, subject_from): (&[u8], u32) = match whole {
             Some((key, bioseq)) => {
@@ -1575,6 +1965,7 @@ impl LetterCache {
             query: &self.query.as_ref().expect("read above").1,
             subject,
             subject_from,
+            codes: ctx.codes,
         })
     }
 }

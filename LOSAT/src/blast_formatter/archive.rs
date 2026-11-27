@@ -94,6 +94,7 @@ pub(crate) fn format_archive(
         matrix_name: None,
         psi_step: Ok(0),
         taxdb: TaxdbRun::default(),
+        subject_index: std::cell::Cell::new(0),
         buf: Vec::new(),
     };
     match run.objects(archive, diag) {
@@ -130,6 +131,9 @@ struct Run<'r, 'o> {
     psi_step: Result<u32, ()>,
     /// The run's record of the taxonomy database (`tabular::ObjectInputs::taxdb`).
     taxdb: TaxdbRun,
+    /// The run's index of the subject that outfmt 7's next header names
+    /// (`tabular::ObjectInputs::subject_index`).
+    subject_index: std::cell::Cell<u32>,
     /// The encoder's buffer of one Seq-annot.
     buf: Vec<u8>,
 }
@@ -621,6 +625,7 @@ impl<'r, 'o> Run<'r, 'o> {
                 database: database.map(|database| (database.name.as_slice(), &database.db)),
                 taxdb: &self.taxdb,
                 iteration,
+                subject_index: &self.subject_index,
             };
             let mut sink = TabularSink {
                 output: &mut self.output,

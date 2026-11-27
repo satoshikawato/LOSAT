@@ -41,7 +41,7 @@ fn the_scores_and_the_dense_seg_are_read() {
     let scores = read[0].scores().unwrap();
     assert_eq!((scores.score, scores.num_ident), (61, 30));
     assert_eq!(read[0].named_int("num_ident").unwrap(), Some(30));
-    let ds = read[0].dense_seg().unwrap();
+    let ds = read[0].dense_seg(false).unwrap();
     assert_eq!(ds.lens, vec![5, 2, 3]);
     assert_eq!(ds.strands, [Strand::Plus, Strand::Minus]);
     assert!(!ds.first_minus);
@@ -50,14 +50,87 @@ fn the_scores_and_the_dense_seg_are_read() {
     assert_eq!(read[0].seq_range(&ds, 1), (10, 19));
 }
 
+/// A Std-seg Seq-align of the segments `segs` (each `{ dim 2, loc { ... } }`).
+fn std_align(segs: &str) -> Value {
+    value(&format!(
+        "Seq-align ::= {{ type partial, dim 2, segs std {{ {segs} }} }}"
+    ))
+}
+
 #[test]
-fn a_std_seg_is_refused_by_name() {
-    let text = "Seq-align ::= { type partial, dim 2, segs std { { dim 2, ids { local str \"q1\", \
-        local str \"s1\" }, loc { int { from 0, to 2, id local str \"q1\" }, int { from 0, to 8, \
-        id local str \"s1\" } } } } }";
-    let align = value(text);
+fn a_std_seg_becomes_a_dense_seg_with_the_widths_of_its_rows() {
+    // BLASTX: the query's 9 letters on the subject's 3 residues, a gap of the subject, then 6
+    // letters on 2 residues.
+    let align = std_align(
+        "{ dim 2, loc { int { from 0, to 8, strand plus, id local str \"q1\" }, int { from 0, \
+         to 2, id local str \"s1\" } } }, { dim 2, loc { int { from 9, to 11, strand plus, id \
+         local str \"q1\" }, empty local str \"s1\" } }, { dim 2, loc { int { from 12, to 17, \
+         strand plus, id local str \"q1\" }, int { from 3, to 4, id local str \"s1\" } } }",
+    );
     let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
-    assert!(matches!(read[0].dense_seg(), Err(ReadStop::Unsupported(_))));
+    let ds = read[0].dense_seg(false).unwrap();
+    assert_eq!(ds.widths, [3, 1]);
+    // The gap's segment takes its length from its query row, a row of width 3.
+    assert_eq!(ds.lens, vec![3, 1, 2]);
+    assert_eq!(ds.starts, vec![0, 0, 9, -1, 12, 3]);
+    assert!(ds.translated && !ds.first_minus);
+    // `GetSeqRange` of the Std-seg's own rows.
+    assert_eq!(read[0].std_range(0).unwrap(), (0, 17));
+    assert_eq!(read[0].std_range(1).unwrap(), (0, 4));
+    assert_eq!(read[0].row_range(1).unwrap(), (0, 4));
+}
+
+/// The line of NCBI's exception that `stop` is, and its message.
+fn thrown(stop: ReadStop) -> (u32, String) {
+    match stop {
+        ReadStop::Stop(Stop::Exception(exception)) => (
+            exception.site().line,
+            String::from_utf8_lossy(exception.get_msg()).into_owned(),
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_std_seg_that_ncbi_cannot_convert_throws_its_exception() {
+    // Another Seq-id in a later segment's row.
+    let ids = std_align(
+        "{ dim 2, loc { int { from 0, to 8, id local str \"q1\" }, int { from 0, to 2, id local \
+         str \"s1\" } } }, { dim 2, loc { int { from 9, to 11, id local str \"q2\" }, int { \
+         from 3, to 3, id local str \"s1\" } } }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &ids)], false);
+    let (line, message) = thrown(read[0].dense_seg(false).unwrap_err());
+    assert_eq!(line, 861);
+    assert!(message.starts_with("CreateDensegFromStdseg(): Seq-ids: lcl|q1 and lcl|q2 are not"));
+    assert_eq!(
+        thrown(read[0].std_range(0).unwrap_err()).1,
+        "CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range."
+    );
+    // Rows whose lengths are neither equal nor in the ratio of a codon.
+    let lengths = std_align(
+        "{ dim 2, loc { int { from 0, to 8, id local str \"q1\" }, int { from 0, to 4, id local \
+         str \"s1\" } } }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &lengths)], false);
+    assert_eq!(thrown(read[0].dense_seg(false).unwrap_err()).0, 801);
+    // Strands that change in a row.
+    let strands = std_align(
+        "{ dim 2, loc { int { from 0, to 8, strand plus, id local str \"q1\" }, int { from 0, \
+         to 2, id local str \"s1\" } } }, { dim 2, loc { int { from 9, to 17, strand minus, id \
+         local str \"q1\" }, int { from 3, to 5, id local str \"s1\" } } }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &strands)], false);
+    assert_eq!(thrown(read[0].dense_seg(false).unwrap_err()).0, 827);
+    // A row of no letters: `GetSeqRange` throws.
+    let empty = std_align(
+        "{ dim 2, loc { empty local str \"q1\", int { from 0, to 2, id local str \"s1\" } } }",
+    );
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &empty)], false);
+    assert_eq!(
+        thrown(read[0].std_range(0).unwrap_err()).1,
+        "CSeq_align::GetSeqRange(): Row is empty"
+    );
 }
 
 #[test]
@@ -88,7 +161,7 @@ fn a_reversed_dense_seg_keeps_its_first_segments_strands_for_flipping() {
         plus, plus, minus } } }";
     let align = value(text);
     let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
-    let ds = read[0].dense_seg().unwrap();
+    let ds = read[0].dense_seg(false).unwrap();
     assert!(ds.first_minus);
     assert_eq!(ds.strands, [Strand::Minus, Strand::Plus]);
 }

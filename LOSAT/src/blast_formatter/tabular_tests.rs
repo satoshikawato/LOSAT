@@ -57,17 +57,15 @@ fn only_the_covered_programs_are_written() {
         EProgram::DeltaBlast,
         EProgram::PhiBlastp,
         EProgram::RpsBlast,
-    ] {
-        assert!(covered(program), "{program:?}");
-    }
-    for program in [
         EProgram::Blastx,
         EProgram::Tblastn,
         EProgram::Tblastx,
         EProgram::RpsTblastn,
         EProgram::PsiTblastn,
-        EProgram::PhiBlastn,
     ] {
+        assert!(covered(program), "{program:?}");
+    }
+    for program in [EProgram::PhiBlastn] {
         assert!(!covered(program), "{program:?}");
     }
 }

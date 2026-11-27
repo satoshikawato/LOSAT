@@ -2,19 +2,28 @@
 //! blast_formatter, decision F3-13 of line RG): NCBI's `CBlastTabularInfo::SetFields` over a
 //! Seq-align as `report::serial::seqalign_read` reads it, giving the shared writer's
 //! `TabularHsp` (`report::tabular`), and `CBlastFormatUtil::InsertSubjectScores` (`qcovs`,
-//! `qcovus`) over a result set's Seq-aligns. The Seq-aligns of the programs that are not
-//! translated (a Dense-seg, or Dense-diags) only: a Std-seg is refused before any row
-//! (`blast_formatter::refusals`).
+//! `qcovus`) over a result set's Seq-aligns: the Dense-seg and Dense-diag Seq-aligns of the
+//! programs that are not translated and the Std-seg Seq-aligns of the translated ones (BLASTX,
+//! TBLASTN, TBLASTX, RPSTBLASTN, PSI-TBLASTN).
 //!
 //! What a row reads of a Seq-align, in NCBI's order: its scores (`GetAlnScores`), the query's
-//! coverage (`hsp_percent_coverage`, else the span over the query's length), and where a field
-//! needs the alignment block its Dense-seg (a Dense-diag Seq-align's made by
-//! `CreateDensegFromDendiag`), reversed where its first strand is minus, as `CAlnVec` reads it
-//! (`query_anchored::aln_vec::AlnMap`: the lengths, the rows' letters and the coordinates).
+//! coverage (`hsp_percent_coverage`, else the span over the query's length; where a Std-seg's
+//! query range throws, the query block's `catch` ends the row there: `RowPlan::leaves`), and
+//! where a field needs the alignment block its Dense-seg (a Dense-diag Seq-align's made by
+//! `CreateDensegFromDendiag`, a Std-seg Seq-align's by `CreateDensegFromStdseg`, of two
+//! nucleotide rows then `CreateTranslatedDensegFromNADenseg`), reversed where it is not
+//! translated and its first strand is minus, as `CAlnVec` reads it
+//! (`query_anchored::aln_vec::AlnMap`: the lengths, the rows' letters translated on a row of width
+//! 3 with the formatter's genetic codes, and the coordinates and frames).
 
-use crate::report::query_anchored::aln_vec::{AlnMap, MapBuffers};
+use crate::algorithm::tblastx::report::DisplayCode;
+use crate::ncbi_exception::NcbiException;
+use crate::report::archive::read::Stop;
+use crate::report::query_anchored::aln_vec::{AlnMap, MapBuffers, TranslateNaToAa};
 use crate::report::query_anchored::{Denseg, SeqKey, Sequences};
-use crate::report::serial::seqalign::Strand;
+use crate::report::serial::seqalign::{
+    translate_na_to_aa_exception, unknown_genetic_code_exception, Strand,
+};
 use crate::report::serial::seqalign_read::{PairDenseg, ReadAlign, ReadStop};
 use crate::report::tabular::{TabularField, TabularHsp, TabularSpec};
 use crate::seqid::defline_set::{compare, Sic};
@@ -26,8 +35,39 @@ pub(crate) struct RowContext<'s> {
     /// `SetNoFetch` set: the program is BLASTN (blast_format.cpp:791-792), whose rows are not
     /// read for `nident`, `mismatch` and `pident`.
     pub(crate) no_fetch: bool,
-    /// The query Bioseq's length (`GetBioseqLength`), for `qcovhsp`.
+    /// The query Bioseq's length (`GetBioseqLength`), for `qcovhsp` and the query's frame.
     pub(crate) query_length: i64,
+    /// The subject Bioseq's length (`GetBioseqLength`), for the subject's frame.
+    pub(crate) subject_length: i64,
+    /// Whether the query and the subject are nucleotide sequences (`CSeq_inst::IsNa` of the
+    /// scope's `GetSequenceType`): a Std-seg of two nucleotide rows is TBLASTX's.
+    pub(crate) nucleotide: [bool; 2],
+    /// The formatter's genetic codes (`SetQueryGeneticCode`, `SetDbGeneticCode`).
+    pub(crate) codes: &'s GeneticCodes,
+}
+
+/// The formatter's genetic codes, of the query's rows and of the others (`m_QueryGenCode`,
+/// `m_DbGenCode`, blast_format.cpp:233-234): each number, and its table where NCBI's has one.
+#[derive(Clone, Copy)]
+pub(crate) struct GeneticCodes {
+    pub(crate) numbers: [i32; 2],
+    tables: [Option<DisplayCode>; 2],
+}
+
+impl GeneticCodes {
+    /// The codes `query` and `db`.
+    pub(crate) fn new(query: i32, db: i32) -> Self {
+        let table = |code: i32| {
+            u8::try_from(code)
+                .ok()
+                .and_then(|id| crate::utils::genetic_code::GeneticCode::try_from_id(id).ok())
+                .map(|code| DisplayCode::new(&code))
+        };
+        GeneticCodes {
+            numbers: [query, db],
+            tables: [table(query), table(db)],
+        }
+    }
 }
 
 /// The vectors that the rows of a report reuse.
@@ -106,14 +146,22 @@ pub(crate) struct RowPlan {
     qcovhsp: i32,
     /// The Dense-seg of the counts' block (`None` where it does not open).
     ds: Option<PairDenseg>,
+    /// Whether the row ends at the query block's `catch` (tabular.cpp:782-799, `bioseqs_found`
+    /// false): a Std-seg whose query range throws (`GetSeqRange`, BLASTX's HSPs of length 0).
+    /// The row shows the Seq-align's query id (`SetQueryId` of `GetSeq_id(0)`), its scores, the
+    /// query's length, the subject's fields, `qcovhsp` `N/A` and `x_ResetFields`' 0 for the
+    /// rest.
+    pub(crate) leaves: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:776-905
 /// The plan of the row of `align` whose scores are `scores`: the query block's coverage
-/// (`x_SetQueryCovSeqalign`) and whether the counts' block opens (`opens_counts`), whose
-/// Dense-seg it reads. A BLASTN row (`no_fetch`) that prints a count of identities that the
-/// Seq-align does not hold (`nident`, `pident`, `mismatch` from NCBI's -1) is refused: the shared
-/// writer counts identities without a sign.
+/// (`x_SetQueryCovSeqalign`; a Std-seg's query range that throws ends the row there,
+/// `RowPlan::leaves`) and whether the counts' block opens (`opens_counts`), whose Dense-seg it
+/// reads (`ReadAlign::dense_seg`, whose exceptions are NCBI's, after the rows before). A BLASTN row
+/// (`no_fetch`) that prints a count of identities that the Seq-align does not hold (`nident`,
+/// `pident`, `mismatch` from NCBI's -1) is refused: the shared writer counts identities without
+/// a sign.
 pub(crate) fn row_plan(
     align: &ReadAlign<'_>,
     scores: RowScores,
@@ -122,23 +170,47 @@ pub(crate) fn row_plan(
     let spec = ctx.spec;
     let counts = spec.opens_counts(&usize::try_from(scores.num_ident).unwrap_or(0));
     let query_block = spec.has_any(&QUERY_FIELDS);
-    if !counts && !query_block {
-        return Ok(RowPlan {
-            scores,
-            qcovhsp: 0,
-            ds: None,
-        });
-    }
-    // The coverage of the query block (`x_SetQueryCovSeqalign`) reads the Seq-align's range
-    // of the query, which needs its Dense-seg.
-    let ds = align.dense_seg()?;
-    let qcovhsp = if query_block {
-        query_coverage_per_hsp(align, &ds, ctx.query_length)?
-    } else {
-        0
+    let plan = |qcovhsp, ds, leaves| RowPlan {
+        scores,
+        qcovhsp,
+        ds,
+        leaves,
     };
-    if counts
-        && scores.num_ident < 0
+    if !counts && !query_block {
+        return Ok(plan(0, None, false));
+    }
+    let translated = align.variant() == "std";
+    // The coverage of the query block (`x_SetQueryCovSeqalign`) reads the Seq-align's range
+    // of the query: a Std-seg's own (whose exceptions the block catches), else its Dense-seg's.
+    let mut ds = None;
+    let qcovhsp = if translated {
+        if query_block {
+            match query_coverage_per_hsp(align, None, ctx.query_length) {
+                Ok(qcovhsp) => qcovhsp,
+                Err(ReadStop::Stop(Stop::Exception(_))) => return Ok(plan(-1, None, true)),
+                Err(other) => return Err(other),
+            }
+        } else {
+            0
+        }
+    } else {
+        let pair = align.dense_seg(false)?;
+        let qcovhsp = if query_block {
+            query_coverage_per_hsp(align, Some(&pair), ctx.query_length)?
+        } else {
+            0
+        };
+        ds = Some(pair);
+        qcovhsp
+    };
+    if !counts {
+        return Ok(plan(qcovhsp, None, false));
+    }
+    let ds = match ds {
+        Some(ds) => ds,
+        None => align.dense_seg(ctx.nucleotide[0] && ctx.nucleotide[1])?,
+    };
+    if scores.num_ident < 0
         && !reads_letters(spec, ctx.no_fetch)
         && spec.has_any(&[NumIdentical, Mismatches, PercentIdentical])
     {
@@ -147,41 +219,151 @@ pub(crate) fn row_plan(
              prints",
         ));
     }
-    Ok(RowPlan {
-        scores,
-        qcovhsp,
-        ds: counts.then_some(ds),
-    })
+    Ok(plan(qcovhsp, Some(ds), false))
 }
 
 impl RowPlan {
     /// The subject letters that the row reads: from the first to the last letter of row 1's
-    /// segments (inclusive, plus strand, whatever their strands), `None` where it reads none
-    /// (`reads_letters`).
+    /// segments (inclusive, plus strand, whatever their strands; a segment's letters are its
+    /// length times the row's width), `None` where it reads none (`reads_letters`).
     pub(crate) fn subject_range(&self, ctx: &RowContext<'_>) -> Option<(u32, u32)> {
         let ds = self
             .ds
             .as_ref()
             .filter(|_| reads_letters(ctx.spec, ctx.no_fetch))?;
-        let mut range: Option<(u32, u32)> = None;
-        for (seg, &len) in ds.lens.iter().enumerate() {
-            let Ok(start) = u32::try_from(ds.starts[seg * 2 + 1]) else {
-                continue;
-            };
-            let last = start.saturating_add(len.saturating_sub(1));
-            range = Some(match range {
-                Some((from, to)) => (from.min(start), to.max(last)),
-                None => (start, last),
-            });
+        row_extent(ds, 1)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:983-987
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-904
+    /// NCBI's exception of the translation of `row`'s letters (`GetWholeAlnSeqString`, where the
+    /// row reads letters), `None` where none throws: a row of width 3 whose genetic code NCBI's
+    /// table does not have (`GetTransTable`), or whose letters past its sequence's end (the
+    /// query's and the subject's lengths) leave a segment without whole codons
+    /// (`TranslateNAToAA`). Read before any byte (the driver's pre-pass, row 0 then row 1, each
+    /// after its Bioseq's letters), on the rows' lengths alone.
+    pub(crate) fn translation_stop(
+        &self,
+        ctx: &RowContext<'_>,
+        row: usize,
+    ) -> Result<Option<NcbiException>, ReadStop> {
+        let Some(ds) = self
+            .ds
+            .as_ref()
+            .filter(|_| reads_letters(ctx.spec, ctx.no_fetch))
+        else {
+            return Ok(None);
+        };
+        let lengths = [ctx.query_length, ctx.subject_length];
+        let risky = ds.widths[row] == 3
+            && (ctx.codes.tables[row].is_none()
+                || row_extent(ds, row).is_some_and(|(_, last)| i64::from(last) >= lengths[row]));
+        if !risky {
+            return Ok(None);
         }
-        range
+        let denseg = Denseg::pair(
+            [SeqKey::Query, SeqKey::Subject(0)],
+            &ds.starts,
+            &ds.lens,
+            ds.strands,
+            ds.widths,
+            false,
+        );
+        let mut buffers = MapBuffers::default();
+        let aln = AlnMap::new_in(&denseg, &mut buffers).map_err(ReadStop::Unsupported)?;
+        let counted = LengthsOnly {
+            lengths,
+            codes: ctx.codes,
+        };
+        match aln.whole_aln_seq_string(row, 0, &counted) {
+            Ok(_) => Ok(None),
+            Err(error) => translation_exception(&error, row, ctx).map(Some),
+        }
+    }
+}
+
+/// The first and the last position (`TSeqPos`, plus strand) of `row`'s letters in `ds`: from the
+/// first to the last letter of its segments with a start, `None` where it has none.
+fn row_extent(ds: &PairDenseg, row: usize) -> Option<(u32, u32)> {
+    let mut range: Option<(u32, u32)> = None;
+    for (seg, &len) in ds.lens.iter().enumerate() {
+        let Ok(start) = u32::try_from(ds.starts[seg * 2 + row]) else {
+            continue;
+        };
+        let letters = len.saturating_mul(ds.widths[row]);
+        let last = start.saturating_add(letters.saturating_sub(1));
+        range = Some(match range {
+            Some((from, to)) => (from.min(start), to.max(last)),
+            None => (start, last),
+        });
+    }
+    range
+}
+
+/// NCBI's exception of a translation of `row` that fails with `error` (`AlnMap::seq_string`):
+/// `TranslateNAToAA`'s (a segment without whole codons), else `GetTransTable`'s for a code
+/// that NCBI's table does not have.
+fn translation_exception(
+    error: &std::io::Error,
+    row: usize,
+    ctx: &RowContext<'_>,
+) -> Result<NcbiException, ReadStop> {
+    if TranslateNaToAa::is(error) {
+        Ok(translate_na_to_aa_exception())
+    } else if ctx.codes.tables[row].is_none() {
+        Ok(unknown_genetic_code_exception(ctx.codes.numbers[row]))
+    } else {
+        Err(ReadStop::Unsupported("an alignment row whose letters do not read"))
+    }
+}
+
+/// The letters of a row's sequences as many as their lengths hold (each an `A`), with the
+/// formatter's genetic codes: the translation of a row reads what `RowLetters` would give it
+/// without its letters (`RowPlan::translation_stop`).
+struct LengthsOnly<'c> {
+    lengths: [i64; 2],
+    codes: &'c GeneticCodes,
+}
+
+impl Sequences for LengthsOnly<'_> {
+    fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>) {
+        let length = match seq {
+            SeqKey::Query => self.lengths[0],
+            SeqKey::Subject(_) => self.lengths[1],
+        };
+        let end = (i64::from(to) + 1).min(length.max(0));
+        let count = (end - i64::from(from)).max(0) as usize;
+        out.resize(out.len() + count, b'A');
+    }
+
+    fn genetic_code(&self, master: bool) -> Option<DisplayCode> {
+        self.codes.tables[usize::from(!master)]
+    }
+
+    fn label(&self, _seq: SeqKey, _out: &mut Vec<u8>) {}
+
+    fn masks(&self, _seq: SeqKey, _out: &mut Vec<crate::report::query_anchored::Mask>) {}
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+/// `GetFrame` of the 0-based `start` of a row of strand `strand` in a sequence of `length`:
+/// `start % 3 + 1` on the plus strand, `-((length - start - 1) % 3 + 1)` on the minus strand,
+/// 0 on any other (a protein's).
+fn frame(start: i64, strand: Strand, length: i64) -> i32 {
+    // `(int)GetBioseqLength()`: the `TSeqPos` length cut to an `int`.
+    let length = i64::from(length as u32 as i32);
+    match strand {
+        Strand::Plus => (start % 3 + 1) as i32,
+        Strand::Minus => -(((length - start - 1) % 3 + 1) as i32),
+        Strand::Unknown => 0,
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:906-1096
 /// The row of the plan `plan` (`SetFields`' counts' block), its letters from `sequences` (the
 /// query row's and the subject row's, `SeqKey::Query` and `SeqKey::Subject(0)`), which are read
-/// only where `reads_letters`.
+/// only where `reads_letters`. A row that leaves at the query block (`RowPlan::leaves`) has its
+/// scores and `qcovhsp` `N/A` only.
 pub(crate) fn row_hsp<'r>(
     plan: &RowPlan,
     ctx: &RowContext<'_>,
@@ -203,6 +385,10 @@ pub(crate) fn row_hsp<'r>(
         qcovhsp: plan.qcovhsp,
         ..empty_hsp()
     };
+    if plan.leaves {
+        hsp.num_ident = 0;
+        return Ok(hsp);
+    }
     let Some(ds) = &plan.ds else {
         return Ok(hsp);
     };
@@ -215,6 +401,7 @@ pub(crate) fn row_hsp<'r>(
         &ds.starts,
         &ds.lens,
         ds.strands,
+        ds.widths,
         ds.first_minus,
     );
     let RowBuffers {
@@ -241,34 +428,52 @@ pub(crate) fn row_hsp<'r>(
         let row = |row: usize, out: &mut Vec<u8>| -> Result<(), ReadStop> {
             let string = aln
                 .whole_aln_seq_string(row, 0, sequences)
-                .map_err(|_| ReadStop::Unsupported("a translated alignment row"))?;
+                .map_err(|error| match translation_exception(&error, row, ctx) {
+                    Ok(exception) => ReadStop::Stop(Stop::Exception(exception)),
+                    Err(stop) => stop,
+                })?;
             *out = string.buffer;
             Ok(())
         };
         row(0, query)?;
         row(1, subject)?;
     }
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1029-1060
-    // (not translated: the query as it is, the subject swapped where its strand, or the
-    // query's, is minus.)
-    hsp.q_start = i64::from(aln.seq_start(0)) + 1;
-    hsp.q_end = i64::from(aln.seq_stop(0)) + 1;
-    let (s_first, s_last) = (
-        i64::from(aln.seq_start(1)) + 1,
-        i64::from(aln.seq_stop(1)) + 1,
-    );
-    if ds.strands[1] == Strand::Minus || ds.strands[0] == Strand::Minus {
-        (hsp.s_start, hsp.s_end) = (s_last, s_first);
-    } else {
-        (hsp.s_start, hsp.s_end) = (s_first, s_last);
-    }
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1070-1093
-    hsp.q_frame = 1;
-    hsp.s_frame = if spec.has_any(&[SubjectFrame, Frames]) && hsp.s_start > hsp.s_end {
-        -1
-    } else {
-        1
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1031-1062
+    // (translated: each row swapped where its own strand is minus; not translated: the query as
+    // it is, the subject swapped where its strand, or the query's, is minus.)
+    let first_last = |row: usize| {
+        (
+            i64::from(aln.seq_start(row)) + 1,
+            i64::from(aln.seq_stop(row)) + 1,
+        )
     };
+    let (q_first, q_last) = first_last(0);
+    let (s_first, s_last) = first_last(1);
+    let minus = |row: usize| ds.strands[row] == Strand::Minus;
+    (hsp.q_start, hsp.q_end) = if ds.translated && minus(0) {
+        (q_last, q_first)
+    } else {
+        (q_first, q_last)
+    };
+    (hsp.s_start, hsp.s_end) = if minus(1) || (!ds.translated && minus(0)) {
+        (s_last, s_first)
+    } else {
+        (s_first, s_last)
+    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1070-1093
+    // (`SetCounts`' frames: of a translated row `GetFrame` of its start, else the query's 1 and
+    // the subject's -1 where it runs down; 1 where no field reads them.)
+    (hsp.q_frame, hsp.s_frame) = (1, 1);
+    if ds.translated {
+        if spec.has_any(&[QueryFrame, Frames]) {
+            hsp.q_frame = frame(hsp.q_start - 1, ds.strands[0], ctx.query_length);
+        }
+        if spec.has_any(&[SubjectFrame, Frames]) {
+            hsp.s_frame = frame(hsp.s_start - 1, ds.strands[1], ctx.subject_length);
+        }
+    } else if spec.has_any(&[SubjectFrame, Frames]) && hsp.s_start > hsp.s_end {
+        hsp.s_frame = -1;
+    }
     if letters {
         let (query, subject): (&'r Vec<u8>, &'r Vec<u8>) = (query, subject);
         hsp.rows = Some((query, subject));
@@ -300,18 +505,22 @@ fn empty_hsp<'r>() -> TabularHsp<'r> {
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
 /// `x_SetQueryCovSeqalign`: the Seq-align's `hsp_percent_coverage` cut to an `int`, else its
-/// span of the query (the absolute difference of row 0's `GetSeqStop` and `GetSeqStart`, plus 1) in percent of the query's
-/// length, 0.5 added below 99 (`serial::seqalign::query_coverage`). A value whose cast is
-/// undefined (past the `int` range, a query of length 0) is refused.
+/// span of the query (the absolute difference of row 0's `GetSeqStop` and `GetSeqStart`, plus 1)
+/// in percent of the query's length, 0.5 added below 99 (`serial::seqalign::query_coverage`): of
+/// the Dense-seg `ds`, or a Std-seg's own range (`None`, whose exceptions are NCBI's). A value
+/// whose cast is undefined (past the `int` range, a query of length 0) is refused.
 fn query_coverage_per_hsp(
     align: &ReadAlign<'_>,
-    ds: &PairDenseg,
+    ds: Option<&PairDenseg>,
     query_length: i64,
 ) -> Result<i32, ReadStop> {
     let value = match align.named_real("hsp_percent_coverage") {
         Some(value) => value,
         None => {
-            let (from, to) = align.seq_range(ds, 0);
+            let (from, to) = match ds {
+                Some(ds) => align.seq_range(ds, 0),
+                None => align.std_range(0)?,
+            };
             let span = (to.wrapping_sub(from) as i32).unsigned_abs() as i64 + 1;
             let query_length = i32::try_from(query_length)
                 .ok()
@@ -451,8 +660,7 @@ pub(crate) fn subject_scores(
 fn master_coverage(group: &[ReadAlign<'_>]) -> Result<u64, ReadStop> {
     let mut ranges = Vec::with_capacity(group.len());
     for align in group {
-        let ds = align.dense_seg()?;
-        let (from, to) = align.seq_range(&ds, 0);
+        let (from, to) = align.row_range(0)?;
         let (from, to) = if from > to { (to, from) } else { (from, to) };
         ranges.push((u64::from(from), u64::from(to)));
     }
@@ -472,8 +680,7 @@ pub(crate) fn uniq_seq_coverage(group: &[ReadAlign<'_>]) -> Result<u32, ReadStop
     };
     let variant = first.variant();
     let range = |align: &ReadAlign<'_>, row: usize| -> Result<SeqRange, ReadStop> {
-        let ds = align.dense_seg()?;
-        let (from, to) = align.seq_range(&ds, row);
+        let (from, to) = align.row_range(row)?;
         Ok(SeqRange::new(from, to))
     };
     let mut subject_ranges = RangeCollection(vec![range(first, 1)?]);
@@ -495,15 +702,24 @@ pub(crate) fn uniq_seq_coverage(group: &[ReadAlign<'_>]) -> Result<u32, ReadStop
         }
         if align.variant() != variant {
             return Err(ReadStop::Unsupported(
-                "the Seq-aligns of a subject in both Dense-seg and Dense-diag forms",
+                "the Seq-aligns of a subject in more than one of the Dense-seg, Dense-diag and \
+                 Std-seg forms",
             ));
         }
-        let ds = align.dense_seg()?;
+        if variant == "std" {
+            // `GetDenseg()` of a Std-seg Seq-align: NCBI's `CInvalidChoiceSelection`.
+            return Err(ReadStop::Unsupported(
+                "qcovus of Std-seg Seq-aligns of a subject whose subject ranges overlap in part, \
+                 where NCBI BLAST+ reads a Dense-seg of a Std-seg",
+            ));
+        }
+        let ds = align.dense_seg(false)?;
         let denseg = Denseg::pair(
             [SeqKey::Query, SeqKey::Subject(0)],
             &ds.starts,
             &ds.lens,
             ds.strands,
+            ds.widths,
             false,
         );
         let map = AlnMap::new_in(&denseg, &mut buffers).map_err(ReadStop::Unsupported)?;
@@ -527,6 +743,8 @@ pub(crate) struct RowLetters<'a> {
     pub(crate) query: &'a [u8],
     pub(crate) subject: &'a [u8],
     pub(crate) subject_from: u32,
+    /// The formatter's genetic codes, which translate the rows of width 3.
+    pub(crate) codes: &'a GeneticCodes,
 }
 
 impl Sequences for RowLetters<'_> {
@@ -542,6 +760,10 @@ impl Sequences for RowLetters<'_> {
         if let Some(range) = letters.get(from as usize..end) {
             out.extend_from_slice(range);
         }
+    }
+
+    fn genetic_code(&self, master: bool) -> Option<DisplayCode> {
+        self.codes.tables[usize::from(!master)]
     }
 
     fn label(&self, _seq: SeqKey, _out: &mut Vec<u8>) {}

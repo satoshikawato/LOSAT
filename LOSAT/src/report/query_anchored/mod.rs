@@ -536,13 +536,14 @@ impl Denseg {
             .extend([strands[0] != Strand::Minus, strands[1] != Strand::Minus]);
     }
 
-    /// The Dense-seg of two rows, the sequences `keys`, without widths (`set_pair`): the
-    /// archive path's (`report::tabular_seqalign`).
+    /// The Dense-seg of two rows, the sequences `keys`, of the rows' widths `widths`
+    /// (`set_pair`): the archive path's (`report::tabular_seqalign`).
     pub(crate) fn pair(
         keys: [SeqKey; 2],
         starts: &[i32],
         lens: &[u32],
         strands: [crate::report::serial::seqalign::Strand; 2],
+        widths: [u32; 2],
         reverse: bool,
     ) -> Self {
         let mut ds = Denseg {
@@ -552,7 +553,7 @@ impl Denseg {
             plus: Vec::new(),
             widths: Vec::new(),
         };
-        ds.set_pair(starts, lens.iter().copied(), strands, [1, 1], reverse);
+        ds.set_pair(starts, lens.iter().copied(), strands, widths, reverse);
         ds
     }
 

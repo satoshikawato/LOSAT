@@ -1168,6 +1168,75 @@ fn the_files_of_a_subject_run_are_written_one_report_late_and_a_lost_report_has_
     }
 }
 
+// Line PS, PS15b-4: psiblast's held report of a query whose first `Hit` throws, followed by
+// another query (NCBI BLAST+ 2.17.0, `PS/ps15b4/cases_mix` m.b.u12.off.it1.13 and .14, row
+// db.ps15b4.m.b.u12.b1.it1.13: the held report's file stays empty, exit status 2).
+#[test]
+fn a_held_report_that_failed_ends_a_run_of_side_files_before_the_next_report_is_made() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    // Any exception that the report function catches (`CaughtException`; here the one of
+    // `a_failed_report_keeps_its_separator_and_fails_where_it_is_written`).
+    let exception = || {
+        NcbiException::new(
+            ThrowSite {
+                file: "src/objects/seq/../seqalign/Seq_align.cpp",
+                line: 227,
+                kind: "CSeqalignException::eInvalidAlignment",
+                function: None,
+            },
+            "CSeq_align::GetSeqRange(): Row is empty",
+        )
+    };
+    for kind in [Xml2Kind::Files13, Xml2Kind::Files14] {
+        let files = MemoryFiles::default();
+        let stored = files.files.clone();
+        let mut document = Xml2Document::with_files(kind, true, files);
+        let mut master = Vec::new();
+        put(&mut document, b"q1\n", &mut master).unwrap();
+        document
+            .report(&mut Vec::new(), &mut master, |_, _| {
+                Err(crate::report::blast_xml::CaughtException(exception()).into())
+            })
+            .unwrap();
+        // The next query's report arrives: the held one is written (an empty file) and ends the
+        // run; the arriving report, whose subjects the run never loads, is not made.
+        let mut made = false;
+        document
+            .report(&mut Vec::new(), &mut master, |_, _| {
+                made = true;
+                anyhow::bail!("a report whose subjects the run does not load")
+            })
+            .unwrap();
+        assert!(!made, "{kind:?}");
+        assert!(document.take_posts().ends_run.is_some(), "{kind:?}");
+        assert_eq!(
+            *stored.borrow(),
+            vec![(1, b"q1\n".to_vec()), (2, Vec::new())],
+            "{kind:?}"
+        );
+        assert!(master.is_empty(), "{kind:?}");
+    }
+    // The stream forms catch the held report's exception and go on: the arriving report is made
+    // and held.
+    let mut document = Xml2Document::new(Xml2Kind::Single16, true);
+    let mut out = Vec::new();
+    document
+        .report(&mut Vec::new(), &mut out, |_, _| {
+            Err(crate::report::blast_xml::CaughtException(exception()).into())
+        })
+        .unwrap();
+    let mut made = false;
+    let failed = document.report(&mut Vec::new(), &mut out, |_, report| {
+        made = true;
+        report.extend_from_slice(b"q2\n");
+        Ok(crate::report::blast_xml2::framing::MadeReport::default())
+    });
+    assert!(made);
+    assert!(failed
+        .unwrap_err()
+        .is::<crate::report::blast_xml::CaughtException>());
+}
+
 #[test]
 fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_stay() {
     // probes `naming/unwritable13`, `unwritable14`: `Command line argument error: Cannot open

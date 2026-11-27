@@ -1260,6 +1260,86 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     assert!(!later.renamed(Some).reaches(0));
 }
 
+// Line PS, PS15b-4 (NCBI BLAST+ 2.17.0, `PS/ps15b4/cases_ho`): psiblast's XML2 and JSON documents
+// hold each query's report until the next query's first result, after that query's prefetch, or
+// the epilog (`CallReads::held`): a `Hit` of the held report that ends the run (outfmt 13 and 14)
+// ends it there. The next batch is prefetched (`HitLoads::prefetches`), but its report is not
+// reached; a stopping batch's prefetch after the reports comes first (the held report is never
+// made: `h.b.q12.l3.it1.13`); with neither, the epilog ends the run.
+#[test]
+fn a_held_report_that_throws_ends_the_run_at_the_next_arrival() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 0 throws; 1, 2 and 3 are found.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00001").found_instead(throws()),
+        plain("AAA00002"),
+        plain("AAA00003"),
+        plain("AAA00004"),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let report = |one_by_one: bool, batch: usize, keys: &[usize]| {
+        (
+            ReportRead {
+                one_by_one,
+                batch: Some(batch),
+                prefetch_fails: false,
+            },
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    let walk = |reports: Vec<(ReportRead, ReportKeys)>, call: &CallReads| {
+        HitLoads::of_call(
+            LoadsBefore::none(),
+            Some(RunThrow::every_row(AfterThrow::EndsRun)),
+            reports,
+            subject,
+            none,
+            call,
+        )
+    };
+    let held = CallReads {
+        held: true,
+        ..CallReads::default()
+    };
+    // Query 0 reads one by one and throws at its first `Hit`; query 1's batch is prefetched.
+    let reports = || vec![report(true, 0, &[0, 1]), report(false, 1, &[2])];
+    let loads = walk(reports(), &held);
+    assert_eq!(loads.load(0), HitLoad::Throws);
+    assert_eq!(loads.load(1), HitLoad::Unread);
+    assert!(loads.loaded(2), "query 1's prefetch runs");
+    assert!(loads.reaches(0) && !loads.reaches(1));
+    assert!(loads.prefetches(1) && !loads.prefetches(2));
+    // Not held (blastp): the run ends at the `Hit`, before query 1's prefetch.
+    let written = walk(reports(), &CallReads::default());
+    assert_eq!(written.load(2), HitLoad::Unread);
+    assert!(!written.reaches(1) && !written.prefetches(1));
+    // The next query reads one by one too: its `Hit`s are not loaded.
+    let loads = walk(vec![report(true, 0, &[0, 1]), report(true, 1, &[2])], &held);
+    assert_eq!(loads.load(2), HitLoad::Unread);
+    assert!(!loads.reaches(1) && loads.prefetches(1));
+    // A stopping batch after the reports: its prefetch comes first and stops the run.
+    let stop = CallReads {
+        held: true,
+        stop: Some((Some(1), vec![3])),
+        ..CallReads::default()
+    };
+    let loads = walk(vec![report(true, 0, &[0, 1])], &stop);
+    assert!(loads.prefetches(1) && loads.reaches(1));
+    assert!(loads.prefetched.contains_key(&3));
+    // The last report: the epilog ends the run, after the reads after the report (its PSSM).
+    let loads = walk(vec![report(true, 0, &[0, 1])], &held);
+    assert!(loads.reaches(0) && !loads.reaches(1));
+    assert!(loads.prefetches(1) && !loads.prefetches(2));
+    let written = walk(vec![report(true, 0, &[0, 1])], &CallReads::default());
+    assert!(!written.reaches(1) && !written.prefetches(1));
+}
+
 // Review 3 of line DBID pfoff-3, N2: a call of the library writes several formats with one
 // result, though `api::run` makes one search for each hit list size (`search_groups`): its
 // refusal of a subject whose lookup throws is the call's, over every format of the call

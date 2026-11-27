@@ -435,6 +435,20 @@ impl<F: SideFiles> Xml2Document<F> {
         make: impl FnOnce(usize, &mut Vec<u8>) -> Result<MadeReport>,
     ) -> Result<()> {
         self.prolog(out);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+        // A held report whose making raised an exception ends a run of outfmt 13 and 14 where it
+        // is written, at the arrival of the next query's first result, which NCBI only
+        // accumulates there: the run never makes the arriving report (the walk of the loads ends
+        // the run at its arrival, `db_subject::CallReads::held`, so none of its `Hit`s loads).
+        if self.delayed && self.has_pending && self.kind.is_files() {
+            if let Some(exception) = self.pending_failure.take() {
+                self.has_pending = false;
+                self.pending.clear();
+                self.pending_made = MadeReport::default();
+                report.clear();
+                return self.failed(exception);
+            }
+        }
         // The report written now: this one, or for a `-subject` run the one held before it.
         if !self.delayed || self.has_pending {
             self.separator(out);

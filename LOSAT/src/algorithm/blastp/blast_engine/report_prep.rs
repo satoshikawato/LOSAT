@@ -369,12 +369,39 @@ pub(super) fn prefetch_reported_subjects(
     let reported_lists = &hit_lists[..prefetch_stop
         .as_ref()
         .map_or(hit_lists.len(), |span| span.start)];
+    // psiblast's XML2 and JSON documents hold each query's report until the next query's first
+    // result (`Xml2Run::holds_back`; a database search, so not a `-subject` one).
+    let iterative = crate::report::blast_xml2::reports_held(
+        false,
+        args.xml2_program_type()
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
+    );
+    let xml2 = |outfmt: &[u8]| crate::report::db_subject::FormatThrow::is_xml2(outfmt);
+    let held = iterative && outputs.formats.iter().any(|format| xml2(format.outfmt));
+    // A call of the library whose formats or searches mix those documents with others: a held
+    // report that throws ends NCBI's run at the next query's arrival (`CallReads::held`), the
+    // other formats' runs that end there end at the throw, so the runs stop apart, which the
+    // formats' answer (`FormatThrow::and`, `RunThrow::stops_apart`) does not see.
+    let (any_xml2, all_xml2) = outputs
+        .formats
+        .iter()
+        .map(|format| xml2(format.outfmt))
+        .chain(
+            outputs
+                .other_outfmts
+                .iter()
+                .map(|outfmt| xml2(outfmt.as_bytes())),
+        )
+        .fold((false, true), |(any, all), is| (any || is, all && is));
+    let mixes_held = iterative && any_xml2 && !all_xml2;
     // What the XML2 and JSON reports of the batches before a stop (all of them where none stops)
     // do at each subject's `Hit` (`ListedTitles::hit_loads`, the one answer: a `Hit` whose lookup
     // throws where a batch's prefetch is off, and the subjects that no report loads), which the
     // refusals, the stop's record of the loads before it, the names and the taxonomy reads take
-    // (review 1 of line DBID pfoff-1, H1 and M1; psiblast writes none of these formats,
-    // `psiblast::args::PsiblastArgs::check_outfmt`).
+    // (review 1 of line DBID pfoff-1, H1 and M1). psiblast holds each query's report of these
+    // formats until the next query's first result (`CallReads::held`): a held report that ends
+    // the run ends it there, after that query's prefetch (`HitLoads::prefetches`), and the writer
+    // never makes the arriving report (`Xml2Document::report`).
     // With `-html` where the run has its links (as the writer's `PairwiseConfig::html`).
     let after_throw = crate::report::db_subject::FormatThrow::of_outfmts(
         outputs.formats.iter().map(|format| format.outfmt),
@@ -389,6 +416,14 @@ pub(super) fn prefetch_reported_subjects(
         args.app.request_kind(),
         args.html.is_some(),
     );
+    let after_throw = match after_throw.run() {
+        Some(run) if mixes_held && run.after == crate::report::db_subject::AfterThrow::EndsRun => {
+            crate::report::db_subject::FormatThrow::Refused(
+                crate::report::db_subject::ThrowRefusal::Mixed,
+            )
+        }
+        _ => after_throw,
+    };
     // The call's one walk also loads what NCBI loads besides the reports: psiblast's prefetch of
     // its traceback hit lists beyond `-max_target_seqs` (review 1 of line DBID holdrec, H1), its
     // PSSM's reads after each query's report (H2, H3) and the prefetch of a batch that stops.
@@ -409,6 +444,7 @@ pub(super) fn prefetch_reported_subjects(
                 prefetched_ranks(span.clone()),
             )
         }),
+        held,
     };
     let hit_loads = listed_titles
         .as_ref()
@@ -440,7 +476,7 @@ pub(super) fn prefetch_reported_subjects(
     // prefetched or read one by one, so a stop of a later batch's prefetch is never reached
     // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
     // report with its error.
-    let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
+    let prefetch_stop = prefetch_stop.filter(|span| hit_loads.prefetches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
         let db = database.expect("listed titles are a database's");
         let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
@@ -735,8 +771,9 @@ pub(super) fn prefetch_reported_subjects(
                 }
             };
             for batch in query_batches {
-                // No batch after the run's end is prefetched, nor read one by one.
-                if !hit_loads.reaches(batch.searched.start) {
+                // No batch after the run's end is prefetched, nor read one by one (a batch at whose
+                // arrival a held report ended the run is prefetched, `HitLoads::prefetches`).
+                if !hit_loads.prefetches(batch.searched.start) {
                     break;
                 }
                 crate::algorithm::common::database::Utf8Read::reach(utf8_read, &batch.searched, db);
@@ -896,8 +933,9 @@ pub(super) fn prefetch_reported_subjects(
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
                         // the blobs it loads first look their taxids up then, and NCBI writes
                         // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
-                        // A report that ends the run makes no PSSM (`HitLoads::reaches`).
-                        if pssm_made && hit_loads.reaches(query + 1) {
+                        // A report that ends the run makes no PSSM; a held one makes it before the
+                        // next query's arrival, where it ends the run (`HitLoads::prefetches`).
+                        if pssm_made && hit_loads.prefetches(query + 1) {
                             let texts = titles.pssm_load_texts(
                                 database,
                                 pssm_reads,

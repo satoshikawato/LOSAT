@@ -28,37 +28,63 @@ fn the_rest_after_the_other_end_of_line_runs_into_the_next_line() {
     assert_eq!(lines, [&b"A 1"[..], b"B 2"]);
 }
 
-/// Row a_ov1: FIRST_OID 65535 and LAST_OID 65535 multiply to 2^32, 0 in `int`: the exact and the
-/// wrapped products decide the pairing check apart, which LOSAT refuses until Q-D2b-OV.
+/// Approved exception (`Q-D2b-OV=A`): `a_ov1` (`FIRST_OID 65535`, `LAST_OID 65535`) and `a_ov2`
+/// (`OIDLIST`, `MAXOID 65535`, `LENGTH 4294967295`, `NSEQ 65535`) compute exact products in `i128`
+/// without false errors, while `a_ov3` (`FIRST_OID 2147483647`, `LAST_OID 0`, `NSEQ 2147483647`)
+/// still reports the genuine NSEQ mismatch.
 #[test]
-fn an_overflow_that_decides_a_check_is_refused() {
-    let product = Both::int(65536).mul(Both::int(65536), false);
-    assert_eq!(product.wrapped, 0);
-    assert!(decide(product, |v| v == 0, b"ov1.pal", "FIRST_OID and LAST_OID").is_err());
-}
+fn widened_alias_checks_avoid_ncbi_overflow_false_errors() {
+    use crate::ncbi_app::files::standard_output_file;
+    use crate::report::run_files::{OpenFiles, RunFiles};
 
-/// Row a_ov3: FIRST_OID 2147483647 wraps to INT_MIN after `+ 1`, but neither product is 0: the
-/// check gives NCBI's result.
-#[test]
-fn an_overflow_that_decides_nothing_gives_the_result() {
-    let product = Both::int(i32::MAX)
-        .add(Both::int(1), false)
-        .mul(Both::int(1), false);
-    assert_eq!(product.wrapped, i64::from(i32::MIN));
-    assert_eq!(
-        decide(product, |v| v == 0, b"ov3.pal", "FIRST_OID and LAST_OID").ok(),
-        Some(false)
+    let run_check = |values: Values| -> (u32, String) {
+        let mut buf = Vec::new();
+        let faults = {
+            let files = OpenFiles::new(&RunFiles::Disk);
+            let mut log = Log::new(standard_output_file(&mut buf, &files), DETAILS);
+            check_values(&mut log, b"  p: ", &values).ok().unwrap()
+        };
+        (faults, String::from_utf8(buf).unwrap())
+    };
+    // Row a_ov1: (65535 + 1) * (65535 + 1) != 0 in i128, nseq == -1 -> 0 faults.
+    let (faults, out) = run_check(Values {
+        length: -1,
+        oidlist: -1,
+        gilist: -1,
+        nseq: -1,
+        first_oid: 65535,
+        last_oid: 65535,
+        maxoid: -1,
+    });
+    assert_eq!(faults, 0, "{out}");
+    assert!(out.is_empty(), "{out}");
+
+    // Row a_ov2: (65535 + 1) * (4294967295 + 1) * (65535 + 1) == 2^64 != 0 in i128 -> 0 faults.
+    let (faults, out) = run_check(Values {
+        length: 4_294_967_295,
+        oidlist: 0,
+        gilist: -1,
+        nseq: 65535,
+        first_oid: -1,
+        last_oid: -1,
+        maxoid: 65535,
+    });
+    assert_eq!(faults, 0, "{out}");
+    assert!(out.is_empty(), "{out}");
+
+    // Row a_ov3: genuinely inconsistent with NSEQ -> 1 fault.
+    let (faults, out) = run_check(Values {
+        length: -1,
+        oidlist: -1,
+        gilist: -1,
+        nseq: i32::MAX,
+        first_oid: i32::MAX,
+        last_oid: 0,
+        maxoid: -1,
+    });
+    assert_eq!(faults, 1, "{out}");
+    assert!(
+        out.contains("(FIRST_OID, LAST_OID) is not consistent with NSEQ"),
+        "{out}"
     );
-}
-
-/// The OIDLIST product is taken in `Int8` after 1 is added to MAXOID in `int` (row a_ov2:
-/// 2^16 * 2^32 * 2^16 wraps to 0).
-#[test]
-fn the_oidlist_product_wraps_in_int8() {
-    let product = Both::int(65535)
-        .add(Both::int(1), false)
-        .mul(Both::int8(4_294_967_295).add(Both::int8(1), true), true)
-        .mul(Both::int(65535).add(Both::int(1), false), true);
-    assert_eq!(product.wrapped, 0);
-    assert_eq!(product.exact, 1 << 64);
 }

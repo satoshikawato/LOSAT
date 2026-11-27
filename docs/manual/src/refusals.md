@@ -107,6 +107,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A very large `-xdrop_ungap` (such as `1e10`) with `-subject` that leads to an alignment outside its query context whose query coordinates leave the query on the left | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). Where they pass the query's end, or when searching a `-db` database, LOSAT matches NCBI BLAST+ in every output format. |
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
+| `-db` with a nucleotide index whose ambiguity offset passes the next sequence offset (`amb > next`), at `-num_threads` above 1 when traceback reads that sequence | Refused. NCBI `blastn` aborts (`SIGABRT`) with multiple threads. At `-num_threads 1` LOSAT reports NCBI's database error (`File error: could not get ambiguity data.`, exit status 2). |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
 | Alignments merged across a subject or query chunk overlap whose density-scaled score leaves 32-bit integers (`Int4`, e.g. a very long high-scoring match over ~1.07 Gbp with reward 2) | Refused when the search reaches it, naming the sequence by OID (exit status 1). NCBI's float-to-int conversion is undefined there. |
@@ -180,6 +181,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query batch that NCBI crashes on | Refused, as in `blastp`. See [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
 | `-db_hard_mask` on a database whose masks are stored out of the order of their start (masks that overlap or nest in that order are searched), and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused (exit status 1). A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well, and so are the few sequences with overlapping masks listed in [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
 | `-db_soft_mask` on a database sequence of more than about 15,000,000 bases whose masks are stored out of order, when a gapped search finds an alignment that starts in the letters before one of the 5,000,000-letter parts that NCBI BLAST+ searches a reading frame in (mostly with `-window_size 0`), and that alignment is longer than 11 letters or its middle lies before the part | Refused, naming the database sequence and the reading frame (exit status 1): `Error: TBLASTN: database sequence N, frame F: an initial alignment of the chunk from residue R starts before the chunk (...)`. NCBI BLAST+ crashes on these. Shorter alignments whose middle lies in the part are searched, with NCBI's rows. With `-ungapped` the search runs. |
+| `-db` with a nucleotide index whose ambiguity offset is out of order (`amb <= start`, where NCBI reads the byte before the sequence, or `amb > next`, where NCBI reads into the next sequence's bytes) | Refused: not yet supported (`blastn`, `blastdbcmd`, and `blastdbcheck` handle in-mapping out-of-order ambiguity offsets). |
 | `-ungapped -window_size 0` on a subject searched in overlapping parts (longer than 5,000,000 residues in a frame, or `-db_hard_mask`), when two one-hit alignments merged across a chunk overlap have query lengths summing to 0 or an out-of-range scaled score | Refused when the search reaches it, naming the sequence by OID and reading frame (exit status 1). NCBI divides by zero or converts an out-of-range float to a 32-bit integer there. |
 | `-in_pssm` | See the next section. |
 
@@ -193,6 +195,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension passes into the next frame of the query | Refused. See [Rare and pathological inputs](refusals-edge-cases.md). |
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-db_hard_mask` on a database whose masks are stored out of the order of their start (masks that overlap or nest in that order are searched), and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused (exit status 1). A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well, and so are the few sequences with overlapping masks listed in [Rare and pathological inputs](refusals-edge-cases.md#tblastx). |
+| `-db` with a nucleotide index whose ambiguity offset is out of order (`amb <= start`, where NCBI reads the byte before the sequence, or `amb > next`, where NCBI reads into the next sequence's bytes) | Refused: not yet supported (`blastn`, `blastdbcmd`, and `blastdbcheck` handle in-mapping out-of-order ambiguity offsets). |
 | `-outfmt 1` to `4` with `-parse_deflines` | See "All five search programs" above. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#tblastx).
@@ -378,18 +381,14 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blastdbcheck
 
-`blastdbcheck` runs every option of its `-help` but `-cdd_delta` (`-xmlhelp` on the command line only).
+`blastdbcheck` runs every option of its `-help`, including `-cdd_delta` (`-xmlhelp` on the command line only).
 
 | Option or input | What happens |
 | :--- | :--- |
-| `-cdd_delta` | Refused (not implemented yet). |
 | `-stride 0` or a negative `-stride` | Refused after the first OID passes. NCBI tests the first OID again and again and never finishes. |
 | `-random` or the default sample of 200 OIDs on a database that includes none of its OIDs (an alias file's OID range or list leaves none) | Refused. NCBI draws OIDs without end. |
-| A database file that is shorter than its index says: a cut index (`.pin`, `.nin`), sequence (`.psq`, `.nsq`) or header (`.phr`, `.nhr`) file of a few bytes or more | Refused when the volume is opened. NCBI reads zeros past the end of the file, from the rest of its last memory page. A sequence file of no bytes, a cut string ISAM file (`.psd`, `.nsd`) and a file found by `-dir` that is not a database index are refused too: NCBI crashes. |
-| An alias file whose `NSEQ`, `LENGTH`, `FIRST_OID`, `LAST_OID`, `MAXOID` or `OIDLIST` values overflow NCBI's arithmetic in its checks (such as `FIRST_OID 65535` with `LAST_OID 65535`), where the result of the overflow decides the check | Refused. C leaves the result undefined. Where the result does not decide the check, the alias file is checked as NCBI checks it. |
-| `-ends` with a value whose distance from the last OID passes the largest 32-bit integer (such as `-ends -2147483648`) | Refused. C leaves the result undefined. |
+| An empty (0-byte) sequence file (`.psq`, `.nsq`) or CDD profile file (`.loo`, `.rps`, `.freq`, `.wcounts`, `.obsr`), a cut database or profile file whose offsets pass its last 4 KiB memory page, a nucleotide index whose ambiguity offset causes NCBI to read before the start of the sequence file mapping (such as offset 0), a cut string ISAM file (`.psd`, `.nsd`), or a file found by `-dir` that is not a database index | Refused. NCBI crashes or reads outside its memory mapping. Cuts that stay within the last 4 KiB page read zero-filled bytes as NCBI does, and out-of-order ambiguity offsets that stay within the mapping match NCBI's behavior. |
 | `-must_have_taxids` with a sequence whose first definition line has no Seq-id (only a damaged database has one) | Refused. NCBI reads a null reference. |
-| A definition line whose title NCBI reads as a UTF8String, or bytes that NCBI reads as `#` | Refused. NCBI reports each read. |
 | An error report at `-verbosity 3` or 4 whose text LOSAT does not know | Refused. |
 | `SERIAL_VERIFY_DATA_READ` set to `NO`, `NEVER`, `DEFVALUE` or `DEFVALUE_ALWAYS` with a `-db` or `-dir` volume whose definition lines lack a member that NCBI's reader requires (only a damaged database has such lines) | Refused where NCBI's error would fail the check of that OID, after the same output. NCBI reports the member as missing and goes on. Other runs with these values are answered as NCBI does. |
 

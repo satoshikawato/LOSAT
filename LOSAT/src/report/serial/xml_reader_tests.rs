@@ -1,7 +1,7 @@
 //! Tests of `xml_reader`: NCBI's XML object stream (`CObjectIStreamXml`) as rpsbproc's
 //! BlastOutput input reads it (objistrxml.cpp, strbuffer.cpp, cited at the functions).
 
-use super::asn_text_reader::{SliceSource, StreamSource};
+use super::asn_text_reader::{AsnSource, SliceSource, StreamSource};
 use super::xml_reader::{member, optional, utf8_of, Member, XmlError, XmlReader};
 
 const OUTER: [Member; 3] = [member("name"), optional("number"), member("inner")];
@@ -10,7 +10,7 @@ const INNER: [Member; 2] = [optional("real"), member("big")];
 /// What a document of the test module reads to: `(name, number, real, big)`.
 type Read = (Vec<u8>, Option<i32>, Option<f64>, i64);
 
-fn read_one(reader: &mut XmlReader<SliceSource<'_>>) -> Result<Read, XmlError> {
+fn read_one<S: AsnSource>(reader: &mut XmlReader<S>) -> Result<Read, XmlError> {
     reader.begin_document("Outer")?;
     let mut name = Vec::new();
     let (mut number, mut real, mut big) = (None, None, 0);
@@ -161,8 +161,161 @@ fn character_data() {
         read(&text_doc).map(|r| r.0)
     };
     assert_eq!(latin1(b"\xe9"), Ok(b"\xc3\xa9".to_vec()));
-    assert_eq!(utf8_of(0x10_FFFF), b"\xf4\x8f\xbf\xbf".to_vec());
-    assert_eq!(utf8_of(0xFFFF_FFFF), vec![0xff, 0xbf, 0xbf, 0xbf]);
+    assert_eq!(utf8_of(0x10_FFFF), (*b"\xf4\x8f\xbf\xbf", 4));
+    assert_eq!(utf8_of(0xFFFF_FFFF), ([0xff, 0xbf, 0xbf, 0xbf], 4));
+    // Tabs, DEL, line ends and NULs between runs of plain bytes, entities next to each other.
+    assert_eq!(name("a\tb\u{7f}c\t"), Ok(b"a\tb\x7fc\t".to_vec()));
+    assert_eq!(name("\n\na\r\n\nb\rc\nd"), Ok(b"\n\na\n\nbc\nd".to_vec()));
+    assert_eq!(name("a\0b\r\0\rc\0"), Ok(b"ab\nc".to_vec()));
+    assert_eq!(
+        name("x&amp;&amp;y&#233;&#233;z&#13;&#10;w"),
+        Ok(b"x&&y\xc3\xa9\xc3\xa9z\nw".to_vec())
+    );
+    // Bytes from 0x80 in each encoding: as they are, or the UTF-8 bytes of their code point.
+    let text: &[u8] = b"a\xe9\x80\x81\xffb";
+    let cases: [(Option<&str>, &[u8]); 5] = [
+        (None, text),
+        (Some("UTF-8"), text),
+        (Some("US-ASCII"), text),
+        (Some("ISO-8859-1"), b"a\xc3\xa9\xc2\x80\xc2\x81\xc3\xbfb"),
+        (Some("windows-1252"), b"a\xc3\xa9\xe2\x82\xac?\xc3\xbfb"),
+    ];
+    for (encoding, expected) in cases {
+        assert_eq!(
+            read(&encoded_doc(encoding, text)).map(|r| r.0),
+            Ok(expected.to_vec()),
+            "{encoding:?}"
+        );
+    }
+}
+
+/// A document of the test module in `encoding` (`None`: no declaration) whose `name` is `text`.
+fn encoded_doc(encoding: Option<&str>, text: &[u8]) -> Vec<u8> {
+    let mut doc = match encoding {
+        Some(name) => format!("<?xml version='1.0' encoding='{name}'?>").into_bytes(),
+        None => Vec::new(),
+    };
+    doc.extend_from_slice(b"<Outer><Outer_name>");
+    doc.extend_from_slice(text);
+    doc.extend_from_slice(
+        b"</Outer_name><Outer_inner><Inner><Inner_big>1</Inner_big></Inner></Outer_inner></Outer>",
+    );
+    doc
+}
+
+/// The character data `text` (no `<`; the entities `&amp;` and `&#<decimal>;` only) as the
+/// reader takes it one character at a time: each character's UTF-8 bytes in the document's
+/// `encoding`, NULs dropped, and NCBI's line ends (`read_tag_data`).
+fn one_by_one(text: &[u8], encoding: Option<&str>) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut cr = false;
+    let mut i = 0;
+    while i < text.len() {
+        let (bytes, len) = if text[i] == b'&' {
+            let end = i + text[i..].iter().position(|&c| c == b';').unwrap();
+            let entity = std::str::from_utf8(&text[i + 1..end]).unwrap();
+            i = end + 1;
+            match entity.strip_prefix('#') {
+                Some(digits) => utf8_of(digits.parse().unwrap()),
+                None => utf8_of(u32::from(b'&')),
+            }
+        } else {
+            let c = text[i];
+            i += 1;
+            // (Of cp1252's bytes 0x80 to 0x9F, the texts hold 0x80 and 0x81 only.)
+            match (encoding, c) {
+                (Some("ISO-8859-1"), 0x80..) => utf8_of(u32::from(c)),
+                (Some("windows-1252"), 0x80) => utf8_of(0x20AC),
+                (Some("windows-1252"), 0x81) => utf8_of(u32::from(b'?')),
+                (Some("windows-1252"), 0xA0..) => utf8_of(u32::from(c)),
+                _ => ([c, 0, 0, 0], 1),
+            }
+        };
+        for &c in &bytes[..len] {
+            if c == 0 {
+                continue;
+            }
+            if cr {
+                if c == b'\n' {
+                    cr = false;
+                }
+                out.push(if c == b'\r' { b'\n' } else { c });
+            } else if c == b'\r' {
+                cr = true;
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+// ReadTagData (objistrxml.cpp:1297-1354, cited at `read_tag_data`): the runs of bytes that the
+// reader appends at once give what reading one character at a time gives (`one_by_one`), in
+// every encoding, for random texts of plain bytes, tabs, line ends, NULs, bytes from 0x80 and
+// entities, also from a stream that keeps one byte at a time (a run ends at every byte).
+#[test]
+fn character_data_in_runs_is_read_as_one_character_at_a_time() {
+    const PIECES: [&[u8]; 18] = [
+        b"a",
+        b"Z",
+        b" ",
+        b"~",
+        b"\t",
+        b"\x7f",
+        b"\n",
+        b"\r",
+        b"\0",
+        b"\xe9",
+        b"\x80",
+        b"\x81",
+        b"\xc3\xa9",
+        b"&amp;",
+        b"&#233;",
+        b"&#13;",
+        b"&#10;",
+        b"&#8364;",
+    ];
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move |bound: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % bound
+    };
+    for round in 0..400 {
+        let mut text = Vec::new();
+        for _ in 0..next(60) {
+            // Long runs of one piece as well as mixtures.
+            let piece = PIECES[next(PIECES.len() as u64) as usize];
+            let times = if next(4) == 0 { 1 + next(20) } else { 1 };
+            for _ in 0..times {
+                text.extend_from_slice(piece);
+            }
+        }
+        for encoding in [
+            None,
+            Some("UTF-8"),
+            Some("US-ASCII"),
+            Some("ISO-8859-1"),
+            Some("windows-1252"),
+        ] {
+            let expected = one_by_one(&text, encoding);
+            let doc = encoded_doc(encoding, &text);
+            assert_eq!(
+                read(&doc).map(|r| r.0),
+                Ok(expected.clone()),
+                "round {round} {encoding:?}"
+            );
+            let mut stream = XmlReader::new(StreamSource::new(doc.as_slice(), b""));
+            stream.src.fill_one_byte_at_a_time();
+            assert_eq!(
+                read_one(&mut stream).map(|r| r.0),
+                Ok(expected),
+                "round {round} {encoding:?} (a byte at a time)"
+            );
+        }
+    }
 }
 
 // GetInt4, GetInt8 and ReadDouble (strbuffer.cpp:617-745, objistrxml.cpp:1027-1042): white

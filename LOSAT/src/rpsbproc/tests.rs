@@ -50,14 +50,25 @@ fn format_g_keeps_the_sign_of_zero() {
     assert_eq!(OVERLAPLEADING, 1_410_065_408);
 }
 
-/// A writer whose bytes the test reads while the report is written.
+/// A writer whose bytes, and the size of each of its writes (a gathered write is one, as
+/// `writev`), the test reads while the report is written.
 #[derive(Clone, Default)]
-struct Shared(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+struct Shared(std::rc::Rc<std::cell::RefCell<(Vec<u8>, Vec<usize>)>>);
 
 impl Write for Shared {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().extend_from_slice(buf);
-        Ok(buf.len())
+        self.write_vectored(&[std::io::IoSlice::new(buf)])
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let mut shared = self.0.borrow_mut();
+        let (bytes, writes) = &mut *shared;
+        let before = bytes.len();
+        for buf in bufs {
+            bytes.extend_from_slice(buf);
+        }
+        writes.push(bytes.len() - before);
+        Ok(bytes.len() - before)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -71,11 +82,16 @@ struct CopyingReport {
     pending: Vec<u8>,
     buffer: crate::cli::NcbiBuffer,
     file: Vec<u8>,
+    /// The size of each write (one `write_all` of a block).
+    writes: Vec<usize>,
 }
 
 impl CopyingReport {
     fn write_out(&mut self, n: usize) {
-        self.file.extend_from_slice(&self.pending[..n]);
+        if n > 0 {
+            self.file.extend_from_slice(&self.pending[..n]);
+            self.writes.push(n);
+        }
         self.pending.drain(..n);
     }
 
@@ -101,9 +117,10 @@ impl CopyingReport {
 
 // No NCBI counterpart: how LOSAT gets NCBI's writes of the report (`cli::NcbiBuffer`, observed
 // from NCBI's rpsbproc) to the file. The insertions that NCBI's stream has written go to the file
-// from where they are (`Report::write_through`): the file and the held bytes after every insertion
-// are those of the report that copied each insertion first, for every stream, and a string of a
-// megabyte is not kept in the report's buffer.
+// from where they are (`Report::write_through`): the file, its writes (one per block, of the same
+// size) and the held bytes after every insertion are those of the report that copied each
+// insertion first, for every stream, and a string of a megabyte is not kept in the report's
+// buffer.
 #[test]
 fn report_writes_long_insertions_where_they_are() {
     let streams = [
@@ -140,6 +157,7 @@ fn report_writes_long_insertions_where_they_are() {
             pending: Vec::new(),
             buffer: crate::cli::NcbiBuffer::new(stream),
             file: Vec::new(),
+            writes: Vec::new(),
         };
         for step in 0..2000u64 {
             let size = match next(20) {
@@ -173,10 +191,13 @@ fn report_writes_long_insertions_where_they_are() {
                     old.write(&bytes);
                 }
             }
-            // (The bytes written at each step, compared and dropped.)
-            assert_eq!(*file.0.borrow(), old.file, "{stream:?} step {step}");
-            file.0.borrow_mut().clear();
+            // (The bytes and writes of each step, compared and dropped.)
+            assert_eq!(file.0.borrow().0, old.file, "{stream:?} step {step}");
+            assert_eq!(file.0.borrow().1, old.writes, "{stream:?} step {step}");
+            file.0.borrow_mut().0.clear();
+            file.0.borrow_mut().1.clear();
             old.file.clear();
+            old.writes.clear();
             assert_eq!(report.pending, old.pending, "{stream:?} step {step}");
             assert_eq!(report.buffer, old.buffer, "{stream:?} step {step}");
             assert!(
@@ -188,6 +209,70 @@ fn report_writes_long_insertions_where_they_are() {
         report.flush();
         let n = old.pending.len();
         old.write_out(n);
-        assert_eq!(*file.0.borrow(), old.file, "{stream:?}");
+        assert_eq!(file.0.borrow().0, old.file, "{stream:?}");
+        assert_eq!(file.0.borrow().1, old.writes, "{stream:?}");
     }
+}
+
+/// A device that takes at most `limit` bytes of a write (of all the parts of a gathered one), is
+/// interrupted at its first write, and takes no byte once it is `full`.
+struct Device {
+    taken: Vec<u8>,
+    writes: usize,
+    limit: usize,
+    full: bool,
+}
+
+impl Write for Device {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_vectored(&[std::io::IoSlice::new(buf)])
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.writes += 1;
+        if self.writes == 1 {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        if self.full {
+            return Ok(0);
+        }
+        let before = self.taken.len();
+        for buf in bufs {
+            let room = self.limit - (self.taken.len() - before);
+            self.taken.extend_from_slice(&buf[..buf.len().min(room)]);
+        }
+        Ok(self.taken.len() - before)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+// No NCBI counterpart: the report's write of two pieces (`write_all2`) is `write_all` of the two
+// in one write where the device takes them: an interrupted write is made again, a device that
+// takes part of a write gets the rest, and one that takes no byte is `write_all`'s error.
+#[test]
+fn report_writes_two_pieces_as_write_all() {
+    let device = |limit, full| Device {
+        taken: Vec::new(),
+        writes: 0,
+        limit,
+        full,
+    };
+    let mut one = device(usize::MAX, false);
+    write_all2(&mut one, b"abc", b"defg").unwrap();
+    assert_eq!((one.taken.as_slice(), one.writes), (&b"abcdefg"[..], 2));
+    let mut parts = device(2, false);
+    write_all2(&mut parts, b"abc", b"defg").unwrap();
+    assert_eq!((parts.taken.as_slice(), parts.writes), (&b"abcdefg"[..], 5));
+    let mut second = device(usize::MAX, false);
+    write_all2(&mut second, b"", b"defg").unwrap();
+    assert_eq!((second.taken.as_slice(), second.writes), (&b"defg"[..], 2));
+    let error = write_all2(&mut device(usize::MAX, true), b"a", b"b").unwrap_err();
+    let expected = device(usize::MAX, true).write_all(b"ab").unwrap_err();
+    assert_eq!(
+        (error.kind(), error.to_string()),
+        (expected.kind(), expected.to_string())
+    );
 }

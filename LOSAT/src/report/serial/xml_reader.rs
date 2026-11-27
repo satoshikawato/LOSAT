@@ -135,39 +135,50 @@ const CP1252: [u32; 32] = [
 ];
 
 /// `CUtf8::x_AppendChar`: the UTF-8 bytes of a code point (any 32-bit value: the bits above 21
-/// are cut by the byte conversion).
+/// are cut by the byte conversion), the first `.1` bytes of `.0`.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7040-7060
 // (`CUtf8::AsUTF8` of one `TUnicodeSymbol` (`chU`, length 1), ncbistr.hpp:5718-5758, appends it
 // with this; the surrogate pair test of `x_TCharToUnicodeSymbol` is for 2-byte characters only.)
-pub(crate) fn utf8_of(c: u32) -> Vec<u8> {
+pub(crate) fn utf8_of(c: u32) -> ([u8; 4], usize) {
     if c < 0x80 {
-        vec![c as u8]
+        ([c as u8, 0, 0, 0], 1)
     } else if c < 0x800 {
-        vec![((c >> 6) | 0xC0) as u8, ((c & 0x3F) | 0x80) as u8]
+        (
+            [((c >> 6) | 0xC0) as u8, ((c & 0x3F) | 0x80) as u8, 0, 0],
+            2,
+        )
     } else if c < 0x10000 {
-        vec![
-            ((c >> 12) | 0xE0) as u8,
-            (((c >> 6) & 0x3F) | 0x80) as u8,
-            ((c & 0x3F) | 0x80) as u8,
-        ]
+        (
+            [
+                ((c >> 12) | 0xE0) as u8,
+                (((c >> 6) & 0x3F) | 0x80) as u8,
+                ((c & 0x3F) | 0x80) as u8,
+                0,
+            ],
+            3,
+        )
     } else {
-        vec![
-            ((c >> 18) | 0xF0) as u8,
-            (((c >> 12) & 0x3F) | 0x80) as u8,
-            (((c >> 6) & 0x3F) | 0x80) as u8,
-            ((c & 0x3F) | 0x80) as u8,
-        ]
+        (
+            [
+                ((c >> 18) | 0xF0) as u8,
+                (((c >> 12) & 0x3F) | 0x80) as u8,
+                (((c >> 6) & 0x3F) | 0x80) as u8,
+                ((c & 0x3F) | 0x80) as u8,
+            ],
+            4,
+        )
     }
 }
 
 /// `CUtf8::AsUTF8` of a `CTempString` holding `ch` (length 1) and `enc_in`, for one byte of 0x80
 /// and above in a document of a single-byte encoding: the byte itself for ASCII (`x_Append` copies
-/// ASCII and UTF-8), its code point in UTF-8 for Latin-1 and cp1252 (`CharToSymbol`).
+/// ASCII and UTF-8), its code point in UTF-8 for Latin-1 and cp1252 (`CharToSymbol`); as
+/// `utf8_of` gives them.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7062-7079
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:6859-6881
-fn utf8_of_byte(c: u8, encoding: Encoding) -> Vec<u8> {
+fn utf8_of_byte(c: u8, encoding: Encoding) -> ([u8; 4], usize) {
     match encoding {
-        Encoding::Unknown | Encoding::Utf8 | Encoding::Ascii => vec![c],
+        Encoding::Unknown | Encoding::Utf8 | Encoding::Ascii => ([c, 0, 0, 0], 1),
         Encoding::Iso8859_1 => utf8_of(u32::from(c)),
         Encoding::Windows1252 => {
             if (0x80..0xA0).contains(&c) {
@@ -177,6 +188,51 @@ fn utf8_of_byte(c: u8, encoding: Encoding) -> Vec<u8> {
             }
         }
     }
+}
+
+/// `PLAIN[c]` of a byte `c`: whether `read_encoded_char` gives it as it is and `read_tag_data`
+/// appends it as it is, whatever its `\r` state (`tag_data_byte`): `PLAIN_ASCII` for `\t` and for
+/// 0x20 to 0x7F but `&` (an entity) and `<` (a tag or CDATA); `PLAIN_HIGH` for the bytes from
+/// 0x80, which are given as they are where the document's encoding is unknown, UTF-8 or ASCII
+/// (`utf8_of_byte`); 0 for the control bytes, NUL, `\n` and `\r` (`bad_char`, `tag_data_byte`).
+const PLAIN: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut c = 0;
+    while c < 256 {
+        table[c] = if c >= 0x80 {
+            PLAIN_HIGH
+        } else if c == 0x09 || (c >= 0x20 && c != 0x26 && c != 0x3C) {
+            PLAIN_ASCII
+        } else {
+            0
+        };
+        c += 1;
+    }
+    table
+};
+const PLAIN_ASCII: u8 = 1;
+const PLAIN_HIGH: u8 = 2;
+
+/// NCBI's end-of-line handling of `ReadTagData` for one byte `c` of character data: a NUL is
+/// dropped; a first `\r` is dropped, and from it (`cr`) to the next `\n` every `\r` is a `\n`.
+/// `None`: `c` is dropped.
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1297-1354
+#[inline(always)]
+fn tag_data_byte(c: u8, cr: &mut bool) -> Option<u8> {
+    if c == 0 {
+        return None;
+    }
+    if *cr {
+        if c == b'\n' {
+            *cr = false;
+        } else if c == b'\r' {
+            return Some(b'\n');
+        }
+    } else if c == b'\r' {
+        *cr = true;
+        return None;
+    }
+    Some(c)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:156-221
@@ -840,13 +896,9 @@ impl<S: AsnSource> XmlReader<S> {
             return Ok(c);
         }
         let c = if encoded {
-            self.utf8 = utf8_of(c as u32);
-            self.utf8_at = 0;
-            i32::from(self.utf8[0])
+            self.give_utf8(utf8_of(c as u32))
         } else if !matches!(self.encoding, Encoding::Unknown | Encoding::Utf8) && c & 0x80 != 0 {
-            self.utf8 = utf8_of_byte(c as u8, self.encoding);
-            self.utf8_at = 0;
-            i32::from(self.utf8[0])
+            self.give_utf8(utf8_of_byte(c as u8, self.encoding))
         } else {
             c
         };
@@ -862,6 +914,19 @@ impl<S: AsnSource> XmlReader<S> {
             )));
         }
         Ok(c)
+    }
+
+    /// The first of the UTF-8 bytes `bytes` (the first `len`) of a character; the others wait in
+    /// `utf8` for the next calls of `read_encoded_char` (`m_Utf8Buf`, `m_Utf8Pos`). A character of
+    /// one byte leaves `utf8` empty: NCBI's buffer then holds the byte given, which its next call
+    /// finds done, as it finds an empty one.
+    fn give_utf8(&mut self, (bytes, len): ([u8; 4], usize)) -> i32 {
+        if len > 1 {
+            self.utf8.clear();
+            self.utf8.extend_from_slice(&bytes[..len]);
+            self.utf8_at = 0;
+        }
+        i32::from(bytes[0])
     }
 
     /// `ReadCDSection` of `str`: a CDATA section where character data meets `<`.
@@ -894,20 +959,42 @@ impl<S: AsnSource> XmlReader<S> {
     pub(super) fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         let mut cr = false;
+        let plain = if matches!(
+            self.encoding,
+            Encoding::Unknown | Encoding::Utf8 | Encoding::Ascii
+        ) {
+            PLAIN_ASCII | PLAIN_HIGH
+        } else {
+            PLAIN_ASCII
+        };
         loop {
-            // The bytes that `read_encoded_char` gives as they are and that this loop appends as
-            // they are (printable ASCII but `&` and `<`, while no UTF-8 bytes of a character are
-            // being given; a `\r` before them changes none of them) are appended as one run of the
-            // kept bytes. The bytes read are not asked for again: a long text is held in `out`
-            // alone, not in the stream's buffer as well (`StreamSource::release_before`).
+            // While no UTF-8 bytes of a character are being given, the kept bytes that this loop
+            // would take one by one as they are (`PLAIN`) are appended as one run, and the line
+            // ends and NULs between the runs are taken here too (`tag_data_byte`). The other bytes
+            // (`&`, `<`, control bytes, bytes that the encoding converts) and the byte after the
+            // kept ones are read below. The bytes read are not asked for again: a long text is
+            // held in `out` alone, not in the stream's buffer as well (`release_before`).
             if self.utf8.is_empty() {
-                let rest = self.src.rest(self.pos);
-                let run = rest
-                    .iter()
-                    .position(|&c| !(b' '..=b'~').contains(&c) || c == b'&' || c == b'<')
-                    .unwrap_or(rest.len());
-                out.extend_from_slice(&rest[..run]);
-                self.pos += run;
+                loop {
+                    let rest = self.src.rest(self.pos);
+                    let run = rest
+                        .iter()
+                        .position(|&c| (PLAIN[usize::from(c)] & plain) == 0)
+                        .unwrap_or(rest.len());
+                    if run > 0 {
+                        out.extend_from_slice(&rest[..run]);
+                        self.pos += run;
+                    }
+                    match rest.get(run) {
+                        Some(&c @ (b'\n' | b'\r' | 0)) => {
+                            self.pos += 1;
+                            if let Some(c) = tag_data_byte(c, &mut cr) {
+                                out.push(c);
+                            }
+                        }
+                        _ => break,
+                    }
+                }
             }
             self.src.release_before(self.pos);
             let c = self.read_encoded_char(b'<')?;
@@ -918,21 +1005,9 @@ impl<S: AsnSource> XmlReader<S> {
                 cr = false;
                 continue;
             }
-            if c == 0 {
-                continue;
+            if let Some(c) = tag_data_byte(c as u8, &mut cr) {
+                out.push(c);
             }
-            let mut c = c as u8;
-            if cr {
-                if c == b'\n' {
-                    cr = false;
-                } else if c == b'\r' {
-                    c = b'\n';
-                }
-            } else if c == b'\r' {
-                cr = true;
-                continue;
-            }
-            out.push(c);
         }
         Ok(())
     }

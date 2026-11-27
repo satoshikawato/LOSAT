@@ -2123,6 +2123,7 @@ impl ListedTitles<'_> {
             &self.parsed,
             |rank| loads.load(rank as usize),
             |rank| self.oids.oid(self.listed.ordinals[rank as usize]),
+            true,
             self.program,
         )
     }

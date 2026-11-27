@@ -45,8 +45,6 @@ use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVAL
 use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 use crate::utils::genetic_code::GeneticCode;
 
-const PROGRAM: &str = "TBLASTX";
-
 /// `-gapopen 11 -gapextend 1`: TBLASTX has no options for them, and NCBI's XML prints its option
 /// defaults (blastxml_format.cpp:602-607; DECISIONS 19, Q7), or the best costs of `-matrix`
 /// (`gap_costs`).
@@ -156,6 +154,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let args = run.args;
+    // The name in LOSAT's refusals: the running application's.
+    let program = args.app().name();
     let taxa = run.xml_taxa;
     let (db_name, db_num, db_len, db_len_overflow) = match &run.database {
         Some(database) => (
@@ -254,7 +254,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 ));
             }
             names::query_text(
-                PROGRAM,
+                program,
                 query.local_id.as_bytes(),
                 query.warning_id(),
                 query.believed(),
@@ -294,7 +294,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     for hsp in &hits[..written_hits] {
         if last_subject != Some(hsp.hit.s_idx) {
             last_subject = Some(hsp.hit.s_idx);
-            cache.get(hsp.hit.s_idx as usize, PROGRAM)?;
+            cache.get(hsp.hit.s_idx as usize, program)?;
         }
     }
     let query_code = GeneticCode::from_id(args.query_gencode);
@@ -388,7 +388,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                     }
                     end += 1;
                 }
-                let subject = cache.get(s_idx as usize, PROGRAM)?.names()?;
+                let subject = cache.get(s_idx as usize, program)?.names()?;
                 let subject_record_length = subjects.length(s_idx as usize);
                 let hit = XmlHit::of(subject, subject_record_length);
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup

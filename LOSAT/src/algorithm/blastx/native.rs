@@ -393,8 +393,8 @@ fn run_inner(
                 list.as_ref(),
                 args.db_mask.option().as_ref(),
                 &mut stderr,
-                program.upper,
-                program.app,
+                program,
+                args.app(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -777,6 +777,7 @@ fn run_inner(
             database.x_seqdb(),
             longest,
             allow_long,
+            database.app.name(),
         )),
         _ => None,
     };
@@ -1577,7 +1578,13 @@ pub(super) fn reported_batch(
             record: &record,
             protein: false,
         };
-        reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
+        reported.refuse_ids_of_queries(
+            results,
+            options.gapped,
+            scopes,
+            &run,
+            options.app.name(),
+        )?;
     }
     reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
@@ -1601,7 +1608,7 @@ pub(super) fn reported_batch(
     let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch.fails {
-        diagnostics.write_all(&database.prefetch_warning(options.app_name))?;
+        diagnostics.write_all(&database.prefetch_warning(options.app_name()))?;
     }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
@@ -1747,7 +1754,7 @@ fn failed_batch_reads(
     // The post's prefix is the running application's (`app_name`: BLASTX's own run names its
     // program, RPSTBLASTN's too).
     if let (Some(read), Some(db)) = (&failure.utf8, subjects.seqdb()) {
-        if let Some(posts) = read.post(db, options.app_name) {
+        if let Some(posts) = read.post(db, options.app_name()) {
             posts.write(diagnostics, None)?;
         }
     }

@@ -142,7 +142,7 @@ pub(crate) fn run_pair(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     super::native::write_empty_subject_warnings(
         &subjects,
-        options.app_name,
+        options.app_name(),
         &mut *diagnostics.borrow_mut(),
     )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254

@@ -6736,7 +6736,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
-                args.app().ncbi_name(),
+                args.app(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -6801,7 +6801,7 @@ fn open_search_database(
             crate::report::serial::seqalign::check_database(
                 serial,
                 database.name(),
-                Program::Blastn,
+                args.app(),
             )?;
         }
     }
@@ -8119,7 +8119,8 @@ fn ungapped_reap_query_coverage(
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
 /// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
 /// The word cutoff of an ungapped search and of matrix-only scoring (`batch_setup::batch_cutoffs`).
-fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
+/// `program` names the running application (`BlastnArgs::app`).
+fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit, program: &str) -> anyhow::Error {
     let what = match limit {
         ungapped::CutoffLimit::QueryLength => {
             "a query of 2^30 letters or more, whose doubled length overflows NCBI BLAST+'s 32-bit int in the ungapped word cutoff"
@@ -8129,7 +8130,7 @@ fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
         }
     };
     anyhow::anyhow!(
-        "{what} is not supported by LOSAT's BLASTN with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
+        "{what} is not supported by LOSAT's {program} with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
     )
 }
 
@@ -10278,7 +10279,7 @@ fn write_reports_untimed(
         {
             Some(
                 reported.tabular_subject_ids(
-                    database.oid_map(),
+                    database,
                     output_formats
                         .iter()
                         .any(|format| format.tabular_reads_subject()),
@@ -10523,7 +10524,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 /// letters against a database of `db_len` letters in `db_num_seqs` sequences
 /// (`BLAST_CalcEffLengths`), with the context's gapped Karlin-Altschul block. The search space
 /// is the context's `eff_searchsp` when no `-searchsp` replaces it. The reports compute the
-/// length adjustment again, which the search does not keep.
+/// length adjustment again, which the search does not keep. An overflow of the space is LOSAT's
+/// refusal in the name `program` (the running application's, `BlastnArgs::app`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-846
 fn context_lengths(
@@ -10531,9 +10533,10 @@ fn context_lengths(
     db_len: i64,
     db_num_seqs: i32,
     gapped: &KarlinParams,
+    program: &str,
 ) -> Result<(i64, i64)> {
     let lengths =
-        crate::stats::setup::calc_eff_lengths(query_len, db_len, db_num_seqs, gapped, 0, "BLASTN")?;
+        crate::stats::setup::calc_eff_lengths(query_len, db_len, db_num_seqs, gapped, 0, program)?;
     Ok((i64::from(lengths.length_adjustment), lengths.eff_searchsp))
 }
 
@@ -11650,6 +11653,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         matrix_only: config.matrix_only,
         evalue_threshold,
         subject_length: None,
+        program: args.app().name(),
     };
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
@@ -12043,10 +12047,11 @@ fn search_query_chunks(
     // `SplitBatchSteps` owns the empty-chunk stop, OID 0 read, per-chunk setup checks, read
     // failures, D13 negative-pair gap refusal, and post-loop traceback setup checks; BLASTN
     // disables the re-split stop (approved exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    let program = args.app().name();
     let read_fails = context_statistics::split_read_fails(subjects);
     let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
     let mut steps = SplitBatchSteps::new(
-        "BLASTN",
+        program,
         &chunks,
         batching.split,
         read_fails,
@@ -12104,6 +12109,7 @@ fn search_query_chunks(
             context_offsets,
             batching.split.overlap as u32 as i32,
             |ordinal| subjects.subject_oid(ordinal),
+            program,
         )?;
     }
     // A batch with a valid context whose chunks have none (for instance valid letters only in a
@@ -12126,7 +12132,8 @@ fn search_query_chunks(
 /// the chunks before (`merge_prelim_hit_list`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:476-522
-/// The overlap is 100 and gaps are allowed (`CSplitQueryBlk` of a gapped search).
+/// The overlap is 100 and gaps are allowed (`CSplitQueryBlk` of a gapped search). `program`
+/// names the running application in LOSAT's refusal (`BlastnArgs::app`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:527-534
 fn merge_query_chunk(
@@ -12136,6 +12143,7 @@ fn merge_query_chunk(
     context_offsets: &[i32],
     chunk_overlap_size: i32,
     oid_of: impl Fn(u32) -> u32,
+    program: &str,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12189,6 +12197,7 @@ fn merge_query_chunk(
             split_points,
             chunk_overlap_size,
             &oid_of,
+            program,
         )?;
     }
     for hit_list in merged.iter_mut().flatten() {
@@ -12203,7 +12212,8 @@ fn merge_query_chunk(
 /// hit list of the chunks before into a new hit list of the same size, subject by subject in
 /// subject order (`Blast_HitListUpdate` keeps the best `prelim_hitlist_size` subjects by
 /// their preliminary e-values). The HSP lists of a subject in both merge with
-/// `Blast_HSPListsMerge` when a split point is positive, else `Blast_HSPListAppend`.
+/// `Blast_HSPListsMerge` when a split point is positive, else `Blast_HSPListAppend`. A merge
+/// that NCBI does not define is LOSAT's refusal in the name `program`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2132-2217
 fn merge_prelim_hit_list(
@@ -12212,6 +12222,7 @@ fn merge_prelim_hit_list(
     split_offsets: [i32; 2],
     chunk_overlap_size: i32,
     oid_of: impl Fn(u32) -> u32,
+    program: &str,
 ) -> Result<()> {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
@@ -12250,7 +12261,7 @@ fn merge_prelim_hit_list(
                     crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
                         oid_of(list2.oid),
                         None,
-                        "BLASTN",
+                        program,
                     )
                 })?;
             } else {

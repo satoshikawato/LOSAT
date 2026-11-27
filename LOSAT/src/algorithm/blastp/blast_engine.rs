@@ -5819,6 +5819,7 @@ fn check_pairwise_shown_titles(
                 },
                 described,
                 view.listed_parsed,
+                true,
                 view.args.app.name(),
             )
         }

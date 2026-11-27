@@ -292,19 +292,35 @@ pub(crate) type XKept = Option<(Arc<SequenceBlock>, usize)>;
 /// `OneHitChunkMerge::refuse` in `blast_engine/run_impl.rs`). The subjects after it are not
 /// searched (`skips`); those before it are, so the error kept does not depend on the threads or
 /// their order. Each query batch has its own: a batch that the pipe runs early does not stop the
-/// batch before it.
+/// batch before it. LOSAT's refusals that fail the search name its `program`.
 pub(crate) struct XReadFailure {
     /// The ordinal id of the failed read kept, or `usize::MAX`.
     first: AtomicUsize,
     failed: Mutex<Option<(usize, anyhow::Error)>>,
+    /// The name in LOSAT's refusals of the search: the running application's (`Program::name` of
+    /// `TblastxArgs::app`), TBLASTX's or that of the application that runs a TBLASTX strategy.
+    program: &'static str,
 }
 
 impl XReadFailure {
-    pub(crate) const fn new() -> Self {
+    /// The failure of a search of TBLASTX's own run.
+    #[cfg(test)]
+    pub(crate) fn new() -> Self {
+        Self::named(crate::blastinput::app::Program::Tblastx.name())
+    }
+
+    /// The failure of a search whose refusals name `program`.
+    pub(crate) const fn named(program: &'static str) -> Self {
         Self {
             first: AtomicUsize::new(usize::MAX),
             failed: Mutex::new(None),
+            program,
         }
+    }
+
+    /// The name in LOSAT's refusals of the search (`program`).
+    pub(crate) fn program(&self) -> &'static str {
+        self.program
     }
 
     /// Whether subject `oid` comes after a read that failed.
@@ -513,11 +529,18 @@ pub(crate) struct SubjectSetNumbers {
     /// statistics of each subject read them (`SubjectSetNumbers::preliminary_spaces`,
     /// `per_subject`); `None` for a FASTA set.
     pub(crate) statistics: Option<crate::seqdb::DbStatistics>,
+    /// The name in LOSAT's refusals of the effective lengths (`SearchSpaceOverflow`): the running
+    /// application's (`TblastxArgs::app`).
+    pub(crate) program: &'static str,
 }
 
 impl SubjectSetNumbers {
-    /// The numbers of the records of `-subject`.
-    pub(crate) fn of_records(records: &[FastaRecord], dbsize: Option<i64>) -> Self {
+    /// The numbers of the records of `-subject`, whose refusals name `program`.
+    pub(crate) fn of_records(
+        records: &[FastaRecord],
+        dbsize: Option<i64>,
+        program: &'static str,
+    ) -> Self {
         Self {
             total: records.iter().map(|record| record.seq().len() as i64).sum(),
             count: records.len() as i64,
@@ -526,6 +549,7 @@ impl SubjectSetNumbers {
             dbsize,
             searchsp: None,
             statistics: None,
+            program,
         }
     }
 
@@ -582,7 +606,7 @@ impl SubjectSetNumbers {
             count,
             karlin,
             searchsp,
-            "TBLASTX",
+            self.program,
         )?;
         Ok(super::ncbi_cutoffs::EffLengthsResult {
             length_adjustment: i64::from(lengths.length_adjustment),
@@ -618,7 +642,7 @@ impl SubjectSetNumbers {
                     searchsp,
                     true,
                     karlin,
-                    "TBLASTX",
+                    self.program,
                 )
             })
             .collect::<Result<Vec<_>, _>>()
@@ -657,7 +681,7 @@ impl SubjectSetNumbers {
             option_space,
             true,
             karlin,
-            "TBLASTX",
+            self.program,
         )?;
         Ok(super::ncbi_cutoffs::EffLengthsResult {
             length_adjustment: i64::from(lengths.length_adjustment),

@@ -293,6 +293,7 @@ impl ArchiveBatch<'_> {
                             options.gapped,
                             scopes.numbered_from(queries_before),
                             &crate::report::query_bioseq::SeenRun::REFUSED,
+                            options.app.name(),
                         )?;
                     }
                     (

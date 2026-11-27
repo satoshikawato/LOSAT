@@ -202,13 +202,16 @@ pub(crate) fn refuse_pairwise_reports(
         )
         .map_or_else(Vec::new, |group| group.described(num_descriptions).to_vec()))
     };
+    // TBLASTX's subjects are nucleotide sequences; the refusals name the running application.
+    let program = run.args.app().name();
     let Some(database) = run.database else {
         return crate::algorithm::common::database::refuse_described_records(
             run.queries.len(),
             reported_ranks,
             described,
             records,
-            "TBLASTX",
+            false,
+            program,
         );
     };
     let reported = database.reported;
@@ -220,7 +223,8 @@ pub(crate) fn refuse_pairwise_reports(
         &reported.parsed,
         |rank| reported.loads.load(rank as usize),
         oid_of,
-        "TBLASTX",
+        false,
+        program,
     )?;
     let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::new(
         run.queries,
@@ -235,6 +239,6 @@ pub(crate) fn refuse_pairwise_reports(
         |q_idx| scopes.of_query(q_idx),
         scopes.generated(),
         view != crate::report::pairwise::PairwiseView::Pairwise,
-        "TBLASTX",
+        program,
     )
 }

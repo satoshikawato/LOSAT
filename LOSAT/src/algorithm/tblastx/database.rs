@@ -45,9 +45,6 @@ use crate::sequence::packed_subject::PackedNucleotide;
 use super::blast_engine::TblastxHsp;
 use super::subjects::SubjectSetNumbers;
 
-/// The program that LOSAT's refusals name.
-const PROGRAM: &str = "TBLASTX";
-
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct TblastxDatabase {
@@ -59,6 +56,9 @@ pub(crate) struct TblastxDatabase {
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
     /// of the run.
     taxdb: shared::TaxdbRun,
+    /// The name in LOSAT's refusals: the running application's (`Program::name`), TBLASTX's or
+    /// that of the application that runs a TBLASTX strategy (`TblastxArgs::app`).
+    program: &'static str,
 }
 
 impl TblastxDatabase {
@@ -120,24 +120,25 @@ impl TblastxDatabase {
             None,
             None,
             &mut std::io::sink(),
-            "tblastx",
+            crate::blastinput::app::Program::Tblastx,
         )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
     /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
-    /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
-    /// run's posts, which is not TBLASTX's where the run is another program's strategy).
+    /// `diagnostics`), for the running application `app` (`TblastxArgs::app`: NCBI's lower-case
+    /// name is the prefix of the run's posts and the upper-case one LOSAT's refusals', neither
+    /// TBLASTX's where the run is another program's strategy).
     pub(crate) fn open_restricted(
         name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
-        app: &'static str,
+        app: crate::blastinput::app::Program,
     ) -> Result<Self> {
-        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, app.name())?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed = shared::restrict_database(
             &mut db,
@@ -146,8 +147,8 @@ impl TblastxDatabase {
             mask,
             diagnostics,
             settings,
-            PROGRAM,
-            app,
+            app.name(),
+            app.ncbi_name(),
         )?;
         // TBLASTX has no Gumbel block: the setup of a batch with a valid context divides by the
         // statistics' number of sequences, a count of 0 LOSAT's refusal there
@@ -156,7 +157,8 @@ impl TblastxDatabase {
             db,
             name: name.to_vec(),
             parsed,
-            taxdb: shared::TaxdbRun::running(app),
+            taxdb: shared::TaxdbRun::running(app.ncbi_name()),
+            program: app.name(),
         })
     }
 
@@ -179,7 +181,7 @@ impl TblastxDatabase {
         spec: &crate::report::tabular::TabularSpec,
         taxonomy: &[crate::report::tabular::TabularTaxonomy],
     ) -> Result<Option<crate::report::tabular::TabularNames>> {
-        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, self.program)
     }
 
     /// Whether the database has parsed Seq-ids, whose subjects NCBI's prefetch can fail at
@@ -222,7 +224,7 @@ impl TblastxDatabase {
             prefetch,
             queries,
             pool,
-            PROGRAM,
+            self.program,
         )
     }
 
@@ -242,6 +244,7 @@ impl TblastxDatabase {
             dbsize,
             searchsp: None,
             statistics: Some(statistics),
+            program: self.program,
         }
     }
 
@@ -307,7 +310,7 @@ impl TblastxDatabase {
             &self.db,
             &self.name,
             option,
-            PROGRAM,
+            self.program,
             app,
             archive,
             strategy,
@@ -329,7 +332,7 @@ impl TblastxDatabase {
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
-            PROGRAM,
+            self.program,
             crate::blastinput::db_mask::HardScan::Translated {
                 word,
                 window,
@@ -356,7 +359,7 @@ impl TblastxDatabase {
             &reported.ordinals,
             &ranks,
             &reported.parsed,
-            PROGRAM,
+            self.program,
         )?;
         Ok(XmlTaxa {
             taxids,
@@ -381,7 +384,7 @@ impl TblastxDatabase {
             &reported.parsed,
             0..reported.ordinals.len(),
             &reported.loads,
-            PROGRAM,
+            self.program,
         )
     }
 
@@ -394,7 +397,7 @@ impl TblastxDatabase {
         threads: usize,
         mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
     ) -> Result<XDbStream<'_>> {
-        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
+        Ok(XDbStream::new(&self.db, threads, self.program)?
             .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(
                 mask,
             ))
@@ -464,7 +467,7 @@ pub(crate) fn read_titles(
             &headers,
             ordinal,
             first_query + hsp.hit.q_idx as usize,
-            PROGRAM,
+            database.program,
         )?;
         titles.insert(ordinal, title);
     }
@@ -574,7 +577,7 @@ pub(crate) fn prefetch_messages<'h>(
         };
         (ordinal, parsed)
     });
-    shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+    shared::prefetch_messages(&database.db, &database.taxdb, subjects, database.program)
 }
 
 /// [`prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the first read
@@ -593,7 +596,7 @@ pub(crate) fn subject_read_texts(
     let subjects = ordinals
         .into_iter()
         .map(|ordinal| (ordinal, ordinal, parsed(ordinal)));
-    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows, PROGRAM)
+    shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows, database.program)
 }
 
 /// The open of the taxonomy database by the rows `rows` of the hits `hits` (by ordinal id) after
@@ -612,7 +615,7 @@ pub(crate) fn open_for_rows<'h>(
         };
         (ordinal, parsed)
     });
-    rows.open_after_prefetch(&database.db, &database.taxdb, subjects, PROGRAM)
+    rows.open_after_prefetch(&database.db, &database.taxdb, subjects, database.program)
 }
 
 /// The ordinal ids of the subjects that one query's report reads one by one, in the order of its
@@ -719,7 +722,7 @@ pub(crate) fn batch_prefetch(
         &database.taxdb,
         loaded_subjects(before, titles),
         loads,
-        PROGRAM,
+        database.program,
         queries,
     )
 }
@@ -1220,10 +1223,10 @@ pub(crate) fn reported_subjects(
                     ordinal,
                     stored.replaced_bytes,
                     shown.titles,
-                    PROGRAM,
+                    database.program,
                 )?;
                 if shown.pairwise {
-                    stored.check_shown_source(|| database.db.oid(ordinal), PROGRAM)?;
+                    stored.check_shown_source(|| database.db.oid(ordinal), database.program)?;
                 }
                 shared::keep_source(&mut sources, rank, ordinals.len(), stored.source.clone());
                 stored.title.clone()
@@ -1241,7 +1244,7 @@ pub(crate) fn reported_subjects(
                     taxdb,
                     ordinal,
                     seen_all.contains(&ordinal),
-                    PROGRAM,
+                    database.program,
                 )?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
@@ -1301,7 +1304,7 @@ pub(crate) fn reported_subjects(
                     Some((ordinals[rank as usize], subject))
                 }),
                 database.db.oid_map(),
-                PROGRAM,
+                database.program,
             )?;
             start = end;
         }
@@ -1322,11 +1325,13 @@ impl ReportedSubjects {
     /// The subject ids of the tabular reports (`saccver`), by rank: the first word of the stored
     /// title or the general id's `BL_ORD_ID:n` (`oids`), or the id of a sequence with parsed
     /// Seq-ids (`common::database::tabular_subject_ids`; an id LOSAT cannot write is empty where no
-    /// tabular report `reads` the subject).
+    /// tabular report `reads` the subject). `program`: the name in LOSAT's refusals (the running
+    /// application's, `TblastxDatabase::program`).
     pub(crate) fn tabular_subject_ids(
         &self,
         oids: crate::seqdb::OidMap<'_>,
         reads: bool,
+        program: &str,
     ) -> Result<Vec<crate::algorithm::common::tabular::SubjectId>> {
         shared::tabular_subject_ids(
             &self.records,
@@ -1336,7 +1341,7 @@ impl ReportedSubjects {
             &self.sources,
             false,
             reads,
-            PROGRAM,
+            program,
         )
     }
 
@@ -1352,7 +1357,7 @@ impl ReportedSubjects {
             &self.parsed,
             &self.sources,
             |rank| self.lengths[rank] as usize,
-            PROGRAM,
+            database.program,
         )
     }
 }

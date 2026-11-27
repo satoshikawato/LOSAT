@@ -182,7 +182,7 @@ impl SubjectEmit<'_> {
             s_idx,
             anyhow::Error::new(super::ErrorAfterBatchReports::new(
                 crate::core::blast_hits::x_untranslated_frame_refusal(
-                    "TBLASTX",
+                    self.x_read_failure.program(),
                     "the ungapped re-evaluation",
                 ),
             )),
@@ -212,7 +212,7 @@ fn x_fetch_keeps(
                 ordinal as usize,
                 anyhow::Error::new(super::ErrorAfterBatchReports::new(FetchExcluded::refusal(
                     (ordinal, error),
-                    "TBLASTX",
+                    x_read_failure.program(),
                 ))),
             );
             false

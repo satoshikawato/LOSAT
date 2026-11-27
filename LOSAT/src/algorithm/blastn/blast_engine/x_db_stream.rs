@@ -82,7 +82,8 @@ use crate::utils::threading::SearchPool;
 
 use super::super::x_bnstream::{search_in_order_bounded, WaitingBound};
 use super::{
-    block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes, XWorker, BLOCK_BYTES,
+    block_subject, search_read_error, BlastnDatabase, BlastnSubjectRef, XWaitingBytes, XWorker,
+    BLOCK_BYTES,
 };
 
 /// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
@@ -164,7 +165,7 @@ fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Ve
 /// after `segment` blocks (`X_SEGMENT_BLOCKS`), through `search_window`; the first error in
 /// ordinal order is returned after the blocks before it are merged.
 fn stream_blocks<T, R, I, K, M>(
-    db: &SeqDb,
+    database: &BlastnDatabase,
     pool: &SearchPool<'_>,
     block_bytes: u64,
     segment: usize,
@@ -180,12 +181,12 @@ where
 {
     let mut next_ordinal = 0u32;
     loop {
-        let blocks = blocks_of(db, next_ordinal, block_bytes, segment.max(1));
+        let blocks = blocks_of(&database.db, next_ordinal, block_bytes, segment.max(1));
         let Some(last) = blocks.last() else {
             return Ok(());
         };
         next_ordinal = last.end_ordinal();
-        search_window(db, pool, &blocks, block_bytes, new_scratch, search, merge)?;
+        search_window(database, pool, &blocks, block_bytes, new_scratch, search, merge)?;
     }
 }
 
@@ -193,7 +194,7 @@ where
 /// the blocks of at most `block_bytes` searched by the threads of `pool` and their results passed
 /// to `merge` in ordinal order (module documentation).
 pub(super) fn x_search_blocks_stream<T, R, I, K, M>(
-    db: &SeqDb,
+    database: &BlastnDatabase,
     pool: &SearchPool<'_>,
     block_bytes: u64,
     new_scratch: &I,
@@ -207,7 +208,7 @@ where
     M: FnMut(u32, R) + Send,
 {
     stream_blocks(
-        db,
+        database,
         pool,
         block_bytes,
         X_SEGMENT_BLOCKS,
@@ -218,11 +219,11 @@ where
 }
 
 // No NCBI counterpart (scheduling only): the window (module documentation).
-/// The window over `blocks`: claimed by the threads of `pool` in order, and each block's results
-/// handed to `merge` in ordinal order by the owner; the first error in ordinal order is returned
-/// after the blocks before it are merged.
+/// The window over `blocks` of `database`: claimed by the threads of `pool` in order, and each
+/// block's results handed to `merge` in ordinal order by the owner; the first error in ordinal
+/// order is returned after the blocks before it are merged.
 fn search_window<T, R, I, K, M>(
-    db: &SeqDb,
+    database: &BlastnDatabase,
     pool: &SearchPool<'_>,
     blocks: &[BlockRange],
     block_bytes: u64,
@@ -236,6 +237,7 @@ where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
 {
+    let (db, program) = (&database.db, database.program);
     let stop = AtomicBool::new(false);
     let waiting_bytes = AtomicUsize::new(0);
     let search_block = |worker: &mut XWorker<T>, i: usize| -> Result<Vec<(u32, R)>> {
@@ -243,14 +245,15 @@ where
             return Ok(Vec::new());
         }
         let range = blocks[i];
-        let block = super::x_read_block(db, range, &mut worker.bytes).map_err(search_read_error)?;
+        let block = super::x_read_block(db, range, &mut worker.bytes)
+            .map_err(|error| search_read_error(error, program))?;
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
             if let Some(result) = search(
                 &mut worker.scratch,
                 ordinal,
-                block_subject(&block, &range, j)?,
+                block_subject(&block, &range, j, program)?,
             ) {
                 kept.push((ordinal, result));
             }

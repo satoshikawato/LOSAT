@@ -766,6 +766,7 @@ pub(super) fn render(
                             ))
                         },
                         parsed,
+                        false,
                         program,
                     ),
                 )?;
@@ -814,6 +815,7 @@ pub(super) fn render(
                 parsed,
                 |rank| reported.loads.load(rank as usize),
                 oid_of,
+                false,
                 program,
             )?;
             let batches = batches.get_or_insert_with(|| {

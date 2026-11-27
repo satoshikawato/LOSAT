@@ -120,6 +120,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
     outputs: BatchOutputs<'_, '_>,
 ) -> Result<(Vec<Option<ContextKarlin>>, bool)> {
     let &ContextInputs {
+        args,
         context_ungapped,
         scoring_spec,
         query_contexts,
@@ -162,8 +163,9 @@ fn karlin_blocks<const UNGAPPED: bool>(
                 .any(|(context, block)| context.len != 0 && block.is_none())
             {
                 anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
-                    batching.batch_size
+                    "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's {}",
+                    batching.batch_size,
+                    args.app().name()
                 );
             }
             // A query without letters (also a `-query_loc` interval that holds none) keeps its
@@ -245,8 +247,13 @@ pub(super) fn gap_align_setup_error(
     // it and is reported as NCBI's. Else `stats::setup::setup_subject_length`: the total
     // divided by `num_seqs`, cast to `Int4` and then to `Uint4`, is 0 (a negative `NSEQ`
     // passes; one of 2^31 fails).
-    crate::algorithm::common::database::check_setup_count(total_length, num_seqs, false, "BLASTN")
-        .err()
+    crate::algorithm::common::database::check_setup_count(
+        total_length,
+        num_seqs,
+        false,
+        args.app().name(),
+    )
+    .err()
         .or_else(|| {
             crate::stats::setup::setup_subject_length(total_length, num_seqs, None)
                 .is_none()
@@ -379,7 +386,7 @@ pub(super) fn gap_align_setup_checks(
         total_length,
         num_seqs,
         false,
-        "BLASTN",
+        args.app().name(),
     ) {
         return Err(SetupCheckFailure::Refusal(error));
     }
@@ -579,6 +586,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         seq_data.db_len_total
     };
     let db_num_seqs = seq_data.db_num_seqs;
+    let program = args.app().name();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-786
     // An invalid context keeps the search space of the options, which is 0, except in a query
     // chunk: NCBI sets the options to the search spaces of the batch's contexts
@@ -608,6 +616,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 db_len_total_i64,
                 db_num_seqs,
                 &blocks.gapped,
+                program,
             )
             .map(|(_, effective_search_space)| effective_search_space)
         })

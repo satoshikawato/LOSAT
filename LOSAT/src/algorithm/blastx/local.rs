@@ -1192,8 +1192,8 @@ fn search_database(
         list.as_ref(),
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
-        super::args::ProgramName::BLASTX.upper,
-        args.app_name(),
+        args.program(),
+        args.app(),
     )?
     .showing_gis(args.show_gis)
     .after_calls(args.first_query_ordinal > 0)
@@ -1305,7 +1305,12 @@ fn search_database(
         Err(error) => (None, Some(error)),
     };
     let stream = longest.map(|longest| {
-        super::x_db_stream::XStreamDb::new_with_long(database.x_seqdb(), longest, allow_long)
+        super::x_db_stream::XStreamDb::new_with_long(
+            database.x_seqdb(),
+            longest,
+            allow_long,
+            database.app.name(),
+        )
     });
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match &stream {

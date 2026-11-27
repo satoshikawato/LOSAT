@@ -328,11 +328,12 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
 }
 
 /// The program of a run of BLASTX's driver as NCBI's and LOSAT's texts name it: BLASTX, or
-/// RPSTBLASTN for an RPSTBLASTN run (`BlastxArgs::rpstblastn`).
+/// RPSTBLASTN for an RPSTBLASTN run (`BlastxArgs::rpstblastn`), and the running application
+/// where another program's command line runs a BLASTX strategy (tblastx).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProgramName {
-    /// `BLASTX`: LOSAT's refusals ("not supported by LOSAT's BLASTX") and the reports' program
-    /// lines.
+    /// `BLASTX`: the reports' program lines (NCBI's bytes: `# BLASTX 2.17.0+`, the pairwise
+    /// report's first line), the program's own also where another application runs it.
     pub(crate) upper: &'static str,
     /// `blastx`: NCBI's messages (`Warning: [blastx] ...`) and its settings.
     pub(crate) lower: &'static str,
@@ -340,6 +341,10 @@ pub(crate) struct ProgramName {
     /// or the application of the command line that runs another program's strategy
     /// (`ResolvedOptions::app_name`).
     pub(crate) app: &'static str,
+    /// The name in LOSAT's refusals ("not supported by LOSAT's BLASTX"): `upper` of BLASTX's and
+    /// RPSTBLASTN's own runs, the running application's (`Program::name`: TBLASTX) where it runs
+    /// a BLASTX strategy.
+    pub(crate) refusal: &'static str,
 }
 
 impl ProgramName {
@@ -347,11 +352,13 @@ impl ProgramName {
         upper: "BLASTX",
         lower: "blastx",
         app: "blastx",
+        refusal: "BLASTX",
     };
     pub(crate) const RPSTBLASTN: Self = Self {
         upper: "RPSTBLASTN",
         lower: "rpstblastn",
         app: "rpstblastn",
+        refusal: "RPSTBLASTN",
     };
 
     fn of(rpstblastn: &Option<std::sync::Arc<dyn RpsTblastnSearch>>) -> Self {
@@ -360,15 +367,36 @@ impl ProgramName {
             None => Self::BLASTX,
         }
     }
+
+    /// The names of a run of the running application `app` (`BlastxArgs::app`): the program's
+    /// own (`of`) where it is BLASTX's (RPSTBLASTN's runs import no strategy), else `app`'s in
+    /// the diagnostics' prefix and LOSAT's refusals.
+    fn running(
+        rpstblastn: &Option<std::sync::Arc<dyn RpsTblastnSearch>>,
+        app: crate::blastinput::app::Program,
+    ) -> Self {
+        let own = Self::of(rpstblastn);
+        match app {
+            crate::blastinput::app::Program::Blastx => own,
+            app => Self {
+                app: app.ncbi_name(),
+                refusal: app.name(),
+                ..own
+            },
+        }
+    }
 }
 
 impl ResolvedOptions {
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName {
-            app: self.app_name,
-            ..ProgramName::of(&self.rpstblastn)
-        }
+        ProgramName::running(&self.rpstblastn, self.app)
+    }
+
+    /// NCBI's name of the running application, the prefix of the run's diagnostics
+    /// (`ProgramName::app`).
+    pub(crate) fn app_name(&self) -> &'static str {
+        self.program().app
     }
 
     /// The program type of the run's results where BLASTX does not name it
@@ -620,9 +648,9 @@ pub struct ResolvedOptions {
     /// `native::run` and `local::run_local_database`; series NP, M4b); `None` before, and for a
     /// search without it.
     pub db_mask: Option<crate::blastinput::db_mask::ResolvedMask>,
-    /// NCBI's name of the running application, the prefix of the run's diagnostics
-    /// (`BlastxArgs::app_name`).
-    pub app_name: &'static str,
+    /// The running application (`BlastxArgs::app`): its names prefix the run's diagnostics
+    /// (`app_name`) and are those of LOSAT's refusals (`ProgramName::refusal`, `Program::name`).
+    pub app: crate::blastinput::app::Program,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:185-193
@@ -671,10 +699,7 @@ impl BlastxArgs {
     /// BLASTX's own runs name their program (`ProgramName::lower`: `rpstblastn` for RPSTBLASTN's,
     /// which import no strategy), another running application its own.
     pub(crate) fn app_name(&self) -> &'static str {
-        match self.app() {
-            crate::blastinput::app::Program::Blastx => ProgramName::of(&self.rpstblastn).lower,
-            app => app.ncbi_name(),
-        }
+        self.program().app
     }
 
     /// The running application: the program of the command line, the library call or the Web run,
@@ -876,7 +901,7 @@ impl BlastxArgs {
             bail!(
                 "an -evalue that is not finite ({}) is not supported by LOSAT's {}",
                 self.evalue,
-                self.program().upper
+                self.program().refusal
             );
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
@@ -915,8 +940,9 @@ impl BlastxArgs {
         // one stops at NCBI's matrix error first).
         if scoring.is_none() && identity_prefix(&matrix_bytes) {
             bail!(
-                "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTX",
-                String::from_utf8_lossy(&matrix_bytes)
+                "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's {}",
+                String::from_utf8_lossy(&matrix_bytes),
+                self.app().name()
             );
         }
         crate::blastinput::protein_options_check::check_identity_compressed_lookup(
@@ -924,14 +950,14 @@ impl BlastxArgs {
             word_size > 4,
             word_size,
             self.program().lower,
-            self.program().upper,
+            self.program().refusal,
         )?;
         // A search strategy's word size below 2 (the command line takes 2 or more): NCBI builds a
         // lookup table of one letter, which LOSAT's tables do not have (as BLASTP).
         if word_size < 2 {
             bail!(
                 "-word_size {word_size} (the lookup table) is not supported by LOSAT's {}",
-                self.program().upper
+                self.program().refusal
             );
         }
         // The counts are at most `i32::MAX` (the options are `Int4`).
@@ -1022,7 +1048,7 @@ impl BlastxArgs {
             query_range: None,
             rpstblastn: self.rpstblastn.clone(),
             db_mask: None,
-            app_name: self.app_name(),
+            app: self.app(),
         };
         // The gapped X-drops that NCBI's kernels cannot size are refused before the search.
         super::parameters::check_gapped_x_drops(&options)?;
@@ -1043,10 +1069,7 @@ impl BlastxArgs {
 
     /// The program of the run's texts (`ProgramName`).
     pub(crate) fn program(&self) -> ProgramName {
-        ProgramName {
-            app: self.app_name(),
-            ..ProgramName::of(&self.rpstblastn)
-        }
+        ProgramName::running(&self.rpstblastn, self.app())
     }
 
     /// `-seg` as NCBI's filtering handler reads it (`app::read_seg_option`).

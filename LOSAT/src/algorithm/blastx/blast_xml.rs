@@ -78,8 +78,6 @@ use crate::report::serial::seqalign::{
     read_num_ident, row_range_exception, seqalign_evalue, std_seg_lengths_not_accurate,
 };
 
-const PROGRAM: &str = "BLASTX";
-
 /// LOSAT's refusal of a title that NCBI crashes on (`names::Refusal`; not an error of NCBI's
 /// engine: the run ends with exit status 1 and the message, `native::report_error` passes it
 /// on).
@@ -138,8 +136,9 @@ pub(super) fn drops_held_document(error: &anyhow::Error) -> bool {
         || error.is::<TaxonomyRefusal>()
 }
 
-fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
-    XmlRefusal(refusal.error(PROGRAM, what).to_string()).into()
+/// `refusal` of `what`, naming `program` (the running application's, `Program::name`).
+fn refuse(refusal: names::Refusal, what: &str, program: &str) -> anyhow::Error {
+    XmlRefusal(refusal.error(program, what).to_string()).into()
 }
 
 /// The masked regions of a query as NCBI hands them to the XML writer
@@ -255,18 +254,20 @@ fn query_messages(query: &FastaRecord, search_skipped: bool, filtered_empty: boo
 }
 
 /// The names of a `Hit`, for `-subject` (`Subject_N` and the generated definition line) or a
-/// database's sequence (`gnl|BL_ORD_ID|n`, the stored title as stored).
+/// database's sequence (`gnl|BL_ORD_ID|n`, the stored title as stored); a refusal names
+/// `program`.
 fn subject_names(
     shown: &ShownSubjects<'_>,
     subject: &FastaRecord,
     s_idx: usize,
+    program: &str,
 ) -> Result<SubjectNames> {
     match shown {
         ShownSubjects::Fasta { .. } => match subject.believed() {
             Some(ids) => SubjectNames::of_believed(ids, &subject.title, true),
             None => SubjectNames::of_record(subject.internal_id.as_bytes(), &subject.title, true),
         }
-        .map_err(|refusal| refuse(refusal, "a subject title")),
+        .map_err(|refusal| refuse(refusal, "a subject title", program)),
         ShownSubjects::Database { reported, .. } => Ok(match reported.parsed_subject(s_idx) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(s_idx)),
             None => SubjectNames::of_database_sequence(
@@ -1287,7 +1288,7 @@ pub(super) fn scan_queries(
             } else {
                 let shown = show.label.map_or(query, |label| &batch[label - written]);
                 query_text(
-                    options.program().upper,
+                    options.program().refusal,
                     shown,
                     false,
                     false,
@@ -1507,7 +1508,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: options.program().lower,
-        app: options.app_name,
+        app: options.app_name(),
         version: &format!(
             "{} {}",
             options.program().upper,
@@ -1585,7 +1586,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(
-                options.program().upper,
+                options.program().refusal,
                 query,
                 batch.search_skipped,
                 options.filtered_empty,
@@ -1612,7 +1613,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                         ShownSubjects::Fasta { .. } => None,
                     };
                     slot.insert(HitNames::of(loads, list.oid, parsed, || {
-                        subject_names(shown, &subjects[list.oid], list.oid)
+                        subject_names(shown, &subjects[list.oid], list.oid, options.app.name())
                     })?);
                 }
             }
@@ -1646,7 +1647,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                         Ok(CaughtException(exception)) => {
                             Some(crate::ncbi_exception::error_post_line(
                                 None,
-                                Some(options.app_name),
+                                Some(options.app_name()),
                                 &document.caught_message(&exception),
                             ))
                         }
@@ -1822,7 +1823,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 Err(error) => match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Some(crate::ncbi_exception::error_post_line(
                         None,
-                        Some(options.app_name),
+                        Some(options.app_name()),
                         &document.caught_message(&exception),
                     )),
                     Err(error) => return Err(error),

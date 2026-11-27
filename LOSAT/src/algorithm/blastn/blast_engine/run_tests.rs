@@ -674,9 +674,14 @@ fn merge_prelim_hit_lists_refuses_scaled_score_outside_int4() {
         best_evalue: 0.0,
     });
     let mut combined_opt = Some(combined_hl);
-    let error = merge_prelim_hit_list(hitlist1, &mut combined_opt, [1_000, -1], 100, |ordinal| {
-        ordinal + 100
-    })
+    let error = merge_prelim_hit_list(
+        hitlist1,
+        &mut combined_opt,
+        [1_000, -1],
+        100,
+        |ordinal| ordinal + 100,
+        "BLASTN",
+    )
     .expect_err("scaled score > Int4::MAX must be refused");
     assert!(
         error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
@@ -1113,7 +1118,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     combined.update(list(2, &[60]));
     combined.update(list(7, &[40]));
     let mut combined = Some(combined);
-    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100, |ordinal| ordinal).unwrap();
+    merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100, |ordinal| ordinal, "BLASTN").unwrap();
     let mut merged = combined.unwrap();
     assert_eq!(merged.hsplist_max, 3);
     merged.sort_by_evalue();
@@ -1124,7 +1129,7 @@ fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
     let mut empty = None;
     let mut single = HitList::new(3);
     single.update(list(5, &[10]));
-    merge_prelim_hit_list(single, &mut empty, [0, 0], 100, |ordinal| ordinal).unwrap();
+    merge_prelim_hit_list(single, &mut empty, [0, 0], 100, |ordinal| ordinal, "BLASTN").unwrap();
     assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
 }
 

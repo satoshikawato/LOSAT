@@ -356,18 +356,20 @@ impl QueryScope {
     /// Adds the ids `ids` of a query record (`record`: its number in the scope and its letters), or
     /// LOSAT's refusal of a record whose id another record of the scope has
     /// (`believed::duplicate_id`). Whether an earlier id of the scope may be one of `ids` in
-    /// another form (`add_version_form`).
+    /// another form (`add_version_form`). `program` and `name` as `duplicate_id` reads them.
     fn add(
         &mut self,
         ids: &[crate::seqid::ParsedSeqId],
         record: (usize, usize),
         program: &str,
+        name: &str,
     ) -> anyhow::Result<bool> {
         if let Some(refusal) = crate::blastinput::fasta_reader::believed::duplicate_id(
             ids,
             &mut self.keys,
             "query",
             program,
+            name,
         ) {
             return Err(refusal);
         }
@@ -677,8 +679,12 @@ pub(crate) fn believed_queries(
 #[derive(Debug)]
 pub(crate) struct QueryScopes {
     span: QueryScopeSpan,
-    /// The program, for the refusals.
+    /// The program whose rules of the scopes apply (BLASTN's, PSIBLAST's: `QueryScope::meets`,
+    /// `believed::duplicate_id`).
     program: &'static str,
+    /// The name in LOSAT's refusals: `program`, or the running application's where it runs
+    /// another program's strategy with `program`'s engine (`named`).
+    name: &'static str,
     scopes: Vec<QueryScope>,
     /// The first searched query of each scope.
     starts: Vec<usize>,
@@ -1060,6 +1066,7 @@ impl QueryScopes {
         Self {
             span,
             program,
+            name: program,
             scopes: Vec::new(),
             starts: Vec::new(),
             whole_run: None,
@@ -1106,6 +1113,14 @@ impl QueryScopes {
     /// anything of their repeated records' letters are marked (`ScopeRefusal::xml_takes`).
     pub(crate) fn with_xml_matrix_failure(mut self, failure: Option<XmlMatrixFailure>) -> Self {
         self.xml_matrix = failure;
+        self
+    }
+
+    /// The scopes whose refusals name `name` (`blastinput::app::Program::name` of the running
+    /// application, where it runs another program's strategy with this program's engine); the
+    /// rules of the scopes stay the program's (`program`).
+    pub(crate) fn named(mut self, name: &'static str) -> Self {
+        self.name = name;
         self
     }
 
@@ -1317,7 +1332,7 @@ impl QueryScopes {
                 other_form = if message.is_some() {
                     scope.add_after_refusal(&believed.ids, record)
                 } else {
-                    match scope.add(&believed.ids, record, self.program) {
+                    match scope.add(&believed.ids, record, self.program, self.name) {
                         Ok(other_form) => other_form,
                         Err(error) => {
                             // `duplicate_id` stopped at the id it refuses: the record's other keys.

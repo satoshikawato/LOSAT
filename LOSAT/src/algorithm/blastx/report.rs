@@ -844,7 +844,7 @@ pub(super) fn render_queries_with(
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
         stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
-            options.app_name,
+            options.app_name(),
         ))?;
     }
     if options.pairwise_view().is_some() {
@@ -1670,12 +1670,12 @@ pub(crate) fn write_epilog(
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name, queries, None)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name(), queries, None)?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name(), queries, xml2)?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
@@ -1722,7 +1722,7 @@ pub(super) fn query_warning(
     }
     // The id and the title, cut as every program's query warning (`RecordNames::warning_query_id`).
     let id = query.names().warning_query_id();
-    let mut bytes = format!("Warning: [{}] ", options.app_name).into_bytes();
+    let mut bytes = format!("Warning: [{}] ", options.app_name()).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {

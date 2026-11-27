@@ -2301,7 +2301,7 @@ impl<M: TbxScore> XPairPar<M> {
         let t_units = timing().then(Instant::now);
         // The units refuse into a failure of their own and note a right walk past a NULLB
         // (`x_units_in_order`).
-        let failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
+        let failure = crate::algorithm::tblastx::subjects::XReadFailure::named(inp.failure.program());
         let passed = std::sync::atomic::AtomicBool::new(false);
         let units_inp = XSubject {
             failure: &failure,

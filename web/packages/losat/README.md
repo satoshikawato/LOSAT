@@ -238,7 +238,7 @@ files, as the command line runs them in a folder that holds them:
 - `convert2blastmask` (`losat convert2blastmask`: the lower-case masks of FASTA as masking information in each `-outfmt`,
   with its options, help and version), reading `-in` and `-conffile` from `options.directory`.
 
-The outputs of the `maskinfo_*` formats are the files that `makeblastdb -mask_data` reads.
+The outputs of `-outfmt maskinfo_asn1_bin` and `maskinfo_asn1_text` are the files that `makeblastdb -mask_data` reads.
 
 `argv[0]` is the tool name (`windowmasker`, `blast_formatter`, `dustmasker`, `segmasker` or `convert2blastmask`), then the command line's words. `options.directory` holds
 the files that the words name, each a `DirectoryFile` that the engine reads in place, as for a search of `-db` (above). A

@@ -6,5 +6,5 @@
   made with their sizes; each one downloads, or all of them as one `.tar`. "Use as Database (-db)" opens
   the Search tab with the new database chosen (blastn for nucleotide, blastp for protein), and "Use as
   Repeats database (-filtering_db)" does the same for a nucleotide database. A WindowMasker run that
-  writes mask data (`-outfmt maskinfo_asn1_bin`, `maskinfo_asn1_text` or `maskinfo_xml`) has "Use as
+  writes mask data that makeblastdb reads (`-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`) has "Use as
   -mask_data in makeblastdb", which adds its file to the makeblastdb form.

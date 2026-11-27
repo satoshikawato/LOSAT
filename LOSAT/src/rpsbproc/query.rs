@@ -193,12 +193,12 @@ pub(crate) fn is_na_mol(mol: i32) -> bool {
 // (Dereferencing a `NULL` `Seq-annot` or `Seq-feat` reached before a matching feature throws
 // `CCoreException::eNullPtr` with a stack trace of memory addresses: refused.)
 fn query_title(query: &mut Query) -> Result<Vec<u8>, ProcessError> {
-    if let Some(title) = query.title.take() {
-        return Ok(title);
+    if let Some(title) = &mut query.title {
+        return Ok(std::mem::take(title));
     }
-    match std::mem::take(&mut query.annot_title) {
+    match &mut query.annot_title {
         AnnotTitle::None => Ok(Vec::new()),
-        AnnotTitle::Title(title) => Ok(title),
+        AnnotTitle::Title(title) => Ok(std::mem::take(title)),
         AnnotTitle::NullElement(what) => Err(ProcessError::Unsupported(format!(
             "a query Bioseq without a title descriptor whose annot reaches {what} (NCBI stops with a NULL pointer stack trace) is not supported by LOSAT's rpsbproc"
         ))),
@@ -219,8 +219,9 @@ fn query_title(query: &mut Query) -> Result<Vec<u8>, ProcessError> {
 // a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
-// The title and the residues are taken out of `query`, which nothing reads again (NCBI copies them
-// from its Bioseq, which it keeps): a long title or sequence is not held twice.
+// The title and the residues, where there are any, are taken out of `query`, which nothing reads
+// again (NCBI copies them from its Bioseq, which it keeps): a long title or sequence is not held
+// twice.
 fn fill_sequence(query: &mut Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
     // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the encodings with
     // `CSeqportUtil::Convert`, which LOSAT ports for every encoding but NCBI8aa and NCBIstdaa
@@ -336,14 +337,16 @@ const UNCONVERTIBLE: &str = "Requested conversion not implemented";
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:199-246
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
 fn one_letter_residues(query: &mut Query) -> Result<Vec<u8>, (&'static str, &'static str)> {
-    if let Some(data) = query.seq_data.take() {
-        return Ok(one_letter(data).map_err(|name| ("Seq-data", name))?.1);
+    if let Some((name, bytes)) = &mut query.seq_data {
+        return Ok(one_letter((*name, std::mem::take(bytes)))
+            .map_err(|name| ("Seq-data", name))?
+            .1);
     }
     let mut residues = Vec::new();
     let mut literal_type = None;
-    for data in std::mem::take(&mut query.delta_literals) {
-        let (kind, letters) =
-            one_letter(data).map_err(|name| ("Seq-data of a delta literal", name))?;
+    for (name, bytes) in &mut query.delta_literals {
+        let (kind, letters) = one_letter((*name, std::mem::take(bytes)))
+            .map_err(|name| ("Seq-data of a delta literal", name))?;
         if *literal_type.get_or_insert(kind) == kind {
             residues.extend_from_slice(&letters);
         }

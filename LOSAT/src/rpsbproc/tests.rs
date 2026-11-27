@@ -249,9 +249,10 @@ impl Write for Device {
     }
 }
 
-// No NCBI counterpart: the report's write of two pieces (`write_all2`) is `write_all` of the two
-// in one write where the device takes them: an interrupted write is made again, a device that
-// takes part of a write gets the rest, and one that takes no byte is `write_all`'s error.
+// No NCBI counterpart: the report's write of two pieces (`report::ostream::write_device2`) is
+// `write_all` of the two in one write where the device takes them: an interrupted write is made
+// again, a device that takes part of a write gets the rest (each write's bytes counted), and one
+// that takes no byte is `write_all`'s error.
 #[test]
 fn report_writes_two_pieces_as_write_all() {
     let device = |limit, full| Device {
@@ -260,16 +261,20 @@ fn report_writes_two_pieces_as_write_all() {
         limit,
         full,
     };
+    let write = |device: &mut Device, first: &[u8], second: &[u8]| {
+        let mut landed = 0;
+        crate::report::ostream::write_device2(device, &mut landed, first, second).map(|()| landed)
+    };
     let mut one = device(usize::MAX, false);
-    write_all2(&mut one, b"abc", b"defg").unwrap();
+    assert_eq!(write(&mut one, b"abc", b"defg").unwrap(), 7);
     assert_eq!((one.taken.as_slice(), one.writes), (&b"abcdefg"[..], 2));
     let mut parts = device(2, false);
-    write_all2(&mut parts, b"abc", b"defg").unwrap();
+    assert_eq!(write(&mut parts, b"abc", b"defg").unwrap(), 7);
     assert_eq!((parts.taken.as_slice(), parts.writes), (&b"abcdefg"[..], 5));
     let mut second = device(usize::MAX, false);
-    write_all2(&mut second, b"", b"defg").unwrap();
+    assert_eq!(write(&mut second, b"", b"defg").unwrap(), 4);
     assert_eq!((second.taken.as_slice(), second.writes), (&b"defg"[..], 2));
-    let error = write_all2(&mut device(usize::MAX, true), b"a", b"b").unwrap_err();
+    let error = write(&mut device(usize::MAX, true), b"a", b"b").unwrap_err();
     let expected = device(usize::MAX, true).write_all(b"ab").unwrap_err();
     assert_eq!(
         (error.kind(), error.to_string()),

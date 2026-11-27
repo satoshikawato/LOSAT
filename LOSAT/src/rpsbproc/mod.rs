@@ -129,38 +129,6 @@ struct Report {
 /// The size of the blocks in which LOSAT writes the report.
 const REPORT_BLOCK: usize = 1 << 16;
 
-/// `write_all` of `first` and then `second`, the two in one write where the device takes them so
-/// (`writev`): a block of the report is one write wherever its bytes are, so a write that fails
-/// cuts the report where it cuts the block (`standard_output`: a writer's write sizes decide it).
-/// As `write_all`, a write that is interrupted is made again, and one that takes no byte fails.
-fn write_all2(out: &mut dyn Write, mut first: &[u8], mut second: &[u8]) -> std::io::Result<()> {
-    while !first.is_empty() || !second.is_empty() {
-        let written = if first.is_empty() {
-            out.write(second)
-        } else if second.is_empty() {
-            out.write(first)
-        } else {
-            out.write_vectored(&[std::io::IoSlice::new(first), std::io::IoSlice::new(second)])
-        };
-        match written {
-            Ok(0) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::WriteZero,
-                    "failed to write whole buffer",
-                ))
-            }
-            Ok(n) => {
-                let from_first = n.min(first.len());
-                first = &first[from_first..];
-                second = &second[n - from_first..];
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
 impl Report {
     /// A report written to `out` through NCBI's `stream`.
     fn new(
@@ -204,15 +172,21 @@ impl Report {
 
     /// The write of a full block or more that NCBI's stream has written, ending in the insertion
     /// `bytes`: the bytes before the last `held` ones (which NCBI's buffer holds) go to the file
-    /// from `pending` and from `bytes` where they are, in one write as the block would
-    /// (`write_all2`), and only the held ones are kept, so a long string of the input (a title of
-    /// many megabytes) is not copied into the report as well.
+    /// from `pending` and from `bytes` where they are, in one write as the block's `write_all` was
+    /// (`report::ostream::write_device2`), and only the held ones are kept, so a long string of the
+    /// input (a title of many megabytes) is not copied into the report as well.
     fn write_through(&mut self, bytes: &[u8], held: usize) {
         let held_of_bytes = held.min(bytes.len());
         let (written, kept) = bytes.split_at(bytes.len() - held_of_bytes);
         let n = self.pending.len() - (held - held_of_bytes);
-        if let Err(error) =
-            write_all2(&mut *self.out, &self.pending[..n], written).and_then(|()| self.out.flush())
+        let mut landed = 0;
+        if let Err(error) = crate::report::ostream::write_device2(
+            &mut *self.out,
+            &mut landed,
+            &self.pending[..n],
+            written,
+        )
+        .and_then(|()| self.out.flush())
         {
             self.failed = Some(error);
         }
@@ -241,8 +215,10 @@ impl Report {
     /// Writes the first `n` bytes of `pending` to the file.
     fn write_out(&mut self, n: usize) {
         if self.failed.is_none() && n > 0 {
-            if let Err(error) =
-                write_all2(&mut *self.out, &self.pending[..n], &[]).and_then(|()| self.out.flush())
+            if let Err(error) = self
+                .out
+                .write_all(&self.pending[..n])
+                .and_then(|()| self.out.flush())
             {
                 self.failed = Some(error);
             }

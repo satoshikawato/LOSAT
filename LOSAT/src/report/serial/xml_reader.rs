@@ -213,6 +213,15 @@ const PLAIN: [u8; 256] = {
 const PLAIN_ASCII: u8 = 1;
 const PLAIN_HIGH: u8 = 2;
 
+/// The bits of `PLAIN` of the bytes that `read_encoded_char` gives as they are in a document of
+/// `encoding`: the bytes from 0x80 too where it is unknown, UTF-8 or ASCII (`utf8_of_byte`).
+const fn plain_bits(encoding: Encoding) -> u8 {
+    match encoding {
+        Encoding::Unknown | Encoding::Utf8 | Encoding::Ascii => PLAIN_ASCII | PLAIN_HIGH,
+        Encoding::Iso8859_1 | Encoding::Windows1252 => PLAIN_ASCII,
+    }
+}
+
 /// NCBI's end-of-line handling of `ReadTagData` for one byte `c` of character data: a NUL is
 /// dropped; a first `\r` is dropped, and from it (`cr`) to the next `\n` every `\r` is a `\n`.
 /// `None`: `c` is dropped.
@@ -298,8 +307,11 @@ pub(crate) struct XmlReader<S: AsnSource> {
     pub(super) rejected: Option<Vec<u8>>,
     /// `m_LastTag`.
     pub(super) last_tag: Vec<u8>,
-    /// `m_Encoding`.
-    pub(super) encoding: Encoding,
+    /// `m_Encoding` (`set_encoding`).
+    encoding: Encoding,
+    /// The bits of `PLAIN` that `read_tag_data` takes in runs in the document's encoding
+    /// (`set_encoding`).
+    plain: u8,
     /// `m_Utf8Buf` and `m_Utf8Pos`: the UTF-8 bytes of a character being returned one by one.
     utf8: Vec<u8>,
     utf8_at: usize,
@@ -336,6 +348,7 @@ impl<S: AsnSource> XmlReader<S> {
             rejected: None,
             last_tag: Vec::new(),
             encoding: Encoding::Unknown,
+            plain: plain_bits(Encoding::Unknown),
             utf8: Vec::new(),
             utf8_at: 0,
             object: false,
@@ -345,6 +358,12 @@ impl<S: AsnSource> XmlReader<S> {
             ns_prefix: Vec::new(),
             namespaces: Vec::new(),
         }
+    }
+
+    /// The document's encoding (`m_Encoding`) and what `read_tag_data` takes in runs in it.
+    fn set_encoding(&mut self, encoding: Encoding) {
+        self.encoding = encoding;
+        self.plain = plain_bits(encoding);
     }
 
     /// The reader of an object stream (see `object`).
@@ -758,7 +777,7 @@ impl<S: AsnSource> XmlReader<S> {
             let value = self.read_attribute_value()?;
             if is_encoding {
                 match string_to_encoding(&value) {
-                    Some(encoding) => self.encoding = encoding,
+                    Some(encoding) => self.set_encoding(encoding),
                     None => return fail("unsupported encoding"),
                 }
                 break;
@@ -959,21 +978,16 @@ impl<S: AsnSource> XmlReader<S> {
     pub(super) fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         let mut cr = false;
-        let plain = if matches!(
-            self.encoding,
-            Encoding::Unknown | Encoding::Utf8 | Encoding::Ascii
-        ) {
-            PLAIN_ASCII | PLAIN_HIGH
-        } else {
-            PLAIN_ASCII
-        };
-        loop {
+        let plain = self.plain;
+        'data: loop {
             // While no UTF-8 bytes of a character are being given, the kept bytes that this loop
-            // would take one by one as they are (`PLAIN`) are appended as one run, and the line
-            // ends and NULs between the runs are taken here too (`tag_data_byte`). The other bytes
-            // (`&`, `<`, control bytes, bytes that the encoding converts) and the byte after the
-            // kept ones are read below. The bytes read are not asked for again: a long text is
-            // held in `out` alone, not in the stream's buffer as well (`release_before`).
+            // would take one by one as they are (`PLAIN`) are appended as one run, the line ends
+            // and NULs between the runs are taken here too (`tag_data_byte`), and the `<` that
+            // ends the character data or starts a CDATA section is read here (the ending of
+            // `read_encoded_char`). The other bytes (`&`, control bytes, bytes that the encoding
+            // converts) and the byte after the kept ones are read below. The bytes read are not
+            // asked for again: a long text is held in `out` alone, not in the stream's buffer as
+            // well (`release_before`).
             if self.utf8.is_empty() {
                 loop {
                     let rest = self.src.rest(self.pos);
@@ -991,6 +1005,13 @@ impl<S: AsnSource> XmlReader<S> {
                             if let Some(c) = tag_data_byte(c, &mut cr) {
                                 out.push(c);
                             }
+                        }
+                        Some(&b'<') => {
+                            self.src.release_before(self.pos);
+                            if !self.read_cd_section(out)? {
+                                break 'data;
+                            }
+                            cr = false;
                         }
                         _ => break,
                     }
@@ -1148,7 +1169,7 @@ impl<S: AsnSource> XmlReader<S> {
     pub(super) fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);
-            self.encoding = Encoding::Utf8;
+            self.set_encoding(Encoding::Utf8);
         }
         loop {
             match self.begin_opening_tag()? {
@@ -1195,7 +1216,7 @@ impl<S: AsnSource> XmlReader<S> {
         self.state = TagState::Outside;
         self.rejected = None;
         self.last_tag.clear();
-        self.encoding = Encoding::Unknown;
+        self.set_encoding(Encoding::Unknown);
         self.utf8.clear();
         self.utf8_at = 0;
         let name = self.read_file_header()?;

@@ -36,7 +36,7 @@ const LOSAT_REFUSES: [&str; 8] = [
     "strideneg",
 ];
 
-/// Rows covered by approved exception 35 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.120,
+/// Rows covered by approved exception 35 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.124,
 /// Owner decision 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and
 /// wraps to produce false alias errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`, `a_dir_v1`
 /// that visit them) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the calculation and

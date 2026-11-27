@@ -31,9 +31,7 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
-pub(super) use crate::algorithm::common::database::{
-    ErrorAfterPosts, PreliminaryReadError, Utf8Read,
-};
+pub(super) use crate::algorithm::common::database::{PreliminaryReadError, Utf8Read};
 use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -1980,13 +1978,6 @@ impl ListedTitles<'_> {
         self.seen.numbered_from(self.seen_first)
     }
 
-    /// The subject index by which a check of the rows of the call's query `q_idx` takes the
-    /// subject of rank `rank` (`report::query_bioseq::SeenFrom::row`).
-    pub(super) fn seen_row(&self, q_idx: usize, rank: usize) -> usize {
-        self.seen()
-            .row(q_idx, self.listed.ordinals.get(rank).copied(), rank)
-    }
-
     /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
     /// refusal of a subject with parsed Seq-ids of the final hit lists `hit_lists` whose Seq-align
     /// id is the generated id (`lcl|Query_N`) of a query of the batch that reports it, as NCBI's
@@ -2969,7 +2960,7 @@ impl ListedTitles<'_> {
     /// listed subject, by rank (`shared::tabular_subject_id`); a
     /// subject without rows gets an empty id, one whose lookup fails none
     /// (`common::tabular::SubjectId`: `TabularSubjectId::Unknown`, a parsed subject's
-    /// `ParsedSubject::tabular_ids`; `report::tabular::check_failed_lookups`). A subject with rows
+    /// `ParsedSubject::tabular_ids`; `report::tabular::row_stop_end`). A subject with rows
     /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
     /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
     /// empty: a table of fields that read nothing of the subject prints none of them.
@@ -2999,16 +2990,22 @@ impl ListedTitles<'_> {
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
-                let found = match subject.tabular_ids(true) {
-                    Ok(ids) => ids,
-                    Err(_) if !reads => Some(Default::default()),
-                    Err(problem) => {
-                        return Err(shared::parsed_refusal(
-                            self.oids.oid(ordinal),
-                            &format!("has {problem}"),
-                            self.program,
-                        ))
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                // No ids where the scope gets no Bioseq (`scope_finds_none`) or the lookup throws
+                // (`ParsedSubject::tabular_ids`).
+                let found = if subject.scope_finds_none() {
+                    None
+                } else {
+                    match subject.tabular_ids(true) {
+                        Ok(ids) => ids,
+                        Err(_) if !reads => Some(Default::default()),
+                        Err(problem) => {
+                            return Err(shared::parsed_refusal(
+                                self.oids.oid(ordinal),
+                                &format!("has {problem}"),
+                                self.program,
+                            ))
+                        }
                     }
                 };
                 ids.push(found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice())));

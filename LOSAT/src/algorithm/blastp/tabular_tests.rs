@@ -75,6 +75,7 @@ fn report(
     let tab = BlastpTabular {
         spec: &spec,
         app,
+        formatter_app: app,
         program_version: "PSIBLAST 2.17.0+",
         iteration: (app == BlastpApp::Psiblast).then_some(1),
         matrix: ScoringMatrix::Blosum62,

@@ -43,11 +43,17 @@ pub(super) struct BlastpTabular<'a> {
     pub spec: &'a TabularSpec,
     /// blastp or psiblast: NCBI's messages name it (`ncbi_name`), LOSAT's refusals too (`name`).
     pub app: BlastpApp,
+    /// The application whose formatter writes the report (`ResolvedBlastpArgs::formatter_app`):
+    /// `app`, or deltablast for a domain section of `-show_domain_hits` (an rpsblast report
+    /// that deltablast's formatter writes: its matrix counts the positives, its warnings name
+    /// deltablast).
+    pub formatter_app: BlastpApp,
     /// outfmt 7's `# BLASTP 2.17.0+` line (`# PSIBLAST 2.17.0+`).
     pub program_version: &'a str,
     /// psiblast's round (`# Iteration: 1`), `None` for blastp.
     pub iteration: Option<u32>,
-    /// The search's matrix, whose formatting matrix counts the positives of the rows.
+    /// The formatter's matrix, which counts the positives of the rows
+    /// (`ResolvedBlastpArgs::shown_matrix`).
     pub matrix: ScoringMatrix,
     /// By query: the shown id (the default outfmt 6 query id), the title (outfmt 7's
     /// `# Query:` line) and the searched length.
@@ -720,19 +726,22 @@ fn write_tabular_rows<const RPS: bool>(
     }
     // rpsblast's options carry no matrix name (the `.aux` matrix goes to the search's options
     // only), so NCBI's formatter has no matrix and counts the identities as the positives.
+    // deltablast's formatter, which also writes the domain sections of `-show_domain_hits`, has
+    // deltablast's `-matrix` (`formatter_app`).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:238
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
     let table = TabularWriter::new(
         spec,
         tab.program_version,
-        (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
+        (tab.formatter_app != BlastpApp::Rpsblast).then_some(tab.matrix),
     );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.app.ncbi_name());
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.formatter_app.ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;

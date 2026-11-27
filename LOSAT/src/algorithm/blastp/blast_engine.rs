@@ -127,7 +127,7 @@ mod phi_hooks;
 mod rps_hooks;
 // deltablast's domain search and conserved-domain PSSM (series PR, item PS13a).
 mod delta_hooks;
-pub(crate) use delta_hooks::DeltaRun;
+pub(crate) use delta_hooks::{DeltaRun, DomainFormatter};
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_call`.
 mod psi_round;
@@ -6824,6 +6824,7 @@ fn search(
             strategy_next: next,
             call_requests: None,
             x_plan_blocks: true,
+            domain_results: None,
         };
         run_resolved_in_pool(
             args,
@@ -7240,6 +7241,7 @@ fn search(
                                 strategy_next: None,
                                 call_requests: None,
                                 x_plan_blocks: false,
+                                domain_results: None,
                             },
                             x_block,
                         )
@@ -8184,9 +8186,12 @@ fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
-    let pairwise_database = subject_source
-        .database()
-        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
+    let pairwise_database = subject_source.database().map(|database| {
+        with_domain_database(
+            args,
+            database.pairwise_database_masked(args.db_mask_resolved.as_ref()),
+        )
+    });
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(number).is_some() {
@@ -8224,6 +8229,17 @@ fn write_pairwise_prologs(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:185-193
+/// `database`, the `-db` database of the outfmt 0 prolog and epilog, with the domain database of
+/// deltablast's `-show_domain_hits` that they show before it (`DeltaRun::shown_database`).
+fn with_domain_database(
+    args: &ResolvedBlastpArgs,
+    mut database: crate::report::pairwise::PairwiseDatabase,
+) -> crate::report::pairwise::PairwiseDatabase {
+    database.domain = args.delta.as_deref().and_then(DeltaRun::shown_database);
+    database
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259,294-295
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
 /// The reports of a run without a query batch: the outfmt 0 prolog and epilog, the outfmt
@@ -8235,9 +8251,12 @@ fn write_reports_without_queries(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let (num_sequences, total_db_len) = subject_source.shown_totals();
-    let pairwise_database = subject_source
-        .database()
-        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
+    let pairwise_database = subject_source.database().map(|database| {
+        with_domain_database(
+            args,
+            database.pairwise_database_masked(args.db_mask_resolved.as_ref()),
+        )
+    });
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
         // of line alone: `m_Outfile` gets `m_BlastXMLIncremental->m_SerialXmlEnd` and `endl`, with the
@@ -8344,6 +8363,7 @@ fn write_reports_without_queries(
                         .as_ref()
                         .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
+                    section: None,
                 };
                 // No query writes warnings; an `-html` prolog's references post on the
                 // diagnostics (`pairwise::html_with_diagnostics`).
@@ -9040,6 +9060,7 @@ fn reports_then_engine_error(
         strategy_next: None,
         call_requests: None,
         x_plan_blocks: false,
+        domain_results: None,
     };
     if let Err(error) = run_resolved_in_pool(
         args.clone(),
@@ -9128,6 +9149,11 @@ struct BlastpReports<'a> {
     /// block of the block search (whose plan was made for all queries), a query chunk, a block of
     /// the preliminary stage, a psiblast round or the batches before a failing one.
     x_plan_blocks: bool,
+    /// deltablast `-show_domain_hits`: the domain search's final hit list of each query of a
+    /// domain section's call (`delta_hooks::DomainSide::report_calls`), which the call's RPS step
+    /// takes in place of a search of its own (`prelim_run::run_preliminary`; NCBI formats the
+    /// domain search's results, `CDeltaBlast::GetDomainResults`). `None` for every other call.
+    domain_results: Option<&'a [Option<BlastpHitList>]>,
 }
 
 impl<'a> BlastpReports<'a> {
@@ -9151,6 +9177,7 @@ impl<'a> BlastpReports<'a> {
             strategy_next: None,
             call_requests: None,
             x_plan_blocks: false,
+            domain_results: None,
         }
     }
 }
@@ -10088,7 +10115,7 @@ fn query_xml_stats(
 /// the batch's domain search (`psi_round::run_queries`), so that no message of the batch comes
 /// after them.
 fn posts_as_made(args: &ResolvedBlastpArgs) -> bool {
-    args.delta.is_some()
+    args.delta.is_some() || args.domain_formatter.is_some()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-866
@@ -11291,7 +11318,7 @@ fn prefetch_call<'a>(
         ranges,
         report_contexts: &report_contexts,
         subjects,
-        matrix: args.scoring.matrix,
+        matrix: args.shown_matrix(),
         shown_queries: ShownQueries::of(query_records, &args, phi_call.as_ref()),
         shown_subjects,
         x_rows_pool,
@@ -11692,7 +11719,7 @@ fn report_call(
         ranges,
         report_contexts,
         subjects,
-        matrix: args.scoring.matrix,
+        matrix: args.shown_matrix(),
         shown_queries: ShownQueries::of(query_records, &args, phi_call.as_ref()),
         shown_subjects,
         x_rows_pool,

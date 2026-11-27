@@ -287,7 +287,8 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
 /// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. deltablast writes its
 /// own reference first and psiblast's compositionally adjusted matrices, and none for the
-/// composition-based statistics; LOSAT has no domain database report yet, item PS13b.)
+/// composition-based statistics; the lines of the domain database of `-show_domain_hits` come
+/// after, with the database's, `pairwise::write_blast_database_header`.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
     mut html: Option<(&super::formatter_registry::FormatterNcbirc, &mut dyn Write)>,

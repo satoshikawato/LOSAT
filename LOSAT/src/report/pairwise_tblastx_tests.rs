@@ -1334,6 +1334,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         view: PairwiseView::Pairwise,
         unreadable_query: None,
         html: None,
+        section: None,
     };
     let gapped_k = [0.041, 0.047, 0.041, 0.041];
     let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {

@@ -28,7 +28,9 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::blastinput::seq_range;
 use crate::common::GapEditOp;
+use crate::config::ScoringMatrix;
 use crate::core::psi::{create_pssm_from_cdd, validate_cd_msa};
+use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::rps::CdProfileFiles;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 
@@ -41,6 +43,40 @@ pub(crate) struct DeltaRun {
     /// The application's settings (`search_cli`), which the domain database is opened with.
     settings: Mutex<Option<ApplicationSettings>>,
     side: Mutex<Option<Arc<DomainSide>>>,
+    /// `-show_domain_hits`: the domain database's report (`PairwiseDatabase`), which the outfmt 0
+    /// prolog and epilog show before `-db`'s (`open_domain_database`).
+    shown_database: Mutex<Option<Arc<PairwiseDatabase>>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+/// What a domain section of `-show_domain_hits` takes of deltablast's formatter (NCBI formats the
+/// domain search's results with the application's `CBlastFormat`, `PrintOneResultSet`), where
+/// the section is otherwise rpsblast's report of the domain search (`DomainReports`): the
+/// application's name (`ResolvedBlastpArgs::formatter_app`), outfmt 7's `# Database:` line and
+/// the matrix of the positives and the middle line (`ResolvedBlastpArgs::shown_matrix`).
+#[derive(Debug)]
+pub(crate) struct DomainFormatter {
+    /// `-db` as NCBI keeps it (`# Database:`).
+    pub(crate) database_name: Vec<u8>,
+    /// deltablast's `-matrix`.
+    pub(crate) matrix: ScoringMatrix,
+}
+
+/// The domain sections of a batch of `-show_domain_hits` (`DeltaRun::domain_reports`): each is
+/// a call of rpsblast's on the domain database (`subject_source`) with `args`, the domain search's
+/// resolved arguments with deltablast's formatting options and its `DomainFormatter`, whose RPS
+/// step takes the query's hit list of the batch's domain search (`CddDomains::list`,
+/// `BlastpReports::domain_results`).
+pub(super) struct DomainReports {
+    side: Arc<DomainSide>,
+    pub(super) args: ResolvedBlastpArgs,
+}
+
+impl DomainReports {
+    /// The domain database, the subjects of the domain sections.
+    pub(super) fn subject_source(&self) -> BlastpSubjectSource<'_> {
+        BlastpSubjectSource::Database(&self.side.database)
+    }
 }
 
 impl std::fmt::Debug for DeltaRun {
@@ -64,8 +100,13 @@ struct DomainSide {
 
 /// One query's PSSM of conserved domains: what `CDeltaBlast::Run` makes for it before round 1.
 pub(super) struct CddQuery<'a> {
-    /// The query as the reader kept it (its lower case is `-lcase_masking`'s).
+    /// The searched query as the reader kept it (its lower case is `-lcase_masking`'s): the
+    /// record, or its `-query_loc` range.
     pub(super) record: &'a FastaRecord,
+    /// The query's whole record.
+    pub(super) input: &'a FastaRecord,
+    /// Where `record` lies in `input` (`None` without `-query_loc`).
+    pub(super) placement: Option<seq_range::RecordPlacement>,
     /// The query's Seq-align id (`Query_<n>`, or the id `-parse_deflines` read).
     pub(super) id: &'a ParsedSeqId,
     /// Whether the query is alone in its query batch.
@@ -81,6 +122,14 @@ pub(super) struct CddDomains {
     letters: Vec<u8>,
     valid: bool,
     list: Option<BlastpHitList>,
+}
+
+impl CddDomains {
+    /// The query's final hit list of the domain search (`None` for an invalid query or one
+    /// without hits), which `-show_domain_hits` reports (`DomainReports`).
+    pub(super) fn list(&self) -> &Option<BlastpHitList> {
+        &self.list
+    }
 }
 
 /// The PSSM of a query's conserved domains and the query of the PSSM's Bioseq, which every later
@@ -102,6 +151,7 @@ impl DeltaRun {
             lcase_masking,
             settings: Mutex::new(None),
             side: Mutex::new(None),
+            shown_database: Mutex::new(None),
         }
     }
 
@@ -110,12 +160,17 @@ impl DeltaRun {
         *self.settings.lock().expect("deltablast's settings") = Some(settings);
     }
 
-    /// LOSAT's refusal of a domain database (`-rpsdb`) of several volumes, made before the run
-    /// writes anything (`psi_round::refuse_before_output`; NCBI 2.17.0 searches one, probes
-    /// `delta2`, `delta2_0` of PS13a's fix round 2a): its volumes as the domain search opens them
-    /// (`open_side`, NCBI's open of the domain database in its first search, after the prolog). A
-    /// database that does not open here gets NCBI's error there, at NCBI's place.
-    pub(super) fn refuse_several_volumes(&self) -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:244-259
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:185-193
+    /// The open of `-rpsdb` before the run writes anything (`psi_round::refuse_before_output`):
+    /// with `-show_domain_hits` (`show`) NCBI opens it as a sequence database after the query
+    /// input and `-db`, before its formatter, which reads the database's report for the prolog
+    /// (`shown_database`), so a database that does not open stops the run there (exit status 2,
+    /// nothing written); without it the open's error comes from the domain search (`open_side`,
+    /// after the prolog) and is ignored here. Either way LOSAT refuses a domain database of
+    /// several volumes here (NCBI 2.17.0 searches one, probes `delta2`, `delta2_0` of PS13a's fix
+    /// round 2a).
+    pub(super) fn open_domain_database(&self, show: bool) -> Result<()> {
         let Some(settings) = self.settings.lock().expect("deltablast's settings").clone() else {
             return Ok(());
         };
@@ -124,19 +179,82 @@ impl DeltaRun {
         };
         let name_bytes = crate::utils::os_bytes::os_str_bytes(name);
         let name = crate::seqdb::db_argument_name_bytes(&name_bytes);
-        if let Ok(db) = crate::algorithm::common::database::open_database(
+        let mut db = match crate::algorithm::common::database::open_database(
             name,
             crate::seqdb::SeqType::Protein,
             &settings,
             "DELTABLAST",
         ) {
-            if db.volumes().len() > 1 {
-                bail!(
-                    "a domain database of several volumes is not supported by LOSAT's DELTABLAST"
-                );
-            }
+            Ok(db) => db,
+            Err(error) if show => return Err(error),
+            Err(_) => return Ok(()),
+        };
+        if db.volumes().len() > 1 {
+            bail!("a domain database of several volumes is not supported by LOSAT's DELTABLAST");
+        }
+        if show {
+            db.read_name_records(name, false).map_err(|error| {
+                crate::algorithm::common::database::database_error(error, "DELTABLAST")
+            })?;
+            *self
+                .shown_database
+                .lock()
+                .expect("deltablast's domain database report") = Some(Arc::new(
+                crate::algorithm::common::database::pairwise_database(&db),
+            ));
         }
         Ok(())
+    }
+
+    /// Whether the run reports each query's domain search (`-show_domain_hits`).
+    pub(super) fn show_domain_hits(&self) -> bool {
+        self.options.show_domain_hits
+    }
+
+    /// `-show_domain_hits`: the domain database's report for the outfmt 0 prolog and epilog
+    /// (`open_domain_database`); `None` without the option.
+    pub(crate) fn shown_database(&self) -> Option<Arc<PairwiseDatabase>> {
+        self.shown_database
+            .lock()
+            .expect("deltablast's domain database report")
+            .clone()
+    }
+
+    /// `-show_domain_hits`: the domain sections' calls of a batch whose domain search gave
+    /// `domains` (`DomainReports`), for deltablast's arguments `args` and its `-db` named
+    /// `database_name`; `None` without the option (or a batch without a searched query).
+    pub(super) fn domain_reports(
+        &self,
+        args: &ResolvedBlastpArgs,
+        database_name: &[u8],
+        domains: &[CddDomains],
+    ) -> Option<DomainReports> {
+        if !self.options.show_domain_hits {
+            return None;
+        }
+        let side = Arc::clone(&domains.first()?.side);
+        let mut report = side.args.clone();
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+        // The formatter's options are deltablast's; the search's (and so the statistics of the
+        // footer, the identities and rpsblast's table writer) stay the domain search's.
+        report.parse_deflines = args.parse_deflines;
+        report.show_gis = args.show_gis;
+        report.html = args.html.clone();
+        report.is_html = args.is_html;
+        report.out = args.out.clone();
+        report.outfmt = args.outfmt.clone();
+        report.max_target_seqs = args.max_target_seqs;
+        report.num_descriptions = args.num_descriptions;
+        report.num_alignments = args.num_alignments;
+        report.line_length = args.line_length;
+        report.sort = args.sort;
+        report.num_threads = args.num_threads;
+        report.first_query_ordinal = args.first_query_ordinal;
+        report.domain_formatter = Some(Arc::new(DomainFormatter {
+            database_name: database_name.to_vec(),
+            matrix: args.scoring.matrix,
+        }));
+        Some(DomainReports { side, args: report })
     }
 
     /// Opens `-rpsdb` and checks the domain search options (`-domain_inclusion_ethresh`), as
@@ -217,6 +335,7 @@ impl DeltaRun {
     pub(super) fn cdd_domains(
         &self,
         queries: &[CddQuery<'_>],
+        range_length: Option<usize>,
         pool: &crate::utils::threading::SearchPool<'_>,
         diagnostics: &mut (dyn std::io::Write + Send),
     ) -> Result<Vec<CddDomains>> {
@@ -226,16 +345,16 @@ impl DeltaRun {
             .iter()
             .map(|letters| query_ungapped_block(side.args.scoring.matrix, letters).is_some())
             .collect();
-        let searched: Vec<FastaRecord> = queries
+        let searched: Vec<&CddQuery<'_>> = queries
             .iter()
             .zip(&valid)
             .filter(|(_, valid)| **valid)
-            .map(|(query, _)| query.record.clone())
+            .map(|(query, _)| query)
             .collect();
         let mut lists = if searched.is_empty() {
             Vec::new()
         } else {
-            side.search(&searched, pool, diagnostics)?
+            side.search(&searched, range_length, pool, diagnostics)?
         }
         .into_iter();
         let mut domains = Vec::with_capacity(queries.len());
@@ -279,7 +398,7 @@ impl DeltaRun {
         args: &ResolvedBlastpArgs,
         request: &PssmRequest,
         query: &CddQuery<'_>,
-        domains: CddDomains,
+        domains: &CddDomains,
     ) -> Result<CddPssm> {
         let CddDomains {
             side,
@@ -293,7 +412,7 @@ impl DeltaRun {
         // 2.17.0 probes `x1`, `x1_it2`, `x2_it2`, `xs_it2` of PS13a's fix round 1) where the query is
         // alone in its batch. In a batch of several queries NCBI's deltablast crashes there
         // (exit 139, probes `x2`, `xs`, `sxs`).
-        if !valid {
+        if !*valid {
             if query.alone {
                 return Err(engine_error("NULL alignments"));
             }
@@ -301,19 +420,20 @@ impl DeltaRun {
                 "a query whose letters give no Karlin-Altschul parameters read together with other queries (with one round or -num_iterations 0 queries are read together up to 10000 letters; NCBI BLAST+'s deltablast crashes there) is not supported by LOSAT's DELTABLAST"
             );
         }
-        let hits = side.hits(list.as_ref())?;
+        let range_start = query.placement.map_or(0, |placement| placement.offset);
+        let hits = side.hits(list.as_ref(), range_start)?;
         let hits = cdd_input::included_hits(hits, self.options.domain_inclusion_ethresh);
         let hits = cdd_input::remove_multiple_cd_hits(hits)
             .map_err(|refusal| anyhow!(refusal.message()))?;
         // The files open after the domain search, also for a query without a hit.
         let files = side.profile_files()?;
-        let msa = cdd_input::build_msa(&letters, &hits, &files)?;
+        let msa = cdd_input::build_msa(letters, &hits, &files, range_start)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:412-445
         let (matrix, sbp) = engine_score_block(
             &args.matrix_name,
             args.scoring.gap_open,
             args.scoring.gap_extend,
-            &letters,
+            letters,
         )?
         .map_err(|message| engine_error(&message))?;
         let Some(sbp) = sbp else {
@@ -324,7 +444,7 @@ impl DeltaRun {
         // The search's matrix gives the query Karlin-Altschul parameters where the domain search's
         // did (above); a matrix where it does not is LOSAT's refusal, not reached with NCBI's
         // matrices (`tests::every_letter_set_gives_a_karlin_block_under_every_matrix_or_none`).
-        if query_ungapped_block(matrix, &letters).is_none() {
+        if query_ungapped_block(matrix, letters).is_none() {
             bail!(
                 "a query whose letters give Karlin-Altschul parameters with the domain search's matrix but not with -matrix is not supported by LOSAT's DELTABLAST"
             );
@@ -364,7 +484,7 @@ impl DeltaRun {
         let pssm = cdd_query_pssm(
             request,
             pssm,
-            &letters,
+            letters,
             PssmQueryRecord {
                 letters: query.record.seq(),
                 id: query.id,
@@ -391,15 +511,28 @@ impl DeltaRun {
 
 impl DomainSide {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
-    /// The domain search of the queries `records`, one batch (`PrelimOnly::Domain`): the final
-    /// hit list of each query of the RPS engine.
+    /// The domain search of the queries `queries`, one batch (`PrelimOnly::Domain`): the final
+    /// hit list of each query of the RPS engine, in the coordinates of the searched letters (a
+    /// `-query_loc` range's, `range_length` its length as given), as the run's searches of a
+    /// range read their records.
     fn search(
         &self,
-        records: &[FastaRecord],
+        queries: &[&CddQuery<'_>],
+        range_length: Option<usize>,
         pool: &crate::utils::threading::SearchPool<'_>,
         diagnostics: &mut (dyn std::io::Write + Send),
     ) -> Result<Vec<Option<BlastpHitList>>> {
-        let query_input = seq_range::QueryInput::whole(records);
+        let records: Vec<FastaRecord> = queries.iter().map(|query| query.record.clone()).collect();
+        let inputs: Vec<FastaRecord> = queries.iter().map(|query| query.input.clone()).collect();
+        let placements: Option<Vec<seq_range::RecordPlacement>> =
+            queries.iter().map(|query| query.placement).collect();
+        let query_input = seq_range::QueryInput {
+            placements: seq_range::Placements(placements.unwrap_or_default()),
+            ordinals: (0..queries.len()).collect(),
+            input_lengths: inputs.iter().map(|input| input.seq().len()).collect(),
+            skipped: vec![false; queries.len()],
+            range_length,
+        };
         let mut outputs = ReportOutputs {
             formats: Vec::new(),
             diagnostics,
@@ -412,7 +545,7 @@ impl DomainSide {
         let mut lists = Vec::new();
         run_resolved_in_pool(
             self.args.clone(),
-            records,
+            &records,
             BlastpSubjectSource::Database(&self.database),
             "",
             "",
@@ -420,7 +553,7 @@ impl DomainSide {
             pool,
             Some(PrelimOnly::Domain(&mut lists)),
             &BlastpRanges {
-                input_records: records,
+                input_records: &inputs,
                 query_input: &query_input,
                 subject_placements: &seq_range::Placements::default(),
                 x_ordinal_base: 0,
@@ -435,10 +568,15 @@ impl DomainSide {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:151-165
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:335-376
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
     /// The Seq-aligns of the domain search (one for each HSP, in the lists' order) as `CHit`s: the
     /// domain's Seq-align id, the HSP's E-value as the Seq-align stores it, and its aligned runs
-    /// (the gaps of either sequence are dropped).
-    fn hits(&self, list: Option<&BlastpHitList>) -> Result<Vec<Hit>> {
+    /// (the gaps of either sequence are dropped), at the record's query positions: the list's
+    /// searched positions plus `offset`, the start of a `-query_loc` range in its record (0
+    /// without one).
+    fn hits(&self, list: Option<&BlastpHitList>, offset: usize) -> Result<Vec<Hit>> {
+        let offset = i32::try_from(offset)
+            .map_err(|_| anyhow!("LOSAT internal error: a query range past i32 positions"))?;
         let Some(list) = list else {
             return Ok(Vec::new());
         };
@@ -456,12 +594,12 @@ impl DomainSide {
                 let mut aligned = Vec::new();
                 match hsp.gap_info.as_deref() {
                     None => aligned.push((
-                        hsp.q_start as i32 - 1,
+                        hsp.q_start as i32 - 1 + offset,
                         hsp.s_start as i32 - 1,
                         (hsp.q_end + 1 - hsp.q_start) as i32,
                     )),
                     Some(ops) => {
-                        let mut query = hsp.q_start as i32 - 1;
+                        let mut query = hsp.q_start as i32 - 1 + offset;
                         let mut subject = hsp.s_start as i32 - 1;
                         for op in ops {
                             match *op {

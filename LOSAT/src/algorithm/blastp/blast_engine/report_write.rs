@@ -906,7 +906,10 @@ pub(super) fn write_pairwise(
         line_length: args.line_length,
         show_frame: false,
         program: args.report_program().to_string(),
-        protein_matrix: args.scoring.matrix,
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+        // The formatter's matrix (deltablast's `-matrix` in a domain section of
+        // `-show_domain_hits`, `ResolvedBlastpArgs::shown_matrix`).
+        protein_matrix: args.shown_matrix(),
         sort: view.report_sort(args.sort),
         view,
         html: args.html.as_ref().map(|links| {
@@ -940,6 +943,12 @@ pub(super) fn write_pairwise(
                             .collect()
                     }),
             }),
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:369-373
+        // deltablast's report of a query's domain search (`-show_domain_hits`).
+        section: args
+            .domain_formatter
+            .as_ref()
+            .map(|_| crate::report::pairwise::SectionHeading::DomainSearch),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
@@ -1388,11 +1397,12 @@ pub(super) fn write_custom_tabular(
     let tab = tabular::BlastpTabular {
         spec,
         app: args.app,
+        formatter_app: args.formatter_app(),
         program_version: &program_version,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1458
         // psiblast's round (`psi_round`), 1 outside the rounds.
         iteration: report_iteration(args, reports),
-        matrix: args.scoring.matrix,
+        matrix: args.shown_matrix(),
         query_ids,
         query_records,
         query_titles,

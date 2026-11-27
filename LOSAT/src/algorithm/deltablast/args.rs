@@ -214,8 +214,7 @@ impl DeltablastArgs {
             soft_masking: args.given_option("soft_masking")?,
             lcase_masking: args.flag("lcase_masking"),
             use_sw_tback: args.flag("use_sw_tback"),
-            // LOSAT refuses `-query_loc` by name (`cli::reader::named_refusal`, item PS13b).
-            query_loc: None,
+            query_loc: args.given_option("query_loc")?,
             subject_loc: args.given_option("subject_loc")?,
             outfmt: args.option_or_default("outfmt")?,
             num_iterations: args.option_or_default("num_iterations")?,
@@ -231,8 +230,7 @@ impl DeltablastArgs {
             pssm_check: Default::default(),
             domain_inclusion_ethresh: args.option_or_default("domain_inclusion_ethresh")?,
             rpsdb: args.option_or_default("rpsdb")?,
-            // LOSAT refuses `-show_domain_hits` by name (`cli::reader::named_refusal`, item PS13b).
-            show_domain_hits: false,
+            show_domain_hits: args.flag("show_domain_hits"),
         })
     }
 

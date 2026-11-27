@@ -1812,14 +1812,18 @@ pub(super) fn report_values(
         hit_lists,
         ShownQueries::of(query_records, args, setup.phi),
         shown_subjects,
-        args.scoring.matrix,
+        args.shown_matrix(),
         // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
         // reports count their stored letters (series NP, M4b).
         psi_round::searched_other_letters(args)
             || args
                 .db_mask_resolved
                 .as_ref()
-                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
+                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard)
+            // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+            // A domain section of deltablast's `-show_domain_hits` counts its positives with the
+            // formatter's matrix (deltablast's `-matrix`), not the domain search's.
+            || args.shown_matrix() != args.scoring.matrix,
         &mut engine_counts,
     );
     Ok(ReportValues {
@@ -1893,10 +1897,12 @@ pub(super) fn report_labels(
     let context = ReportContext {
         subject_name: Some(subject_name_label),
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-801
-        // The `# Database:` line of outfmt 7 shows the `-db` value as NCBI keeps it.
-        database_name: Some(match database {
-            Some(database) => database.name().to_vec(),
-            None => [
+        // The `# Database:` line of outfmt 7 shows the `-db` value as NCBI keeps it: deltablast's
+        // also in a domain section of `-show_domain_hits` (`DomainFormatter`).
+        database_name: Some(match (args.domain_formatter.as_deref(), database) {
+            (Some(formatter), _) => formatter.database_name.clone(),
+            (None, Some(database)) => database.name().to_vec(),
+            (None, None) => [
                 b"User specified sequence set (Input: ".as_slice(),
                 &subject_input_label,
                 b")",

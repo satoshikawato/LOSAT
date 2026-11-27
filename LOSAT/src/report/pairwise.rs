@@ -62,6 +62,31 @@ pub struct PairwiseConfig {
     /// (`query_anchored::write_unreadable_section`).
     /// `None` for every other report.
     pub unreadable_query: Option<UnreadableQuery>,
+    /// The line that starts each query's report (`SectionHeading`): deltablast's domain search
+    /// section (`-show_domain_hits`); `None` otherwise (psiblast's first round then writes its
+    /// round's heading, `BlastpSections::head`).
+    pub section: Option<SectionHeading>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1470-1476
+/// The line before a result set's outfmt 0 report (`PrintOneResultSet`): `Results from domain
+/// search` for deltablast's report of a query's domain search (`-show_domain_hits`), `Results
+/// from round N` for a round of psiblast's or deltablast's rounds. The tabular formats write
+/// neither.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionHeading {
+    Round(u32),
+    DomainSearch,
+}
+
+impl SectionHeading {
+    /// Writes the heading's line.
+    pub fn write<W: Write + ?Sized>(self, writer: &mut W) -> io::Result<()> {
+        match self {
+            SectionHeading::Round(number) => writeln!(writer, "Results from round {number}"),
+            SectionHeading::DomainSearch => writeln!(writer, "Results from domain search"),
+        }
+    }
 }
 
 impl Default for PairwiseConfig {
@@ -75,6 +100,7 @@ impl Default for PairwiseConfig {
             view: PairwiseView::Pairwise,
             html: None,
             unreadable_query: None,
+            section: None,
         }
     }
 }
@@ -800,6 +826,10 @@ pub struct PairwiseDatabase {
     /// The databases in the order of the list, a name given twice twice: the blocks of the
     /// epilog.
     pub databases: Vec<DatabaseInfo>,
+    /// deltablast `-show_domain_hits`: the domain database (`-rpsdb`, NCBI's `m_DomainDbInfo`),
+    /// whose report the prolog and the epilog show before this one's
+    /// (`write_blast_database_header`, `write_final_database_block`); `None` elsewhere.
+    pub domain: Option<Arc<PairwiseDatabase>>,
 }
 
 impl PairwiseDatabase {
@@ -829,6 +859,7 @@ impl PairwiseDatabase {
                 })
                 .is_none(),
             databases,
+            domain: None,
         }
     }
 }
@@ -3112,13 +3143,20 @@ pub fn write_blastp_pairwise_prolog<W: ReportWrite>(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:511-538
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:428-436
 /// The `Database:` lines of the prolog for the database of a `-db` search: the titles of the
 /// databases of its list joined with `; ` (`PairwiseDatabase::new`), wrapped at 68, then the
-/// summed counts and one blank line.
+/// summed counts and one blank line. Before them, the domain database's lines of deltablast's
+/// `-show_domain_hits` (`PairwiseDatabase::domain`), after two more blank lines and
+/// `Conserved Domain `.
 fn write_blast_database_header<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
+    if let Some(domain) = database.domain.as_deref() {
+        write!(writer, "\n\nConserved Domain ")?;
+        write_blast_database_header(writer, domain)?;
+    }
     write!(writer, "Database: ")?;
     write_flatfile_wrapped(writer, &database.definition, 68)?;
     if let Some(first) = database.databases.first() {
@@ -3157,10 +3195,27 @@ fn write_masked_using<W: ReportWrite>(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:541-574
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2255-2267
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2250-2267
 /// The database blocks of the epilog, one per database of the list, and the blank lines
-/// before the matrix line (as `write_final_database_report`).
+/// before the matrix line (as `write_final_database_report`). Before them, `Conserved Domain`
+/// and the blocks of the domain database of deltablast's `-show_domain_hits`
+/// (`PairwiseDatabase::domain`).
 fn write_final_database_block<W: ReportWrite>(
+    writer: &mut W,
+    database: &PairwiseDatabase,
+) -> io::Result<()> {
+    if let Some(domain) = database.domain.as_deref() {
+        write!(writer, "Conserved Domain")?;
+        write_epilog_databases(writer, domain)?;
+    }
+    write_epilog_databases(writer, database)?;
+    writeln!(writer)?;
+    writeln!(writer)
+}
+
+/// The epilog's block of each database of the list of `database`, each with a blank line after
+/// it (`write_final_database_block`).
+fn write_epilog_databases<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
@@ -3181,8 +3236,7 @@ fn write_final_database_block<W: ReportWrite>(
         )?;
         writeln!(writer)?;
     }
-    writeln!(writer)?;
-    writeln!(writer)
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
@@ -4090,12 +4144,16 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1470-1476
         // psiblast's results carry their round (`PrintOneResultSet` with
         // `itr.GetIterationNumber()`, psiblast_app.cpp:283-285); LOSAT's psiblast runs its
-        // first round only.
-        if self.config.program == "psiblast" {
-            writeln!(writer, "Results from round 1")?;
+        // first round only here. deltablast's domain search section carries its own heading
+        // (`PairwiseConfig::section`).
+        let section = self.config.section.or_else(|| {
+            (self.config.program == "psiblast").then_some(SectionHeading::Round(1))
+        });
+        if let Some(section) = section {
+            section.write(writer)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
         // Emit two blank lines before the query header.

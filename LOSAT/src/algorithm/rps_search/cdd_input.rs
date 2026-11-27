@@ -81,8 +81,7 @@ pub(crate) enum CddRefusal {
     /// A domain whose Seq-align id is neither a local nor a general id: NCBI orders them by the
     /// rules of `CSeq_id::CompareOrdered` that LOSAT does not port.
     IdKind(String),
-    /// A hit segment that reaches past the query or has negative length: NCBI writes outside its
-    /// alignment.
+    /// A hit segment of negative length or start: NCBI writes outside its alignment.
     Range(String),
 }
 
@@ -94,7 +93,7 @@ impl CddRefusal {
                 "a domain database whose Seq-align ids are not local or general ids (the hit {id}) is not supported by LOSAT's DELTABLAST"
             ),
             CddRefusal::Range(id) => format!(
-                "a query whose domain hit {id} has a segment that is outside the query or has a negative length (NCBI BLAST+ writes outside its alignment) is not supported by LOSAT's DELTABLAST"
+                "a query whose domain hit {id} has a segment of negative length or start (NCBI BLAST+ writes outside its alignment) is not supported by LOSAT's DELTABLAST"
             ),
         }
     }
@@ -406,17 +405,21 @@ pub(crate) fn remove_multiple_cd_hits(mut hits: Vec<Hit>) -> Result<Vec<Hit>, Cd
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:222-272
 /// `x_FillHitsData` and `x_CreateMsa`: the alignment of the kept hits' columns with the query,
-/// one row for each hit with the columns of its segments in place; the columns' data come from the
-/// domain database's `.wcounts` and `.obsr` files.
+/// one row for each hit with the columns of its segments in place (`place_cells`); the columns'
+/// data come from the domain database's `.wcounts` and `.obsr` files. `query`: the searched
+/// letters (a `-query_loc` range's), whose record starts `range_start` letters before them (0
+/// without a range): the hits' query starts are the record's (`DomainSide::hits`).
 pub(crate) fn build_msa(
     query: &[u8],
     hits: &[Hit],
     files: &CdProfileFiles,
+    range_start: usize,
 ) -> Result<PsiCdMsa, anyhow::Error> {
     let mut columns: Vec<CdColumn> = Vec::new();
-    let mut rows: Vec<Vec<CdCell>> = Vec::with_capacity(hits.len());
-    for hit in hits {
-        let mut row = vec![CdCell::UNALIGNED; query.len()];
+    // Each segment's cells: the hit, the record position of its first column and the index of
+    // that column in `columns`, in the hits' and segments' order.
+    let mut segments: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for (index, hit) in hits.iter().enumerate() {
         // The profile's columns that the hit's segments read, at most up to the last one's end
         // (`CdHitData`: a few reads for the hit).
         let end = hit
@@ -430,29 +433,83 @@ pub(crate) fn build_msa(
         let mut data = files.hit(hit.oid as usize, end);
         for segment in &hit.segments {
             let len = segment.query.to - segment.query.from;
-            if len < 0
-                || segment.query.from < 0
-                || segment.subject.from < 0
-                || segment.query.from as usize + len as usize > query.len()
-            {
+            if len < 0 || segment.query.from < 0 || segment.subject.from < 0 {
                 anyhow::bail!(CddRefusal::Range(id_label(&hit.id)).message());
             }
             let from = segment.subject.from as usize;
             let data = data
                 .columns(from, from + len as usize)
                 .map_err(open_error)?;
-            for (offset, (wfreqs, iobsr)) in data.wfreqs.into_iter().zip(data.iobsr).enumerate() {
-                row[segment.query.from as usize + offset] = CdCell::aligned(columns.len());
-                columns.push(CdColumn { wfreqs, iobsr });
-            }
+            segments.push((
+                index,
+                segment.query.from as usize,
+                len as usize,
+                columns.len(),
+            ));
+            columns.extend(
+                data.wfreqs
+                    .into_iter()
+                    .zip(data.iobsr)
+                    .map(|(wfreqs, iobsr)| CdColumn { wfreqs, iobsr }),
+            );
         }
-        rows.push(row);
     }
+    let rows = place_cells(&segments, hits.len(), query.len(), range_start)?;
     Ok(PsiCdMsa {
         query: query.to_vec(),
         rows,
         columns,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:240-283
+/// The cells of the kept hits in NCBI's one array of `hits * length` cells: hit h's cell at record
+/// position q at index h * length + q (`segments`: each segment's hit, first record position,
+/// length and first column, `build_msa`), each write in the hits' order over the ones before, so a
+/// range that starts past 1 shifts or spills them into the next hits' rows (NCBI's deterministic
+/// result). Where an index reaches the array's end NCBI writes past its heap block; LOSAT then
+/// places every hit at the range's own coordinates (q - `range_start`; PD-LOSAT-NCBI-DEFECTS
+/// approved exception 35, `Q-DL-QLOC=B`). Without a range, or with one that starts at 1, every
+/// position is inside its row and both placements are the same.
+fn place_cells(
+    segments: &[(usize, usize, usize, usize)],
+    hits: usize,
+    length: usize,
+    range_start: usize,
+) -> Result<Vec<Vec<CdCell>>, anyhow::Error> {
+    let cells = hits * length;
+    let past_end = segments
+        .iter()
+        .any(|&(hit, from, len, _)| len > 0 && hit * length + from + len > cells);
+    if !past_end {
+        let mut flat = vec![CdCell::UNALIGNED; cells];
+        for &(hit, from, len, column) in segments {
+            for offset in 0..len {
+                flat[hit * length + from + offset] = CdCell::aligned(column + offset);
+            }
+        }
+        return Ok(if length == 0 {
+            vec![Vec::new(); hits]
+        } else {
+            flat.chunks_exact(length).map(<[CdCell]>::to_vec).collect()
+        });
+    }
+    let mut rows = vec![vec![CdCell::UNALIGNED; length]; hits];
+    for &(hit, from, len, column) in segments {
+        let inside = from >= range_start && from - range_start + len <= length;
+        debug_assert!(inside, "a domain hit outside the searched range");
+        if !inside {
+            anyhow::bail!(
+                "LOSAT internal error: a domain hit at {from}..{} lies outside the searched range {range_start}..{}",
+                from + len,
+                range_start + length
+            );
+        }
+        for offset in 0..len {
+            rows[hit][from - range_start + offset] = CdCell::aligned(column + offset);
+        }
+    }
+    Ok(rows)
 }
 
 /// NCBI's error of the RPS files as the engine's (exit status 3), LOSAT's refusal as its own.

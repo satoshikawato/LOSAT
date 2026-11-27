@@ -415,7 +415,7 @@ impl QuerySections for RoundSections<'_> {
         place: ReportHook<'_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
-        writeln!(writer, "Results from round {}", self.round.number)?;
+        super::SectionHeading::Round(self.round.number).write(writer)?;
         writeln!(writer)?;
         writeln!(writer)?;
         let query_title = self

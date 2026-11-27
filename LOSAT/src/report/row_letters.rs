@@ -78,7 +78,8 @@ pub(crate) struct QueryLetters<'a> {
 
 impl<'a> QueryLetters<'a> {
     /// The letters of a query whose record holds `record` and whose Bioseq, where its letters are
-    /// not the record's, `bioseq` (of the same length).
+    /// not the record's, `bioseq` (at least as long: deltablast's query of a `-query_loc` range
+    /// reads its record's, `blast_engine::psi_round::pssm_round_args`).
     pub(crate) fn new(record: &'a [u8], bioseq: Option<&'a [u8]>) -> Self {
         Self { record, bioseq }
     }

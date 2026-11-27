@@ -251,8 +251,8 @@ fn app_mode(mode: BlastpCompositionMode) -> CompositionMode {
 
 /// deltablast's refusals that the inputs decide before any search, made before the run writes
 /// anything: a subject set (`-subject`) of more records than `-max_target_seqs` (the round-1
-/// search, `RoundResults`), and a domain database of several volumes
-/// (`DeltaRun::refuse_several_volumes`).
+/// search, `RoundResults`), and a domain database of several volumes; with `-show_domain_hits`
+/// NCBI's error of a domain database that does not open (`DeltaRun::open_domain_database`).
 fn refuse_before_output(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -265,7 +265,7 @@ fn refuse_before_output(
         );
     }
     if let Some(delta) = args.delta.as_deref() {
-        delta.refuse_several_volumes()?;
+        delta.open_domain_database(delta.show_domain_hits())?;
     }
     Ok(())
 }
@@ -322,12 +322,42 @@ fn round_query_input(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:59-68,114-119
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1478-1486
+/// deltablast's query input of the rounds of searched query `query` of the record `record`: they
+/// search the query of the PSSM's Bioseq (`CddPssm::query`), the searched letters as a query of
+/// their own, so the rows keep the coordinates of a `-query_loc` range (no offset), while the
+/// reports show the record's `Length=` (NCBI's formatter reads the query's Bioseq by its id: the
+/// record) and the tabular `qlen` the range as given. psiblast's rounds keep the range in its
+/// record (`round_query_input`).
+fn delta_round_query_input(
+    query_input: &seq_range::QueryInput,
+    query: usize,
+    record: &FastaRecord,
+) -> seq_range::QueryInput {
+    let placement = query_input
+        .placements
+        .get(query)
+        .map(|_| seq_range::RecordPlacement {
+            offset: 0,
+            length: record.seq().len(),
+        });
+    seq_range::QueryInput {
+        placements: seq_range::Placements(placement.into_iter().collect()),
+        ordinals: vec![0],
+        input_lengths: vec![record.seq().len()],
+        skipped: vec![false],
+        range_length: query_input.range_length,
+    }
+}
+
 /// The arguments of round `round` of a query whose record is `record`: the run's, and where the
 /// round searches a PSSM (`pssm`) the search of that PSSM (`PsiSearch`), with its set-up's
 /// warnings, the round's query (`round_query` holds the query of the round before, and takes this
 /// round's where the next round starts from it) and the mode of a PSSM round. `calls`: the rounds
 /// searched before in the run; `split`: whether NCBI splits the query (`RoundQuery::split`);
-/// `cdd_query`: deltablast's query of its PSSM's Bioseq (`CddPssm::query`).
+/// `cdd_query`: deltablast's query of its PSSM's Bioseq (`CddPssm::query`); `ranged_record`:
+/// the whole record of deltablast's query of a `-query_loc` range (`None` otherwise).
 #[allow(clippy::too_many_arguments)]
 fn pssm_round_args(
     args: &ResolvedBlastpArgs,
@@ -339,6 +369,7 @@ fn pssm_round_args(
     calls: usize,
     round_query: &mut Option<RoundQuery>,
     cdd_query: Option<&FastaRecord>,
+    ranged_record: Option<&FastaRecord>,
 ) -> Result<ResolvedBlastpArgs> {
     let delta = args.delta.as_deref();
     let mut round_args = args.clone();
@@ -391,6 +422,13 @@ fn pssm_round_args(
         .psi_search
         .as_deref()
         .and_then(|psi| psi.bioseq_letters.clone());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1478-1486
+    // deltablast's query of a `-query_loc` range: the reports read the letters of the query's
+    // Bioseq in NCBI's scope, the record's (in upper case, as NCBI's reader keeps them), at the
+    // range's coordinates (`delta_round_query_input`).
+    if let (Some(_), Some(input)) = (cdd_query, ranged_record) {
+        search.bioseq_letters = Some(Arc::from(input.seq().to_ascii_uppercase()));
+    }
     // And its molecule: a query of the molecule `other` is unreadable for the
     // reports of every round (`PsiSearch::query_other_coding`).
     search.query_other_coding = args
@@ -577,6 +615,7 @@ fn round_reports<'r>(
         strategy_next: None,
         call_requests: None,
         x_plan_blocks: false,
+        domain_results: None,
     }
 }
 
@@ -659,6 +698,8 @@ struct RoundOne {
 struct DeltaCall<'s> {
     query: usize,
     ordinal: usize,
+    /// The results that the run formatted before this one's (`search_delta_batch`).
+    formatted: usize,
     io: PsiRoundIo,
     call_source: BlastpSubjectSource<'s>,
     call_placements: seq_range::Placements,
@@ -675,6 +716,67 @@ impl DeltaCall<'_> {
             x_ordinal_base: self.ordinal,
             searched_base: self.query,
             split_search_spaces: None,
+        }
+    }
+}
+
+/// A domain section of a deltablast batch with `-show_domain_hits` (`search_delta_batch`): the
+/// call of rpsblast's (`delta_hooks::DomainReports`) of its query on the domain database, held
+/// from its search to its report as the round's calls are (`DeltaCall`). Its query input is the
+/// range's in its record (`round_query_input`), so its report shows rpsblast `-query_loc`'s
+/// record coordinates.
+struct DomainCall<'d> {
+    query: usize,
+    ordinal: usize,
+    /// The results that the run formatted before this one's.
+    formatted: usize,
+    query_input: seq_range::QueryInput,
+    subject_placements: seq_range::Placements,
+    /// The query's final hit list of the batch's domain search (`CddDomains::list`).
+    lists: &'d [Option<BlastpHitList>],
+}
+
+impl DomainCall<'_> {
+    /// The call's ranges (`BlastpRanges`), of its query's record in the run's `query_records`.
+    fn ranges<'r>(&'r self, query_records: &'r [FastaRecord]) -> BlastpRanges<'r> {
+        BlastpRanges {
+            input_records: std::slice::from_ref(&query_records[self.ordinal]),
+            query_input: &self.query_input,
+            subject_placements: &self.subject_placements,
+            x_ordinal_base: self.ordinal,
+            searched_base: self.query,
+            split_search_spaces: None,
+        }
+    }
+
+    /// The call's reports (`BlastpReports`): a round's (`round_reports`) outside the rounds, with
+    /// the query's hit list of the domain search as the RPS step's results.
+    fn reports<'r>(
+        &'r self,
+        batches: &'r QueryBatches,
+        searched_queries: &'r [FastaRecord],
+        prefetch_scope: &'r (dyn Fn() -> crate::blastinput::query_batch::QueryScope + Sync),
+    ) -> BlastpReports<'r> {
+        BlastpReports {
+            reader_warnings: &[],
+            identity_warned: 0,
+            epilog: false,
+            x_prolog: false,
+            x_queries_before: self.formatted,
+            x_xml2_carry: None,
+            last_call: false,
+            psi_round: None,
+            stopped_pssms: None,
+            query_scopes: batches
+                .query_scopes
+                .as_ref()
+                .map(|scopes| scopes.numbered_from(self.query)),
+            all_searched_queries: Some(searched_queries),
+            prefetch_scope: Some(prefetch_scope),
+            strategy_next: None,
+            call_requests: None,
+            x_plan_blocks: false,
+            domain_results: Some(self.lists),
         }
     }
 }
@@ -713,7 +815,8 @@ fn search_delta_batch(
         pool,
         modes,
     } = *run;
-    // The query of each PSSM (`CddQuery`): its record and its Seq-align id.
+    // The query of each PSSM (`CddQuery`): its searched letters, its record, where they lie in it
+    // and its Seq-align id.
     let alone = batch_queries.len() == 1;
     let ids: Vec<_> = batch_queries
         .clone()
@@ -726,10 +829,15 @@ fn search_delta_batch(
         })
         .collect();
     let cdd_queries: Vec<_> = (0..ids.len())
-        .map(|index| super::delta_hooks::CddQuery {
-            record: &query_records[query_input.ordinal(batch_queries.start + index)],
-            id: &ids[index],
-            alone,
+        .map(|index| {
+            let query = batch_queries.start + index;
+            super::delta_hooks::CddQuery {
+                record: &searched_queries[query],
+                input: &query_records[query_input.ordinal(query)],
+                placement: query_input.placements.get(query),
+                id: &ids[index],
+                alone,
+            }
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:288
@@ -742,19 +850,79 @@ fn search_delta_batch(
             }
             Ok(error)
         };
+    // The error of a domain section's call: as a round's (`round_call_error`, the posts of the
+    // reads of the domain database), after deltablast's prolog where nothing was written.
+    let domain_call_error = |error: anyhow::Error,
+                             domain: &super::delta_hooks::DomainReports,
+                             formatted: usize,
+                             outputs: &mut ReportOutputs<'_>|
+     -> Result<anyhow::Error> {
+        if !error.is::<ErrorAfterBatchReports>() {
+            return with_prolog(error, outputs);
+        }
+        if formatted == 0 {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+        }
+        round_call_error(
+            error,
+            &domain.args,
+            formatted.max(1),
+            1,
+            &[],
+            domain.subject_source(),
+            subject_label,
+            outputs,
+        )
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
     // One domain search of every query of the batch (`x_FindDomainHits`) comes before the first
     // query's PSSM.
-    let domains = match delta.cdd_domains(&cdd_queries, pool, &mut *outputs.diagnostics) {
+    let domains = match delta.cdd_domains(
+        &cdd_queries,
+        query_input.range_length,
+        pool,
+        &mut *outputs.diagnostics,
+    ) {
         Ok(domains) => domains,
         Err(error) => return Err(with_prolog(error, outputs)?),
     };
+    // `-show_domain_hits`: the calls of the domain sections (`DomainReports`), with deltablast's
+    // `-db` as NCBI keeps it for outfmt 7.
+    let database_name = subject_source
+        .database()
+        .map_or_else(Vec::new, |database| database.name().to_vec());
+    let domain_reports = delta.domain_reports(args, &database_name, &domains);
     let results = RoundResults::of(args, 1, subject_source);
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:357-378
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:404-416
+    // The results that the batch formats, in NCBI's order: with one round each query's domain
+    // section, then its results; with rounds every query's domain section, then the results
+    // (the batch is one query, but with `-num_iterations 0`). `formatted` numbers them from the
+    // run's results formatted before (`calls`, `m_QueriesFormatted`), each domain section one.
+    let one_round = plan.num_iterations == 1;
+    let sections = usize::from(domain_reports.is_some());
+    let per_query = sections + results.count;
+    let domain_formatted = |index: usize| -> usize {
+        *calls
+            + if one_round {
+                index * per_query
+            } else {
+                index
+            }
+    };
+    let round_formatted = |index: usize, result_index: usize| -> usize {
+        *calls
+            + if one_round {
+                index * per_query + sections + result_index
+            } else {
+                sections * ids.len() + index * results.count + result_index
+            }
+    };
     let state = IterationState::new(plan.num_iterations);
     let mut held = Vec::with_capacity(ids.len() * results.count);
     let mut cdd_queries_out = Vec::with_capacity(ids.len());
     let mut first_pssm = None;
-    for (index, domains) in domains.into_iter().enumerate() {
+    for (index, domains) in domains.iter().enumerate() {
         let query = batch_queries.start + index;
         let cdd = match delta.cdd_pssm(args, &plan.request, &cdd_queries[index], domains) {
             Ok(cdd) => cdd,
@@ -777,6 +945,7 @@ fn search_delta_batch(
             ));
         }
         let record = &searched_queries[query];
+        let ordinal = query_input.ordinal(query);
         // Round 1's query is that of the PSSM's Bioseq; round 2 starts from it again
         // (`pssm_round_args`), so the round's query is not kept.
         let round_args = match pssm_round_args(
@@ -789,6 +958,10 @@ fn search_delta_batch(
             *calls + held.len(),
             &mut None,
             Some(&cdd.query),
+            query_input
+                .placements
+                .get(query)
+                .map(|_| &query_records[ordinal]),
         ) {
             Ok(round_args) => round_args,
             Err(error) => return Err(with_prolog(error, outputs)?),
@@ -796,10 +969,10 @@ fn search_delta_batch(
         for result_index in 0..results.count {
             let (call_args, call_source, call_placements) =
                 results.call(result_index, &round_args, subject_source, subjects);
-            let ordinal = query_input.ordinal(query);
             let call = DeltaCall {
                 query,
                 ordinal,
+                formatted: round_formatted(index, result_index),
                 io: round_io(
                     args,
                     plan,
@@ -811,7 +984,7 @@ fn search_delta_batch(
                 ),
                 call_source,
                 call_placements,
-                query_input: round_query_input(query_input, query, &query_records[ordinal]),
+                query_input: delta_round_query_input(query_input, query, &query_records[ordinal]),
             };
             // The library's records of the round (`FormatObserver::round_begin`).
             if let Some(observer) = outputs.observer.as_deref_mut() {
@@ -826,7 +999,6 @@ fn search_delta_batch(
             }) {
                 return Err(with_prolog(failure.error(args.app.name()), outputs)?);
             }
-            let formatted = *calls + held.len();
             let searched = search_call(
                 call_args,
                 std::slice::from_ref(record),
@@ -838,7 +1010,7 @@ fn search_delta_batch(
                 &call.ranges(query_records),
                 &round_reports(
                     &[],
-                    formatted,
+                    call.formatted,
                     false,
                     &call.io,
                     batches,
@@ -875,6 +1047,47 @@ fn search_delta_batch(
         }
         cdd_queries_out.push(cdd.query);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
+    // `-show_domain_hits`: each query's domain section is rpsblast's call of the query on the
+    // domain database, whose RPS step takes the query's hit list of the batch's domain search
+    // (`BlastpReports::domain_results`): NCBI formats the results of that search
+    // (`CDeltaBlast::GetDomainResults`), which `CDeltaBlast::Run` has made by now.
+    let mut domain_held = Vec::with_capacity(sections * ids.len());
+    if let Some(domain) = domain_reports.as_ref() {
+        for (index, domains) in domains.iter().enumerate() {
+            let query = batch_queries.start + index;
+            let ordinal = query_input.ordinal(query);
+            let call = DomainCall {
+                query,
+                ordinal,
+                formatted: domain_formatted(index),
+                query_input: round_query_input(query_input, query, &query_records[ordinal]),
+                subject_placements: seq_range::Placements::default(),
+                lists: std::slice::from_ref(domains.list()),
+            };
+            let searched = search_call(
+                domain.args.clone(),
+                std::slice::from_ref(&searched_queries[query]),
+                domain.subject_source(),
+                subject_label,
+                outputs,
+                pool,
+                None,
+                &call.ranges(query_records),
+                &call.reports(batches, searched_queries, prefetch_scope),
+                super::x_lookup_ahead::XAheadBlock::none(),
+            );
+            match searched {
+                Ok(searched) => domain_held.push((
+                    call,
+                    searched.expect("a domain section's call is not of the preliminary stage only"),
+                )),
+                Err(error) => {
+                    return Err(domain_call_error(error, domain, *calls, outputs)?);
+                }
+            }
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:353,405
     // `SavePssmToFile` of the batch's first PSSM: after the searches of the batch
     // (`CDeltaBlast::Run` has returned), before its prefetch.
@@ -883,45 +1096,78 @@ fn search_delta_batch(
             return Err(with_prolog(error, outputs)?);
         }
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:364-369
+    // The prefetches: with one round the round's results, then the domain sections'
+    // (`BlastFormatter_PreFetchSequenceData` of each); with rounds the domain sections are
+    // formatted before the rounds' prefetch.
+    let mut domain_prefetched = Vec::with_capacity(domain_held.len());
     let mut prefetched = Vec::with_capacity(held.len());
-    for (formatted, (call, searched)) in held.into_iter().enumerate() {
-        let formatted = *calls + formatted;
-        let record = std::slice::from_ref(&searched_queries[call.query]);
-        let done = prefetch_call(
-            searched,
-            record,
-            call.call_source,
-            subject_label,
-            outputs,
-            pool,
-            &call.ranges(query_records),
-            &round_reports(
-                &[],
-                formatted,
-                false,
-                &call.io,
-                batches,
-                call.query,
-                searched_queries,
-                prefetch_scope,
-            ),
-        );
-        match done {
-            Ok((searched, done)) => prefetched.push((call, searched, done)),
-            Err(error) => {
-                if error.is::<ErrorAfterBatchReports>() {
-                    return Err(round_call_error(
-                        error,
-                        args,
-                        *calls,
-                        1,
-                        &[],
-                        subject_source,
-                        subject_label,
-                        outputs,
-                    )?);
+    let phases = if one_round {
+        [false, true]
+    } else {
+        [true, false]
+    };
+    for domain_phase in phases {
+        if domain_phase {
+            let Some(domain) = domain_reports.as_ref() else {
+                continue;
+            };
+            for (call, searched) in std::mem::take(&mut domain_held) {
+                let done = prefetch_call(
+                    searched,
+                    std::slice::from_ref(&searched_queries[call.query]),
+                    domain.subject_source(),
+                    subject_label,
+                    outputs,
+                    pool,
+                    &call.ranges(query_records),
+                    &call.reports(batches, searched_queries, prefetch_scope),
+                );
+                match done {
+                    Ok((searched, done)) => domain_prefetched.push((call, searched, done)),
+                    Err(error) => return Err(domain_call_error(error, domain, *calls, outputs)?),
                 }
-                return Err(with_prolog(error, outputs)?);
+            }
+            continue;
+        }
+        for (call, searched) in std::mem::take(&mut held) {
+            let record = std::slice::from_ref(&searched_queries[call.query]);
+            let done = prefetch_call(
+                searched,
+                record,
+                call.call_source,
+                subject_label,
+                outputs,
+                pool,
+                &call.ranges(query_records),
+                &round_reports(
+                    &[],
+                    call.formatted,
+                    false,
+                    &call.io,
+                    batches,
+                    call.query,
+                    searched_queries,
+                    prefetch_scope,
+                ),
+            );
+            match done {
+                Ok((searched, done)) => prefetched.push((call, searched, done)),
+                Err(error) => {
+                    if error.is::<ErrorAfterBatchReports>() {
+                        return Err(round_call_error(
+                            error,
+                            args,
+                            *calls,
+                            1,
+                            &[],
+                            subject_source,
+                            subject_label,
+                            outputs,
+                        )?);
+                    }
+                    return Err(with_prolog(error, outputs)?);
+                }
             }
         }
     }
@@ -931,9 +1177,41 @@ fn search_delta_batch(
     if *calls == 0 {
         write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
     }
+    // The reports in the order of `formatted`.
+    let mut domain_sections = domain_prefetched.into_iter().peekable();
+    let mut rounds = prefetched.into_iter().peekable();
     let mut outcomes = Vec::with_capacity(cdd_queries_out.len());
-    for (formatted, (call, searched, done)) in prefetched.into_iter().enumerate() {
-        let formatted = *calls + formatted;
+    loop {
+        let domain_next = match (domain_sections.peek(), rounds.peek()) {
+            (Some((section, _, _)), Some((round, _, _))) => section.formatted < round.formatted,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if domain_next {
+            let (call, searched, done) = domain_sections.next().expect("a domain section");
+            let domain = domain_reports.as_ref().expect("the domain sections' calls");
+            let reported = report_call(
+                searched,
+                done,
+                std::slice::from_ref(&searched_queries[call.query]),
+                domain.subject_source(),
+                outputs,
+                pool,
+                &call.ranges(query_records),
+                &call.reports(batches, searched_queries, prefetch_scope),
+            );
+            if let Err(error) = reported {
+                return Err(domain_call_error(
+                    error,
+                    domain,
+                    call.formatted.max(1),
+                    outputs,
+                )?);
+            }
+            continue;
+        }
+        let (call, searched, done) = rounds.next().expect("a round's call");
         let record = std::slice::from_ref(&searched_queries[call.query]);
         let reported = report_call(
             searched,
@@ -945,7 +1223,7 @@ fn search_delta_batch(
             &call.ranges(query_records),
             &round_reports(
                 &[],
-                formatted,
+                call.formatted,
                 false,
                 &call.io,
                 batches,
@@ -958,7 +1236,7 @@ fn search_delta_batch(
             return Err(round_call_error(
                 error,
                 args,
-                formatted.max(1),
+                call.formatted.max(1),
                 1,
                 &[],
                 subject_source,
@@ -978,7 +1256,7 @@ fn search_delta_batch(
             outcomes.push(outcome);
         }
     }
-    *calls += ids.len() * results.count;
+    *calls += ids.len() * per_query;
     Ok(outcomes
         .into_iter()
         .zip(cdd_queries_out)
@@ -1115,7 +1393,10 @@ fn run_queries(
             let ordinal = query_input.ordinal(query);
             let record = &query_records[ordinal];
             let placement = query_input.placements.get(query);
-            let query_input = round_query_input(query_input, query, record);
+            let query_input = match delta {
+                Some(_) => delta_round_query_input(query_input, query, record),
+                None => round_query_input(query_input, query, record),
+            };
             let ranges = BlastpRanges {
                 input_records: std::slice::from_ref(record),
                 query_input: &query_input,
@@ -1228,6 +1509,7 @@ fn run_queries(
                             calls,
                             &mut round_query,
                             cdd_query.as_ref(),
+                            delta.and(placement).map(|_| record),
                         )?;
                         let results = RoundResults::of(args, round, subject_source);
                         let mut first_outcome: Option<RoundOutcome> = None;
@@ -1622,9 +1904,9 @@ fn write_round_epilogs(
     rounds: usize,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
-    let pairwise_database = subject_source
-        .database()
-        .map(super::database::BlastpDatabase::pairwise_database);
+    let pairwise_database = subject_source.database().map(|database| {
+        super::with_domain_database(args, database.pairwise_database())
+    });
     let taxdb_found = match subject_source.database() {
         Some(database) => database.taxdb_found(),
         None => args.subject_taxdb_found,

@@ -330,7 +330,26 @@ where
     // invalid), as NCBI merges the volumes' empty results (review A of PS12a, S2's rpsblast half).
     let mut rps_multi_volume = args.rps_search.is_some()
         && database.is_some_and(|database| rps_hooks::volume_count(database) > 1);
-    if let Some(rps) = args.rps_search.as_deref() {
+    if let (Some(_), Some(given)) = (args.rps_search.as_deref(), reports.domain_results) {
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:357-378
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:90
+        // A domain section of deltablast's `-show_domain_hits`: the results are those of the
+        // domain search of the query's batch (`CDeltaBlast::GetDomainResults`), not a search of
+        // the call's own. Their footer's gapped K is then the matrix table's
+        // (`rps_gapped_k` stays `None`): deltablast's formatter prints `kbp_gap_psi`, which
+        // `BlastSetup_ScoreBlkInit` copied from the table's block before the RPS traceback set
+        // `kbp_gap_std`'s K.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:115-120
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:462-470
+        for (index, (slot, list)) in preliminary_hit_lists.iter_mut().zip(given).enumerate() {
+            slot.clone_from(list);
+            // The batch's search numbered its own queries; this call has one query per list.
+            for hsp_list in slot.iter_mut().flat_map(|list| &mut list.hsplist_array) {
+                hsp_list.query_index = index as u32;
+            }
+        }
+        rps_multi_volume = false;
+    } else if let Some(rps) = args.rps_search.as_deref() {
         let run = rps_hooks::RpsSearchRun {
             contexts,
             gapped_params,

@@ -437,7 +437,8 @@ pub struct BlastpArgs {
 pub struct DeltaOptions {
     /// `-domain_inclusion_ethresh`: the E-value below which a domain hit joins the PSSM.
     pub domain_inclusion_ethresh: f64,
-    /// `-show_domain_hits` (refused by name, `ncbi_app::args::refusal`: item PS13b).
+    /// `-show_domain_hits`: each query's domain search results are reported before its results
+    /// (`blast_engine::delta_hooks::DomainFormatter`, item PS13b).
     pub show_domain_hits: bool,
     /// The domain search's arguments: rpsblast's on `-rpsdb`, with the E-value of the domain
     /// search and the query's lower-case masking.
@@ -744,6 +745,11 @@ pub struct ResolvedBlastpArgs {
     /// and reads the statistics of the whole set: its letters and its number of sequences
     /// (`blast_engine::psi_round::run_queries`). `None` for every other call.
     pub(crate) whole_subject_set: Option<(i64, i32)>,
+    /// deltablast `-show_domain_hits`: the report of a query's domain search (an rpsblast call of
+    /// the domain database on the domain search's results) is made by deltablast's formatter,
+    /// whose side this is (`blast_engine::delta_hooks::DomainFormatter`): the program the report
+    /// names, the `-db` it names and the matrix of its positives. `None` for every other call.
+    pub(crate) domain_formatter: Option<std::sync::Arc<super::blast_engine::DomainFormatter>>,
     /// psiblast `-phi_pattern` (item PS8a): round 1's pattern as compiled
     /// (`phi_search::pattern::PhiPattern::compile`), or why it does not compile: NCBI's error,
     /// which NCBI's engine raises after the prolog (`blast_engine/phi_hooks.rs`), or LOSAT's
@@ -821,12 +827,37 @@ impl ResolvedBlastpArgs {
     /// The program that the reports name (the formatter's program): the application's, or
     /// `phiblastp` for psiblast's `-phi_pattern` (`PHIBLASTP` in the prolog and in outfmt 7's
     /// header, item PS8a).
+    ///
+    /// A domain section of deltablast's `-show_domain_hits` (`domain_formatter`) is deltablast's
+    /// formatter's: `deltablast` (outfmt 7's `# DELTABLAST` line).
     pub(crate) fn report_program(&self) -> &'static str {
         if self.phi.is_some() {
             "phiblastp"
         } else {
-            self.app.ncbi_name()
+            self.formatter_app().ncbi_name()
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+    /// The application whose formatter writes the call's reports: deltablast for a domain
+    /// section of `-show_domain_hits` (`domain_formatter`, an rpsblast call that deltablast's
+    /// formatter reports), the call's application otherwise.
+    pub(crate) fn formatter_app(&self) -> BlastpApp {
+        if self.domain_formatter.is_some() {
+            BlastpApp::Deltablast
+        } else {
+            self.app
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+    /// The matrix that the reports count the positives with and show the middle line of: the
+    /// formatter's, which is deltablast's `-matrix` for a domain section of `-show_domain_hits`
+    /// (`domain_formatter`; the domain search's own matrix is BLOSUM62), the search's otherwise.
+    pub(crate) fn shown_matrix(&self) -> ScoringMatrix {
+        self.domain_formatter
+            .as_deref()
+            .map_or(self.scoring.matrix, |formatter| formatter.matrix)
     }
 
     fn compute_traceback_hitlist_size(&self) -> usize {
@@ -1459,6 +1490,7 @@ impl BlastpArgs {
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
             whole_subject_set: None,
+            domain_formatter: None,
             traceback_hitlist: 0,
             subject_taxdb_found: false,
             subject_taxdb: None,

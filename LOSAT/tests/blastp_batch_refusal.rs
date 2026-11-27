@@ -633,10 +633,9 @@ fn a_search_space_overflow_is_refused_after_the_batches_before() {
         "36028797018963968",
     ];
     let env = [("BATCH_SIZE", "1")];
-    // A `-subject` search's outfmt 0 has no epilog of a database: its rows show the form there.
     for (subjects, outfmts) in [
         (&alias[..], &["7", "0", "6"][..]),
-        (&dbsize[..], &["7", "6"]),
+        (&dbsize[..], &["7", "0", "6"]),
     ] {
         for &outfmt in outfmts {
             let near = search_in(
@@ -697,6 +696,58 @@ fn a_search_space_overflow_is_refused_after_the_batches_before() {
     }
 }
 
+// Review M2 of item bp-SF1: a refusal that the call's first batch meets follows the prolog of
+// outfmt 0 to 4 (the program, the references and the database), which NCBI writes before it sets
+// the first batch up; outfmt 5 and 7 write nothing before it (rows `db.ak.bp.rej.l55.b1.*`,
+// `db.ak.bp.rej.nseq0.oldfsc.one.0`).
+#[test]
+fn a_first_batch_refusal_follows_the_pairwise_prolog() {
+    let prolog = |near: &Run| {
+        assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
+        let end = near.stdout.find("Query= ").expect("a query's report");
+        near.stdout[..end].to_string()
+    };
+    let overflow =
+        "with a query of 4970 letters overflows NCBI BLAST+'s 64-bit effective search space";
+    let count = "the statistics count 0 sequences of the database";
+    let cases: [(&str, &[(&str, &str)], &str, &str, &str); 2] = [
+        (
+            "tests/db_search/aliaskeys/p_l55",
+            &[],
+            "tests/db_search/aliaskeys/q_hba.faa",
+            "tests/db_search/aliaskeys/q_hba_long.faa",
+            overflow,
+        ),
+        (
+            "tests/db_search/aliaskeys/p_nseq0",
+            &[("OLD_FSC", "1")],
+            "tests/fasta/rps/x6only.faa",
+            "tests/db_search/aliaskeys/q_hba.faa",
+            count,
+        ),
+    ];
+    for (db, env, near_query, query, refusal) in cases {
+        let db = ["-db", db];
+        for outfmt in ["0", "3", "5", "7"] {
+            let before = match outfmt {
+                "0" | "3" => prolog(&search_in("blastp", near_query, &db, outfmt, 1, env)),
+                _ => String::new(),
+            };
+            for blocks in BLOCKS {
+                for threads in [1, 4] {
+                    let mut env = env.to_vec();
+                    env.extend_from_slice(blocks);
+                    let run = search_in("blastp", query, &db, outfmt, threads, &env);
+                    let case = format!("{db:?} outfmt {outfmt} n{threads} {blocks:?}");
+                    assert_eq!(run.code, Some(1), "{case}: {}", run.stderr);
+                    assert!(run.stderr.contains(refusal), "{case}: {}", run.stderr);
+                    assert_eq!(run.stdout, before, "{case}");
+                }
+            }
+        }
+    }
+}
+
 // NCBI computes no search space for a query that is not valid (an X-only one): such queries over
 // a length whose space for them would overflow `Int8` are reported as NCBI reports them (exit 0;
 // row `db.ak.bp.l55.x6.7`).
@@ -737,7 +788,14 @@ fn the_long_subject_refusal_of_an_ungapped_search_follows_the_unsearched_batches
     letters.truncate(5_000_001);
     std::fs::write(&subject, format!(">long\n{letters}\n")).expect("long subject");
     let subject = subject.to_str().expect("a UTF-8 path").to_string();
-    let subjects = ["-subject", subject.as_str(), "-ungapped"];
+    // An ungapped search takes only `-comp_based_stats 0` (NCBI's option check).
+    let subjects = [
+        "-subject",
+        subject.as_str(),
+        "-ungapped",
+        "-comp_based_stats",
+        "0",
+    ];
     let env = [("BATCH_SIZE", "1")];
     let near = search_in(
         "blastp",

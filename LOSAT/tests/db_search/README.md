@@ -2049,6 +2049,11 @@ times, 4,970 letters) and `BATCH_SIZE=1`: the first batch has hits, the second's
 (NCBI wraps it and goes on); `aliaskeys/q_hba.faa` alone is the near run. `../fasta/rps/x6only.faa` (the six X-only
 queries of `x6q.faa`) is the near run of the count-0 refusal after six unsearched batches, and over `p_l55` an input
 whose invalid contexts NCBI computes no space for (exit 0).
+Review rows of bp-SF1: `db.ak.bp.rej.l55.b1.{0,5}` and `db.ak.bp.rej.nseq0.oldfsc.one.0` (a refusal of the first batch:
+outfmt 0's prolog, which NCBI writes before the batch's setup, then the refusal; nothing in outfmt 5),
+`db.ak.bp.l55.x1hba.7` (`aliaskeys/q_x1_hba.faa`: an X-only query of 10,000 letters, then `q_hba.faa`'s hba, in one
+batch: exit 0), `db.ak.bp.l55.hba.5` and `db.ak.bp.rej.l55.b2.5` (outfmt 5 up to the end of the first batch's iteration),
+`db.ak.ps.l55.hba.7` and `db.ak.ps.rej.l55.b2.7` (psiblast: the first query's report, then the plain refusal).
 Rows `db.ub.*` (line RG series D, item bp-SF2): NCBI's engine error of a query batch's setup (`The average subject length
 is too short`, exit 3) after first batches that NCBI does not search, in every format: `OLD_FSC=1 BATCH_SIZE=1` with
 `../fasta/rps/allx_q649.faa` (two X-only queries, then a valid one) against `-subject q1c/avg_s.faa` (2, 0 and 0 letters;

@@ -5,3 +5,5 @@
   Before, both stopped before any output. Queries with no letter to search no longer meet the
   second refusal: their reports are written as in NCBI. An ungapped `blastp` search over a subject
   longer than 5,000,000 residues also writes those batches before its refusal.
+  With `-outfmt` 0 to 4 the report's opening lines (the program, the references and the database)
+  now come before these refusals also where the first batch meets them, as NCBI writes them.

@@ -1,0 +1,296 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2d2 a0_r2_m
+           2 sequences; 131 total letters
+
+
+
+Query= x2d dash 50
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x2d_motif frame +1 = QPQILRMHYFREDQILTAAQDPIL                         120     2e-44
+a0_r2                                                                 37.6    9e-12
+
+
+>x2d_motif frame +1 = QPQILRMHYFREDQILTAAQDPIL
+Length=72
+
+ Score = 120 bits (300),  Expect = 2e-44
+ Identities = 12/12 (100%), Positives = 12/12 (100%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  19  MHYFREDQILTA  30
+           MHYFREDQILTA
+Sbjct  19  MHYFREDQILTA  54
+
+
+ Score = 30.3 bits (67),  Expect = 7e-09
+ Identities = 4/15 (27%), Positives = 4/15 (27%), Gaps = 11/15 (73%)
+ Frame = -1
+
+Query  23  REDQIL--------T  29
+           R   IL        T
+Sbjct  66  R---ILSSSKNLIFT  31
+
+
+ Score = 27.6 bits (60),  Expect = 9e-08
+ Identities = 4/11 (36%), Positives = 4/11 (36%), Gaps = 7/11 (64%)
+ Frame = -3
+
+Query  20  H----Y--FRE  24
+           H    Y  F E
+Sbjct  34  HENNAYEEF-E  5
+
+
+ Score = 27.6 bits (60),  Expect = 9e-08
+ Identities = 4/12 (33%), Positives = 4/12 (33%), Gaps = 6/12 (50%)
+ Frame = -1
+
+Query  19  MH--YFREDQIL  28
+           MH    R    L
+Sbjct  24  MHTKNLR----L  1
+
+
+ Score = 27.2 bits (59),  Expect = 1e-07
+ Identities = 5/17 (29%), Positives = 5/17 (29%), Gaps = 10/17 (59%)
+ Frame = -3
+
+Query  24  E-D---Q---IL---TA  30
+           E D   Q    L    A
+Sbjct  70  E*DLEQQ*EFDLHENNA  20
+
+
+ Score = 23.7 bits (50),  Expect = 3e-06
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +2
+
+Query  27  IL  28
+           IL
+Sbjct  62  IL  67
+
+
+ Score = 23.3 bits (49),  Expect = 4e-06
+ Identities = 3/7 (43%), Positives = 3/7 (43%), Gaps = 4/7 (57%)
+ Frame = +3
+
+Query  21  Y--F--R  23
+           Y  F  R
+Sbjct  18  YALFS*R  38
+
+
+ Score = 18.7 bits (37),  Expect = 3e-04
+ Identities = 3/9 (33%), Positives = 3/9 (33%), Gaps = 4/9 (44%)
+ Frame = -2
+
+Query  23  REDQI-LTA  30
+           R   I   A
+Sbjct  71  R---IGS*A  54
+
+
+ Score = 17.5 bits (34),  Expect = 7e-04
+ Identities = 2/7 (29%), Positives = 2/7 (29%), Gaps = 5/7 (71%)
+ Frame = +3
+
+Query  29  T-----A  30
+           T     A
+Sbjct  3   TSNSSYA  23
+
+
+ Score = 17.5 bits (34),  Expect = 7e-04
+ Identities = 3/13 (23%), Positives = 3/13 (23%), Gaps = 6/13 (46%)
+ Frame = +2
+
+Query  22  FREDQI------L  28
+           F    I      L
+Sbjct  11  FFVCIIFVKIKFL  49
+
+
+ Score = 17.5 bits (34),  Expect = 7e-04
+ Identities = 2/7 (29%), Positives = 2/7 (29%), Gaps = 5/7 (71%)
+ Frame = -1
+
+Query  27  I-----L  28
+           I     L
+Sbjct  27  IMHTKNL  7
+
+
+ Score = 16.8 bits (32),  Expect = 0.001
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  23  REDQI  27
+           R+  I
+Sbjct  32  RK*CI  18
+
+
+ Score = 16.4 bits (31),  Expect = 0.002
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 2/5 (40%)
+ Frame = +3
+
+Query  21  Y--FR  23
+           Y   R
+Sbjct  48  YCCSR  62
+
+
+ Score = 14.1 bits (25),  Expect = 0.025
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  5   L  7
+
+
+ Score = 14.1 bits (25),  Expect = 0.025
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  21  Y  21
+           Y
+Sbjct  66  Y  68
+
+
+Sequence with id BL_ORD_ID:0 no longer exists in database...alignment skipped
+>a0_r2
+Length=59
+
+ Score = 31.4 bits (70),  Expect = 3e-09
+ Identities = 4/12 (33%), Positives = 4/12 (33%), Gaps = 8/12 (67%)
+ Frame = -1
+
+Query  22  FREDQILT---A  30
+           F     LT   A
+Sbjct  53  F-----LTQ*KA  33
+
+
+ Score = 27.9 bits (61),  Expect = 6e-08
+ Identities = 4/11 (36%), Positives = 5/11 (45%), Gaps = 5/11 (45%)
+ Frame = +1
+
+Query  20  HYFREDQILTA  30
+           H F +D    A
+Sbjct  19  HLF-KD----A  36
+
+
+ Score = 26.8 bits (58),  Expect = 2e-07
+ Identities = 4/10 (40%), Positives = 5/10 (50%), Gaps = 1/10 (10%)
+ Frame = +2
+
+Query  19  MHYFREDQIL  28
+           M  F   +IL
+Sbjct  32  ML-FIGLKIL  58
+
+
+ Score = 23.7 bits (50),  Expect = 3e-06
+ Identities = 4/16 (25%), Positives = 4/16 (25%), Gaps = 11/16 (69%)
+ Frame = -2
+
+Query  22  FR--E------D---Q  26
+           F   E      D   Q
+Sbjct  52  F*PNEKHL*KDDKEVQ  5
+
+
+ Score = 21.4 bits (44),  Expect = 2e-05
+ Identities = 3/12 (25%), Positives = 3/12 (25%), Gaps = 9/12 (75%)
+ Frame = +2
+
+Query  22  FREDQI-----L  28
+           F    I     L
+Sbjct  14  F----IIFLKML  37
+
+
+ Score = 20.6 bits (42),  Expect = 4e-05
+ Identities = 3/9 (33%), Positives = 3/9 (33%), Gaps = 5/9 (56%)
+ Frame = +2
+
+Query  22  FREDQI--L  28
+           F    I  L
+Sbjct  11  F---FIIFL  28
+
+
+ Score = 18.3 bits (36),  Expect = 3e-04
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 3/5 (60%)
+ Frame = -3
+
+Query  23  REDQI  27
+           R   I
+Sbjct  57  R---I  52
+
+
+ Score = 16.8 bits (32),  Expect = 0.001
+ Identities = 2/9 (22%), Positives = 2/9 (22%), Gaps = 7/9 (78%)
+ Frame = -3
+
+Query  19  MHYFREDQI  27
+           M       I
+Sbjct  21  M-------I  16
+
+
+ Score = 14.5 bits (26),  Expect = 0.015
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 1/5 (20%)
+ Frame = -3
+
+Query  19  M-HYF  22
+           M   F
+Sbjct  42  MKSIF  28
+
+
+ Score = 14.1 bits (25),  Expect = 0.024
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  2   L  4
+
+
+ Score = 14.1 bits (25),  Expect = 0.024
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  5   L  7
+
+
+ Score = 14.1 bits (25),  Expect = 0.024
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  29  T  29
+           T
+Sbjct  9   T  11
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.110    0.312    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1290
+
+
+  Database: x2d2 a0_r2_m
+    Posted date:  Nov 26, 2026  4:37 AM
+  Number of letters in database: 131
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1

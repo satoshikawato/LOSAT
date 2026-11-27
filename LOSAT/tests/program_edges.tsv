@@ -8,6 +8,7 @@ src	dst	scope
 blastn	common	code
 blastp	blastn	code
 blastp	common	code
+blastp	phi_search	code
 blastp	psiblast	code
 blastp	pssm_search	code
 blastp	rps_search	code
@@ -16,7 +17,9 @@ blastx	blastn	code
 blastx	blastp	code
 blastx	common	code
 blastx	tblastx	code
+phi_search	pssm_search	code
 psiblast	blastp	code
+psiblast	phi_search	code
 psiblast	pssm_search	code
 pssm_search	blastn	code
 pssm_search	blastp	code

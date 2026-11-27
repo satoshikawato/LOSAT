@@ -114,6 +114,13 @@ export interface DatabaseSnapshot {
   readonly filterFiles?: readonly DatabaseFilterFileSnapshot[];
 }
 
+/** Metadata of a file-based query (`-in_pssm` or `-in_msa`) fixed when a run is queued. */
+export interface QueryFileSnapshot {
+  readonly flag: '-in_pssm' | '-in_msa';
+  readonly name: string;
+  readonly size: number;
+}
+
 export interface RunSnapshot {
   readonly kind?: 'search';
   readonly runId: string;
@@ -127,6 +134,8 @@ export interface RunSnapshot {
   readonly title?: string;
   readonly argv: readonly string[];
   readonly query: InputSnapshot;
+  /** Present when the run used a PSSM (`-in_pssm`) or MSA (`-in_msa`) file query instead of FASTA `-query`. */
+  readonly queryFile?: QueryFileSnapshot;
   readonly subject: InputSnapshot;
   /** Present when the run searched a local BLAST database (`-db`); absent for `-subject` FASTA runs. */
   readonly database?: DatabaseSnapshot;

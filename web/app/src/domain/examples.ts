@@ -139,7 +139,7 @@ export const EXAMPLE_SETS: readonly ExampleSet[] = Object.freeze([
   {
     id: 'uniprot-ecoli-k12',
     label: 'E. coli K-12 proteins (UniProt reviewed)',
-    programs: ['blastp', 'blastx'],
+    programs: ['blastp', 'blastx', 'psiblast'],
     url: 'https://rest.uniprot.org/uniprotkb/stream?query=reviewed:true+AND+organism_id:83333&format=fasta&compressed=true',
     fileName: 'uniprot_reviewed_ecoli_k12.fasta',
     downloadBytes: 981_194,
@@ -149,7 +149,7 @@ export const EXAMPLE_SETS: readonly ExampleSet[] = Object.freeze([
   {
     id: 'pdbaa',
     label: 'PDB proteins (pdbaa)',
-    programs: ['blastp', 'blastx'],
+    programs: ['blastp', 'blastx', 'psiblast'],
     url: `${NCBI_FTP}/blast/db/FASTA/pdbaa.gz`,
     fileName: 'pdbaa',
     downloadBytes: 36_755_745,

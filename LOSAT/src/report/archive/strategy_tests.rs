@@ -204,6 +204,7 @@ fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
         .set_search_sets(
             Vec::new(),
             crate::algorithm::rps_search::volumes::search_sets(Some(i64::MIN), None),
+            Vec::new(),
         )
         .unwrap();
     for at in 0..2 {

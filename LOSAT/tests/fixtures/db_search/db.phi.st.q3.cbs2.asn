@@ -1,0 +1,300 @@
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "plain",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">YP_009220477.1 hypothetical protein [White spot
+ syndrome virus]"
+                }
+              }
+            },
+            title "YP_009220477.1 hypothetical protein [White spot syndrome
+ virus]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 104,
+            seq-data ncbieaa "MYLSHIRQTPLVEERRALTFKMYHHNNNNQHSFVNCQCRRTSSSINCS
+SCSRETFNSVKAIQYFNKTSRNNTAHHFKMPASKDRNYSSFEYAETAVAAHNISQW"
+          }
+        }
+      }
+    },
+    subject database "tests/db_search/paja",
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean FALSE
+      },
+      {
+        name "SegFiltering",
+        value boolean FALSE
+      },
+      {
+        name "WordThreshold",
+        value integer 11
+      },
+      {
+        name "WindowSize",
+        value integer 40
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      },
+      {
+        name "GapTrigger",
+        value real { 22, 10, 0 }
+      },
+      {
+        name "IgnoreMsaMaster",
+        value boolean FALSE
+      },
+      {
+        name "PseudoCountWeight",
+        value integer 0
+      },
+      {
+        name "InclusionThreshold",
+        value real { 2, 10, -3 }
+      },
+      {
+        name "PHIPattern",
+        value string "C-x(2)-C"
+      }
+    },
+    format-options {
+      {
+        name "Web_StepNumber",
+        value integer 1
+      }
+    }
+  }
+}
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "plain",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">YP_009220540.1 hypothetical protein [White spot
+ syndrome virus]"
+                }
+              }
+            },
+            title "YP_009220540.1 hypothetical protein [White spot syndrome
+ virus]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 856,
+            seq-data ncbieaa "MSSTSSSTKKRVHEEDENLIPQPKKKKSKKVLPFPVDKYRAVDKKVVN
+LIHKILDQEKDHLSSTELQMITECNGAREDLLKHLLDEGEFNPTIIEVVSSMPIETIYEILSSSADDKKFVQISLSML
+IHILFFADKGTMWVSNACVQNVLGNDYKVEFENIRKKYLILEDLLNGVSNHWSEHGPLSHMLHSSIPIVQDMLLNRLV
+RYFSTYDGDAQFDISFIINSVLWGIDKSVLNELTQLISRGVFIVSYVPMRVRTPSKDSNRPQNTPSQNMSALGMKLNT
+FSSRISVYRNNTFKKLTELVHNFDYGSKDASSSSPPPPSLSDSVNTFVRLYTNYDIFLKVISDWKMPYGFFKKTFDVL
+YSKGLMTLSVSEYTLKKELVTFLRALKEREILIYKMEKRDIICILKKSLFGFNFRCLKQLLPLFKHFLKIEEVKHIAR
+FVFRDYSLMCKTQKDLQSFPAIQSASLFMEEFPWLAKTWIDDDDDEGGKGHTLLTFAIVHRYPLISQLISHPILKSLV
+NTTCRDKHFTPLMHLANTSIMYQCNTLLCLIINGAKPEFINKFNENVLHIAIENVNYGVITELRGTLSSEQIEKMVNV
+RRMMDNTTPLMIALARENIVLAQLFDGLYKPKIKVRFGSSKRLRIPEFVLLKGLKESVAYLETRNISYDINIIKDAVM
+DNSLFEEEYEIAAAGLRGNNCDPEADEKTMNTWNFFTKNSTKWASSIFQKNRQKFVKIVDGMNRTYEDSECAICLDSL
+DGDLPSGRTTCGHCFHNVCWLSLIRMSGPNNGSRARGGGIKCPSCRQVTCLGKRLGVADYDIETEEERDTKNVVPSVE
+EGRREWRKIGVDRYEFLVGGVWTNEIKL"
+          }
+        }
+      }
+    },
+    subject database "tests/db_search/paja",
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean FALSE
+      },
+      {
+        name "SegFiltering",
+        value boolean FALSE
+      },
+      {
+        name "WordThreshold",
+        value integer 11
+      },
+      {
+        name "WindowSize",
+        value integer 40
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      },
+      {
+        name "GapTrigger",
+        value real { 22, 10, 0 }
+      },
+      {
+        name "IgnoreMsaMaster",
+        value boolean FALSE
+      },
+      {
+        name "PseudoCountWeight",
+        value integer 0
+      },
+      {
+        name "InclusionThreshold",
+        value real { 2, 10, -3 }
+      },
+      {
+        name "PHIPattern",
+        value string "C-x(2)-C"
+      },
+      {
+        name "EffectiveSearchSpace",
+        value big-integer 66394
+      },
+      {
+        name "CompositionBasedStats",
+        value integer 0
+      }
+    },
+    format-options {
+      {
+        name "Web_StepNumber",
+        value integer 1
+      }
+    }
+  }
+}
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "plain",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">YP_009220504.1 putative CREB-binding protein,
+ immediate-early protein [White spot syndrome virus]"
+                }
+              }
+            },
+            title "YP_009220504.1 putative CREB-binding protein,
+ immediate-early protein [White spot syndrome virus]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 624,
+            seq-data ncbieaa "MSSTTSPSSLWDDDDDDDEEDEKDVKQEVSNRPPIFSYMETVSFSDND
+EDDNKGEEECFGSNFDMFGDSDNMPSTSTAPFPPPSTTTPLPTPRSIMDTDSDECDEEGAAAASAPSIAASSSIPVGI
+SEAELKKMEKKKRKEIKKLKKMMKDPLPHLYVGGEPPVAADYKTRANISLYKVDPSIDMCGVAPPQFCAELPTPSIDV
+YTSSYVFPPPTPAMHNKKGFKKCQFLKGRKALRKWIHENVCMAPPGKRGGVFLAHLEQRFLAEHGDEYKVPRMFVSRV
+LNKAFPNLIARADTLCSDMTFYTNLCWIVNGVVVCFDKDDGGIHGDASEYATGENFDTVVFHKREEQKTNGSASKKRR
+LTPDTSNMGTSTDVQEFQTMGTNTDMQEFQSMGTNTNPIETSSVGVNTNPLPNPPPRLVITPLTNDVPELDMMWLYSP
+SRGGGNSRMSANTGTSPLSNTPIPTCFTGGANVVVPNGFVPPTFPLECDEDDPSIPNSYNYEEDKVFHPFYEYMAKYL
+SPLVPSYNKGQTCNVVQEWFKGSFSLAKRRGTVPKFCSNISHAFFCNMDVCTAMCKWAKTVIRHGQYCNRCIVRRSCT
+SMLAYHYIVCRDASCDVPKCRERVRNDMDD"
+          }
+        }
+      }
+    },
+    subject database "tests/db_search/paja",
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean FALSE
+      },
+      {
+        name "SegFiltering",
+        value boolean FALSE
+      },
+      {
+        name "WordThreshold",
+        value integer 11
+      },
+      {
+        name "WindowSize",
+        value integer 40
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      },
+      {
+        name "GapTrigger",
+        value real { 22, 10, 0 }
+      },
+      {
+        name "IgnoreMsaMaster",
+        value boolean FALSE
+      },
+      {
+        name "PseudoCountWeight",
+        value integer 0
+      },
+      {
+        name "InclusionThreshold",
+        value real { 2, 10, -3 }
+      },
+      {
+        name "PHIPattern",
+        value string "C-x(2)-C"
+      },
+      {
+        name "EffectiveSearchSpace",
+        value big-integer 66394
+      },
+      {
+        name "CompositionBasedStats",
+        value integer 0
+      }
+    },
+    format-options {
+      {
+        name "Web_StepNumber",
+        value integer 1
+      }
+    }
+  }
+}

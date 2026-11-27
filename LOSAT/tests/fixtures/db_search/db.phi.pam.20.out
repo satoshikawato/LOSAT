@@ -1,0 +1,4 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+
+Query_1 YP_009220601.1 TK.. : Matrix PAM250 not allowed in PHI-BLAST
+ 

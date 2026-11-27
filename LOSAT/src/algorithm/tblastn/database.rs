@@ -85,9 +85,15 @@ impl TblastnDatabase {
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
     /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
     /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
-    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+    pub(super) fn keeping_scope(
+        mut self,
+        keeps: bool,
+        separate_xml2: bool,
+        record_keeps: Option<bool>,
+    ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
+        self.taxdb.set_record_keeps_scope(record_keeps);
         self
     }
 
@@ -607,17 +613,14 @@ pub(super) struct CallReads<'a> {
     /// Those of the failed batch, by its first query, which its Seq-aligns read before the
     /// failure (`ErrorAfterBatchReports::title_posts`, `write_failed`).
     failed_titled: std::sync::Mutex<Option<(usize, crate::report::diag_log::Posts)>>,
-    one_by_one: bool,
 }
 
 impl<'a> CallReads<'a> {
     /// The reads of a call of `database` (`None`: the subjects are records) whose batches
-    /// `batches` makes (each with its searched queries), in a run of the first format `format`,
-    /// whose reports may read the reported sequences one by one (`shared::prefetch_may_be_off`).
+    /// `batches` makes (each with its searched queries).
     pub(super) fn of(
         database: Option<&'a TblastnDatabase>,
         batches: impl FnOnce() -> Vec<crate::blastinput::seq_range::RangedBatch>,
-        format: shared::PrefetchFormat,
     ) -> Self {
         let excluded = database.and_then(fetch_excluded);
         let notes = match excluded {
@@ -634,7 +637,6 @@ impl<'a> CallReads<'a> {
             utf8: shared::CallUtf8::default(),
             titled: Default::default(),
             failed_titled: Default::default(),
-            one_by_one: shared::prefetch_may_be_off(format),
         }
     }
 
@@ -712,13 +714,7 @@ impl<'a> CallReads<'a> {
             .map(|note| note.at);
         let aligned = drop_unaligned(database, hitlists);
         let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
-        let read = read_titles(
-            database,
-            hitlists,
-            range.start,
-            (earlier, self.one_by_one),
-            titles,
-        );
+        let read = read_titles(database, hitlists, range.start, earlier, titles);
         self.utf8.note(
             range.start,
             shared::Utf8Read::of_read(&read, Option::as_ref),
@@ -846,10 +842,10 @@ pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
-    (earlier, one_by_one): (shared::EarlierUtf8, bool),
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db, one_by_one);
+    let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
     headers.note_earlier(earlier);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
@@ -965,7 +961,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
-    (format, gapped): (shared::PrefetchFormat, bool),
+    (format, gapped, has_pssm): (shared::PrefetchFormat, bool, bool),
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -989,7 +985,12 @@ pub(super) fn prefetch_stop(
         let seq_aligns = lists()
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
-        if shared::prefetch_off(format, seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns)
+            || (has_pssm
+                && hitlists
+                    .get(span.clone())
+                    .is_some_and(super::nullb_report::hitlists_have_empty_subject_row_db))
+        {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -1103,7 +1104,6 @@ pub(super) fn parsed_shown(
         // `tblastn_app::search`).
         prefetched: shared::prefetches_subjects(Some(prefetch_format(formats)))
             && !shared::prefetch_always_off(prefetch_format(formats)),
-        one_by_one: shared::prefetch_may_be_off(prefetch_format(formats)),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Tblastn,
             formats
@@ -1228,6 +1228,7 @@ pub(super) fn reported_subjects(
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
+    has_nullb: bool,
     seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -1254,12 +1255,14 @@ pub(super) fn reported_subjects(
         batches,
         |span| seq_aligns_of(&hitlists[span], gapped),
         |span| {
-            shared::BatchPrefetch::prefetch_fails_among(
-                hitlists[span]
-                    .iter()
-                    .flat_map(KappaResultHitList::lists)
-                    .map(|list| titled(usize::try_from(list.oid).ok()?)),
-            )
+            (has_nullb
+                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
+                || shared::BatchPrefetch::prefetch_fails_among(
+                    hitlists[span]
+                        .iter()
+                        .flat_map(KappaResultHitList::lists)
+                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
+                )
         },
     );
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {

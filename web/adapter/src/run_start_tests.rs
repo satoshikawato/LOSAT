@@ -1631,7 +1631,7 @@ fn registered_run_files_uses_one_reader_regardless_of_parse() {
         "-no_such_option",
     ];
     let psiblast_help = ["psiblast", "-query", "q.fa", "-subject", "s.fa", "-h"];
-    let want_psiblast: Vec<Vec<u8>> = Vec::new();
+    let want_psiblast: Vec<Vec<u8>> = vec![b"q.fa".to_vec(), b"s.fa".to_vec()];
     assert_eq!(
         registered_run_files(&psiblast_base, &registry),
         want_psiblast
@@ -1643,6 +1643,11 @@ fn registered_run_files_uses_one_reader_regardless_of_parse() {
     assert_eq!(
         registered_run_files(&psiblast_help, &registry),
         want_psiblast
+    );
+    let rps_base = ["rpsblast", "-query", "q.fa", "-db", "cdd"];
+    assert_eq!(
+        registered_run_files(&rps_base, &registry),
+        Vec::<Vec<u8>>::new()
     );
 
     crate::files::release(handle).unwrap();
@@ -1847,7 +1852,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -1860,25 +1865,25 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","log_file_name":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","log_file_name":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     // `log_file` keeps NCBI's scan of the argv; `log_file_name` is the normalized host file name
     // under which a run gives the file on stream 8 (line WQA D19, case 4).
     assert_eq!(
         start_json(&["tblastx", "-logfile", "logs/"]).unwrap(),
-        r#"{"conffile":null,"log_file":"logs/","log_file_name":"logs","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"logs/","log_file_name":"logs","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&["tblastx", "-logfile", "./run.log"]).unwrap(),
-        r#"{"conffile":null,"log_file":"./run.log","log_file_name":"run.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"./run.log","log_file_name":"run.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&["tblastx", "-logfile", "-"]).unwrap(),
-        r#"{"conffile":null,"log_file":"-","log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"-","log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&["tblastx", "-logfile", "/dev/stdout"]).unwrap(),
-        r#"{"conffile":null,"log_file":"/dev/stdout","log_file_name":"/dev/stdout","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"/dev/stdout","log_file_name":"/dev/stdout","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     // The name of the search strategy file, under which a run gives it (line RG item F1w).
     assert_eq!(
@@ -1890,12 +1895,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "run.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"run.log","log_file_name":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"run.log","log_file_name":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     // A run that prints the command line's text (line WQA's D14, 2026-11-20): a version word, read
     // before the arguments and the configuration (no `-conffile` to register, not a dry run), or a
@@ -1911,24 +1916,45 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "v.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"v.log","log_file_name":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
+        r#"{"conffile":null,"log_file":"v.log","log_file_name":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
-        r#"{"conffile":"c.ini","log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":"c.ini","log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     assert_eq!(
         start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
     );
     // The words before a help word are read first: an error there is the run's.
     assert_eq!(
         start_json(&["blastp", "-evalue", "x", "-help"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":null,"out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
+    );
+    // PSW1: psiblast PSSM/MSA query and PSSM output files, and tblastn -in_pssm.
+    assert_eq!(
+        start_json(&[
+            "psiblast",
+            "-in_pssm",
+            "seed.pssm",
+            "-subject",
+            "s.fa",
+            "-out_pssm",
+            "./out.asn",
+            "-out_ascii_pssm",
+            "out.ascii",
+            "-save_each_pssm",
+        ])
+        .unwrap(),
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false,"query_file":"seed.pssm","out_pssm":"out.asn","out_ascii_pssm":"out.ascii","save_each_pssm":true}"#
     );
     assert_eq!(
-        start_json(&["psiblast"]).unwrap_err(),
-        "psiblast is not available in the browser (ABI v2)"
+        start_json(&["tblastn", "-in_pssm", "seed.pssm", "-db", "nt"]).unwrap(),
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":true,"query_file":"seed.pssm","out_pssm":null,"out_ascii_pssm":null,"save_each_pssm":false}"#
+    );
+    assert_eq!(
+        start_json(&["rpsblast"]).unwrap_err(),
+        "rpsblast is not available in the browser (ABI v2)"
     );
 }
 
@@ -2249,5 +2275,35 @@ fn a_version_comes_before_the_configuration_and_the_help_after_it() {
     assert_eq!(
         run_files(&streams),
         Some(vec![("v.log".to_string(), String::new())])
+    );
+}
+
+#[test]
+fn range_recorder_faults_when_hit_list_count_mismatches_parts() {
+    let mut recorder = RangeRecorder::new(vec![6], vec![Arc::new(AtomicU64::new(0))]);
+    recorder.round_begin(0, 1);
+    recorder.round_begin(0, 2);
+    assert_eq!(recorder.parts.len(), 2);
+
+    // Zero hit lists (e.g. search that handed over no hit list) or exact match is valid.
+    recorder.check_hit_lists(0);
+    assert!(recorder.fault.is_none());
+    recorder.check_hit_lists(2);
+    assert!(recorder.fault.is_none());
+
+    // Fewer hit lists than parts faults instead of silently truncating later rounds.
+    recorder.check_hit_lists(1);
+    assert_eq!(
+        recorder.fault.as_deref(),
+        Some("1 hit lists for 2 parts of the search")
+    );
+
+    // More hit lists than parts also faults.
+    let mut extra = RangeRecorder::new(vec![6], vec![Arc::new(AtomicU64::new(0))]);
+    extra.round_begin(0, 1);
+    extra.check_hit_lists(3);
+    assert_eq!(
+        extra.fault.as_deref(),
+        Some("3 hit lists for 1 parts of the search")
     );
 }

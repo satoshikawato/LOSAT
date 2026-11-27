@@ -1,0 +1,103 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/outfmt0/xsb_qa.faa).
+           1 sequences; 31 total letters
+
+
+
+Query= na
+
+Length=93
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qa                                                                    64.7    2e-22
+
+
+> qa
+Length=31
+
+ Score = 64.7 bits (156),  Expect = 2e-22, Method: Compositional matrix adjust.
+ Identities = 31/31 (100%), Positives = 31/31 (100%), Gaps = 0/31 (0%)
+ Frame = +1
+
+Query  1   MKELLRSAFQDIYEKCMRQLAEFSKDIYRLC  93
+           MKELLRSAFQDIYEKCMRQLAEFSKDIYRLC
+Sbjct  1   MKELLRSAFQDIYEKCMRQLAEFSKDIYRLC  31
+
+
+ Score = 13.5 bits (23),  Expect = 0.039, Method: Compositional matrix adjust.
+ Identities = 4/20 (20%), Positives = 11/20 (55%), Gaps = 0/20 (0%)
+ Frame = -1
+
+Query  66  FRQLTHAFFINILKRATQQF  7
+            ++L  + F +I ++  +Q 
+Sbjct  1   MKELLRSAFQDIYEKCMRQL  20
+
+
+ Score = 11.5 bits (18),  Expect = 0.34, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 7/12 (58%), Gaps = 1/12 (8%)
+ Frame = -1
+
+Query  81  NIFAKF-RQLTH  49
+           +I+ K  RQL  
+Sbjct  11  DIYEKCMRQLAE  22
+
+
+ Score = 11.2 bits (17),  Expect = 0.53, Method: Compositional matrix adjust.
+ Identities = 3/12 (25%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  36  NILKRATQQFFH  1
+            +L+ A Q  + 
+Sbjct  3   ELLRSAFQDIYE  14
+
+
+ Score =  8.8 bits (11),  Expect = 3.8, Method: Compositional matrix adjust.
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -1
+
+Query  75  FAKF  64
+            A+F
+Sbjct  20  LAEF  23
+
+
+ Score =  8.8 bits (11),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  55  DACI  44
+           + C+
+Sbjct  14  EKCM  17
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 961
+
+
+  Database: User specified sequence set (Input: tests/fasta/outfmt0/xsb_qa.faa).
+    Posted date:  Unknown
+  Number of letters in database: 31
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1
+Window for multiple hits: 40

@@ -159,7 +159,7 @@ fn initial_tabular_oracle_bytes() {
                 .iter()
                 .zip(outputs_bytes.iter_mut())
                 .map(|(outfmt, bytes)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(bytes),
                 })

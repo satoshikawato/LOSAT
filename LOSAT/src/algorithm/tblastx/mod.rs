@@ -7,7 +7,7 @@
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 mod anchored;
-mod archive;
+pub(crate) mod archive;
 pub mod args;
 mod besthit;
 pub mod blast_aascan;
@@ -31,6 +31,9 @@ pub(crate) mod report;
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
 pub(crate) mod seqalign;
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755: the SAM records
+// (outfmt 17) of a TBLASTX strategy that BLASTN's application runs.
+mod sam;
 // The scores of the search's matrix (`-matrix`).
 pub(crate) mod scoring;
 pub mod stage_dump;

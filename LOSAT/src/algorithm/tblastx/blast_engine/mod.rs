@@ -20,6 +20,7 @@ mod run_impl;
 
 // Re-export the main run function
 pub use run_impl::check_options;
+pub(crate) use run_impl::library_batch_sizes;
 pub use run_impl::run;
 pub use run_impl::run_local;
 pub use run_impl::run_local_database;
@@ -167,6 +168,10 @@ pub(crate) struct TblastxBatch {
     /// batch pipe keeps here for the batch loop to print when it takes the batch; empty
     /// otherwise (the block is printed at the end of the search). No NCBI counterpart.
     pub x_timing: Vec<String>,
+    /// NCBI's count of the batch's successful initial extensions (`good_init_extends`, an `Int4`
+    /// that LOSAT keeps wider), counted where the running application sizes its batches by it
+    /// (BLASTN's), else 0.
+    pub good_init_extends: u64,
     /// The first of the batch's re-evaluation fetches (`check_oid_exclusion`) that read a header
     /// with a UTF8String where a VisibleString is expected (`FetchExcluded::excludes`, in
     /// increasing ordinal): NCBI's warning comes there, before its Seq-aligns' reads.

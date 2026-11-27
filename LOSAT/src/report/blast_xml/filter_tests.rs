@@ -62,7 +62,7 @@ fn custom_dust_and_seg_and_masker() {
             None,
             None,
             None,
-            Some(WindowMasker::Database("db.wm")),
+            Some(WindowMasker::Database(b"db.wm")),
             false
         )),
         "W -d db.wm;"
@@ -136,7 +136,7 @@ fn a_long_repeat_database_is_written_whole() {
     let text = s(filter_string(
         Some((20, 128, 1)),
         None,
-        Some(&database),
+        Some(database.as_bytes()),
         None,
         false,
     ));

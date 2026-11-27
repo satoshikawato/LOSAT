@@ -1,0 +1,6495 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "psitblastn"
+              },
+              "data": {
+                "int": 11
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "x2d a0m subjects"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 300
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 300
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.9628183065268e-44
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 120.003357577569
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 12
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 12
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 40.5
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 53,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 67
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 67
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 7.32194312940084e-09
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 30.2518563888259
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 23.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 63,
+                      "to": 65,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 57,
+                      "to": 62,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 33,
+                      "to": 56,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 28,
+                      "to": 28,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 30,
+                      "to": 32,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 60
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 60
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 8.51248772674745e-08
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 27.5554593574044
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 31,
+                      "to": 33,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 30,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 20,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 16,
+                      "to": 18,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 10,
+                      "to": 15,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 7,
+                      "to": 9,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 23,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 6,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 60
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 60
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 8.51248772674745e-08
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 27.5554593574044
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 33.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 23,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 12,
+                      "to": 17,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 3,
+                      "to": 11,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 2,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 59
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 59
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.2082676598135e-07
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 27.1702597814871
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 5
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 5
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 23.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 23,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 67,
+                      "to": 69,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 64,
+                      "to": 66,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 24,
+                      "to": 24,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 61,
+                      "to": 63,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 52,
+                      "to": 60,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 49,
+                      "to": 51,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 40,
+                      "to": 48,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 34,
+                      "to": 39,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 33,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 28,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 24,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 50
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 50
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.81517591100121e-06
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 23.7034635982309
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 7.16666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 61,
+                      "to": 66,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 49
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 49
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.99204903613097e-06
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 23.3182640223135
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 10.5
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 20,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 17,
+                      "to": 19,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 25,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 28,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 29,
+                      "to": 34,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 35,
+                      "to": 37,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 37
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 37
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.000259495804220047
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 18.6958691113053
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 27.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 68,
+                      "to": 70,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 65,
+                      "to": 67,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 62,
+                      "to": 64,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 53,
+                      "to": 61,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.000730148061878996
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 17.5402703835533
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 7.16666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 28,
+                      "to": 28,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 4,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 5,
+                      "to": 19,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 29,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 22,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.000730148061878996
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 17.5402703835533
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 23.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 10,
+                      "to": 27,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 28,
+                      "to": 45,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 46,
+                      "to": 48,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 34
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.000730148061878996
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 17.5402703835533
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 7.16666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 24,
+                      "to": 26,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 9,
+                      "to": 23,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 6,
+                      "to": 8,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.00144914630209247
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.7698712317185
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 17,
+                      "to": 31,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 31
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.00203792321331473
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.3846716558012
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 10.5
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 20,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 49,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 50,
+                      "to": 55,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 56,
+                      "to": 61,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0246928808770196
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 6,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0246928808770196
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 1
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 20,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 65,
+                      "to": 67,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 86
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 86
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.29204374049068e-12
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 37.5706483312556
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 13.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 10,
+                      "to": 10,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 42,
+                      "to": 44,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 11,
+                      "to": 13,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 45,
+                      "to": 53,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 14,
+                      "to": 15,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 59,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 70
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 70
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.53512830732339e-09
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 31.407455116578
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 30.5
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 50,
+                      "to": 52,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 28,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 44,
+                      "to": 49,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 35,
+                      "to": 43,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 29,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 32,
+                      "to": 34,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 61
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 61
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 5.91222424101043e-08
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 27.9406589333218
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 5
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 37.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 26,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 24,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 32,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 28,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 29,
+                      "to": 29,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 33,
+                      "to": 35,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 55
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 55
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.80698426470256e-07
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 25.6294614778177
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 33.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 18,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 31,
+                      "to": 33,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 19,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 20,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 34,
+                      "to": 39,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 40,
+                      "to": 42,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 43,
+                      "to": 45,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 46,
+                      "to": 48,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 50
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 50
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.74582086159509e-06
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 23.7034635982309
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 4
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 46,
+                      "to": 51,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 40,
+                      "to": 45,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 23,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 39,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 36,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 24,
+                      "to": 24,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 16,
+                      "to": 18,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 7,
+                      "to": 15,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 6,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 42
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 42
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.40840269401856e-05
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 20.6218669908921
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 3
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 23.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 10,
+                      "to": 12,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 24,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 13,
+                      "to": 18,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 24,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 25,
+                      "to": 27,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 36
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 36
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.00034693101649136
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 18.310669535388
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 17.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 22,
+                      "to": 22,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 54,
+                      "to": 56,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 23,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 51,
+                      "to": 53,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 32
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.00134604334557735
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 16.7698712317185
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 30.5
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 18,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 20,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 25,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 0
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 15,
+                      "to": 17,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0149473510618113
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.4586737762144
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 13.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 18,
+                      "to": 18,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 39,
+                      "to": 41,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "x2dq"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 36,
+                      "to": 38,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 19,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 35,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0237688203501007
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 3,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0237688203501007
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 27,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 6,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0237688203501007
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 28,
+                      "to": 28,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 8,
+                      "to": 10,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0237688203501007
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 26,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 30,
+                      "to": 32,
+                      "strand": "minus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 25
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0.0237688203501007
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.0734742002971
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 1
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.83333333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "x2dq"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 0
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 21,
+                      "to": 21,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "x2dq"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 53,
+                      "to": 55,
+                      "strand": "plus",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

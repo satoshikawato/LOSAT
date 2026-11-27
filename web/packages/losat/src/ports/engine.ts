@@ -34,12 +34,15 @@ export interface ProgramDescription {
  * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
  * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
  * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
- * data, as the CLI does (line WQA's D16, 2026-11-20). A refused argv says it too when the engine's
- * start read the registry before the option that it refuses (line WQA's D13 round 3, L1).
+ * data, as the CLI does (line WQA's D16, 2026-11-20), and whether `-parse_deflines` is active
+ * (`parseDeflines`, ABI v2 *validation*, version 15; line RG-XT item X7-5, 2026-11-25). A refused
+ * argv says `dataLoaders` when the engine's start read the registry before the option that it
+ * refuses (line WQA's D13 round 3, L1), and says `parseDeflines` only when the argv parsed
+ * (omitted on parse errors so the host keeps its previous value).
  */
 export type ValidationResult =
-  | { readonly ok: true; readonly dataLoaders: boolean }
-  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean };
+  | { readonly ok: true; readonly dataLoaders: boolean; readonly parseDeflines: boolean }
+  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean; readonly parseDeflines?: boolean };
 
 /**
  * What NCBI's application reads of an argv before its arguments (docs/web/abi_v2.md §4
@@ -78,6 +81,17 @@ export interface StartInfo {
    * (`EngineRunRequest.files`), and takes no subject (line WQA D12a, 2026-11-20).
    */
   readonly database: boolean;
+  /**
+   * The query file name (`-in_pssm` or `-in_msa`) in the run's working directory (`EngineRunRequest.files`),
+   * when the run reads its query from a file instead of a FASTA query input (query handle 0; PSW1).
+   */
+  readonly queryFile?: string | null;
+  /** The normalized host file name for `-out_pssm` on stream 8, if any (PSW1). */
+  readonly outPssm?: string | null;
+  /** The normalized host file name for `-out_ascii_pssm` on stream 8, if any (PSW1). */
+  readonly outAsciiPssm?: string | null;
+  /** Whether `-save_each_pssm` numbers PSSM output files (`F.1`, `F.2`, ...; PSW1). */
+  readonly saveEachPssm?: boolean;
 }
 
 /** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a program that LOSAT Web does not run). */
@@ -103,6 +117,8 @@ export interface HspRecord {
   readonly s_end: number;
   readonly query_frame: number | null;
   readonly subject_frame: number | null;
+  /** Query sequence length reported by the engine (used for `-in_pssm`/`-in_msa` runs without FASTA query records). */
+  readonly query_length?: number | null;
   readonly subject_length: number | null;
   readonly query_aligned: string | null;
   readonly subject_aligned: string | null;
@@ -112,6 +128,8 @@ export interface HspRecord {
   readonly out0: readonly [number, number] | null;
   /** Byte range [start, end) of the heading of this HSP's subject in the outfmt 0 text, or null. */
   readonly out0_subject: readonly [number, number] | null;
+  /** 1-based PSI-BLAST iteration round number, present for multi-round `psiblast` searches. */
+  readonly round?: number;
 }
 
 export type EnginePhase = 'preparing' | 'running' | 'finalizing';
@@ -198,7 +216,8 @@ export interface EngineInput {
 export interface EngineRunRequest {
   readonly runId: string;
   readonly argv: readonly string[];
-  readonly query: EngineInput;
+  /** The query; none for a run of `-in_pssm` or `-in_msa` (`StartInfo.queryFile`), which reads its query from `files`. */
+  readonly query?: EngineInput;
   /** The subject; none for a run of `-db` (`StartInfo.database`), which searches the database of `files`. */
   readonly subject?: EngineInput;
   /**

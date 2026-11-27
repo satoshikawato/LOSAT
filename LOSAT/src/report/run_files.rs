@@ -72,9 +72,10 @@ pub trait FileStream: Send {
 }
 
 /// Where the files of a run go.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum RunFiles {
     /// The file system, at the names that the arguments give (the command line, the library).
+    #[default]
     Disk,
     /// The caller's receiver, which gets each file whole when it is complete, or as it is written
     /// (`FileReceiver::open`, a tool's run; LOSAT Web).
@@ -133,6 +134,22 @@ impl RunFiles {
         }
     }
 
+    /// Like [`RunFiles::log_target`], also enforcing the command-line / library self-reference
+    /// refusal on [`RunFiles::Disk`] before opening or creating `-logfile` (line WQA D23,
+    /// `Q-D23=A`): refuses any `-logfile` pointing to an input file read by `start.program()`
+    /// with `words` and `start` (`report::log_inputs::check_disk_logfile`).
+    pub(crate) fn log_target_for<S: AsRef<OsStr>>(
+        &self,
+        words: &[S],
+        start: &crate::blastinput::ncbi_environment::ApplicationStart,
+        name: Option<&OsStr>,
+    ) -> Result<(DiagTarget, Option<Vec<u8>>), String> {
+        if matches!(self, RunFiles::Disk) {
+            crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
+        }
+        self.log_target(name)
+    }
+
     /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
     /// entry if the file is made: `run.log` for `./run.log` and ` run.log`, `logs` for `logs/`,
     /// `/tmp/run.log` outside the working directory, `/dev/stdout` for a search's `/dev/stdout`),
@@ -164,14 +181,81 @@ impl RunFiles {
             _ => Ok(()),
         }
     }
+
+    /// What a psiblast PSSM output file (`-out_pssm` or `-out_ascii_pssm`) named `name` resolves
+    /// to for a `Receiver` (`PssmTarget`): uses the same working-directory output-name rules as
+    /// `OpenFiles::create` (`receiver_output_name`). No NCBI counterpart: NCBI writes files.
+    pub(crate) fn pssm_target(&self, option: &str, name: &OsStr) -> PssmTarget {
+        let RunFiles::Receiver(receiver) = self else {
+            return PssmTarget::Unopened;
+        };
+        match receiver_output_name(receiver.as_ref(), name.as_encoded_bytes()) {
+            OutputName::File {
+                name: host_name, ..
+            } => PssmTarget::File(host_name),
+            OutputName::Discard => PssmTarget::Discard,
+            OutputName::Full => PssmTarget::Full,
+            OutputName::Unopened => PssmTarget::Unopened,
+            OutputName::Stdout => PssmTarget::Refused(format!(
+                "an {option} file that is also the standard output ({}) is not supported by LOSAT's PSIBLAST",
+                name.display()
+            )),
+            OutputName::Special => PssmTarget::Refused(format!(
+                "an {option} file '{}' that is the standard error, a device or a file of \
+                 procfs (LOSAT Web writes no such file)",
+                name.display()
+            )),
+            OutputName::Existing => PssmTarget::Refused(format!(
+                "an {option} file '{}' that is a file of the run's directory (the command \
+                 line replaces it; LOSAT Web reads the run's files and writes none of them)",
+                name.display()
+            )),
+        }
+    }
+
+    /// The host file name of a `-out_pssm` or `-out_ascii_pssm` value `name` (what a `Receiver`
+    /// names the stream 8 entry if the file is made: `pssm.asn` for `./pssm.asn`, `/tmp/pssm.asn`
+    /// outside the working directory), without checking the run's real directory
+    /// (`losat_web2_start`, which has no run directory yet). `None` for names that never make a
+    /// stream 8 file (`/dev/null`, `/dev/stdout`, `/etc/pssm.asn`, `.`, `..`).
+    pub fn pssm_host_name(name: &OsStr) -> Option<Vec<u8>> {
+        let none = |_: &[u8], _: &[u8]| None;
+        match output_name(name.as_encoded_bytes(), &none) {
+            OutputName::File { name, .. } => Some(name),
+            OutputName::Unopened
+            | OutputName::Stdout
+            | OutputName::Discard
+            | OutputName::Full
+            | OutputName::Special
+            | OutputName::Existing => None,
+        }
+    }
+}
+
+/// What a psiblast PSSM output file name (`-out_pssm` or `-out_ascii_pssm`) gives for a
+/// `Receiver` (`RunFiles::pssm_target`). No NCBI counterpart: NCBI writes files.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PssmTarget {
+    /// A file of the run under `host_name` (`host_file_name`), which the receiver gets.
+    File(Vec<u8>),
+    /// No file: writes are lost (the null device and discarding devices).
+    Discard,
+    /// Writes fail (`/dev/full`).
+    Full,
+    /// Cannot be opened by the command line (a directory, a missing folder inside the working
+    /// directory, or a path a user cannot open).
+    Unopened,
+    /// The standard output, standard error, a special device/procfs file, or an existing file in
+    /// the run's directory (refused by LOSAT Web).
+    Refused(String),
 }
 
 /// LOSAT's refusal reason for a `-logfile` naming an existing file of the run's directory or a
 /// file the run opens for reading.
 fn existing_log_refusal(name: &OsStr) -> String {
     format!(
-        "a -logfile file '{}' that is a file of the run's directory (the command line appends \
-         its messages to it; LOSAT Web reads the run's files and writes none of them)",
+        "a -logfile file '{}' that is a file of the run's directory (LOSAT Web reads the run's \
+         files and writes none of them)",
         name.display()
     )
 }
@@ -312,6 +396,20 @@ impl OpenFiles {
                 || ToolLog::Stdout,
             ),
         }
+    }
+
+    /// Like [`OpenFiles::log_target`], also enforcing the `Disk` self-reference refusal before
+    /// opening or creating `-logfile` (`report::log_inputs::check_disk_logfile`, line WQA D23).
+    pub(crate) fn log_target_for<S: AsRef<OsStr>>(
+        &self,
+        words: &[S],
+        start: &crate::blastinput::ncbi_environment::ApplicationStart,
+        name: Option<&OsStr>,
+    ) -> Result<ToolLog, String> {
+        if self.0.is_none() {
+            crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
+        }
+        self.log_target(name)
     }
 
     /// The output file `name` that a tool opens by name for writing (NCBI's `CNcbiOfstream` of the
@@ -930,8 +1028,7 @@ enum LogName {
     /// No message: the null device written otherwise than NCBI's special `/dev/null`, or a file
     /// system that reports no free space.
     Nowhere,
-    /// A file of the run's working directory, which the command line appends to (refused by LOSAT
-    /// Web).
+    /// A file of the run's working directory (refused by LOSAT Web).
     Existing,
     /// A new file made at this host name (`host_file_name`) and file-table key (`file_key`).
     File { name: Vec<u8>, key: Vec<u8> },

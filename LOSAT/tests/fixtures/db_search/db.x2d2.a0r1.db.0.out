@@ -1,0 +1,166 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2d2 a0_r1
+           1 sequences; 58 total letters
+
+
+
+Query= x2d dash 50
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a0_r1                                                                 37.6    4e-12
+
+
+Sequence with id BL_ORD_ID:0 no longer exists in database...alignment skipped
+>a0_r1
+Length=58
+
+ Score = 31.4 bits (70),  Expect = 1e-09
+ Identities = 4/12 (33%), Positives = 4/12 (33%), Gaps = 8/12 (67%)
+ Frame = -3
+
+Query  22  FREDQILT---A  30
+           F     LT   A
+Sbjct  53  F-----LTQ*KA  33
+
+
+ Score = 27.9 bits (61),  Expect = 3e-08
+ Identities = 4/11 (36%), Positives = 5/11 (45%), Gaps = 5/11 (45%)
+ Frame = +1
+
+Query  20  HYFREDQILTA  30
+           H F +D    A
+Sbjct  19  HLF-KD----A  36
+
+
+ Score = 26.8 bits (58),  Expect = 7e-08
+ Identities = 4/10 (40%), Positives = 5/10 (50%), Gaps = 1/10 (10%)
+ Frame = +2
+
+Query  19  MHYFREDQIL  28
+           M  F   +IL
+Sbjct  32  ML-FIGLKIL  58
+
+
+ Score = 23.7 bits (50),  Expect = 1e-06
+ Identities = 4/16 (25%), Positives = 4/16 (25%), Gaps = 11/16 (69%)
+ Frame = -1
+
+Query  22  FR--E------D---Q  26
+           F   E      D   Q
+Sbjct  52  F*PNEKHL*KDDKEVQ  5
+
+
+ Score = 21.4 bits (44),  Expect = 1e-05
+ Identities = 3/12 (25%), Positives = 3/12 (25%), Gaps = 9/12 (75%)
+ Frame = +2
+
+Query  22  FREDQI-----L  28
+           F    I     L
+Sbjct  14  F----IIFLKML  37
+
+
+ Score = 20.6 bits (42),  Expect = 2e-05
+ Identities = 3/9 (33%), Positives = 3/9 (33%), Gaps = 5/9 (56%)
+ Frame = +2
+
+Query  22  FREDQI--L  28
+           F    I  L
+Sbjct  11  F---FIIFL  28
+
+
+ Score = 18.3 bits (36),  Expect = 2e-04
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 3/5 (60%)
+ Frame = -2
+
+Query  23  REDQI  27
+           R   I
+Sbjct  57  R---I  52
+
+
+ Score = 16.8 bits (32),  Expect = 6e-04
+ Identities = 2/9 (22%), Positives = 2/9 (22%), Gaps = 7/9 (78%)
+ Frame = -2
+
+Query  19  MHYFREDQI  27
+           M       I
+Sbjct  21  M-------I  16
+
+
+ Score = 14.5 bits (26),  Expect = 0.007
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 1/5 (20%)
+ Frame = -2
+
+Query  19  M-HYF  22
+           M   F
+Sbjct  42  MKSIF  28
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  2   L  4
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  5   L  7
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  29  T  29
+           T
+Sbjct  9   T  11
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -2
+
+Query  27  I  27
+           I
+Sbjct  33  I  31
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.110    0.312    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 570
+
+
+  Database: x2d2 a0_r1
+    Posted date:  Nov 26, 2026  4:37 AM
+  Number of letters in database: 58
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1

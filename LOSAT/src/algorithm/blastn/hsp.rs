@@ -226,6 +226,23 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Blastn;
+        match self {
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                tabular_shows(None, program)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
     /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {
@@ -271,14 +288,16 @@ impl BlastnOutputFormat {
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    subject_title: &str,
+    subject_title: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {subject_title}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(subject_title)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -981,7 +1000,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1057,7 +1076,7 @@ pub(crate) fn write_query_rows<W: Write>(
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
@@ -1139,7 +1158,7 @@ pub(crate) fn write_query_header<W: Write>(
     hit_list_opt: Option<&BlastnHitList>,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
 ) -> io::Result<()> {
     if output_format == BlastnOutputFormat::TabularWithComments {
@@ -1179,7 +1198,10 @@ pub(crate) fn write_hsp_rows<W: Write>(
         // earlier rows have been written.
         if let Some((placements, ungapped)) = left_of_record {
             if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
-                return Err(super::left_of_query::alnmap_empty_query_row(false).into_io_error());
+                return Err(
+                    crate::report::serial::seqalign::aln_vec_row_gaps_only(0, false)
+                        .into_io_error(),
+                );
             }
         }
         let query_id = query_ids

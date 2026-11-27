@@ -62,11 +62,11 @@ fn web_run(row: &Row) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = run::Program::parse(words[0]).unwrap();
     let loaders = run::data_loaders(&words).unwrap();
     let read = |option| std::fs::read(value(&row.words, option).unwrap()).unwrap();
-    let (query, _) = store::register(words[0], 0, loaders, &read("-query")).unwrap();
+    let (query, _) = store::register(words[0], 0, loaders, false, &read("-query")).unwrap();
     let subject = match run::searches_database(&words) {
         true => 0,
         false => {
-            store::register(words[0], 1, loaders, &read("-subject"))
+            store::register(words[0], 1, loaders, false, &read("-subject"))
                 .unwrap()
                 .0
         }

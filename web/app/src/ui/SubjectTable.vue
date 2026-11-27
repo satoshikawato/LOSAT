@@ -28,7 +28,7 @@ function sortBy(key: SubjectSortKey, descending: boolean): void {
 
 // The descriptions are read from outfmt 0 for the subjects in view (and a screenful more).
 watch(
-  () => [props.state.subjects, props.state.qIdx] as const,
+  () => [props.state.subjects, props.state.qIdx, props.state.round] as const,
   ([subjects]) => props.results.requestHeadings(subjects.slice(0, 3 * MAX_ROWS).map((subject) => subject.sIdx)),
   { immediate: true },
 );
@@ -136,7 +136,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         :row-px="ROW_PX"
         :max-rows="MAX_ROWS"
         :reveal="selectedPosition"
-        :reveal-key="`${state.runId}:${state.qIdx}:${state.sIdx}`"
+        :reveal-key="`${state.runId}:${state.qIdx}:${state.round ?? 0}:${state.sIdx}`"
         :order-key="`${state.subjectSort.key}:${state.subjectSort.descending}`"
         kind="grid"
         testid="subject-list"

@@ -443,6 +443,42 @@ impl HspAlnVec {
         self.aln_stop
     }
 
+    /// The alignment columns of the query's positions `from..=to` (0-based) where they meet the
+    /// query row's range (`x_GetQueryFeatureList` of row 0, plus strand; `GetAlnPosFromSeqPos`
+    /// without a direction): `None` where the clipped range has no columns. A feature that starts
+    /// right of the row's range (NCBI's column -1) is none here: PHI-BLAST's occurrence lies
+    /// within its HSPs' query range, or left of it under `-query_loc` (offsets in the range).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4352-4389
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-541
+    pub(crate) fn query_columns(&self, from: u32, to: u32) -> Option<(usize, usize)> {
+        let ds = &self.ds;
+        if !ds.plus.first().copied().unwrap_or(true) {
+            return None;
+        }
+        // The query row's segments: (start, length, first column).
+        let mut column = 0u32;
+        let mut segments = Vec::with_capacity(ds.lens.len());
+        for (seg, &len) in ds.lens.iter().enumerate() {
+            let start = ds.starts[2 * seg];
+            if start >= 0 {
+                segments.push((start as u32, len, column));
+            }
+            column += len;
+        }
+        let (&(first, _, _), &(last_start, last_len, _)) = (segments.first()?, segments.last()?);
+        let (seq_start, seq_stop) = (first, last_start + last_len - 1);
+        let aln_pos = |pos: u32| {
+            segments
+                .iter()
+                .find(|&&(start, len, _)| start <= pos && pos < start + len)
+                .map(|&(start, _, column)| column + pos - start)
+        };
+        let aln_from = aln_pos(from.max(seq_start))?;
+        let aln_to = aln_pos(to.min(seq_stop))?;
+        (aln_from <= aln_to).then_some((aln_from as usize, aln_to as usize))
+    }
+
     /// Row `row` on line `line` (0 for the first), of columns `from..=to`: its first and last
     /// position there (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row
     /// meets the line (`hasSequence`), `None` otherwise. Every line pops each row's fronts
@@ -775,8 +811,11 @@ fn unasked_merge_stop(error: aln_mix::MixError) -> io::Error {
     }
 }
 
-/// Writes the section of one query whose HSPs are `hsps` (none: nothing, as `DisplaySeqalign`
-/// returns before its first byte for an empty Seq-align set; `-num_alignments 0`).
+/// Writes the section of one query whose HSPs are `hsps`. The caller writes none for an empty
+/// Seq-align set (`-num_alignments 0`: `DisplaySeqalign` returns before its first byte); a set
+/// whose every aligned subject has no Bioseq (`pairwise::section_hsps` leaves them out of the
+/// merge) gives no HSP here: the line feed alone, as each frame's empty mix throws in the loop's
+/// `try`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1918
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2055-2111
@@ -794,7 +833,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
     sequences: &dyn Sequences,
 ) -> io::Result<()> {
     if hsps.is_empty() {
-        return Ok(());
+        return writer.write_all(b"\n");
     }
     let (merged, num_distinct_frames) = merge_groups(hsps).map_err(unasked_merge_stop)?;
     writer.write_all(b"\n")?;
@@ -823,7 +862,12 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         // writes nothing more of the group.
         let rows = match prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)
         {
-            Err(error) if aln_vec::UnknownGeneticCode::is(&error) => continue,
+            Err(error)
+                if aln_vec::UnknownGeneticCode::is(&error)
+                    || aln_vec::TranslateNaToAa::is(&error) =>
+            {
+                continue
+            }
             rows => rows?,
         };
         display_rows(writer, &map, view, line_length, rows, sequences)?;
@@ -834,7 +878,10 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// Writes the section of one query whose letters NCBI's display cannot read (`pairwise::
 /// UnreadableQuery`, a PSSM query of the molecule `other`), whose HSPs are `hsps` with the query's
 /// Bioseq marked as not a protein (`Hsps::set_query_not_protein`), in the report of `program`
-/// (its name in LOSAT's words, as `PSIBLAST`). None: nothing, as `write_section`.
+/// (its name in LOSAT's words, as `PSIBLAST`). The caller writes none for an empty Seq-align set
+/// (`-num_alignments 0`); an empty `hsps` here means every aligned subject had no Bioseq
+/// (`pairwise::blastp_section_hsps` / `section_hsps` left them out), for which NCBI writes the
+/// line feed alone (`showalign.cpp:2000-2095`), as `write_section` does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2054-2112 (cited at
 /// `merge_groups` and `write_section`)
@@ -874,7 +921,7 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     program: &str,
 ) -> io::Result<()> {
     if hsps.is_empty() {
-        return Ok(());
+        return writer.write_all(b"\n");
     }
     let refusal = |failure| {
         Err(UnreadableMergeRefusal {

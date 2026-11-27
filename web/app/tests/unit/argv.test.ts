@@ -149,14 +149,17 @@ describe('buildArgv', () => {
       '-negative_taxids',
       '-negative_taxidlist',
       '-no_taxid_expansion',
-      '-db_soft_mask',
-      '-db_hard_mask',
     ];
     for (const program of PROGRAMS) {
       const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
       expect(flags, program.id).toEqual(expect.arrayContaining(commonDbFlags));
+      if (program.id !== 'psiblast') {
+        expect(flags, program.id).toEqual(expect.arrayContaining(['-db_soft_mask', '-db_hard_mask']));
+      }
       const ipg = ['-ipglist', '-negative_ipglist'].filter((flag) => flags.includes(flag));
-      expect(ipg, program.id).toEqual(program.id === 'blastp' || program.id === 'blastx' ? ['-ipglist', '-negative_ipglist'] : []);
+      expect(ipg, program.id).toEqual(
+        program.id === 'blastp' || program.id === 'blastx' || program.id === 'psiblast' ? ['-ipglist', '-negative_ipglist'] : [],
+      );
       if (program.id === 'blastn') expect(flags).toContain(FILTERING_DB_FLAG);
     }
   });

@@ -189,7 +189,15 @@ async function start(walker: Walker): Promise<void> {
 }
 
 async function checkedProgram(page: Page): Promise<string> {
-  for (const id of PROGRAMS) if (await page.getByTestId(`program-${id}`).isChecked()) return id;
+  for (const id of PROGRAMS) {
+    if (await page.getByTestId(`program-${id}`).isChecked()) {
+      if (id === 'blastp') {
+        const psiblast = page.getByTestId('param-task-psiblast');
+        if ((await psiblast.count()) > 0 && (await psiblast.isChecked())) return 'psiblast';
+      }
+      return id;
+    }
+  }
   throw new StepFailure('model', 'no mode is chosen');
 }
 
@@ -307,9 +315,9 @@ const mode: StepBody = async (walker, draws) => {
   const id = draws.pick(PROGRAMS);
   await page.getByTestId(`program-${id}`).check();
   await described(page);
-  walker.program = id;
   await settle(page);
-  return id;
+  walker.program = await checkedProgram(page);
+  return walker.program;
 };
 
 const task: StepBody = async (walker, draws) => {
@@ -322,7 +330,9 @@ const task: StepBody = async (walker, draws) => {
   const radio = radios.nth(draws.index(count));
   const id = (await radio.getAttribute('data-testid')) ?? '';
   await radio.check();
+  await described(page);
   await settle(page);
+  walker.program = await checkedProgram(page);
   return id;
 };
 

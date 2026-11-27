@@ -93,7 +93,7 @@ impl Search {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     sink: OutputSink::Writer(sink),
                     refusal: first.take().unwrap_or(FormatRefusal::FailsAlone),
                 })
@@ -269,7 +269,7 @@ fn a_receiver_holds_the_warnings_of_several_queries_in_their_order() {
 // A later format that failed alone before its reports gives none: the command line's run of it
 // stops at the refusal, before the first query's report and its warning. Outfmt 0 is refused for
 // the masks of a query that is also a subject (`-parse_deflines -lcase_masking`), or for a
-// description id longer than 65 bytes (`report::db_subject::check_pairwise_records`). The formats
+// description id longer than 65 bytes (`common::database::refuse_described_records`). The formats
 // after it give theirs (review r1 of this change, M1, 2026-11-20).
 #[test]
 fn a_later_format_refused_before_its_reports_gives_no_query_warnings() {

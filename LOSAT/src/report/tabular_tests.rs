@@ -179,16 +179,19 @@ fn delimiter_conflicts_are_ncbis() {
 fn default_reports_have_no_spec() {
     let choice = |spec: &str, delimiter: &str| FormatChoice {
         number: 6,
-        spec: spec.to_string(),
-        delimiter: delimiter.to_string(),
+        spec: spec.as_bytes().to_vec(),
+        delimiter: delimiter.as_bytes().to_vec(),
     };
     assert!(blastp_spec(ReportFormat::Tabular, &choice("", "")).is_none());
     assert!(blastp_spec(ReportFormat::Tabular, &choice("std", "\t")).is_none());
     assert!(blastp_spec(ReportFormat::TabularWithComments, &choice("", "")).is_none());
     let csv = blastp_spec(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
-    assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
+    assert_eq!(
+        (csv.delimiter.as_slice(), csv.fields.len()),
+        (b",".as_slice(), 12)
+    );
     let piped = blastp_spec(ReportFormat::Tabular, &choice("std", "|")).unwrap();
-    assert_eq!(piped.delimiter, "|");
+    assert_eq!(piped.delimiter, b"|");
 }
 
 // NCBI 2.17.0 (line RG F/d36 probes ps.f10at, ps.f20at, ps.f6at, ps.pssm.f10at, bp.f20at,
@@ -200,8 +203,8 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     use crate::report::archive::options::RequestKind;
     let choice = |number: i32, spec: &str| FormatChoice {
         number,
-        spec: spec.to_string(),
-        delimiter: "@".to_string(),
+        spec: spec.as_bytes().to_vec(),
+        delimiter: b"@".to_vec(),
     };
     let csv = choice(10, "qseqid sseqid evalue");
     let std6 = choice(6, "");
@@ -216,12 +219,12 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     ] {
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
         assert_eq!(
-            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
-            (TabularKind::Csv, "@", 3),
+            (spec.kind, spec.delimiter.as_slice(), spec.fields.len()),
+            (TabularKind::Csv, b"@".as_slice(), 3),
             "{app:?}"
         );
         let spec = TabularSpec::of_app(ReportFormat::Tabular, &std6, app).unwrap();
-        assert_eq!(spec.delimiter, "@", "{app:?}");
+        assert_eq!(spec.delimiter, b"@", "{app:?}");
     }
     for app in [
         RequestKind::Psiblast,
@@ -230,16 +233,16 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     ] {
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
         assert_eq!(
-            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
-            (TabularKind::Csv, ",", 3),
+            (spec.kind, spec.delimiter.as_slice(), spec.fields.len()),
+            (TabularKind::Csv, b",".as_slice(), 3),
             "{app:?}"
         );
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValuesWithHeader, &header, app);
-        assert_eq!(spec.unwrap().delimiter, ",", "{app:?}");
+        assert_eq!(spec.unwrap().delimiter, b",", "{app:?}");
         assert!(TabularSpec::of_app(ReportFormat::Tabular, &std6, app).is_none());
         let commented = choice(7, "qseqid");
         let spec = TabularSpec::of_app(ReportFormat::TabularWithComments, &commented, app);
-        assert_eq!(spec.unwrap().delimiter, "\t", "{app:?}");
+        assert_eq!(spec.unwrap().delimiter, b"\t", "{app:?}");
     }
 }
 
@@ -317,8 +320,8 @@ fn taxonomy_names_get_ncbis_fillers() {
                names: Option<&TabularNames>| {
         let choice = FormatChoice {
             number: 10,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         };
         let spec = blastp_spec(format, &choice).unwrap();
         let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
@@ -466,8 +469,8 @@ fn row_messages_follow_the_lookups() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "ssciname sscinames".to_string(),
-            delimiter: String::new(),
+            spec: b"ssciname sscinames".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -510,8 +513,8 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             format,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -608,8 +611,8 @@ fn id_columns_are_the_subject_s_own() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -671,8 +674,8 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -742,6 +745,7 @@ fn failed_lookups_write_ncbis_catch_row() {
                 accession: align_id,
                 subject_id: true,
                 all_ids: None,
+                empty_handle: false,
             }),
             None => SubjectLookup::Found,
         },
@@ -885,8 +889,8 @@ fn a_load_that_throws_writes_the_kept_row() {
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -957,8 +961,8 @@ fn a_rows_fields_say_what_its_throw_does() {
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1008,8 +1012,8 @@ fn a_rows_fields_say_what_its_throw_does() {
         ReportFormat::TaxFormat,
         &FormatChoice {
             number: 18,
-            spec: String::new(),
-            delimiter: String::new(),
+            spec: Vec::new(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -1054,6 +1058,7 @@ fn a_database_lookup_failing_in_x_set_subject_ids_keeps_the_length() {
                 accession: b"BL_ORD_ID:0",
                 subject_id: true,
                 all_ids: Some(&[]),
+                empty_handle: false,
             })
         } else {
             SubjectLookup::Found
@@ -1104,6 +1109,7 @@ fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
             accession: b"AB000001",
             subject_id: false,
             all_ids: Some(&before),
+            empty_handle: false,
         }),
         index: 0,
     };
@@ -1132,8 +1138,8 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1144,6 +1150,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             subject_id: true,
             all_ids,
             bioseq: false,
+            length: false,
             lineless: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
@@ -1162,6 +1169,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         subject_id: false,
         all_ids: true,
         bioseq: false,
+        length: false,
         lineless: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
@@ -1176,6 +1184,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         [vec![0, 1], vec![1, 0]],
         record,
         |s_idx, _| failed_record_title(s_idx, b"Subject_9"),
+        crate::blastinput::app::Program::Blastn,
         "BLASTN",
         true,
     );
@@ -1188,6 +1197,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         [vec![0, 1], vec![0, 1]],
         record,
         |s_idx, _| failed_record_title(s_idx, b"x"),
+        crate::blastinput::app::Program::Blastn,
         "BLASTN",
         true,
     )
@@ -1206,8 +1216,8 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1235,6 +1245,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         [vec![0], vec![1, 0]],
         |s_idx| (s_idx == 1).then_some(lineless),
         describe_database_subject,
+        crate::blastinput::app::Program::Blastp,
         "BLASTP",
         true,
     );
@@ -1248,7 +1259,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
 }
 
 fn describe_database_subject(s_idx: usize, failure: LookupFailure) -> String {
-    failed_database_subject(s_idx, None, failure)
+    failed_database_subject(s_idx, None, None, failure)
 }
 
 // The refusal names the result set where NCBI stops; TBLASTN and TBLASTX write the reports of
@@ -1263,8 +1274,8 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "qseqid sallacc".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -1274,6 +1285,7 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         [vec![0], vec![], vec![0], vec![2, 1]],
         fail_subject_1,
         describe_database_subject,
+        crate::blastinput::app::Program::Tblastn,
         "TBLASTN",
         true,
     )
@@ -1364,8 +1376,8 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             format,
             &FormatChoice {
                 number,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
             crate::report::archive::options::RequestKind::Rpsblast,
         )
@@ -1479,4 +1491,157 @@ fn table_counts_leave_out_the_query_rows_end_gaps() {
     let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
     assert_eq!(counts(21, 2, 3, &xdrop), (21, 3, 2));
     assert_eq!(counts(190, 0, 0, &[]), (190, 0, 0));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-1085
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1245
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+// Without a subject-block field, an empty subject handle is not caught in `SetFields`' subject
+// block; NCBI throws `CAlnException::eInvalidSeqId` in `CAlnVec::GetWholeAlnSeqString` on the
+// subject row, or `CCoreException::eNullPtr` in `CAlignFormatUtil::GetFrame` for translated-subject
+// minus-strand HSPs (plus-strand HSPs compute `(start % 3) + 1` without touching the handle). With
+// a subject-block field (such as `sseqid`), NCBI catches the empty handle and prints its fallback
+// row.
+#[test]
+fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
+    use crate::blastinput::app::Program;
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+        )
+        .unwrap()
+    };
+    let empty = LookupFailure::empty_handle();
+    let plain = LookupFailure::of_plain(true);
+    // Subject-block field catches the empty handle before the alignment block runs.
+    assert!(!spec("sseqid sseq").empty_handle_throws(Program::Blastp));
+    assert!(!spec("sseqid qseq").empty_handle_throws(Program::Blastn));
+    assert!(!spec("stitle pident").empty_handle_throws(Program::Blastx));
+    assert!(!spec("sseqid sframe qstart").empty_handle_throws(Program::Tblastx));
+    assert!(failed_lookup_stop_for(
+        Some(&spec("sseqid sseq")),
+        empty,
+        true,
+        Program::Blastp,
+        false
+    )
+    .is_none());
+    // Without a subject-block field, sequence/scoring fields throw an alignment exception on empty
+    // handle regardless of strand.
+    for fields in [
+        "qseqid sseq",
+        "qseqid qseq",
+        "qseqid positive",
+        "qseqid ppos",
+        "qseqid btop",
+    ] {
+        for program in [
+            Program::Blastp,
+            Program::Blastn,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ] {
+            assert!(
+                spec(fields).empty_handle_reads_letters(program),
+                "{fields} {program:?}"
+            );
+            let reason =
+                failed_lookup_stop_for(Some(&spec(fields)), empty, false, program, false).unwrap();
+            assert!(reason.contains("alignment exception"), "{reason}");
+            assert!(
+                failed_lookup_stop_for(Some(&spec(fields)), plain, false, program, false).is_none(),
+                "{fields} {program:?}"
+            );
+        }
+    }
+    // `pident`/`nident`/`mismatch` throw outside BLASTN, and do not throw in BLASTN alone.
+    for fields in ["qseqid pident", "qseqid nident", "qseqid mismatch"] {
+        assert!(!spec(fields).empty_handle_reads_letters(Program::Blastn));
+        for program in [
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ] {
+            assert!(
+                spec(fields).empty_handle_reads_letters(program),
+                "{fields} {program:?}"
+            );
+        }
+    }
+    // `sframe`/`frames` with an `opens_counts` field throw a null pointer exception for
+    // translated-subject minus-strand HSPs only; plus-strand HSPs do not stop.
+    for fields in ["qseqid qstart sframe", "qseqid length frames"] {
+        let s = spec(fields);
+        assert!(s.empty_handle_reads_minus_frame(Program::Tblastn));
+        assert!(s.empty_handle_reads_minus_frame(Program::Tblastx));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastp));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastn));
+        assert!(!s.empty_handle_reads_minus_frame(Program::Blastx));
+        for program in [Program::Tblastn, Program::Tblastx] {
+            assert!(
+                failed_lookup_stop_for(Some(&s), empty, true, program, false).is_none(),
+                "plus-strand row must not stop for {fields} in {program:?}"
+            );
+            let reason = failed_lookup_stop_for(Some(&s), empty, false, program, true).unwrap();
+            assert!(
+                reason.contains("null pointer exception") && reason.contains("minus-strand"),
+                "{reason}"
+            );
+        }
+    }
+    // `check_failed_lookups` passes when every empty-handle row is plus-strand and refuses when
+    // any empty-handle row is minus-strand.
+    let frame_spec = spec("qseqid qstart sframe");
+    assert!(check_failed_lookups(
+        Some(&frame_spec),
+        [[CheckedRow {
+            subject: 0,
+            minus_subject_frame: false,
+        }]],
+        |_| Some(empty),
+        |_, _| "database sequence 0".to_string(),
+        Program::Tblastn,
+        "TBLASTN",
+        true,
+    )
+    .is_ok());
+    let err = check_failed_lookups(
+        Some(&frame_spec),
+        [[
+            CheckedRow {
+                subject: 0,
+                minus_subject_frame: false,
+            },
+            CheckedRow {
+                subject: 0,
+                minus_subject_frame: true,
+            },
+        ]],
+        |_| Some(empty),
+        |_, _| "database sequence 0".to_string(),
+        Program::Tblastn,
+        "TBLASTN",
+        true,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("null pointer exception"), "{err}");
+    // Standalone `sframe`/`frames` never open the alignment block.
+    assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));
+    assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastn));
+    assert!(may_stop_at_failed_lookup_for(
+        Some(&spec("qseqid sseq")),
+        Program::Blastp
+    ));
+    assert!(!may_stop_at_failed_lookup_for(
+        Some(&spec("qseqid evalue")),
+        Program::Blastp
+    ));
 }

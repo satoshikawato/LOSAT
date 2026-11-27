@@ -1490,9 +1490,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         return Ok(());
     };
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,
@@ -1507,6 +1507,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     );
     let run = XmlRun {
         program: options.program().lower,
+        app: options.app_name,
         version: &format!(
             "{} {}",
             options.program().upper,
@@ -1645,7 +1646,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                         Ok(CaughtException(exception)) => {
                             Some(crate::ncbi_exception::error_post_line(
                                 None,
-                                Some(options.program().lower),
+                                Some(options.app_name),
                                 &document.caught_message(&exception),
                             ))
                         }
@@ -1821,7 +1822,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 Err(error) => match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Some(crate::ncbi_exception::error_post_line(
                         None,
-                        Some(options.program().lower),
+                        Some(options.app_name),
                         &document.caught_message(&exception),
                     )),
                     Err(error) => return Err(error),
@@ -1855,12 +1856,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 
 /// The end of the document (`PrintEpilog`): its trailer when `queries` queries were formatted,
 /// else the epilog's end of line alone. For the XML2 and JSON documents `xml2` is the run's
-/// writer: it writes the report held back by a `-subject` run and the document's end; `program`
-/// names the run's program in its message (`ncbi_exception::error_post_line`).
+/// writer: it writes the report held back by a `-subject` run and the document's end; `app`
+/// names the running application in its message (`ncbi_exception::error_post_line`).
 pub(super) fn write_xml_epilog(
     writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
-    program: &str,
+    app: &str,
     queries: usize,
     xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
@@ -1873,7 +1874,7 @@ pub(super) fn write_xml_epilog(
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
                         None,
-                        Some(program),
+                        Some(app),
                         &xml2.caught_message(&exception),
                     )),
                     Err(error) => Err(error),

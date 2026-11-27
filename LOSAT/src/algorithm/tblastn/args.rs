@@ -1,10 +1,12 @@
 //! TBLASTN's options (NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp and blast_args.cpp)
 //! and LOSAT's limits.
 use anyhow::Result;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
+use crate::utils::os_bytes::os_str_bytes;
 
 use super::stage_d_pipeline::LocalStageDScoring;
 use crate::config::ScoringMatrix;
@@ -21,6 +23,9 @@ pub(crate) const TBLASTN_TASK: TaskParser = task_parser("TBLASTN", "tblastn");
 // (`ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct TblastnArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    pub(crate) given: crate::cli::GivenArguments,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
     // The default `-` is standard input.
     pub query: PathBuf,
@@ -28,7 +33,7 @@ pub struct TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
     // exclusion (`cli::reader`). The database is searched by `tblastn/database.rs`.
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
@@ -57,6 +62,13 @@ pub struct TblastnArgs {
     // (cited at `BlastpArgs::export_search_strategy`). The search strategy file
     // (`report::archive::strategy`), created by `run` before the other options are read.
     pub export_search_strategy: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
+    // The search strategy to import (`report::archive::read::import`), read by `run` before the
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
+    pub import_search_strategy: Option<PathBuf>,
+    /// The run state of an imported search strategy (`import::apply`).
+    pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
     // An omitted value keeps the default of the task (10).
     pub evalue: Option<f64>,
     pub word_size: Option<i32>,
@@ -68,7 +80,7 @@ pub struct TblastnArgs {
     // PD-TLOSAN-LOCAL-GENCODE-32 adds gc.prt ID 32 only for TBLASTN.
     pub db_gencode: u8,
     pub max_intron_length: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214,276-278:
@@ -76,17 +88,17 @@ pub struct TblastnArgs {
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
     // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`).
-    pub comp_based_stats: String,
-    pub outfmt: String,
+    pub comp_based_stats: OsString,
+    pub outfmt: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`check_options`).
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`);
     // an omitted value is NCBI's default for tblastn, "12 2.2 2.5".
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     pub lcase_masking: bool,
     // NCBI's flag, off by default: the Smith-Waterman redo of each match
@@ -198,6 +210,7 @@ impl TblastnArgs {
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(TblastnArgs {
+            given: crate::cli::GivenArguments::from_args(args),
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
@@ -212,6 +225,8 @@ impl TblastnArgs {
             task: args.option_or_default("task")?,
             out: args.given_option("out")?,
             export_search_strategy: args.given_option("export_search_strategy")?,
+            import_search_strategy: args.given_option("import_search_strategy")?,
+            import: Default::default(),
             evalue: args.given_option("evalue")?,
             word_size: args.given_option("word_size")?,
             gap_open: args.given_option("gapopen")?,
@@ -313,7 +328,7 @@ pub struct ResolvedTblastnArgs {
     pub subject_besthit: bool,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     pub num_threads: usize,
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
@@ -349,7 +364,12 @@ impl TblastnArgs {
         if !self.ungapped {
             return None;
         }
-        match ungapped_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")) {
+        let matrix = self
+            .matrix
+            .as_deref()
+            .map(os_str_bytes)
+            .unwrap_or(std::borrow::Cow::Borrowed(b"BLOSUM62"));
+        match ungapped_matrix(&matrix) {
             TblastxMatrix::Table(_) => None,
             other => Some(other),
         }
@@ -367,9 +387,12 @@ impl TblastnArgs {
         if self.unknown_matrix_name()
             == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
         {
-            self.matrix_file = search
-                .file(self.matrix.as_deref().unwrap_or("BLOSUM62"))
-                .map_err(anyhow::Error::msg)?;
+            let matrix = self
+                .matrix
+                .as_deref()
+                .map(os_str_bytes)
+                .unwrap_or(std::borrow::Cow::Borrowed(b"BLOSUM62"));
+            self.matrix_file = search.file(&matrix).map_err(anyhow::Error::msg)?;
         }
         Ok(())
     }
@@ -388,13 +411,21 @@ impl TblastnArgs {
     /// search of `-subject`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-    pub fn database_name(&self) -> Option<&str> {
-        self.db.as_deref().map(crate::seqdb::db_argument_name)
+    pub fn database_name(&self) -> Option<Vec<u8>> {
+        self.db
+            .as_deref()
+            .map(|db| crate::seqdb::db_argument_name_bytes(&os_str_bytes(db)).to_vec())
     }
 
     /// The options as `check_options` sets them, without its warnings.
     pub fn resolve(&self) -> Result<ResolvedTblastnArgs> {
         self.check_options(&mut std::io::sink())
+    }
+
+    /// `resolve` without opening `-in_pssm` from disk (for web ABI v2's `validate`, which checks
+    /// options alone without the run's working directory).
+    pub(crate) fn resolve_without_files(&self) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(None, false, &mut std::io::sink())
     }
 
     /// `check_options` for the output formats of a `run_local` call (their numbers).
@@ -403,7 +434,7 @@ impl TblastnArgs {
         outfmts: &[i32],
         diagnostics: &mut dyn Write,
     ) -> Result<ResolvedTblastnArgs> {
-        self.check_options_with(Some(outfmts), diagnostics)
+        self.check_options_with(Some(outfmts), true, diagnostics)
     }
 
     /// NCBI's `CBlastAppArgs::SetOptions` for tblastn after the files are opened: the task's
@@ -412,12 +443,13 @@ impl TblastnArgs {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     pub fn check_options(&self, diagnostics: &mut dyn Write) -> Result<ResolvedTblastnArgs> {
-        self.check_options_with(None, diagnostics)
+        self.check_options_with(None, true, diagnostics)
     }
 
     fn check_options_with(
         &self,
         outfmts: Option<&[i32]>,
+        read_files: bool,
         diagnostics: &mut dyn Write,
     ) -> Result<ResolvedTblastnArgs> {
         use crate::blastinput::app::{
@@ -457,20 +489,27 @@ impl TblastnArgs {
         if let Some(value) = self.evalue {
             evalue = value;
         }
-        let (matrix_gap_open, matrix_gap_extend) = self
-            .matrix
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
+        let matrix_arg_bytes = self.matrix.as_deref().map(os_str_bytes);
+        let (matrix_gap_open, matrix_gap_extend) = matrix_arg_bytes
             .as_deref()
             .and_then(protein_gap_existence_extend_params)
             .unwrap_or((0, 0));
         match (self.gap_open, &self.matrix) {
             (Some(value), _) => gap_open = value,
-            (None, Some(_)) => gap_open = matrix_gap_open,
-            (None, None) => {}
+            (None, Some(_)) if command_line => gap_open = matrix_gap_open,
+            (None, _) => {}
         }
         match (self.gap_extend, &self.matrix) {
             (Some(value), _) => gap_extend = value,
-            (None, Some(_)) => gap_extend = matrix_gap_extend,
-            (None, None) => {}
+            (None, Some(_)) if command_line => gap_extend = matrix_gap_extend,
+            (None, _) => {}
         }
         if let Some(value) = self.xdrop_gap {
             xdrop_gap = value;
@@ -479,14 +518,18 @@ impl TblastnArgs {
             xdrop_gap_final = value;
         }
         if let Some(value) = self.word_size {
+            // NCBI's setter of the word size makes the table compressed above 4 for an import too
+            // (blast_options_local_priv.hpp:612-619); the threshold is the command line's.
             if value > 4 {
                 compressed_lookup = true;
-                threshold = 19.3;
-                if value > 5 {
-                    threshold = 21.0;
-                }
-                if value > 6 {
-                    threshold = 20.25;
+                if command_line {
+                    threshold = 19.3;
+                    if value > 5 {
+                        threshold = 21.0;
+                    }
+                    if value > 6 {
+                        threshold = 20.25;
+                    }
                 }
             }
             word_size = value;
@@ -502,46 +545,62 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-408 (the
         // filtering handler; the default -seg of tblastn is "12 2.2 2.5")
         let soft_masking = self.soft_masking.unwrap_or(false);
-        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"))?;
+        let seg_bytes = self
+            .seg
+            .as_deref()
+            .map(os_str_bytes)
+            .unwrap_or(std::borrow::Cow::Borrowed(b"12 2.2 2.5"));
+        let seg = parse_seg_option(&seg_bytes)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (the word
         // threshold handler: the matrix's suggestion replaces only tblastn's default 13)
-        let matrix_name = self
-            .matrix
-            .clone()
-            .unwrap_or_else(|| "BLOSUM62".to_string());
+        let matrix_bytes: Vec<u8> = match matrix_arg_bytes.as_deref() {
+            Some(bytes) => bytes.to_vec(),
+            None => b"BLOSUM62".to_vec(),
+        };
+        let matrix_name = String::from_utf8_lossy(&matrix_bytes).into_owned();
         if let Some(value) = self.threshold {
             threshold = value;
-        } else if threshold as i32 == 13 {
-            threshold = suggested_threshold(SuggestionProgram::TranslatedSubject, &matrix_name);
+        } else if command_line && threshold as i32 == 13 {
+            threshold = suggested_threshold(SuggestionProgram::TranslatedSubject, &matrix_bytes);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
-        let window_size = self
-            .window_size
-            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+        // (tblastn's handle: window 40)
+        let window_size = match self.window_size {
+            Some(window) => window,
+            None if command_line => suggested_window_size(&matrix_bytes),
+            None => 40,
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (tblastn_args.cpp:44-135).
-        let query_range = crate::blastinput::seq_range::parse_optional_range(
-            self.query_loc.as_deref(),
-            crate::blastinput::seq_range::RangeRole::Query,
-        )?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2976 and
+        // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
+        let query_range = match self.import.as_ref().and_then(|import| import.query_range) {
+            Some(range) => Some(range),
+            None => crate::blastinput::seq_range::parse_optional_range(
+                self.query_loc.as_deref(),
+                crate::blastinput::seq_range::RangeRole::Query,
+            )?,
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
-        let choice = parse_formatting_string(&self.outfmt)?;
+        let choice = parse_formatting_string(os_str_bytes(&self.outfmt))?;
         formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
+        let db_name = self.database_name();
+        let request_kind = if psi {
+            crate::report::archive::options::RequestKind::PsiTblastn
+        } else {
+            crate::report::archive::options::RequestKind::Tblastn
+        };
         let html = crate::blastinput::app::html_links(
             self.html,
-            if psi {
-                crate::report::archive::options::RequestKind::PsiTblastn
-            } else {
-                crate::report::archive::options::RequestKind::Tblastn
-            },
-            self.database_name(),
+            request_kind,
+            request_kind,
+            db_name.as_deref(),
             outfmts.unwrap_or(&own_outfmt),
         )?;
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -553,12 +612,20 @@ impl TblastnArgs {
             &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
+        // An imported strategy's warnings for the options it replaces
+        // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+        if let Some(import) = &self.import {
+            diagnostics.write_all(&import.option_warning_lines())?;
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-875
         // PSI-TBLASTN takes any value as mode 0, before the test of an ungapped search.
-        let (composition_mode, _) =
-            parse_comp_based_stats(&self.comp_based_stats, false, self.ungapped && !psi)?;
+        let (composition_mode, _) = parse_comp_based_stats(
+            os_str_bytes(&self.comp_based_stats),
+            false,
+            self.ungapped && !psi,
+        )?;
         let composition_mode = if psi {
             crate::blastinput::app::CompositionMode::NoCompositionBasedStats
         } else {
@@ -567,10 +634,12 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
         // The PSSM is read by the last handler of tblastn's options (`CPsiBlastArgs`, after the
         // composition-based statistics, tblastn_args.cpp:128-130), before `Validate`.
-        let pssm = match self.in_pssm.as_deref() {
+        let pssm = match self.in_pssm.as_deref().filter(|_| read_files) {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
+                gap_open,
+                gap_extend,
                 self.export_search_strategy.is_some(),
                 self.db.is_some(),
                 self.archive.as_ref(),
@@ -592,7 +661,7 @@ impl TblastnArgs {
             gapped: !self.ungapped,
             gap_open,
             gap_extend,
-            matrix_name: &matrix_name,
+            matrix_name: &matrix_bytes,
             threshold,
             word_size,
             compressed_lookup,
@@ -600,7 +669,11 @@ impl TblastnArgs {
             evalue,
             psiblast: false,
             psi_tblastn: psi,
+            phi: false,
             x_dropoff: self.xdrop_ungap,
+            culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),
@@ -789,7 +862,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // threshold and window are the options' (the matrix's suggested values by default). The
     // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
     // the two-hit one (a window above 0) or the one-hit one (a window of 0,
-    // `XTwoHit::x_pairs_one_hit`).
+    // `XTwoHit::x_pairs_one_hit`; below 0, which only a hand-edited search strategy gives,
+    // `XTwoHit::x_pairs_one_hit_negative`).
     let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
@@ -821,24 +895,15 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     })
 }
 
-// No NCBI counterpart: LOSAT Web's host has no file system.
-/// The browser's refusal of `-in_pssm` (a PSSM query): the host has no PSSM files (line PS, item
-/// PSW1). The Web's checks of the options (`check_options`) and its runs (the adapter's `run`,
-/// before `run_local`) make it; the library API's records take the option (`api::Inputs::pssm`).
-pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
-    if args.in_pssm.is_some() {
-        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
-    }
-    Ok(())
-}
-
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
-    // `-db` is checked as the command line checks it: the database is opened by the run
-    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
-    refuse_browser_pssm_query(args)?;
-    let resolved = args.resolve()?;
+    // `-db` and `-in_pssm` are checked as the command line checks them without reading files: the
+    // run opens them from its working directory (`run_local` / `run_local_database`).
+    let resolved = args.resolve_without_files()?;
+    if !resolved.gapped && args.in_pssm.is_some() {
+        anyhow::bail!("{}", ungapped_pssm_refusal());
+    }
     search_settings(&resolved)?;
     check_search_limits(&resolved)?;
     // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where

@@ -236,9 +236,8 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         assert_eq!(
             reason,
             format!(
-                "a -logfile file '{existing}' that is a file of the run's directory (the command \
-                 line appends its messages to it; LOSAT Web reads the run's files and writes none \
-                 of them)"
+                "a -logfile file '{existing}' that is a file of the run's directory (LOSAT Web \
+                 reads the run's files and writes none of them)"
             ),
             "{existing}"
         );

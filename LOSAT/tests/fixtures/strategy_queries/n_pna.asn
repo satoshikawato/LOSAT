@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "pna" }, inst { repr raw, mol na, length 1, seq-data ncbipna '0102030405'H } }
+      }
+    }

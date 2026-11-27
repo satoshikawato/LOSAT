@@ -1,0 +1,620 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "pq"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pq protein query one"
+                  }
+                }
+              },
+              title "protein query one"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 150,
+              seq-data ncbieaa "AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIW
+KHCMWKCWDTSFPTSKSHCVTCTSQQQQQQQQQQQQQQQQEQFSANDWFCRWRFCFKGWLINPDVPCPTKVRVDTYLN
+CGCCEVWDKEITESDAQNYIHEANAE"
+            }
+          },
+          seq {
+            id {
+              local str "pq2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pq2 second query"
+                  }
+                }
+              },
+              title "second query"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 110,
+              seq-data ncbieaa "VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYG
+DHIILQRIAVSVFSANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            pir {
+              name "A12345"
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">pir||A12345 pir subject"
+                }
+              }
+            },
+            title "pir subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 450,
+            seq-data ncbieaa "CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPY
+ACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDF
+AVKTSNDFDGGVCERDKSYVTLIPPPLRRTYRLALVALNPVSRHYVFCHVWGAFRPDCYGYVHTSSKTGLAVGLTAAS
+IMIALYWNEPSGTLDASMKIWAKSGLPLRPMLFRATSLGFVYRNQQLFTSTALRCHRMLRHCRLIMPRRAEEEHNRPG
+LTKQHIWLEPERQDPCETVGLSTPFVNLVRHAAQLKVYSRLACDIAHPAALKGTRSPRLTDYPRCSIHSGRGLFDPES
+TLGDPSRVQIPLTERACNLRLITVSTDYCTSKTREPAHSCVLVDVNVILICNSSRGSLCKRSRGTEYSKFTSSGFSSP
+PSMVTTLVNYQN"
+          }
+        },
+        {
+          id {
+            prf {
+              name "1234567A"
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">prf||1234567A prf subject"
+                }
+              }
+            },
+            title "prf subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 120,
+            seq-data ncbieaa "CFTYQGVGFIGIRSARVTSNPFPFSFQRVEYCMRGRGATINLRHRVPY
+ACGDESLAAAGRPARPTSTRVVRHTICPKYFFLCRCRRVVWIQYMLQSRLLRADRNVESGYCVTLVSLLVLK"
+          }
+        },
+        {
+          id {
+            patent {
+              seqid 1,
+              cit {
+                country "US",
+                id number "5000000"
+              }
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">pat|US|5000000|1 patent subject"
+                }
+              }
+            },
+            title "patent subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 150,
+            seq-data ncbieaa "GDESHIVADLPAAPTLTRSVRVTISPDPFFPCRCRRDSSIQYMLQPRL
+LRPSENVESITCANSVMRAVSKASAYDFAVKTSNDFDGKVCERDKSQVTLIHSGLSTPRRNLVRHAMQLQVPSRLALC
+YTHGAASKGLGSSPLPESNRCSTH"
+          }
+        },
+        {
+          id {
+            tpg {
+              accession "DAA00001",
+              version 1
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">tpg|DAA00001.1| tpg subject"
+                }
+              }
+            },
+            title "tpg subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 100,
+            seq-data ncbieaa "SLRFPFEPEGTLGLPGTQQGPLHETRCNSREVTPINQYCTSKLREPRH
+SLNLVRYNGKLICNSARGSLCKRRRGTEYRKFTSSEFERPPWRNSTDANYQP"
+          }
+        },
+        {
+          id {
+            gi 1000,
+            genbank {
+              accession "AAA00001",
+              version 1
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">gi|1000|gb|AAA00001.1| gi and gb <&> \""q\"""
+                }
+              }
+            },
+            title "gi and gb <&> ""q"""
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 100,
+            seq-data ncbieaa "PSENVESHTSANLVIRPVVKVRAACFAVCTSNDSDGDVCIRDKSYVTL
+IPSGLSTRFVNLVRPAMQLKVPSRSPACYTHLAALLGLPSPNLSEFFRGSTV"
+          }
+        },
+        {
+          id {
+            general {
+              db "TI",
+              tag id 12345
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">gnl|TI|12345 trace subject"
+                }
+              }
+            },
+            title "trace subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 70,
+            seq-data ncbieaa "SGSTVDVRHTMMKVSRRAACYTHAAAKGRDNCSNVKRGRMGTGDSRRT
+TTRCHSRVTGSNACTSSRRHSH"
+          }
+        },
+        {
+          id {
+            swissprot {
+              name "NAME_HUMAN",
+              accession "Q99999",
+              release "reviewed",
+              version 1
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sp|Q99999.1|NAME_HUMAN two deflines
+ first\1emb|CAA99999.1| two deflines second"
+                }
+              }
+            },
+            title "two deflines first"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 100,
+            seq-data ncbieaa "CFDYNGKGFDSVYSLRLTLNPYCEIRSRVERPPRGRLAEITQLHRVPY
+ACQDEFHIFAGGPARPTLTLSVLHTISPDPVFVCTWDNDYSIQYMLQPRLRR"
+          }
+        },
+        {
+          id {
+            other {
+              accession "XP_000901",
+              version 1
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">ref|XP_000901.1| nine titles 1
+ <&>\1ref|XP_000902.1| nine titles 2 <&>\1ref|XP_000903.1| nine titles 3
+ <&>\1ref|XP_000904.1| nine titles 4 <&>\1ref|XP_000905.1| nine titles 5
+ <&>\1ref|XP_000906.1| nine titles 6 <&>\1ref|XP_000907.1| nine titles 7
+ <&>\1ref|XP_000908.1| nine titles 8 <&>\1ref|XP_000909.1| nine titles 9 <&>"
+                }
+              }
+            },
+            title "nine titles 1 <&>"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 100,
+            seq-data ncbieaa "RPMRGRLTLIDPRHRVPYACGDPSHIVAGRPARPTVTRSVDATISNDP
+FFNCRCRRDYSITYMLQPRLCRPNGNVESGTCANLVMVAVVKVSAYDTTTKT"
+          }
+        },
+        {
+          id {
+            local str "loc_x"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">lcl|loc_x local & id"
+                }
+              }
+            },
+            title "local & id"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 60,
+            seq-data ncbieaa "SGIGFLEPESTLGDPSGVQPPLTETRCNSALVTPITSYCTSKSCEPVD
+SPNLVRVNVILI"
+          }
+        },
+        {
+          id {
+            gi 999
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">gi|999 gi only subject"
+                }
+              }
+            },
+            title "gi only subject"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 80,
+            seq-data ncbieaa "CFDYQGKGFISMYSLRGDINPEPEIASRVEDPARGVLALITVRHRVYY
+ACPVESHIVAGRPARPTLTKSVRHAISPDPFF"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 123600
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 27
+          },
+          {
+            id str "blast_score",
+            value int 27
+          },
+          {
+            id str "e_value",
+            value real { 419271949102163, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 150086208298125, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 4
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 4
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 316666666666667, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "pq",
+            patent {
+              seqid 1,
+              cit {
+                country "US",
+                id number "5000000"
+              }
+            }
+          },
+          starts {
+            1,
+            126
+          },
+          lens {
+            4
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 29
+          },
+          {
+            id str "blast_score",
+            value int 29
+          },
+          {
+            id str "e_value",
+            value real { 141680712989149, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 157790199816472, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 232272727272727, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "pq2",
+            swissprot {
+              name "NAME_HUMAN",
+              accession "Q99999",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            76,
+            18,
+            80,
+            -1,
+            82,
+            22
+          },
+          lens {
+            4,
+            2,
+            19
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 24
+          },
+          {
+            id str "blast_score",
+            value int 24
+          },
+          {
+            id str "e_value",
+            value real { 661669970159181, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 138530221020605, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 3
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 5
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 595454545454545, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "pq2",
+            patent {
+              seqid 1,
+              cit {
+                country "US",
+                id number "5000000"
+              }
+            }
+          },
+          starts {
+            77,
+            26
+          },
+          lens {
+            6
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 32340022162459, 10, -14 },
+        k { 130449663932196, 10, -15 },
+        h { 473098699025597, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 123600",
+      "Effective search space used: 123600",
+      "Length adjustment: 30"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "FASTA-Reader: Ignoring invalid nucleotide residues at
+ position(s): On line 24: 3, 6-7, 10, 16, 20, 33, 36-39, 41-44, 50, 55, 57, 59"
+    },
+    {
+      code 1,
+      message "FASTA-Reader: Ignoring invalid nucleotide residues at
+ position(s): On line 25: 2, 5, 9, 11-12, 14, 21, 24, 32, 35-36"
+    }
+  }
+}

@@ -624,6 +624,13 @@ impl ParamList {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:273-290
+    /// `CBlastOptionsRemote::x_ResetValue`: removes every recorded parameter of `field`.
+    pub fn reset(&mut self, field: Field) {
+        self.params
+            .retain(|recorded| recorded.name() != field.name());
+    }
+
     fn get(&self, field: Field) -> Option<&ParamValue> {
         self.params
             .iter()

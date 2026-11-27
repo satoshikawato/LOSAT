@@ -272,7 +272,7 @@ pub trait AlignSource {
     fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()>;
 }
 
-fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
+pub(crate) fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
     enc.element();
     enc.begin_sequence("Blast4-parameter");
     enc.member("name", 0);
@@ -342,7 +342,7 @@ fn write_messages<E: Encoder>(enc: &mut E, messages: &[Message]) {
     enc.end_member();
 }
 
-fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
+pub(crate) fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
     enc.element();
     enc.begin_sequence("Blast4-ka-block");
     enc.member("lambda", 0);

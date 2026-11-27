@@ -12,7 +12,7 @@ use crate::ncbi_app::Diag;
 
 /// The output formats that blast_formatter writes; it refuses the others by name
 /// (`Refusal::OutputFormat`).
-pub(crate) const WRITTEN_FORMATS: [i32; 3] = [8, 9, 12];
+pub(crate) const WRITTEN_FORMATS: [i32; 4] = [8, 9, 11, 12];
 
 /// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
 /// tests' list of the refusals (`documented`).
@@ -64,6 +64,9 @@ pub(crate) enum Refusal {
     /// a delay buffer). The bytes of the Seq-annot that went to the output before it stay
     /// written.
     Unwritable(&'static str, i32),
+    /// `-outfmt 11` of an archive whose queries are a `seq-loc-list`: NCBI's `CObjMgr_QueryFactory`
+    /// resolves the locations through its data loaders (the database or NCBI's servers).
+    SeqLocQuery,
 }
 
 impl Refusal {
@@ -122,6 +125,12 @@ impl Refusal {
                  supported by LOSAT's {}",
                 super::PROGRAM
             ),
+            Refusal::SeqLocQuery => format!(
+                "output format 11 of a BLAST archive whose queries are a list of sequence \
+                 locations (seq-loc-list), for which NCBI BLAST+ fetches sequences from its data \
+                 loaders, is not supported by LOSAT's {}",
+                super::PROGRAM
+            ),
         }
     }
 
@@ -147,6 +156,7 @@ impl Refusal {
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
             Refusal::Unwritable(..) => "an archive's results".to_string(),
+            Refusal::SeqLocQuery => "seq-loc-list".to_string(),
         }
     }
 }
@@ -160,7 +170,7 @@ impl std::fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
-/// The written formats as a list in words: `8, 9 and 12`.
+/// The written formats as a list in words: `8, 9, 11 and 12`.
 fn written_formats() -> String {
     let names: Vec<String> = WRITTEN_FORMATS.iter().map(i32::to_string).collect();
     match names.split_last() {
@@ -192,6 +202,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
         Refusal::Unwritable("", 12),
+        Refusal::SeqLocQuery,
     ]);
     refusals
 }

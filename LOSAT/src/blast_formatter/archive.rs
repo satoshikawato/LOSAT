@@ -33,7 +33,7 @@ use crate::blastinput::app::{
 use crate::blastinput::db_mask::name_mask_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::{command_line_argument_error, NativeError};
-use crate::ncbi_app::files::{self, OutputFile};
+use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions, EProgram};
@@ -44,6 +44,7 @@ use crate::report::archive::read::{
 use crate::report::archive::writer::FLUSH_BYTES;
 use crate::report::run_files::{OpenFiles, OpenedFile};
 use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
@@ -219,16 +220,16 @@ impl<'o> Output<'o> {
             .stdout
             .take()
             .expect("the standard output until -out is opened");
-        let file = files::open_output_file("out", value, stdout, self.files)
+        let file = files::open_output_device("out", value, stdout, self.files)
             .map_err(|error| command_line_argument_error(error.message()))?;
         let buf = match file {
-            OutputFile::Stdout(out) => {
+            OutputDevice::Stdout(out) => {
                 OutBuf::Cout(CoutBuf::new(out, crate::cli::NcbiStdio::cout()))
             }
-            OutputFile::File(file) => OutBuf::File(FileBuf::of_file(file)),
+            OutputDevice::File(file) => OutBuf::File(FileBuf::of_file(file)),
             // LOSAT Web's refusal of a name that it does not write, in blastdbcmd's words
-            // (`OutputFile::Refused`); the command line and the library open every name.
-            OutputFile::Refused(reason) => {
+            // (`OutputDevice::Refused`); the command line and the library open every name.
+            OutputDevice::Refused(reason) => {
                 return Err(anyhow::anyhow!(crate::seqmasks_io::run::unsupported(
                     &reason, PROGRAM
                 )))
@@ -426,20 +427,25 @@ struct OpenedDatabase {
 }
 
 impl<'r, 'o> Run<'r, 'o> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1657-1665
     /// The `CRemoteBlast` made of a stream and the loop of `LoadFromArchive`: the encoding guessed
-    /// (an archive in ASN.1 binary or XML is refused by name), then each object read, its messages
-    /// posted and, unless it is the error archive, formatted.
+    /// (`CFormatGuess`, accepting ASN.1 text, ASN.1 binary and ASN.1-style XML), then each object
+    /// read, its messages posted and, unless it is the error archive, formatted.
     fn objects(&mut self, archive: &mut dyn Read, diag: &mut Diag) -> anyhow::Result<()> {
         let guessed = guess_encoding(archive);
-        match &guessed.encoding {
-            Ok(Encoding::Text) => {}
-            Ok(Encoding::Binary) => return Err(Refusal::BinaryArchive.into()),
-            Ok(Encoding::Xml) => return Err(Refusal::XmlArchive.into()),
+        let mut reader = match guessed.encoding {
+            Ok(Encoding::Text) => ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE)),
+            Ok(Encoding::Binary) => {
+                ArchiveReader::binary(guessed.into_binary(Names::BLAST_ARCHIVE))
+            }
+            Ok(Encoding::Xml) => {
+                ArchiveReader::xml(guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
+            }
             Ok(Encoding::Other) => return Err(invalid_archive()),
-            Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
+            Err(GuessStop::Exception(exception)) => return Err(exception_error(&exception)),
             Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
-        }
-        let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
+        };
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -1207,7 +1213,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
         ReadError::Exception(exception) => exception_error(&exception),
         ReadError::Std(what) => NativeError::std_exception(what).into(),
         ReadError::OutOfMemory => NativeError::out_of_memory().into(),
-        ReadError::Unsupported(text) => Refusal::UnreadText(text).into(),
+        ReadError::Unsupported(text) => Refusal::UnreadArchive(text).into(),
     }
 }
 

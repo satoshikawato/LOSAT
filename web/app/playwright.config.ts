@@ -49,6 +49,8 @@ function playwrightWebkit(): string | undefined {
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  // Names CI's artifact upload refuses are renamed after each test (support/test.ts) and after the run.
+  globalTeardown: './tests/e2e/support/global-teardown.ts',
   fullyParallel: true,
   // At most two browsers at a time: the same machine runs the engine gates (plan DW-7).
   workers: 2,

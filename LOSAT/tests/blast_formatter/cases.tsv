@@ -6,6 +6,7 @@
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
 # Rows from of6_bx on (line RG item F3 PR 3b, agent 3B of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and in/db/s3gb, in/db/bpgb by the official release's search programs and makeblastdb -parse_seqids), by remaining-gaps-20261112/F/f3/tools/fix3b.py, every NCBI run under unshare -rn. New inputs: in/qx.fna, qxg.fna, tq.faa, s3gb.fa, qgb.fa, qgb2.fa, bpgb.faa, qbpgb.faa, qxgb.fna (made by fix3b.py from in/s3.fa, in/ps.faa, in/bp_s.faa); in/bx.asn, bx_subj.asn, bx_gc2.asn (-query_gencode 2), bx_ungapped.asn, tn.asn, tn_subj.asn, tn_gc4.asn (-db_gencode 4), tn_ungapped.asn, tx.asn, tx_subj.asn, tx_batch.asn (BATCH_SIZE=1), tx_gc.asn (-query_gencode 5 -db_gencode 11), bx_empty.asn and bx_empty_subj.asn (-ungapped -window_size 0 on the inputs of line RG item X2g: HSPs of length 0), bl2_q2s3.asn and bl2_q2s3_b1.asn (blastn -subject, 2 queries x 3 subjects, the second with BATCH_SIZE=1), loc_bn.asn, loc_bn2.asn, loc_tx.asn, loc_bp.asn, loc_tn.asn, loc_bx.asn, tn_gb.asn (-parse_deflines on databases of parsed ids: NCBI's archive keeps the queries as a seq-loc-list); in/mix_n_tx.asn, mix_tx_n.asn, mix_bx_tn.asn, bl2_1_3.asn, bl2_3_1.asn, bl2_3_1_1.asn (archives one after the other). refused_tabular_locations_bx and _tn: queries given as locations that the database does not hold, which NCBI asks its servers for. Rows refused_tabular_rpstblastn and refused_tabular_bl2seq_legacy_7 of PR 3a are rows of6_rtn and bl2seq_legacy_7_bn (the same bytes).
+# Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
 noargs	
 h	-h
 help	-help
@@ -358,3 +359,33 @@ of6_tn_gb	-archive in/tn_gb.asn -outfmt 6
 of7_tn_gb	-archive in/tn_gb.asn -outfmt 7
 of6_tn_gb_all	-archive in/tn_gb.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
 of7_tn_gb_pd	-archive in/tn_gb.asn -outfmt 7 -parse_deflines
+of8_db_bin	-archive in/db.asnb -outfmt 8
+of9_db_bin	-archive in/db.asnb -outfmt 9
+of12_db_bin	-archive in/db.asnb -outfmt 12
+of8_db_xml	-archive in/db.xml -outfmt 8
+of9_db_xml	-archive in/db.xml -outfmt 9
+of12_db_xml	-archive in/db.xml -outfmt 12
+of8_subject_bin	-archive in/bn.asnb -outfmt 8
+of9_subject_bin	-archive in/bn.asnb -outfmt 9
+of12_subject_bin	-archive in/bn.asnb -outfmt 12
+of8_subject_xml	-archive in/bn.xml -outfmt 8
+of9_subject_xml	-archive in/bn.xml -outfmt 9
+of12_subject_xml	-archive in/bn.xml -outfmt 12
+of8_batch_bin	-archive in/batch.asnb -outfmt 8
+of8_batch_xml	-archive in/batch.xml -outfmt 8
+of8_rpsblast_bin	-archive in/rps.asnb -outfmt 8
+of8_rpsblast_xml	-archive in/rps.xml -outfmt 8
+of8_error_object_bin	-archive in/err.asnb -outfmt 8
+of8_error_object_xml	-archive in/err.xml -outfmt 8
+of8_bin_cut1	-archive in/bin_cut1.asnb -outfmt 8
+of8_bin_cut2	-archive in/bin_cut2.asnb -outfmt 8
+of8_bin_plus30	-archive in/bin_plus30.asnb -outfmt 8
+of8_bin_plus00	-archive in/bin_plus00.asnb -outfmt 8
+of8_batch_bin_cut1	-archive in/batch_bin_cut1.asnb -outfmt 8
+of8_xml_cut1	-archive in/xml_cut1.xml -outfmt 8
+of8_xml_cut2	-archive in/xml_cut2.xml -outfmt 8
+of8_xml_cut20	-archive in/xml_cut20.xml -outfmt 8
+of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
+bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
+bad_title_2_xml	-archive in/bad2.xml -outfmt 8
+of8_bom	-archive in/bom.asn -outfmt 8

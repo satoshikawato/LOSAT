@@ -29,8 +29,6 @@ fn the_documented_refusals_are_one_of_each_kind() {
         })
         .collect();
     assert_eq!(formats, [0, 1, 2, 3, 4, 5, 11, 13, 14, 15, 16, 17, 18]);
-    assert!(documented.contains(&Refusal::BinaryArchive));
-    assert!(documented.contains(&Refusal::XmlArchive));
     assert!(documented.contains(&Refusal::FatalMessage));
     for refusal in &documented {
         assert!(!refusal.manual_words().is_empty(), "{refusal:?}");

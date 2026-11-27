@@ -10,9 +10,12 @@
 // directory succeeds and its reads fail: the descriptor is a directory's (`fd_read` and `fd_pread` give EISDIR, the stat
 // calls say directory, `fd_readdir` lists it, and a path opened from it is looked up in it); an open of a folder
 // for writing is EISDIR (line NP WW3a, 2026-11-23: the command line's `windowmasker -in <folder>` says "Is a directory"
-// from the read). The engine reads the files in place: each read takes the bytes that it asks for from the
-// file's Blob (`File.slice`) with `FileReaderSync`, so a file is never copied whole into the Wasm memory or into the
-// browser's storage. The Node hosts of LOSAT's tests give the engine the same view from the OS
+// from the read). The engine reads the files in place: a read takes its bytes from the file's Blob (`File.slice`) with
+// `FileReaderSync`, so a file is never copied whole into the Wasm memory or into the browser's storage. A file read in
+// order is read ahead, as an OS reads ahead (`readBase`): a read of a Blob costs about a millisecond up to a few hundred
+// KiB, whatever it takes (the browser's process reads the file), so makeblastdb's FASTA reader, which asks for 32 KiB at
+// a time, spent 87 % of its run in those reads (line NP WW4b1, 2026-11-27: 9.3 of 10.7 s for 146 MB in Chromium). The
+// Node hosts of LOSAT's tests give the engine the same view from the OS
 // (LOSAT/tests/wasi_thread_worker.js, `preopens: { "/work": directory }`).
 //
 // A search's directory is read-only: a call that would make, change or remove a name is EROFS, and a file opens for
@@ -59,6 +62,14 @@ const READ_LIMIT = 16 * 1024 * 1024;
 export const CHUNK_BYTES = 1024 * 1024;
 /** The smallest chunk: a small file does not take a whole chunk. */
 const MIN_CHUNK_BYTES = 4096;
+/** The most bytes that a read of a file in order takes beyond what it asks for (`readBase`); the first time, 64 KiB. */
+export const AHEAD_BYTES = 1024 * 1024;
+const FIRST_AHEAD_BYTES = 64 * 1024;
+/**
+ * How many files keep the bytes read ahead of them, on each thread: those read last (a search's reads in OID order take
+ * up to 8 places of a volume's files at once, LOSAT/src/seqdb/file.rs `IN_ORDER_WINDOWS`).
+ */
+export const AHEAD_FILES = 8;
 
 // WASI preview1's values (wasi_snapshot_preview1.witx).
 const ERRNO_SUCCESS = 0;
@@ -197,6 +208,11 @@ interface FileNode {
   /** The folder that holds it under `name`; undefined once it is removed. */
   parent: DirNode | undefined;
   name: string;
+  /** The user's bytes read ahead (`readBase`): from `start`, of the Blob; undefined when none are kept. */
+  ahead: { readonly start: number; readonly bytes: Uint8Array } | undefined;
+  /** Where the last read of the user's bytes ended (0 before the first), and how many it took beyond what it asked for. */
+  readEnd: number;
+  aheadBytes: number;
 }
 
 /** A folder of the directory: the run directory (number 0), a folder of the user's paths, or one that the run made. */
@@ -261,6 +277,8 @@ export class RunDirectory {
   private readonly modes = new Uint8Array(OPEN_FILES);
   /** Per slot of a folder that is being listed, the entries as the listing began (`fd_readdir`). */
   private readonly listings = new Map<number, readonly ListEntry[]>();
+  /** The files that keep bytes read ahead (`FileNode.ahead`), the one read last at the end; at most AHEAD_FILES. */
+  private aheadNodes: FileNode[] = [];
 
   /**
    * @param table the table of descriptors (`TABLE_BYTES`), a SharedArrayBuffer that every thread of the threaded
@@ -339,13 +357,30 @@ export class RunDirectory {
       if (there !== undefined) throw new Error(`${path} is both a file and a folder`);
       const size = file.file.size;
       const mtime = BigInt(Math.max(0, Math.trunc((file.file as File).lastModified ?? 0))) * 1_000_000n;
-      const node: FileNode = { kind: 'file', id, ino: BigInt(id + 2), base: file.file, baseSize: size, chunks: new Map(), size, mtime, origin: path, changed: false, parent: folder, name };
+      const node: FileNode = {
+        kind: 'file',
+        id,
+        ino: BigInt(id + 2),
+        base: file.file,
+        baseSize: size,
+        chunks: new Map(),
+        size,
+        mtime,
+        origin: path,
+        changed: false,
+        parent: folder,
+        name,
+        ahead: undefined,
+        readEnd: 0,
+        aheadBytes: 0,
+      };
       folder.children.set(name, node);
       fileNodes.push(node);
     });
     this.files = files;
     this.fileNodes = fileNodes;
     this.dirNodes = dirNodes;
+    this.aheadNodes = [];
     this.nextIno = BigInt(files.length + 1 + dirNodes.length);
   }
 
@@ -394,12 +429,43 @@ export class RunDirectory {
     }
   }
 
-  /** The user's bytes `start` to `end` of `node`'s Blob. */
+  /**
+   * The user's bytes `start` to `end` (within `baseSize`) of `node`'s Blob, which the caller copies. A file read in order
+   * is read ahead, as an OS reads ahead: a read that starts where the file's last read ended (at the file's start for its
+   * first) or inside the bytes read ahead goes on in order, and takes from the Blob, beyond its own bytes, twice what the
+   * last such read took beyond its own (FIRST_AHEAD_BYTES the first time, at most AHEAD_BYTES), which the next reads
+   * take without a read of the Blob. A read elsewhere takes only its own bytes, so that reads here and there (a search's
+   * fetch of the sequences that it found) read no more than they did, and leaves the bytes read ahead where they are;
+   * a read in order after it starts again from FIRST_AHEAD_BYTES. The bytes read ahead are the Blob's, which never
+   * changes; the last AHEAD_FILES files that were read ahead keep theirs.
+   */
   private readBase(node: FileNode, start: number, end: number): Uint8Array {
     if (this.read === undefined) throw new Error('this thread cannot read a file synchronously');
-    const data = this.read(node.base!, start, end);
-    if (data.length !== end - start) throw new Error(`a read of ${end - start} bytes of a file gave ${data.length}`);
-    return data;
+    const held = node.ahead;
+    const heldEnd = held === undefined ? 0 : held.start + held.bytes.length;
+    if (held !== undefined && start >= held.start && end <= heldEnd) {
+      node.readEnd = end;
+      return held.bytes.subarray(start - held.start, end - held.start);
+    }
+    const inOrder = start === node.readEnd || (held !== undefined && start >= held.start && start <= heldEnd);
+    node.aheadBytes = inOrder ? Math.min(AHEAD_BYTES, Math.max(FIRST_AHEAD_BYTES, 2 * node.aheadBytes)) : 0;
+    const stop = Math.min(node.baseSize, Math.max(end, start + node.aheadBytes));
+    const data = this.read(node.base!, start, stop);
+    if (data.length !== stop - start) throw new Error(`a read of ${stop - start} bytes of a file gave ${data.length}`);
+    node.readEnd = end;
+    if (stop === end) return data;
+    this.keepAhead(node, { start, bytes: data });
+    return data.subarray(0, end - start);
+  }
+
+  /** `node` keeps `ahead` (the file read last), or no bytes read ahead; the file read longest ago past AHEAD_FILES lets its go. */
+  private keepAhead(node: FileNode, ahead: FileNode['ahead']): void {
+    node.ahead = ahead;
+    const at = this.aheadNodes.indexOf(node);
+    if (at >= 0) this.aheadNodes.splice(at, 1);
+    if (ahead === undefined) return;
+    this.aheadNodes.push(node);
+    if (this.aheadNodes.length > AHEAD_FILES) this.aheadNodes.shift()!.ahead = undefined;
   }
 
   /** `length` bytes of `node` from `start` (within its size): its chunks, the user's bytes below them, zeros in a hole. */
@@ -606,6 +672,7 @@ export class RunDirectory {
       if (node.parent !== undefined) return;
       for (let slot = 0; slot < OPEN_FILES; slot++) if (Atomics.load(this.slots, slot) === node.id + 1) return;
       node.chunks.clear();
+      this.keepAhead(node, undefined);
     };
     /** Takes `node` out of its folder (the folder changes; a file stays readable through its open descriptors). */
     const unlink = (node: DirectoryNode) => {
@@ -693,6 +760,9 @@ export class RunDirectory {
           changed: true,
           parent: found.parent,
           name: found.name,
+          ahead: undefined,
+          readEnd: 0,
+          aheadBytes: 0,
         };
         this.fileNodes.push(made);
         found.parent.children.set(made.name, made);

@@ -4,7 +4,7 @@
 // writable directory, the overlay of the run's files on the user's (line NP WW4b1, D-WW4b-1, 2026-11-27): each call
 // that makeblastdb's `std::fs` makes, answered as Linux answers it, and the files that the run leaves.
 import { describe, expect, it } from 'vitest';
-import { CHUNK_BYTES, FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
+import { AHEAD_BYTES, AHEAD_FILES, CHUNK_BYTES, FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
 const ERRNO = {
   SUCCESS: 0,
@@ -130,6 +130,20 @@ function guest(directory: RunDirectory) {
   };
 }
 
+/** A directory of the files `files` (their bytes) for a run that only reads. */
+function binaryDirectoryOf(files: Record<string, Uint8Array>) {
+  const contents = new Map<Blob, Uint8Array>();
+  const list = Object.entries(files).map(([name, bytes]) => {
+    const file = new Blob([bytes as BlobPart]);
+    contents.set(file, bytes);
+    return { name, file };
+  });
+  const reader = syncReader(contents);
+  const directory = new RunDirectory(undefined, reader.read);
+  directory.open(list);
+  return { directory, list, reader, contents };
+}
+
 function directoryOf(files: Record<string, string>, table?: SharedArrayBuffer) {
   const contents = new Map<Blob, Uint8Array>();
   const list = Object.entries(files).map(([name, text]) => {
@@ -171,11 +185,8 @@ describe("the run's working directory", () => {
     expect(g.read(fd, 100)).toEqual({ errno: 0, bytes: 'tes' });
     // At the end: 0 bytes, as a file system's read.
     expect(g.read(fd, 100)).toEqual({ errno: 0, bytes: '' });
-    // Only the bytes that each read asked for were taken from the Blob.
-    expect(reader.reads).toEqual([
-      [0, 9],
-      [9, 12],
-    ]);
+    // The first read, at the file's start, read the file ahead (to its end, here), and the next took its bytes from there.
+    expect(reader.reads).toEqual([[0, 12]]);
     expect(g.pread(fd, 5, 7n)).toEqual({ errno: 0, bytes: 'bytes' });
     // fd_pread does not move the position.
     expect(g.seek(fd, 0n, 1)).toEqual({ errno: 0, at: 12n });
@@ -190,6 +201,84 @@ describe("the run's working directory", () => {
     expect(g.wasi.fd_close!(fd)).toBe(ERRNO.SUCCESS);
     expect(g.wasi.fd_close!(fd)).toBe(ERRNO.BADF);
     expect(g.read(fd, 1).errno).toBe(ERRNO.BADF);
+  });
+
+  it('reads a file read in order ahead, twice as far each time up to AHEAD_BYTES, and a read elsewhere only its own bytes', () => {
+    const fasta = new Uint8Array(5 * AHEAD_BYTES + 123).map((_, i) => (i * 7) % 251);
+    const mask = new Uint8Array(3 * AHEAD_BYTES).map((_, i) => (i * 13) % 241);
+    const { directory, reader, contents } = binaryDirectoryOf({ 'in.fa': fasta, 'mask.asnb': mask });
+    const g = guest(directory);
+    const blobOf = new Map([...contents].map(([blob, bytes]) => [bytes, blob]));
+    // The reads of each Blob, in order.
+    const reads = new Map<Blob, Array<[number, number]>>();
+    const plain = reader.read;
+    (directory as unknown as { read: typeof plain }).read = (blob, start, end) => {
+      (reads.get(blob) ?? reads.set(blob, []).get(blob)!).push([start, end]);
+      return plain(blob, start, end);
+    };
+    const a = g.open('in.fa').fd;
+    const b = g.open('mask.asnb').fd;
+    // makeblastdb's FASTA reader asks for 32 KiB at a time; here a mask file is read in turn with it.
+    const got = { a: [] as number[], b: [] as number[] };
+    for (let done = false; !done; ) {
+      done = true;
+      for (const [fd, out] of [[a, got.a], [b, got.b]] as const) {
+        g.view().setUint32(3072, 4096, true);
+        g.view().setUint32(3076, 32768, true);
+        expect(g.wasi.fd_read!(fd, 3072, 1, 2048)).toBe(ERRNO.SUCCESS);
+        const count = g.view().getUint32(2048, true);
+        if (count > 0) done = false;
+        out.push(...new Uint8Array(g.view().buffer, 4096, count));
+      }
+    }
+    expect(Buffer.from(got.a).equals(Buffer.from(fasta))).toBe(true);
+    expect(Buffer.from(got.b).equals(Buffer.from(mask))).toBe(true);
+    // Each file was read from its Blob once, in pieces that follow one another: 64 KiB, then twice as many, up to AHEAD_BYTES.
+    for (const bytes of [fasta, mask]) {
+      const pieces = reads.get(blobOf.get(bytes)!)!;
+      expect(pieces[0]![0]).toBe(0);
+      expect(pieces.at(-1)![1]).toBe(bytes.length);
+      pieces.slice(1).forEach(([start], i) => expect(start).toBe(pieces[i]![1]));
+      expect(pieces.slice(0, 4).map(([start, end]) => end - start)).toEqual([65536, 131072, 262144, 524288]);
+      expect(Math.max(...pieces.map(([start, end]) => end - start))).toBe(AHEAD_BYTES);
+    }
+    expect(reads.get(blobOf.get(fasta)!)!.length).toBe(4 + Math.ceil((fasta.length - 983040) / AHEAD_BYTES));
+    // Reads elsewhere take their own bytes; one that goes on from the last reads ahead again, from 64 KiB, and its bytes
+    // replace those read ahead at the file's end.
+    reads.clear();
+    const first = AHEAD_BYTES + 5;
+    const second = first - 4096;
+    const pread = (offset: number, length: number) => {
+      g.view().setUint32(3072, 4096, true);
+      g.view().setUint32(3076, length, true);
+      expect(g.wasi.fd_pread!(a, 3072, 1, BigInt(offset), 2048)).toBe(ERRNO.SUCCESS);
+      expect([...new Uint8Array(g.view().buffer, 4096, length)]).toEqual([...fasta.subarray(offset, offset + length)]);
+    };
+    pread(first, 100);
+    pread(second, 100);
+    pread(second + 100, 50);
+    pread(second + 150, 50);
+    pread(fasta.length - 100, 100);
+    expect(reads.get(blobOf.get(fasta)!)).toEqual([
+      [first, first + 100],
+      [second, second + 100],
+      [second + 100, second + 100 + 65536],
+      [fasta.length - 100, fasta.length],
+    ]);
+  });
+
+  it('keeps the bytes read ahead of the AHEAD_FILES files read last', () => {
+    const files: Record<string, Uint8Array> = {};
+    for (let i = 0; i <= AHEAD_FILES; i++) files[`f${i}`] = new Uint8Array(200_000);
+    const { directory, reader } = binaryDirectoryOf(files);
+    const g = guest(directory);
+    const fds = Object.keys(files).map((name) => g.open(name).fd);
+    for (const fd of fds) expect(g.read(fd, 10).errno).toBe(ERRNO.SUCCESS);
+    expect(reader.reads).toEqual(fds.map(() => [0, 65536]));
+    reader.reads.length = 0;
+    // The file read longest ago (f0) let its bytes go: its next read takes the Blob again (in order: twice as far ahead).
+    for (const fd of [fds[1]!, fds.at(-1)!, fds[0]!]) expect(g.read(fd, 10)).toEqual({ errno: 0, bytes: '\0'.repeat(10) });
+    expect(reader.reads).toEqual([[10, 10 + 131072]]);
   });
 
   it("answers for its folders and for what it does not hold as a file system does", () => {
@@ -580,6 +669,8 @@ describe("a tool run's writable directory", () => {
   it("cuts and extends a file (`set_len`, `fd_allocate`); a user's bytes past a cut do not come back, and its Blob is not changed", async () => {
     const w = writableOf({ u: '0123456789' });
     const { fd } = w.openWith('u', { read: true, write: true });
+    // Read first: the user's bytes are then read ahead, and those past the cut must not come back from there either.
+    expect(w.contents('u')).toBe('0123456789');
     expect(w.wasi.fd_filestat_set_size!(fd, 4n)).toBe(ERRNO.SUCCESS);
     expect(w.contents('u')).toBe('0123');
     expect(w.wasi.fd_filestat_set_size!(fd, 8n)).toBe(ERRNO.SUCCESS);
@@ -610,10 +701,10 @@ describe("a tool run's writable directory", () => {
     w.view().setUint32(3076, 8, true);
     expect(w.wasi.fd_pread!(fd, 3072, 1, BigInt(CHUNK_BYTES - 4), 2048)).toBe(ERRNO.SUCCESS);
     expect([...new Uint8Array(w.view().buffer, 4096, 8)]).toEqual([...expected.subarray(CHUNK_BYTES - 4, CHUNK_BYTES + 4)]);
-    // A read of the third chunk takes the user's bytes in place.
+    // A read of the third chunk takes the user's bytes in place: read ahead, as the file was read in order up to there.
     w.reader.reads.length = 0;
     expect(w.pread(fd, 3, BigInt(2 * CHUNK_BYTES)).errno).toBe(ERRNO.SUCCESS);
-    expect(w.reader.reads).toEqual([[2 * CHUNK_BYTES, 2 * CHUNK_BYTES + 3]]);
+    expect(w.reader.reads).toEqual([[2 * CHUNK_BYTES, 2 * CHUNK_BYTES + 262144]]);
     expect(w.directory.writtenBytes).toBe(2 * CHUNK_BYTES);
     const [[name, bytes]] = writtenOf(w.directory) as [[string, Uint8Array]];
     expect(name).toBe('big.fa');

@@ -172,9 +172,10 @@ directory, as the command line run from that directory names it (`-db db/nt` rea
 database; files named `db/taxdb.*` give the command line's `N/A` names. The directory is the engine's
 current directory, `/work`: a relative name is a file of it, an absolute one (`/db/nt`) names none, and
 a path is looked up as the OS looks it up (`nofolder/../db/nt` fails), as on the command line run from
-that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place, only the bytes that
-it needs, with `FileReaderSync` in the workers: a database is never copied into memory or into the
-browser's storage. Every thread of a threaded search reads the same files.
+that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place with `FileReaderSync` in the
+workers: the bytes that it needs and, for a file read in order, up to 1 MiB ahead (a read of a file costs
+about a millisecond whatever its size, so a file read in small pieces is read in fewer, larger ones). A
+database is never copied whole into memory or into the browser's storage. Every thread of a threaded search reads the same files.
 
 BLASTN's `-filtering_db` (a database of repeats that masks the query) runs the same way, with `-db` or
 with a `-subject`: give the run the repeat database's files (every file of that database, as for `-db`)

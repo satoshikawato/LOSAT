@@ -253,7 +253,7 @@ fn phi_second_set_options(
             Err(error) => error.to_error(),
         }
     };
-    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+    write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
     Err(error)
 }
 

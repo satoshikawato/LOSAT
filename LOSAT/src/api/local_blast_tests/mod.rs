@@ -10,6 +10,7 @@ mod database_refusal;
 mod file_sink;
 mod later_warnings;
 mod outfmt13_14;
+mod phi;
 mod support;
 mod tblastn;
 mod tblastx;

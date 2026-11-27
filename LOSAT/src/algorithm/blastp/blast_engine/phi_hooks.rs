@@ -285,6 +285,7 @@ impl PhiCall<'_> {
                     continue;
                 }
                 let part = rows_of_lists(std::slice::from_ref(list), batch.searched)?;
+                debug_assert_eq!(part.len(), list_hsps(list), "one row per HSP (`first_hsp`)");
                 let number = u32::try_from(occurrence + 1).unwrap_or(u32::MAX);
                 occurrences.extend(std::iter::repeat_n(number, part.len()));
                 rows.extend(part);
@@ -308,6 +309,40 @@ impl PhiCall<'_> {
     pub(super) fn occurrence_lists(&self, q_idx: usize) -> &[Option<BlastpHitList>] {
         self.occurrence_lists.get(q_idx).map_or(&[], Vec::as_slice)
     }
+
+    /// The index in the call's hit list that the library reads (`library_rows`) of the first HSP
+    /// of occurrence `occurrence` (0-based) of the batch `batch`: the HSPs of the searched batches
+    /// before it, then of its occurrences before. The reports of a batch or of an occurrence
+    /// number their HSPs from there (`FormatProbe::from_hsp`).
+    pub(super) fn first_hsp(
+        &self,
+        batch: &PhiBatch,
+        occurrence: usize,
+    ) -> crate::api::local_blast::HspIndex {
+        let mut first = 0;
+        for earlier in &self.batches {
+            if self.search_of(earlier).is_none() {
+                continue;
+            }
+            let lists = self.occurrence_lists(earlier.searched);
+            if std::ptr::eq(earlier, batch) {
+                return first + lists.iter().take(occurrence).map(list_hsps).sum::<usize>();
+            }
+            first += lists.iter().map(list_hsps).sum::<usize>();
+        }
+        first
+    }
+}
+
+/// The HSPs of an occurrence's hit list, one row each in the reports and in the call's hit list.
+fn list_hsps(list: &Option<BlastpHitList>) -> usize {
+    list.as_ref().map_or(0, |list| {
+        list.hsplist_array
+            .iter()
+            .take(list.hsplist_count)
+            .map(|hsp_list| hsp_list.hsps.len())
+            .sum()
+    })
 }
 
 /// How the call's PHI-BLAST setup ends.

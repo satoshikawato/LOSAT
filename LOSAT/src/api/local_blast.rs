@@ -758,6 +758,50 @@ impl<'o> FormatProbe<'o> {
     pub fn subject_end(&mut self, first_hsp: HspIndex) {
         self.observer.subject_end(self.format, first_hsp);
     }
+
+    /// Runs `write` with the probe of a part of the call's hit list that a formatter numbers from
+    /// 0: the observer gets the part's HSPs from `first` on, their index in the call's hit list
+    /// (psiblast `-phi_pattern`'s report of a query batch or of a pattern occurrence, item PS8b).
+    pub(crate) fn from_hsp<R>(
+        probe: Option<&mut FormatProbe<'_>>,
+        first: HspIndex,
+        write: impl FnOnce(Option<&mut FormatProbe<'_>>) -> R,
+    ) -> R {
+        let Some(probe) = probe else {
+            return write(None);
+        };
+        let format = probe.format;
+        let mut shifted = FromHsp {
+            observer: &mut *probe.observer,
+            first,
+        };
+        write(Some(&mut FormatProbe::new(&mut shifted, format)))
+    }
+}
+
+/// The observer of `FormatProbe::from_hsp`: the HSP and subject events of a part's formatter,
+/// moved to the part's place in the call's hit list.
+struct FromHsp<'a> {
+    observer: &'a mut dyn FormatObserver,
+    first: HspIndex,
+}
+
+impl FormatObserver for FromHsp<'_> {
+    fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
+        self.observer.hsp_begin(format, self.first + hsp);
+    }
+
+    fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
+        self.observer.hsp_end(format, self.first + hsp);
+    }
+
+    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
+        self.observer.subject_begin(format, self.first + first_hsp);
+    }
+
+    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
+        self.observer.subject_end(format, self.first + first_hsp);
+    }
 }
 
 /// The receiver of the final hit list (`ReportOutputs::hits`).

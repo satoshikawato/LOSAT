@@ -1551,28 +1551,32 @@ fn write_phi_window(
                 .map(|occurrence| (occurrence.offset as u32, occurrence.length as u32))
                 .collect(),
         });
-        phi_round::write_phi_round_report(
-            &occurrence_hits,
-            batch.queries.clone(),
-            &phi.call.result_warnings(batch, phi.result_warnings),
-            info.as_ref(),
-            phi.call.footer(batch),
-            writer,
-            pairwise_config,
-            pairwise_queries,
-            query_titles,
-            subject_titles,
-            listed_parsed,
-            listed_sources,
-            hit_loads,
-            pairwise_report,
-            pairwise_database.as_ref(),
-            probe.as_mut(),
-            warnings.as_mut(),
-            anchored_sequences
-                .as_ref()
-                .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
-        )
+        // The report numbers the batch's HSPs from 0; the call's hit list has the batches before
+        // first (`PhiCall::first_hsp`).
+        FormatProbe::from_hsp(probe.as_mut(), phi.call.first_hsp(batch, 0), |probe| {
+            phi_round::write_phi_round_report(
+                &occurrence_hits,
+                batch.queries.clone(),
+                &phi.call.result_warnings(batch, phi.result_warnings),
+                info.as_ref(),
+                phi.call.footer(batch),
+                writer,
+                pairwise_config,
+                pairwise_queries,
+                query_titles,
+                subject_titles,
+                listed_parsed,
+                listed_sources,
+                hit_loads,
+                pairwise_report,
+                pairwise_database.as_ref(),
+                probe,
+                warnings.as_mut(),
+                anchored_sequences.as_ref().map(|sequences| {
+                    sequences as &dyn crate::report::query_anchored::ReportSequences
+                }),
+            )
+        })
         .map_err(crate::cli::NativeError::of_writer)?;
     }
     Ok(())
@@ -1869,14 +1873,17 @@ pub(super) fn write_custom_tabular(
             let mut occurrence_posts = warnings
                 .as_mut()
                 .map(|warnings| QueryWarnings::of_posts(&[], None, &mut *warnings.sink));
-            tabular::write_blastp_tabular(
-                &phi_tab,
-                &shown,
-                &mut writer,
-                occurrence_posts.as_mut(),
-                probe.as_mut(),
-                rows.as_mut(),
-            )?;
+            // The batch's HSPs from their place in the call's hit list (`PhiCall::first_hsp`).
+            FormatProbe::from_hsp(probe.as_mut(), phi.call.first_hsp(batch, 0), |probe| {
+                tabular::write_blastp_tabular(
+                    &phi_tab,
+                    &shown,
+                    &mut writer,
+                    occurrence_posts.as_mut(),
+                    probe,
+                    rows.as_mut(),
+                )
+            })?;
         }
         writer.flush()?;
         return Ok(());
@@ -2024,26 +2031,32 @@ pub(super) fn write_phi_text(
                 None => &[None],
             };
             let stopped = |s_idx: usize| stopped_subject(view, s_idx);
-            if let Err(err) = write_blastp_tabular_hit_lists(
-                part,
-                outfmt,
-                &mut writer,
-                query_ids,
-                &query_titles[q_idx..=q_idx],
-                subject_ids,
-                subject_accessions,
-                view.hit_loads,
-                &[no_set],
-                None,
-                context,
-                probe.as_mut(),
-                None,
-                false,
-                0,
-                Some(1),
-                None,
-                (&stopped, view.args.app.name()),
-            ) {
+            // The occurrence's HSPs from their place in the call's hit list
+            // (`PhiCall::first_hsp`).
+            let first = phi.first_hsp(batch, occurrence);
+            let written = FormatProbe::from_hsp(probe.as_mut(), first, |probe| {
+                write_blastp_tabular_hit_lists(
+                    part,
+                    outfmt,
+                    &mut writer,
+                    query_ids,
+                    &query_titles[q_idx..=q_idx],
+                    subject_ids,
+                    subject_accessions,
+                    view.hit_loads,
+                    &[no_set],
+                    None,
+                    context,
+                    probe,
+                    None,
+                    false,
+                    0,
+                    Some(1),
+                    None,
+                    (&stopped, view.args.app.name()),
+                )
+            });
+            if let Err(err) = written {
                 if err.is::<crate::report::tabular::FailedLookupRefusal>() {
                     if let Some(warnings) = warnings.as_mut() {
                         warnings.end_run();

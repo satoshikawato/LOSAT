@@ -190,8 +190,18 @@ pub fn search_database_read_files(
 /// (`report::archive::read::import::strategy_reads`, the command line's reading before it opens
 /// `-logfile`), where the argv gives `-db` or `-subject` (`override_subject`) or not: its
 /// database, the repeat filter's database, the window masker's taxid and its MegaBLAST index.
-/// `None` for bytes that do not read as a strategy (the run's import reports them).
-pub fn strategy_reads(bytes: &[u8], override_subject: bool) -> Option<StrategyReads> {
+/// `None` where the `-logfile` of `arguments` (the words after the program's name) names no file
+/// (`special_log_target`: none, `-`, empty, `/dev/null`), so that a run without one reads nothing
+/// more, as on the command line (`report::log_inputs::check_disk_logfile`), and for bytes that do
+/// not read as a strategy (the run's import reports them).
+pub fn strategy_reads(
+    arguments: &[&str],
+    bytes: &[u8],
+    override_subject: bool,
+) -> Option<StrategyReads> {
+    if crate::blastinput::ncbi_environment::special_log_target(log_file(arguments)).is_some() {
+        return None;
+    }
     crate::report::archive::read::import::strategy_reads(
         std::io::Cursor::new(bytes),
         override_subject,

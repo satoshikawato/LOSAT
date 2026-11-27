@@ -615,10 +615,10 @@ struct SearchRunFiles {
 ///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
 ///   `registered` so a missing file does not make its parent folders present.
 ///
-/// With `-import_search_strategy NAME`, the registered strategy file (kind 3) adds what it makes
-/// the run read (`losat::web_adapter::strategy_reads`, line RG-F item F2f): its database's and
-/// its repeat filter database's lookup files to `read`, the counts of its window masker taxid to
-/// `registered` where the host registered them.
+/// With `-import_search_strategy NAME` and a `-logfile` that names a file, the registered strategy
+/// file (kind 3) adds what it makes the run read (`losat::web_adapter::strategy_reads`, line RG-F
+/// item F2f): its database's and its repeat filter database's lookup files to `read`, the counts
+/// of its window masker taxid to `registered` where the host registered them.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
         preparse, scan_program_argv, search_database_read_files, strategy_reads, Preparsed,
@@ -724,7 +724,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     }
     let reads: Option<StrategyReads> = strategy
         .and_then(|name| crate::files::strategy(Path::new(&name)))
-        .and_then(|bytes| strategy_reads(&bytes, override_subject));
+        .and_then(|bytes| strategy_reads(arguments, &bytes, override_subject));
     if let Some(taxid) = reads.as_ref().and_then(|reads| reads.window_masker_taxid) {
         push_taxid(&mut registered, &taxid.to_string());
     }

@@ -839,7 +839,7 @@ fn a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count() {
         ("psiblast", "psiblast", "q.fa", &["-num_iterations", "2"][..]),
     ] {
         let expected = fs::read(frozen.join(format!("{name}.dba0.out"))).unwrap();
-        let mut stderr_at_one = None;
+        let expected_err = fs::read(frozen.join(format!("{name}.dba0.err"))).unwrap();
         for threads in ["1", "2", "4"] {
             let mut args = vec![prog, "-query", query, "-db", "dba0"];
             args.extend_from_slice(extra);
@@ -847,14 +847,10 @@ fn a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count() {
             let out = losat(&dir.0, &args);
             assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
             assert_eq!(
-                out_str(&out.stdout),
-                out_str(&expected),
+                (out_str(&out.stdout), out_str(&out.stderr)),
+                (out_str(&expected), out_str(&expected_err)),
                 "{args:?}: NCBI's -num_threads 1 bytes"
             );
-            match &stderr_at_one {
-                None => stderr_at_one = Some(out.stderr),
-                Some(first) => assert_eq!(&out.stderr, first, "{args:?}: stderr"),
-            }
         }
     }
 }

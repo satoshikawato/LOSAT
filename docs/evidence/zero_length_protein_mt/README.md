@@ -26,5 +26,6 @@ queries); `LOSAT/tests/fixtures/zero_length_mt/` holds NCBI's 1-thread output of
 python3 -I docs/evidence/zero_length_protein_mt/probe.py <NCBI BLAST+ 2.17.0 bin> <work dir> [losat]
 ```
 
-With `SKIP_NCBI=1` and a `losat` path it runs LOSAT only. Every run is capped
+With `SKIP_NCBI=1` and a `losat` path it runs LOSAT only. `freeze.sh` wrote NCBI's 1-thread outputs on the same
+databases (2026-11-27), among them the fixture files (the `blastx -ungapped` one has no row in `results.tsv`). Every run is capped
 (`prlimit --as=8589934592 --core=1 timeout 120`).

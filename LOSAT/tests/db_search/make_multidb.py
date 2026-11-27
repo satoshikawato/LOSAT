@@ -167,7 +167,9 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   searches each query alone: its first query); `rf1_r` holds `pfo_qe.faa`'s `pfo_r` (back-translated
   in the `.fna`), whose report shows `pf3p`'s hit, and `rf1_re` adds `bsub`'s letters. With `BLASTDB=btd_empty` (an
   empty taxdb.btd) NCBI crashes at the load of `bsub`, after the reports of the batches before (with `BATCH_SIZE=1`,
-  those of `q0_nohit` or `pfo_r`). `make_multidb.py --rf1-only MAKEBLASTDB` builds only these.
+  those of `q0_nohit` or `pfo_r`). `rf1_q0t.faa` holds `q0_nohit`, then `taxfilter/q.faa`'s P69905, whose report shows
+  taxfilter's `tfe_nr` OID 3 (an empty stored title, taxid 9606: NCBI makes the title from the name of the taxid, and
+  crashes at the sequence's load). `make_multidb.py --rf1-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -794,6 +796,14 @@ def make_rf1(binary):
     write("rf1_q0e.fna", [(q0, q0_nucleotide), (e, back(weak))])
     write("rf1_r.fna", [(r, back(query))])
     write("rf1_re.fna", [(r, back(query)), (e, back(weak))])
+    write_rf1_title(write, (q0, q0_protein))
+
+
+def write_rf1_title(write, q0):
+    """Writes rf1_q0t.faa (rf-1 R1): `q0_nohit`, then taxfilter/q.faa's P69905, whose report shows taxfilter's `tfe_nr`
+    OID 3, a sequence with an empty stored title and taxid 9606, whose title NCBI makes from the name of the taxid."""
+    header, lines = read_fasta_path(os.path.join(HERE, "..", "taxfilter", "q.faa"))[0]
+    write("rf1_q0t.faa", [q0, (header.rstrip("\n"), "".join(line.strip() for line in lines))])
 
 
 def main(binary):

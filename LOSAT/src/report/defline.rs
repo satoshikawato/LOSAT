@@ -162,7 +162,17 @@ pub enum SourceTaxname {
     /// whether NCBI faults, depend on its memory map), or a definition line whose taxid does not
     /// read.
     Refused(&'static str),
+    /// LOSAT's refusal where a report shows the title (`NULL_MAPPED_SOURCE`) of a lookup of the
+    /// taxid that reads a record of an empty `taxdb.btd` (`seqdb::SeqDbError::TaxdbNullMap`):
+    /// NCBI BLAST+ maps the file as a null pointer and crashes at the sequence's load, which the
+    /// query batch whose report shows the title makes, so that the refusal fails that batch
+    /// (`common::database::source_name`, `common::database::batch_loads_error`; line DBID rf-1).
+    NullMapped,
 }
+
+/// What a database sequence whose source is [`SourceTaxname::NullMapped`] has, in LOSAT's
+/// refusal of its title (after "database sequence N has").
+pub const NULL_MAPPED_SOURCE: &str = "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads a record of an empty taxdb.btd (NCBI BLAST+ 2.17.0 maps the file as a null pointer and reads unmapped memory)";
 
 /// `SourceTaxname::Unnamed`, for a subject without a source.
 pub static UNNAMED_SOURCE: SourceTaxname = SourceTaxname::Unnamed;
@@ -189,6 +199,7 @@ impl SourceTaxname {
                 Ok(Some(std::sync::Arc::clone(name)))
             }
             SourceTaxname::Refused(reason) => Err(reason),
+            SourceTaxname::NullMapped => Err(NULL_MAPPED_SOURCE),
         }
     }
 

@@ -960,6 +960,27 @@ fn a_lookup_of_a_null_mapped_record_fails_its_batch_after_the_reports_before() {
     let other = batch_loads_error(3, anyhow::anyhow!("another error"));
     assert!(!other.is::<ErrorAfterBatchReports>());
     assert_eq!(other.to_string(), "another error");
+    // A title made from the source that such a lookup names (`SourceTaxname::NullMapped`): NCBI
+    // crashes at the sequence's load, so the refusal, in the words of the title's refusal, fails
+    // the batch that shows it (TBLASTN's `title_stop`, through `batch_loads_failure`).
+    use crate::report::defline::{SourceTaxname, NULL_MAPPED_SOURCE};
+    let oid = crate::seqdb::Oid::of_unrestricted(3);
+    let title = source_name(&SourceTaxname::NullMapped, || oid, "TBLASTN").unwrap_err();
+    assert_eq!(
+        format!("{title:#}"),
+        format!(
+            "database sequence {oid} has {NULL_MAPPED_SOURCE}; this is not supported by LOSAT's \
+             TBLASTN"
+        )
+    );
+    let (span, failure) = batch_loads_failure(2..4, title).expect("the failure of the batch");
+    assert_eq!(span, 2..4);
+    assert!(TaxonomyRefusal::fails_its_batch(&failure));
+    // A title made from a record past NCBI's mapping of a file that is not empty: refused before
+    // the run's first byte.
+    let past = source_name(&SourceTaxname::Refused("a record"), || oid, "TBLASTN").unwrap_err();
+    let past = batch_loads_failure(2..4, past).expect_err("not a failure of the batch");
+    assert!(!past.is::<TaxonomyRefusal>(), "{past:#}");
 }
 
 // RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every

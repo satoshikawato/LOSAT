@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.122
+- Version: 1.126
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -986,7 +986,15 @@
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
-  then 1.118, then 1.120, then 1.121)
+  then 1.118, then 1.120, then 1.121);
+  1.126 2026-11-27 (every program, line DBID item rf-1: the rejection of rule 3 of a lookup that
+  reads a record of an empty `taxdb.btd` (version 1.43), where NCBI crashes, comes at the query
+  batch whose loads (its prefetch, or its report's) or whose report's title made from the taxid
+  make that lookup, after the reports of the query batches before, without the epilog (for the
+  first batch, the prologs), as NCBI's own error of a batch; it came before the run's first byte
+  in BLASTP, PSIBLAST, TBLASTN and TBLASTX, and BLASTN's and BLASTX's outfmt 5, 15 and 16 lost the
+  reports before; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.125 of dev 33e3411371)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4536,7 +4544,10 @@ file. LOSAT refuses (exit 1, one line naming its program) only:
 
 - every lookup that reads a record of an empty `taxdb.btd`, which NCBI maps as a null pointer: it
   faults for certain (SIGSEGV in every program; the loads of dustmasker, segmasker, blastdbcmd's
-  FASTA and the searches' prefetch included);
+  FASTA and the searches' prefetch included). In a search the rejection comes at the query batch
+  whose loads (its prefetch, or its report's) or whose report's title made from the taxid make the
+  first such lookup, after the reports of the query batches before, without the epilog (for the
+  first batch, the prologs), as NCBI's own error of a batch (version 1.126, line DBID item rf-1);
 - a name that the output writes and NCBI reads past the mapping: the super kingdom of a record
   that reaches past it (`blastdbcmd -outfmt %K`, `-tax_info` with `%K`, `sskingdom` and
   `sskingdoms`), and any name of a record whose third tab is past it (whether NCBI finds names at

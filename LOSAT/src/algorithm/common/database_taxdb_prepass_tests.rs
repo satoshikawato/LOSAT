@@ -2299,7 +2299,7 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
             "db_search/ids/nbare_t",
             SeqType::Nucleotide,
             Some("btd_empty"),
-            SourceTaxname::Refused(""),
+            SourceTaxname::NullMapped,
         ),
         (
             "fixtures/outfmt16/db/other_tax9606",
@@ -2316,22 +2316,15 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
         let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence without parsed Seq-ids");
         };
-        let refused = matches!(want, SourceTaxname::Refused(_));
-        if refused {
-            assert!(
-                matches!(stored.source, SourceTaxname::Refused(_)),
-                "{name} {taxdb:?}"
-            );
-        } else {
-            assert_eq!(stored.source, want, "{name} {taxdb:?}");
+        // An empty taxdb.btd: the refusal of a step where NCBI crashes, which fails the query
+        // batch that shows the title (`batch_loads_error`, line DBID rf-1).
+        let refused = want == SourceTaxname::NullMapped;
+        assert_eq!(stored.source, want, "{name} {taxdb:?}");
+        let shown = stored.check_shown_source(|| crate::seqdb::Oid::of_unrestricted(0), "BLASTP");
+        assert_eq!(shown.is_err(), refused, "{name} {taxdb:?}");
+        if let Err(error) = shown {
+            assert!(TaxonomyRefusal::fails_its_batch(&error), "{name} {taxdb:?}");
         }
-        assert_eq!(
-            stored
-                .check_shown_source(|| crate::seqdb::Oid::of_unrestricted(0), "BLASTP")
-                .is_err(),
-            refused,
-            "{name} {taxdb:?}"
-        );
         // TBLASTX's check before the search (`report_stream`) for outfmt 0 and for a report
         // that shows no title (outfmt 5 of a nucleotide database): only a source that LOSAT
         // refuses is refused.

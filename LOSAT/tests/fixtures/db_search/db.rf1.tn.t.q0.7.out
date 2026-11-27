@@ -1,0 +1,5 @@
+# TBLASTN 2.17.0+
+# Query: q0_nohit a query without hits
+# Database: tests/db_search/taxfilter/tfe_nr
+# 0 hits found
+# BLAST processed 1 queries

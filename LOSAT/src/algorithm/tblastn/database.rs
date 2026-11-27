@@ -1015,6 +1015,60 @@ pub(super) fn prefetch_stop(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1169
+/// The first of the query batches `batches` (the searched queries of each) of the final hit lists
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose reports `formats`
+/// show the title that NCBI makes from the source of a reported sequence without parsed Seq-ids
+/// whose taxid's lookup reads a record of an empty `taxdb.btd` (`titles`,
+/// `SourceTaxname::NullMapped`): outfmt 0 to 4 (`StoredTitle::check_shown_source` in
+/// `reported_subjects`) and the tabular ids of a format whose rows read the subject
+/// (`shared::tabular_subject_id` in `stage_e_report::render`). NCBI crashes at that sequence's
+/// load, which the batch's prefetch, or where it is off its report, makes, after the reports of
+/// the batches before. So the batch fails with LOSAT's refusal of its first such sequence (by
+/// ordinal id, as `reported_subjects` refuses them; `shared::batch_loads_failure`), as a batch
+/// whose loads NCBI crashes in (`tblastn_app::search`'s `load_stop`; line DBID rf-1): it is not
+/// reported, nor are the batches after it. Only the batches before the query `before` are asked (a
+/// batch that ends the run earlier, `tblastn_app::search`'s `failed`). `Err`: an error that does
+/// not fail the batch.
+pub(super) fn title_stop(
+    (database, titles, formats): (
+        Option<&TblastnDatabase>,
+        &DatabaseTitles,
+        &[crate::api::local_blast::FormatOutput<'_>],
+    ),
+    hitlists: &[KappaResultHitList],
+    batches: &[std::ops::Range<usize>],
+    before: Option<usize>,
+) -> Result<Option<(std::ops::Range<usize>, anyhow::Error)>> {
+    use crate::report::defline::SourceTaxname;
+    let shown = parsed_shown(formats);
+    let Some(database) = database.filter(|_| shown.pairwise || shown.tabular) else {
+        return Ok(None);
+    };
+    let null_mapped = |ordinal: &u32| {
+        matches!(titles.get(ordinal), Some(ReportedHeader::Stored(stored))
+            if stored.source == SourceTaxname::NullMapped)
+    };
+    let asked = |span: &&std::ops::Range<usize>| before.is_none_or(|at| span.start < at);
+    for span in batches.iter().take_while(asked) {
+        // The report drops the HSPs of score 0 first (`reported_subjects`).
+        let first = hitlists[span.clone()]
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| list.hsps.hsps.iter().any(|linked| linked.hsp.score != 0))
+            .filter_map(|list| u32::try_from(list.oid).ok())
+            .filter(null_mapped)
+            .min();
+        if let Some(ordinal) = first {
+            let oid = || database.db.oid(ordinal);
+            let refusal = shared::source_name(&SourceTaxname::NullMapped, oid, PROGRAM)
+                .expect_err("a source that LOSAT refuses");
+            return shared::batch_loads_failure(span.clone(), refusal).map(Some);
+        }
+    }
+    Ok(None)
+}
+
 /// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
 /// `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`): one for each HSP of a `gapped` search, one
 /// for each subject of an ungapped one (`-ungapped`, `shared::subject_seq_aligns`).

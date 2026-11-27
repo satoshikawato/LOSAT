@@ -3,7 +3,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
-use crate::algorithm::common::database::batch_loads_error;
+use crate::algorithm::common::database::{batch_loads_error, prefetch_off, PrefetchQueries};
 use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::algorithm::tblastx::database::DatabaseTitles;
@@ -4391,11 +4391,7 @@ fn run_batch_loop(
                         &[],
                     )
                     .report_read(0, 0);
-                    if !crate::algorithm::common::database::prefetch_off(
-                        prefetch_format,
-                        seq_aligns,
-                    ) && !ordered.is_empty()
-                    {
+                    if !prefetch_off(prefetch_format, seq_aligns) && !ordered.is_empty() {
                         // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
                         // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
                         // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
@@ -4438,13 +4434,11 @@ fn run_batch_loop(
                             },
                             ordered,
                             &reports.titles.borrow(),
-                            &crate::algorithm::common::database::PrefetchQueries::new(
-                                start, &scope,
-                            )
-                            .after_xml_reports(xml_before.as_ref())
-                            .where_reports_unchanged_by_load_throws(
-                                reports_unchanged_by_load_throws,
-                            ),
+                            &PrefetchQueries::new(start, &scope)
+                                .after_xml_reports(xml_before.as_ref())
+                                .where_reports_unchanged_by_load_throws(
+                                    reports_unchanged_by_load_throws,
+                                ),
                         );
                         drop(reads);
                         let messages = prefetch?;

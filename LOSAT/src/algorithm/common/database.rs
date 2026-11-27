@@ -1208,17 +1208,28 @@ impl StoredTitle {
 
 /// The name of the source `source` of a database sequence without parsed Seq-ids (`oid` gives its
 /// OID, which a refusal names), from which NCBI makes its empty title; `Err` with LOSAT's refusal
-/// of a source that it refuses (`SourceTaxname::Refused`; `program` names the program).
+/// of a source that it refuses (`SourceTaxname::Refused`; `program` names the program), a
+/// [`TaxonomyRefusal`] of a step where NCBI crashes for `SourceTaxname::NullMapped`.
 pub(crate) fn source_name(
     source: &crate::report::defline::SourceTaxname,
     oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<Option<std::sync::Arc<[u8]>>> {
     source.name().map_err(|reason| {
-        anyhow::anyhow!(
+        let text = format!(
             "database sequence {} has {reason}; this is not supported by LOSAT's {program}",
             oid()
-        )
+        );
+        // A lookup that reads a record of an empty `taxdb.btd`: NCBI crashes at the sequence's
+        // load, so the refusal fails the query batch that shows the title ([`batch_loads_error`]).
+        if *source == crate::report::defline::SourceTaxname::NullMapped {
+            return anyhow::Error::new(TaxonomyRefusal {
+                text,
+                load_throws: false,
+                ncbi_crashes: true,
+            });
+        }
+        anyhow::anyhow!(text)
     })
 }
 
@@ -2888,17 +2899,19 @@ impl<'a> HeaderReader<'a> {
             match taxdb.lookup(taxid, messages) {
             Ok(TaxLookup::Named(names)) => Ok(Some(names)),
             Ok(TaxLookup::NotInIndex | TaxLookup::Unnamed) => Ok(None),
-            Ok(TaxLookup::PastMapping(_)) => Err(
+            Ok(TaxLookup::PastMapping(_)) => Err(SourceTaxname::Refused(
                 "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads the record past NCBI BLAST+'s mapping of taxdb.btd (NCBI BLAST+ 2.17.0 reads memory past its mapping there: its bytes, or whether it faults, depend on its memory map)",
-            ),
-            Err(_) => Err(
-                "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads a record of an empty taxdb.btd (NCBI BLAST+ 2.17.0 maps the file as a null pointer and reads unmapped memory)",
-            ),
+            )),
+            // NCBI crashes at the sequence's load (`SourceTaxname::NullMapped`).
+            Err(SeqDbError::TaxdbNullMap { .. }) => Err(SourceTaxname::NullMapped),
+            Err(_) => Err(SourceTaxname::Refused(
+                crate::report::defline::NULL_MAPPED_SOURCE,
+            )),
         }
         };
         match self.source_names.names(taxid, &mut Vec::new(), lookup) {
             Ok(names) => SourceTaxname::of_names(&names),
-            Err(reason) => SourceTaxname::Refused(reason),
+            Err(refused) => refused,
         }
     }
 
@@ -7241,7 +7254,9 @@ pub(crate) struct TaxonomyRefusal {
     /// catches ([`batch_prefetch`]) and its reports do not read as LOSAT does.
     load_throws: bool,
     /// The refusal is of a lookup that reads a record of an empty `taxdb.btd`
-    /// (`SeqDbError::TaxdbNullMap`), where NCBI crashes ([`batch_loads_error`]).
+    /// (`SeqDbError::TaxdbNullMap`), or of a title made from the source that such a lookup names
+    /// (`report::defline::SourceTaxname::NullMapped`, [`source_name`]), where NCBI crashes
+    /// ([`batch_loads_error`]).
     ncbi_crashes: bool,
 }
 
@@ -7284,6 +7299,19 @@ pub(crate) fn batch_loads_error(query: usize, error: anyhow::Error) -> anyhow::E
         return ErrorAfterBatchReports::of_batch(query, error).into();
     }
     error
+}
+
+/// [`batch_loads_error`] for a program that models every batch's loads before it writes a report
+/// and ends the run at the failing batch itself (TBLASTN): `Ok` with the batch of the searched
+/// queries `span` and the error that it fails with, `Err` with any other error.
+pub(crate) fn batch_loads_failure(
+    span: std::ops::Range<usize>,
+    error: anyhow::Error,
+) -> Result<(std::ops::Range<usize>, anyhow::Error)> {
+    match batch_loads_error(span.start, error).downcast::<ErrorAfterBatchReports>() {
+        Ok(failure) => Ok((span, failure.error)),
+        Err(error) => Err(error),
+    }
 }
 
 impl std::fmt::Display for TaxonomyRefusal {

@@ -14,7 +14,9 @@ use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::common::database::PreliminaryReadError;
+use crate::algorithm::common::database::{
+    batch_loads_failure, prefetch_off, prefetch_warning, PrefetchQueries, PreliminaryReadError,
+};
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::api::QueryEnd;
@@ -2342,13 +2344,13 @@ fn search(
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
         // the batches before (below), which look the taxonomy up first.
-        let prefetch_stop = if database.is_some() && first_prefetches {
-            let spans: Vec<std::ops::Range<usize>> = query_input
-                .batches(batch_size)
-                .into_iter()
-                .map(|batch| batch.searched)
-                .filter(|searched| !searched.is_empty() && searched.end <= results.len())
-                .collect();
+        let spans: Vec<std::ops::Range<usize>> = query_input
+            .batches(batch_size)
+            .into_iter()
+            .map(|batch| batch.searched)
+            .filter(|searched| !searched.is_empty() && searched.end <= results.len())
+            .collect();
+        let mut prefetch_stop = if database.is_some() && first_prefetches {
             super::database::prefetch_stop(
                 &titles,
                 &results,
@@ -2368,6 +2370,13 @@ fn search(
                 span.clone(),
                 anyhow::anyhow!("the prefetch of the batch stops (its error is made below)"),
             ));
+        }
+        // An earlier batch whose report shows a title made from a source whose lookup NCBI
+        // crashes at ends the run there, before that prefetch stop (`database::title_stop`).
+        let failed_at = failed.as_ref().map(|(range, _)| range.start);
+        let titled = (database, &titles, &outputs.formats[..]);
+        if let Some(stop) = super::database::title_stop(titled, &results, &spans, failed_at)? {
+            (failed, prefetch_stop) = (Some(stop), None);
         }
         // A batch that a database file failed is not reported, nor are the batches after it.
         let queries = match &failed {
@@ -2472,12 +2481,8 @@ fn search(
             .collect();
         // The query batches that were read and searched, by their searched queries (the batches
         // before a database failure or a reader stop): each is reported.
-        let mut batch_spans: Vec<std::ops::Range<usize>> = query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
-            .collect();
+        let mut batch_spans = spans;
+        batch_spans.retain(|searched| searched.end <= queries.len());
         // `-db_hard_mask` (series NP, M4b PR 2): the search read `B` over the masked bases, and the
         // reports count again on the stored ones (`stage_e_report::recounts_shown_counts`).
         let hard_masked = resolved
@@ -2656,11 +2661,7 @@ fn search(
                         let one_by_one = reported.prefetch.loads_one_by_one(span.start);
                         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
                         // A batch without Seq-aligns prefetches no sequence.
-                        if !crate::algorithm::common::database::prefetch_off(
-                            prefetch_format,
-                            seq_aligns,
-                        ) && seq_aligns > 0
-                        {
+                        if !prefetch_off(prefetch_format, seq_aligns) && seq_aligns > 0 {
                             if has_nullb
                                 && super::nullb_report::hitlists_have_empty_subject_row_db(hitlists)
                             {
@@ -2670,11 +2671,9 @@ fn search(
                                 // prefetch warning without loading any subject.
                                 prefetch_posts.push((
                                     span.start,
-                                    crate::report::diag_log::Posts::of_lines(
-                                        crate::algorithm::common::database::prefetch_warning(
-                                            "tblastn",
-                                        ),
-                                    ),
+                                    crate::report::diag_log::Posts::of_lines(prefetch_warning(
+                                        "tblastn",
+                                    )),
                                 ));
                             } else if taxdb_found || database.parsed_seqids() {
                                 let prefetched = |query: usize| {
@@ -2700,9 +2699,7 @@ fn search(
                                         cuts: xml_cuts,
                                     },
                                     hitlists,
-                                    &crate::algorithm::common::database::PrefetchQueries::new(
-                                        span.start, &scope,
-                                    )
+                                    &PrefetchQueries::new(span.start, &scope)
                                     .after_xml_reports(xml_before.as_ref())
                                     .where_reports_unchanged_by_load_throws(
                                         crate::report::db_subject::unchanged_by_load_throws_outfmts(
@@ -2773,13 +2770,7 @@ fn search(
                     }
                     Ok(())
                 })() {
-                    let span = loading.take();
-                    let error =
-                        crate::algorithm::common::database::batch_loads_error(span.start, error);
-                    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-                        Ok(failure) => load_stop = Some((span, failure.error)),
-                        Err(error) => return Err(error),
-                    }
+                    load_stop = Some(batch_loads_failure(loading.take(), error)?);
                 }
             }
         }

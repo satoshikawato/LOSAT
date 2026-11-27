@@ -648,11 +648,13 @@ fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
     }
 }
 
-/// A feature-made title whose location Seq-id NCBI's scope resolves by state LOSAT cannot know
-/// (here a packed `pir` accession alone that matches the Bioseq's `pir` name) is refused before
-/// any volume is written.
+/// Feature-made titles whose location Seq-id NCBI's scope resolves by state LOSAT cannot know are
+/// refused before any volume is written: a packed `pir` accession alone that matches the Bioseq's
+/// `pir` name, and an accession without a version that two Bioseqs in two Seq-id trees have with
+/// one version.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510,1564-1572
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
 #[test]
 fn d3c5_scope_order_cases_are_refused_cleanly() {
     let env_default = MakedbEnv {
@@ -669,36 +671,65 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
   } } }
 }
 "#;
-    let dir = TempDir::unique("asn1-refuse-inline-pir_accession_alone");
-    let dir_str = dir_string(&dir);
-    let words = vec![
-        "-in".into(),
-        "-".into(),
-        "-input_type".into(),
-        "asn1_txt".into(),
-        "-dbtype".into(),
-        "nucl".into(),
-        "-title".into(),
-        "T".into(),
-        "-out".into(),
-        format!("{dir_str}/db"),
-    ];
-    let (rc, _, stderr) = run_case(&words, env_default, pir_accession_alone);
-    assert_refusal(
-        "pir_accession_alone",
-        rc,
-        &stderr,
-        "by the order of Seq-id handles in memory",
-    );
-    for entry in std::fs::read_dir(&dir).unwrap() {
-        let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
-        assert!(
-            !fname.ends_with(".nin")
-                && !fname.ends_with(".nhr")
-                && !fname.ends_with(".nsq")
-                && !fname.ends_with(".ndb"),
-            "pir_accession_alone: volume/LMDB file {fname} was left behind after refusal"
+    let tie_across_trees = br#"Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { other { accession "NM_000830", version 1 }, gi 900830 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000830", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900830 }, empty tpg { accession "AB000831" } } }
+      } } }
+    },
+    seq {
+      id { genbank { accession "AB000831", version 1 } },
+      descr { title "gb one" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB000831", version 1 } },
+      descr { title "ref one" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}
+"#;
+    for (label, bytes) in [
+        ("pir_accession_alone", pir_accession_alone.as_slice()),
+        ("tie_across_trees", tie_across_trees.as_slice()),
+    ] {
+        let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));
+        let dir_str = dir_string(&dir);
+        let words = vec![
+            "-in".into(),
+            "-".into(),
+            "-input_type".into(),
+            "asn1_txt".into(),
+            "-dbtype".into(),
+            "nucl".into(),
+            "-title".into(),
+            "T".into(),
+            "-out".into(),
+            format!("{dir_str}/db"),
+        ];
+        let (rc, _, stderr) = run_case(&words, env_default, bytes);
+        assert_refusal(
+            label,
+            rc,
+            &stderr,
+            "by the order of Seq-id handles in memory",
         );
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+            assert!(
+                !fname.ends_with(".nin")
+                    && !fname.ends_with(".nhr")
+                    && !fname.ends_with(".nsq")
+                    && !fname.ends_with(".ndb"),
+                "{label}: volume/LMDB file {fname} was left behind after refusal"
+            );
+        }
     }
 }
 

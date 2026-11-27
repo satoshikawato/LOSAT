@@ -7,13 +7,29 @@
 // call" and the page closed in the middle of its test, more often on a busy machine. The test of
 // the wake lock replaces navigator.wakeLock with its own double in every browser; Chromium and
 // Firefox keep the real API in the others.
+//
+// Every test also fails if it leaves a file whose name CI's artifact upload refuses
+// (support/artifact-names.ts): one such name made a failed job upload nothing.
 import { test as base } from '@playwright/test';
+import { unuploadableNames } from './artifact-names';
 
-export const test = base.extend({
+export const test = base.extend<{ uploadableOutputs: void }>({
   context: async ({ context, browserName }, use) => {
     if (browserName === 'webkit') await context.addInitScript(standInWakeLock);
     await use(context);
   },
+  uploadableOutputs: [
+    async ({}, use, testInfo) => {
+      await use();
+      const names = unuploadableNames(testInfo.outputDir);
+      if (names.length > 0) {
+        throw new Error(
+          `the test left files whose names CI's artifact upload refuses (" : < > | * ? CR LF), so a failed job would upload no evidence of any test: ${names.join(', ')}`,
+        );
+      }
+    },
+    { auto: true },
+  ],
 });
 
 /** A wake lock that the browser grants at once and that ends on release(), as WakeLockSentinel does. */

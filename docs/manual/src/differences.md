@@ -155,7 +155,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 ### `deltablast`: a `-query_loc` part that NCBI crashes on
 
-- **What you see.** LOSAT completes the search of the part: its results are those NCBI gives when the part's letters are the query, shown in the part's coordinates with the record's length and letters, and its PSSM files are those of that search. NCBI BLAST+ 2.17.0 writes outside its memory and crashes, after at most its version line.
+- **What you see.** LOSAT completes the search of the part: its results are those NCBI gives when the part's letters are the query, shown in the part's coordinates with the record's length and letters, and its PSSM files are those of that search. NCBI BLAST+ 2.17.0 writes outside its memory: it usually crashes after at most its version line, and otherwise its results differ from those of the part's letters as the query.
 - **When.** `deltablast -query_loc` with a part that starts after the first letter, for a query whose last domain hit kept for the PSSM ends further into the record than the part is long. Other parts, those that start at 1 included, give NCBI's output.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 

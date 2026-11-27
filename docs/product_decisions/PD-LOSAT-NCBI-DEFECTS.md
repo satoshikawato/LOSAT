@@ -5325,11 +5325,15 @@ NCBI writes past its array.
     below L. For a range that starts later, the cells are shifted within their row, or spill into the rows of the
     hits after them; both are deterministic, NCBI completes, and LOSAT writes NCBI's bytes (rule 2; rows
     `db.dl.ql.tail5.*`, `db.dl.ql.dd2.*`, `db.dl.ql.dd50.6`, `db.dl.ql.dd100.6`). Where some index reaches N x L,
-    NCBI writes past its heap block (undefined behaviour). Every NCBI BLAST+ 2.17.0 run of this kind that was
-    probed ended in a crash (exit status 134, "malloc(): invalid size (unsorted)", or 139), having written at most
+    NCBI writes past its heap block (undefined behaviour). Every NCBI BLAST+ 2.17.0 run of this kind on the
+    fixtures ended in a crash (exit status 134, "malloc(): invalid size (unsorted)", or 139), having written at most
     its version line: 21 runs of 10 ranges, of one and of several queries, with and without `-show_domain_hits` and
-    `-subject` (psiblast line `PR/ps13/ps13b/nprobe/ncbi*/summary.tsv`, classes in `model.txt`). The last kept hit
-    ending past position L of the record is enough. LOSAT then completes the search on the range. It places every
+    `-subject` (psiblast line `PR/ps13/ps13b/nprobe/ncbi*/summary.tsv`, classes in `model.txt`). At real size (298
+    E. coli K-12 MG1655 proteins against the S. cerevisiae proteins and `cdd_delta`, `-query_loc 50-400`, one query
+    per run) NCBI crashed on 175 queries; of the 123 it completed, 11 are of this kind by its index and gave other
+    results than its run of the range's letters as their own query (psiblast line
+    `PR/ps13/ps13b_impl_scratch/real_r09082f023/`, `qlprobe/`). The last kept hit ending past position L of the
+    record is enough. LOSAT then completes the search on the range. It places every
     hit's cells at the range's own coordinates (q minus the range's start), which is the alignment NCBI builds when
     the range's letters are given as a query of their own, and otherwise takes NCBI's steps. So its PSSM files are
     those of NCBI's run of the range's letters as their own query, and so are its report's coordinates, scores and

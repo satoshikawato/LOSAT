@@ -53,6 +53,8 @@ The PSSM files are written as in `psiblast`; the PSSM of round 1 is the PSSM of 
 | `-matrix NAME` | BLOSUM62 | Scoring matrix |
 | `-gapopen N`, `-gapextend N` | 11, 1 | Gap costs (the matrix's own values for other matrices) |
 | `-max_target_seqs N` | 500 | Number of subject sequences to keep |
+| `-query_loc START-STOP` | | Search this part of each query |
+| `-show_domain_hits` | off | Also print the domain search's hits of each query, before its results |
 | `-seg yes\|no\|"W L H"` | no | Filter low-complexity regions of the query |
 | `-lcase_masking`, `-soft_masking` | off | Use lower-case letters of the query and subjects as masks; apply filters as soft masks |
 | `-num_threads N` | 1 | Number of threads; the output is the same at every value |
@@ -65,18 +67,22 @@ The other options of NCBI's `deltablast` that `psiblast` also has work as they d
 
 `losat deltablast` writes `-outfmt 0`, `6` and `7`. Formats 6 and 7 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. With `-outfmt 0`, the report shows each round. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
 
+With `-show_domain_hits`, each query's results start with the hits of its domain search, as `rpsblast` reports them against the domain database (under the heading `Results from domain search` in `-outfmt 0`), and the report's first and last lines name the domain database too (`Conserved Domain Database:`). With `-num_iterations 0` and several queries read together, the domain hits of all of them come first.
+
+With `-query_loc START-STOP`, each query is searched over that part, as in `psiblast`: the reports give the part's coordinates and the record's length, and the domain hits are shown in the record's coordinates.
+
 The output is the same as NCBI BLAST+ 2.17.0's `deltablast -num_threads 1` (standard output, error messages, exit status and PSSM files), at every thread count, apart from the tied-domain-hit order noted below. The program line says `DELTABLAST (LOSAT 0.2.0)`, and error messages start with `LOSAT ...`, as in the other programs.
 
 ## Differences from NCBI BLAST+
 
 - **Domain hits that tie in E-value.** Before building a query's round-1 PSSM, LOSAT sorts the domain hits with a stable sort, so two hits of the same domain with equal E-value keep their order from the domain search. NCBI's `deltablast` sorts them with its C++ library's unstable sort, which can trim overlapping hits of that domain differently and change the query's PSSM and search results. See [Differences from NCBI BLAST+](../differences.md#deltablast-domain-hits-that-tie).
+- **A `-query_loc` part that NCBI crashes on.** Where a query's domain hits reach past the end of the part in the record, NCBI BLAST+ crashes; LOSAT completes the search of the part. See [Differences from NCBI BLAST+](../differences.md#deltablast-a--query_loc-part-that-ncbi-crashes-on).
 - `deltablast` is not in LOSAT Web (the browser refuses it, as it refuses `psiblast`), and not in the library API or `pylosat`.
 
 ## What LOSAT refuses
 
 Not yet supported:
 
-- `-show_domain_hits` and `-query_loc`.
 - `-outfmt` other than 0, 6 and 7. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
 - `-html` and `-export_search_strategy`.
 

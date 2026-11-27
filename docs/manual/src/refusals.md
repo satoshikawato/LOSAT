@@ -56,7 +56,7 @@ There is one section for each program, and one for the five search programs toge
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
 | `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10` and `20`) |
-| `-show_domain_hits`, `-query_loc`, non-listed `-outfmt`, `-export_search_strategy` | `deltablast` | Not yet supported (listed: `0`, `6` and `7`) |
+| Non-listed `-outfmt`, `-export_search_strategy` | `deltablast` | Not yet supported (listed: `0`, `6` and `7`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 
 ## All five search programs
@@ -275,8 +275,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-show_domain_hits` | Refused: not yet supported. |
-| `-query_loc` | Refused: not yet supported. |
 | `-outfmt` other than `0`, `6` and `7` | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors, as in `psiblast`. |
 | `-html` | Refused: not yet supported. |
 | `-export_search_strategy` | Refused: not yet supported. |
@@ -561,7 +559,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - `blast_formatter`: the output formats other than `8`, `9` and `12`, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `deltablast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
-Not yet supported in `deltablast` (see [`deltablast`](#deltablast) above): `-show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
+Not yet supported in `deltablast` (see [`deltablast`](#deltablast) above): the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
 
 ## Out of scope: they need NCBI's servers
 

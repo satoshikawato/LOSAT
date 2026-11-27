@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.124
+- Version: 1.125
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1000,6 +1000,10 @@
   6.3.1.4p1 undefined behaviour; 1-to-3-byte files zero-pad to 4 bytes like POSIX mmap so their
   magic check matches NCBI; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   first 1.116, then 1.117, then 1.118, then 1.119, then 1.121, then 1.122, then 1.123)
+  1.125 2026-11-27 (approved exception 35, DELTABLAST `-query_loc` with a range whose domain hits
+  NCBI writes past its alignment of conserved domains, psiblast line item PS13b: the Owner's `Q-DL-QLOC=B`
+  of 2026-11-24; the ranges NCBI completes keep NCBI's bytes, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -5297,6 +5301,49 @@ and their values of a nearby input are deterministic).
     defined), the unit tests of the negative window in the five engines and
     `the_longest_intron_of_a_translated_search_follows_ncbis_branches`
     (`LOSAT/src/core/link_hsps_tests.rs`).
+
+## Approved exception 35 (DELTABLAST `-query_loc`, a range whose domain hits NCBI writes past its alignment, version 1.125)
+
+Version 1.125, psiblast line item PS13b. The Owner decided on 2026-11-24 at 12:44 JST with the words
+「Q-DL-QLOC=B」, one answer of the batch 「Q-AGVI-CAP=A Q-FM-R2=B Q-D23=A Q-KD-1=A Q-MIXIDX=C Q-GBHELP=A
+Q-DL-TIE=B Q-DL-QLOC=B Q-PS7c-SPOUGE=B Q-PS10e=A」 (psiblast line `DECISIONS.md` 103). The option chosen reads
+「正しい部分配列範囲で検索を完了させ、NCBI のヒープ破壊との差を PD 例外とする」: the search is completed on the
+correct part of the query, and its difference from NCBI's heap corruption is recorded here as an exception. Not
+taken (the batch message of 2026-11-24 12:39 JST): option A, 「クラッシュ範囲（開始 > 1 かつドメインヒット有り）を
+PD rule 3 で拒否する」 (an explicit rejection of the ranges NCBI crashes on), and option C, 「ここでは決めず、`PS13b`
+着手時の詳細調査後に再提示する。」 (to ask again after PS13b's study). That study found that NCBI completes some
+ranges that start past 1 (below); those keep NCBI's bytes (Owner-delegated, standing instruction 2026-09-29,
+restated 2026-10-07: they are deterministic NCBI results, rule 2), and the exception covers only the ranges where
+NCBI writes past its array.
+
+35. **A `-query_loc` range whose domain hits NCBI writes past its alignment of conserved domains.** DELTA-BLAST builds
+    a query's first PSSM from its domain hits (`CCddInputData`, NCBI reference (598d8ae6):
+    c++/src/algo/blast/api/deltablast.cpp:92-126). With `-query_loc` it gives that step the range's letters (L of
+    them) and the domain search's alignments in the coordinates of the whole record. `x_CreateMsa`
+    (c++/src/algo/blast/api/cdd_pssm_input.cpp:240-283) allocates one array of N x L cells for the N kept hits and
+    writes hit h's cell at record position q (0-based) at index h x L + q. For a range that starts at 1, every q is
+    below L. For a range that starts later, the cells are shifted within their row, or spill into the rows of the
+    hits after them; both are deterministic, NCBI completes, and LOSAT writes NCBI's bytes (rule 2; rows
+    `db.dl.ql.tail5.*`, `db.dl.ql.dd2.*`, `db.dl.ql.dd50.6`, `db.dl.ql.dd100.6`). Where some index reaches N x L,
+    NCBI writes past its heap block (undefined behaviour). Every NCBI BLAST+ 2.17.0 run of this kind that was
+    probed ended in a crash (exit status 134, "malloc(): invalid size (unsorted)", or 139), having written at most
+    its version line: 21 runs of 10 ranges, of one and of several queries, with and without `-show_domain_hits` and
+    `-subject` (psiblast line `PR/ps13/ps13b/nprobe/ncbi*/summary.tsv`, classes in `model.txt`). The last kept hit
+    ending past position L of the record is enough. LOSAT then completes the search on the range. It places every
+    hit's cells at the range's own coordinates (q minus the range's start), which is the alignment NCBI builds when
+    the range's letters are given as a query of their own, and otherwise takes NCBI's steps. So its PSSM files are
+    those of NCBI's run of the range's letters as their own query, and so are its report's coordinates, scores and
+    E-values. Its reports show the range as NCBI's reports of the ranges it completes show them: the range's
+    coordinates, `Length=` of the record, and the letters of the record at the range's coordinates. Its domain
+    section (`-show_domain_hits`) is rpsblast `-query_loc`'s. The rule is decided per query by NCBI's index, not by
+    whether NCBI happened to crash. Fixtures (`ncbi-near` rows: NCBI's run of the range's letters as their own
+    query, in the fields that read no query letter, with the PSSM files): `db.dl.ql.dd300.s6`,
+    `db.dl.ql.dd300.pssm`, `db.dl.ql.dd933.s6`, `db.dl.ql.serp2.s6`, `db.dl.ql.serp100.s6`, `db.dl.ql.serp10.s6`,
+    `db.dl.ql.serp300.s6`, `db.dl.ql.head701.s6`, `db.dl.ql.m100.s6`, `db.dl.ql.m100.pssm`, `db.dl.ql.three5.s6`,
+    `db.dl.ql.s.serp100.s6`. The test
+    `a_range_past_ncbis_alignment_writes_the_domain_rows_of_the_range_and_the_rows_of_its_letters`
+    (`LOSAT/tests/deltablast_query_loc.rs`) checks the same with `-show_domain_hits`. Code:
+    `rps_search::cdd_input::build_msa`.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -153,6 +153,12 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **When.** `deltablast`, only for a query that gets two hits of the same domain with the same E-value whose trimming depends on their order, or a hit with 17 or more intersected segments whose endpoint ties on domain start and overlaps another hit. In a search of the 4,300 E. coli K-12 MG1655 proteins against `cdd_delta` (3,909 queries with domain hits), at most 10 queries (0.26 %) had overlapping tied hits where the order could change the PSSM, and 0 queries were affected by segment-start ties.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `deltablast`: a `-query_loc` part that NCBI crashes on
+
+- **What you see.** LOSAT completes the search of the part: its results are those NCBI gives when the part's letters are the query, shown in the part's coordinates with the record's length and letters, and its PSSM files are those of that search. NCBI BLAST+ 2.17.0 writes outside its memory and crashes, after at most its version line.
+- **When.** `deltablast -query_loc` with a part that starts after the first letter, for a query whose last domain hit kept for the PSSM ends further into the record than the part is long. Other parts, those that start at 1 included, give NCBI's output.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### A taxonomy record past NCBI's mapping of `taxdb.btd`
 
 - **What you see.** LOSAT writes what NCBI writes (apart from the version line, which names LOSAT) when NCBI completes. Whether NCBI completes depends on its memory map: it may crash on the same files.

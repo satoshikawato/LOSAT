@@ -1225,20 +1225,26 @@ pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
     spec.is_some_and(|spec| spec.writes_rows() && spec.has(SubjectAllAccessions))
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-137
 /// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
 /// `result_sets` (each the checked rows of its subjects in row order, one set per query or
 /// psiblast round), that NCBI has a result for each row whose subject lookups fail (`failure`,
 /// `None` where they do not): `failed_lookup_stop_for`'s cases are LOSAT's refusals, which name
 /// the subject (`describe` of its index and failure: what its title or definition line is) and
-/// the program (`program_name`, upper case; its formatter's warning, `taxdb_found` as
-/// `TabularSpec::formatter_warning` reads it, names it in lower case).
+/// the running application (`app`, NCBI's name of it in lower case, upper case in the refusal).
+/// `app` is the application whose formatter writes the report, also where it runs another
+/// program's strategy (`ImportRun::running`; `program` is the engine's, whose rules of the rows
+/// apply): the formatter's warning (`taxdb_found` as `TabularSpec::formatter_warning` reads it)
+/// has the prefix that the application sets for all its posts at its start (`[blastn]` where
+/// blastn runs a TBLASTX strategy), as its other posts do.
 pub fn check_failed_lookups<S, R>(
     spec: Option<&TabularSpec>,
     result_sets: impl IntoIterator<Item = S>,
     failure: impl Fn(usize) -> Option<LookupFailure>,
     describe: impl Fn(usize, LookupFailure) -> String,
     program: crate::blastinput::app::Program,
-    program_name: &str,
+    app: &str,
     taxdb_found: bool,
 ) -> anyhow::Result<()>
 where
@@ -1264,14 +1270,14 @@ where
             {
                 return Err(FailedLookupRefusal {
                     message: format!(
-                        "{}; {reason}, which is not supported by LOSAT's {program_name}",
-                        describe(entry.subject, failure)
+                        "{}; {reason}, which is not supported by LOSAT's {}",
+                        describe(entry.subject, failure),
+                        app.to_ascii_uppercase()
                     ),
                     set: index,
                     rows,
-                    formatter_warning: spec.and_then(|spec| {
-                        spec.formatter_warning(taxdb_found, &program_name.to_ascii_lowercase())
-                    }),
+                    formatter_warning: spec
+                        .and_then(|spec| spec.formatter_warning(taxdb_found, app)),
                 }
                 .into());
             }

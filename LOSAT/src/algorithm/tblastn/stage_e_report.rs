@@ -546,7 +546,7 @@ pub(super) fn render(
                     ),
                 },
                 crate::blastinput::app::Program::Tblastn,
-                crate::blastinput::app::Program::Tblastn.name(),
+                crate::blastinput::app::Program::Tblastn.ncbi_name(),
                 tabular.taxdb_found,
             );
             if let Err(error) = format.refusal.check(checked) {

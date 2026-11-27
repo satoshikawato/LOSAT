@@ -699,7 +699,7 @@ fn check_failed_lookups(
                 }
             },
             crate::blastinput::app::Program::Blastx,
-            options.program().upper,
+            options.program().app,
             options.taxdb_found,
         )
         .map_err(|error| {

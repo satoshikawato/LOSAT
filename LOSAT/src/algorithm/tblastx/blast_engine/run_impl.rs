@@ -2434,7 +2434,7 @@ fn write_tblastx_outputs(
                     ),
                 },
                 crate::blastinput::app::Program::Tblastx,
-                crate::blastinput::app::Program::Tblastx.name(),
+                run.args.app().ncbi_name(),
                 run.args.tabular_taxdb.unwrap_or(false),
             );
             if let Err(error) = output.refusal.check(checked) {

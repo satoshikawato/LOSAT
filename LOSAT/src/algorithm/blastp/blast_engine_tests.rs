@@ -3197,7 +3197,7 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
                 crate::report::tabular::failed_database_subject(s_idx, None, None, failure)
             },
             crate::blastinput::app::Program::Blastp,
-            "BLASTP",
+            "blastp",
             true,
         )
         .unwrap_err()

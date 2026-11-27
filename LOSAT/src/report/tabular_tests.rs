@@ -1185,7 +1185,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         record,
         |s_idx, _| failed_record_title(s_idx, b"Subject_9"),
         crate::blastinput::app::Program::Blastn,
-        "BLASTN",
+        "blastn",
         true,
     );
     assert!(result
@@ -1198,10 +1198,61 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         record,
         |s_idx, _| failed_record_title(s_idx, b"x"),
         crate::blastinput::app::Program::Blastn,
-        "BLASTN",
+        "blastn",
         true,
     )
     .is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-137
+// Line RG-F item F2f: the refusal and the formatter's warning name the running application (blastn
+// running a TBLASTX strategy: the TBLASTX engine's rows, blastn's prefix), not the engine.
+#[test]
+fn a_failed_lookup_refusal_names_the_running_application() {
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+        )
+        .unwrap()
+    };
+    let record = |s_idx| (s_idx == 0).then(|| LookupFailure::of_plain(false));
+    let refuse = |app: &str| {
+        check_failed_lookups(
+            Some(&spec("qseqid sseqid staxid sscinames")),
+            [vec![0]],
+            record,
+            |s_idx, _| failed_record_title(s_idx, b"Subject_1"),
+            crate::blastinput::app::Program::Tblastx,
+            app,
+            false,
+        )
+        .unwrap_err()
+    };
+    for (app, upper) in [
+        ("blastn", "BLASTN"),
+        ("blastx", "BLASTX"),
+        ("tblastx", "TBLASTX"),
+    ] {
+        let error = refuse(app);
+        assert!(
+            error
+                .to_string()
+                .ends_with(&format!(", which is not supported by LOSAT's {upper}")),
+            "{error}"
+        );
+        let refusal = error.downcast_ref::<FailedLookupRefusal>().unwrap();
+        assert_eq!(
+            refusal.formatter_warning(),
+            Some(taxdb_warning_line(app).as_str())
+        );
+        assert!(taxdb_warning_line(app).starts_with(&format!("Warning: [{app}] ")));
+    }
 }
 
 // Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probe `D/logs/d1c1cb/probe`: `6 qseqid sallacc` exits
@@ -1246,7 +1297,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         |s_idx| (s_idx == 1).then_some(lineless),
         describe_database_subject,
         crate::blastinput::app::Program::Blastp,
-        "BLASTP",
+        "blastp",
         true,
     );
     assert_eq!(
@@ -1286,7 +1337,7 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         fail_subject_1,
         describe_database_subject,
         crate::blastinput::app::Program::Tblastn,
-        "TBLASTN",
+        "tblastn",
         true,
     )
     .unwrap_err();
@@ -1608,7 +1659,7 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         |_| Some(empty),
         |_, _| "database sequence 0".to_string(),
         Program::Tblastn,
-        "TBLASTN",
+        "tblastn",
         true,
     )
     .is_ok());
@@ -1627,7 +1678,7 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         |_| Some(empty),
         |_, _| "database sequence 0".to_string(),
         Program::Tblastn,
-        "TBLASTN",
+        "tblastn",
         true,
     )
     .unwrap_err()

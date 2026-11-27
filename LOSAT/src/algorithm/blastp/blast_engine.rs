@@ -11133,7 +11133,7 @@ fn run_call(
         listed_titles.as_ref(),
         subject_records,
         (
-            args.app.name(),
+            args.app.ncbi_name(),
             database.map_or(args.subject_taxdb_found, |database| database.taxdb_found()),
         ),
     )

@@ -5414,7 +5414,7 @@ fn check_tabular_lookups(
                 ),
             },
             crate::blastinput::app::Program::Blastn,
-            crate::blastinput::app::Program::Blastn.name(),
+            report.app.ncbi_name(),
             report.tabular_taxdb_found,
         );
         output.refusal.check(checked)?;

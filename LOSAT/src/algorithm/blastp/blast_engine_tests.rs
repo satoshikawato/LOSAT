@@ -1467,8 +1467,7 @@ fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table(
         let resolved = args.resolve().expect("resolved blastp args");
         validate_requested_blastp_support(&resolved)
             .unwrap_or_else(|err| panic!("{gap_open}/{gap_extend}: {err}"));
-        // psiblast takes them too (its later rounds search the PSSM with them); only a PSSM
-        // query (`-in_pssm`) keeps BLOSUM62 11/1 (line PS, PS7b; `db.ps.inpssm.rej.gap`).
+        // psiblast takes them too (both FASTA rounds and `-in_pssm`/`-in_msa`, line PS, PS7b).
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
         args.gap_open = Some(gap_open);
@@ -1476,6 +1475,47 @@ fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table(
         let resolved = args.resolve().expect("resolved psiblast args");
         validate_requested_blastp_support(&resolved)
             .unwrap_or_else(|err| panic!("psiblast {gap_open}/{gap_extend}: {err}"));
+    }
+    // PS7b: `-in_pssm` and `-in_msa` accept every supported matrix and gap pair.
+    let pssm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/db_search/db.ps.asn.rnd.6.asn");
+    let msa_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/msa/ps6_b_db_0.aln");
+    for (matrix, gap_open, gap_extend) in [
+        ("BLOSUM45", None, None),
+        ("BLOSUM45", Some(14), Some(2)),
+        ("BLOSUM50", None, None),
+        ("BLOSUM62", Some(9), Some(2)),
+        ("BLOSUM62", Some(32767), Some(32767)),
+        ("BLOSUM80", None, None),
+        ("BLOSUM80", Some(9), Some(2)),
+        ("BLOSUM90", None, None),
+        ("PAM30", None, None),
+        ("PAM70", None, None),
+        ("PAM250", None, None),
+    ] {
+        for is_msa in [false, true] {
+            let mut args = make_blastp_args();
+            args.app = BlastpApp::Psiblast;
+            args.matrix = Some(matrix.into());
+            args.gap_open = gap_open;
+            args.gap_extend = gap_extend;
+            args.psiblast_pssm = Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
+                in_pssm: (!is_msa).then(|| pssm_path.clone()),
+                in_msa: is_msa.then(|| crate::algorithm::psiblast::in_msa::MsaInput {
+                    path: msa_path.clone(),
+                    master_index: None,
+                    ignore_master: false,
+                }),
+                ..Default::default()
+            });
+            let resolved = args.resolve().unwrap_or_else(|err| {
+                panic!("resolve {matrix} {gap_open:?}/{gap_extend:?} msa={is_msa}: {err}")
+            });
+            validate_requested_blastp_support(&resolved).unwrap_or_else(|err| {
+                panic!("support {matrix} {gap_open:?}/{gap_extend:?} msa={is_msa}: {err}")
+            });
+        }
     }
 }
 
@@ -3017,6 +3057,36 @@ fn the_rows_read_each_residue_by_the_operations() {
         stored_gap_columns(&residues, STORED_GAP, &hit, RowSide::Subject),
         [1]
     );
+}
+
+// psiblast `-phi_pattern` (PS8a fix round 1): the rows of a batch whose first query has no letters
+// show a gap character at each position of the searched query, read as a Bioseq's letters
+// (`ShownQueries::phi_shown`; NCBI BLAST+ 2.17.0 `PS/tmp/rev8a/ncbi3/er.first.0`).
+#[test]
+fn phi_shown_letters_replace_the_record_s() {
+    let records = vec![
+        FastaRecord::new("e1".to_string(), b"", b""),
+        FastaRecord::new("p".to_string(), b"", b"MKV"),
+        FastaRecord::new("q".to_string(), b"", b"MKV"),
+    ];
+    let phi_shown = vec![None, Some(b"---".to_vec().into_boxed_slice()), None];
+    let queries = ShownQueries {
+        records: &records,
+        bioseq: None,
+        phi_shown: &phi_shown,
+    };
+    assert_eq!(queries.record(1), b"---");
+    assert_eq!(queries.record(2), b"MKV");
+    assert!(matches!(
+        queries.letters(1),
+        Some(ShownLetters::Bioseq(b"---"))
+    ));
+    assert!(matches!(
+        queries.letters(2),
+        Some(ShownLetters::Ascii(b"MKV"))
+    ));
+    assert!(queries.shown(1).recounted());
+    assert!(matches!(queries.shown(3), ShownLetters::Ascii(b"")));
 }
 
 /// BLASTP's table as the `-db_hard_mask` search moves it between sequences (`db_masked.rs`:

@@ -1,0 +1,76 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x2d2 fm1_r0
+           1 sequences; 57 total letters
+
+
+
+Query= x2d dash 50
+
+Length=30
+
+
+
+x2dq  15  SAAAMHYFREDQILTA  30
+0     39       .L.-K.----.  22
+0     16      .SI.          30
+               \          
+               |          
+               K
+0     5          .-----...  25
+                         \
+                         |
+                       Q*K
+0     26      .-L.----..    9
+                       \  
+                       |  
+                       G
+0     6          .*...      53
+                   \\\    
+                   |||    
+                  PN||
+                    ||    
+               KHL*KD|
+                     |    
+                   KEV
+0     47         .---F..    30
+                       \  
+                       |  
+                      IF
+0     1           .---.     6
+0     37      .-------.     42
+0     56               .    54
+0     53               .    51
+0     49                .   47
+0     25              .     27
+0     4          .          2
+
+
+Lambda      K        H        a         alpha
+   0.319    0.110    0.312    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 570
+
+
+  Database: x2d2 fm1_r0
+    Posted date:  Nov 26, 2026  4:37 AM
+  Number of letters in database: 57
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1

@@ -1230,7 +1230,7 @@ pub(super) fn pairwise_hits(
                         // not those of the rows (`a.identity`), which the display's translation
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
-                        query_left_of_record: false,
+                        edge: crate::report::pairwise::PairwiseEdge::Normal,
                     });
                     // The model of the reads sorts by `hsp_scores` of the batch's query length
                     // without the rows (`ReportedSubjects::fetch_by_query`): the row's values

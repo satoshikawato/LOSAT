@@ -965,7 +965,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
-    (format, gapped): (shared::PrefetchFormat, bool),
+    (format, gapped, has_pssm): (shared::PrefetchFormat, bool, bool),
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -989,7 +989,12 @@ pub(super) fn prefetch_stop(
         let seq_aligns = lists()
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
-        if shared::prefetch_off(format, seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns)
+            || (has_pssm
+                && hitlists
+                    .get(span.clone())
+                    .is_some_and(super::nullb_report::hitlists_have_empty_subject_row_db))
+        {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -1228,6 +1233,7 @@ pub(super) fn reported_subjects(
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
+    has_nullb: bool,
     seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -1254,12 +1260,14 @@ pub(super) fn reported_subjects(
         batches,
         |span| seq_aligns_of(&hitlists[span], gapped),
         |span| {
-            shared::BatchPrefetch::prefetch_fails_among(
-                hitlists[span]
-                    .iter()
-                    .flat_map(KappaResultHitList::lists)
-                    .map(|list| titled(usize::try_from(list.oid).ok()?)),
-            )
+            (has_nullb
+                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
+                || shared::BatchPrefetch::prefetch_fails_among(
+                    hitlists[span]
+                        .iter()
+                        .flat_map(KappaResultHitList::lists)
+                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
+                )
         },
     );
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {

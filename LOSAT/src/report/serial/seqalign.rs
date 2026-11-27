@@ -300,6 +300,7 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     // A protein row's strand is unknown: the lengths are not read.
     collect_seq_align_data(&record, 0, 0, false, false, segments);
@@ -374,6 +375,7 @@ pub(crate) fn nucleotide_row_segments(
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     collect_seq_align_data(&record, query_length, 0, false, false, segments);
     crate::report::query_anchored::HspStrands {
@@ -448,6 +450,7 @@ pub(crate) fn translated_row_segments(
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     collect_seq_align_data(
         &record,
@@ -525,6 +528,32 @@ pub(crate) fn empty_row_segments(
         subject_minus: false,
         query_frame,
         no_widths: true,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:783-786,834-836
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:126-140
+/// The Dense-seg segments of a TBLASTN `-in_pssm -window_size 0` `-db` negative-frame NULLB-start
+/// HSP whose every subject segment has a negative start (`-3`, `-2`, or `-1`): `CAlnMixMatches::Add`
+/// treats row 1 as a gap-only segment and merges only the query row.
+pub(crate) fn empty_subject_row_segments(
+    hit: &crate::common::Hit,
+    subject_frame: i8,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let q_from = hit.q_start.min(hit.q_end).saturating_sub(1) as i32;
+    let len = (hit.q_end.abs_diff(hit.q_start) + 1) as i32;
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([q_from, -1]);
+    segments.lens.push(len);
+    segments.strands.extend([Strand::Unknown, Strand::Unknown]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: false,
+        subject_minus: subject_frame < 0,
+        query_frame: 0,
+        no_widths: false,
     }
 }
 
@@ -1245,11 +1274,13 @@ fn write_std_segs<E: Encoder>(
     segments: &Segments,
     translate: [bool; 2],
     offsets: [i32; 2],
+    last_seg_fuzz: Option<(u32, i32)>,
 ) {
     let numseg = segments.lens.len();
     let ids = [query_id, subject_id];
     enc.begin_list(false);
     for seg in 0..numseg {
+        let is_last = seg + 1 == numseg;
         begin_std_seg(enc, query_id, subject_id);
         for row in 0..2 {
             enc.element();
@@ -1258,18 +1289,45 @@ fn write_std_segs<E: Encoder>(
                 write_seq_loc_empty(enc, ids[row]);
             } else {
                 let len = segments.lens[seg];
-                let stop = if translate[row] {
+                let mut stop = if translate[row] {
                     start + CODON_LENGTH * len - 1
                 } else {
                     start + len - 1
                 };
-                write_seq_interval(
-                    enc,
-                    ids[row],
-                    start + offsets[row],
-                    stop + offsets[row],
-                    segments.strands[2 * seg + row],
-                );
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
+                if is_last && row == 0 {
+                    if let Some((_, query_to_sub)) = last_seg_fuzz {
+                        stop -= query_to_sub;
+                    }
+                }
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
+                let fuzz = if is_last && row == 1 {
+                    last_seg_fuzz.map(|(alt, _)| alt.wrapping_add(offsets[1] as u32))
+                } else {
+                    None
+                };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:344-355
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
+                if start < 0 || fuzz.is_some() {
+                    write_seq_interval_pos(
+                        enc,
+                        ids[row],
+                        (
+                            start.wrapping_add(offsets[row]) as u32,
+                            stop.wrapping_add(offsets[row]) as u32,
+                        ),
+                        segments.strands[2 * seg + row],
+                        (None, fuzz),
+                    );
+                } else {
+                    write_seq_interval(
+                        enc,
+                        ids[row],
+                        start + offsets[row],
+                        stop + offsets[row],
+                        segments.strands[2 * seg + row],
+                    );
+                }
             }
         }
         end_std_seg_locs(enc);
@@ -1386,6 +1444,48 @@ pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:895-900
+/// `CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3` (alnvec.cpp:898): thrown
+/// when a translated alignment extends past the end of its nucleotide sequence and the clamped
+/// slice length is not a multiple of 3 (TBLASTN `-in_pssm -window_size 0` NULLB-start alignment
+/// with `rem in {1, 2}`).
+pub(crate) fn translate_na_to_aa_exception() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objtools/alnmgr/alnvec.cpp",
+            line: 898,
+            kind: "CAlnException::eTranslateFailure",
+            function: Some("ncbi::objects::CAlnVec::TranslateNAToAA"),
+        },
+        "CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3",
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-754
+/// `CAlnVec::x_GetSeqLeftSeg()` / `x_GetSeqRightSeg(): Invalid Dense-seg: Row <row> contains
+/// gaps only.` (`alnmap.cpp:732,753`): thrown when every segment of `row` in a Dense-seg has a
+/// negative start (row 0 for BLASTN `-db` left-of-query alignments; row 1 for TBLASTN `-in_pssm
+/// -window_size 0` `-db` negative-frame alignments whose entire alignment lies in the trailing
+/// NULLB segment with `s_from` in `{-3, -2, -1}`).
+#[cold]
+#[inline(never)]
+pub(crate) fn aln_vec_row_gaps_only(row: usize, left: bool) -> NcbiException {
+    let (line, method) = if left {
+        (732, "x_GetSeqLeftSeg")
+    } else {
+        (753, "x_GetSeqRightSeg")
+    };
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objtools/alnmgr/alnmap.cpp",
+            line,
+            kind: "CAlnException::eInvalidDenseg",
+            function: None,
+        },
+        format!("CAlnVec::{method}(): Invalid Dense-seg: Row {row} contains gaps only."),
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
 /// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of a translated search's HSP from the
@@ -1450,11 +1550,25 @@ pub(crate) fn reported_std_seg_rows_range(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
-/// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
-/// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`, `row_end_gaps`).
+/// Whether `op` places at least one sequence letter (not a gap) on `row`.
+#[inline]
+fn op_has_row_letter(op: &GapEditOp, row: AlignRow) -> bool {
+    !matches!(
+        (op, row),
+        (GapEditOp::Del(_), AlignRow::Query) | (GapEditOp::Ins(_), AlignRow::Subject)
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191,226-230
+/// `std_seg_row_range` of a gapped HSP whose edit script is `ops`: `RowRangeError::Empty` when
+/// `ops` is non-empty and has no letter on `row` (for example, TBLASTN `-in_pssm -window_size 0`
+/// `-db` negative frame `rem == 2` whose sole segment is `Ins(k)`), or
+/// `RowRangeError::SeqidsNotConsistent` when the script starts with a gap on `row` before a letter.
 #[inline]
 pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRangeError> {
+    if !ops.is_empty() && !ops.iter().any(|op| op_has_row_letter(op, row)) {
+        return Some(RowRangeError::Empty);
+    }
     (row_end_gaps(ops, row).leading > 0).then_some(RowRangeError::SeqidsNotConsistent)
 }
 
@@ -1475,14 +1589,9 @@ pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRa
 ///
 /// Only a Smith-Waterman alignment of `-use_sw_tback` has them (`ALIGN_EX` from the
 /// Smith-Waterman start may start with a gap); an X-drop alignment starts and ends with a
-/// substitution. A script without a letter of the row (never made) has none.
+/// substitution. A script without a letter of the row has none.
 pub(crate) fn row_end_gaps(ops: &[GapEditOp], row: AlignRow) -> RowEndGaps {
-    let has_letter = |op: &GapEditOp| {
-        !matches!(
-            (op, row),
-            (GapEditOp::Del(_), AlignRow::Query) | (GapEditOp::Ins(_), AlignRow::Subject)
-        )
-    };
+    let has_letter = |op: &GapEditOp| op_has_row_letter(op, row);
     let (Some(first), Some(last)) = (
         ops.iter().position(has_letter),
         ops.iter().rposition(has_letter),
@@ -2056,17 +2165,22 @@ fn write_seq_align_gapped<E: Encoder>(
     enc.member("dim", 1);
     enc.int(BLAST_ALIGNMENT_DIM);
     enc.end_member();
+    let nullb = hsp.std_seg_nullb;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
-    enc.member("score", 2);
-    enc.begin_list(true);
-    // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
-    let hsp = HspRecord {
-        num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type).unwrap_or(-1),
-        ..*hsp
-    };
-    write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
-    enc.end_list();
-    enc.end_member();
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:3083-3094
+    if !nullb.is_some_and(|n| n.omit_scores) {
+        enc.member("score", 2);
+        enc.begin_list(true);
+        // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
+        let hsp = HspRecord {
+            num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type)
+                .unwrap_or(-1),
+            ..*hsp
+        };
+        write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
+        enc.end_list();
+        enc.end_member();
+    }
     enc.member("segs", 3);
     if translated {
         enc.variant("Seq-align_segs", "std", 2);
@@ -2077,6 +2191,7 @@ fn write_seq_align_gapped<E: Encoder>(
             segments,
             [translate1, translate2],
             [query.offset, subject.offset],
+            nullb.and_then(|n| n.last_seg_fuzz),
         );
     } else {
         enc.variant("Seq-align_segs", "denseg", 1);

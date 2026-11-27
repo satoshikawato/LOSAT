@@ -1231,7 +1231,10 @@ pub(crate) fn write_hsp_rows<W: Write>(
         // earlier rows have been written.
         if let Some((placements, ungapped)) = left_of_record {
             if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
-                return Err(super::left_of_query::alnmap_empty_query_row(false).into_io_error());
+                return Err(
+                    crate::report::serial::seqalign::aln_vec_row_gaps_only(0, false)
+                        .into_io_error(),
+                );
             }
         }
         let query_id = query_ids

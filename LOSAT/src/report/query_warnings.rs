@@ -1548,6 +1548,32 @@ fn warning_line(program: &str, query_id: &[u8], messages: &[String]) -> Vec<u8> 
     )
 }
 
+/// psiblast `-phi_pattern`: the messages of query `index` (`query_warning`'s id and messages) as
+/// PHI-BLAST's report writes them on its output before the query's report, in place of the
+/// warning on standard error: a line feed, the query's id, `: `, each message followed by a
+/// space, a line feed; empty without a message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2047
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:277-292
+pub fn phi_result_warning<R: InputRecord>(index: usize, query: &R, messages: &[String]) -> Vec<u8> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+    let local_id = format!("Query_{}", index + 1);
+    let mut text = vec![b'\n'];
+    text.extend(warning_query_id(
+        query.believed_warning_id().unwrap_or(local_id.as_bytes()),
+        &query.title_bytes(),
+    ));
+    text.extend_from_slice(b": ");
+    for message in sorted_query_messages(messages) {
+        text.extend_from_slice(message.as_bytes());
+        text.push(b' ');
+    }
+    text.push(b'\n');
+    text
+}
+
 /// `query_warning` for a query whose Seq-id is its own rather than the `Query_N` that NCBI's
 /// FASTA reader makes: psiblast's PSSM query (`-in_pssm`), whose warnings start with the PSSM's
 /// Seq-id, `seq_id` (`GetSeqIdString()`: a `local str` as written, a `local id` in decimal; the

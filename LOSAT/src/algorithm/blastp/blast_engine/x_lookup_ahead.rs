@@ -23,7 +23,9 @@
 //! starts when block i's table is ready, beside block i's scan; part 2 (`x_flat_ahead_table`: the
 //! stripes pass, which writes the table) runs on the vectors of block i's table, which block i's
 //! thread gives to the second spare after block i's preliminary stage (`XAheadBlock::after_prelim`,
-//! `x_make_room_flat`), when nothing of block i reads its table any more. The two meet without a
+//! `x_make_room_flat`), when nothing of block i reads its table any more (where a batch of block i
+//! is split, after block i's scan, before the batch's query chunks build their own tables, which
+//! take no spare vectors: `x_lookup_after_prelim`). The two meet without a
 //! wait (`x_run_with_split_build_ahead`): the side that comes second starts part 2 (part 1's task
 //! goes on into it, or block i's thread spawns it as one more task of the scope).
 //!

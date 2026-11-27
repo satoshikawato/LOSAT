@@ -477,13 +477,15 @@ fn x_bp_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>) -> (u64, bool) {
 /// where the table has fewer hits per used cell than [`x_bp_masked_min`] LOSAT_X_BPDEFER's
 /// deferred calls instead of LOSAT_X_BPMASKED's masked batch, and the per-hit loop instead of
 /// LOSAT_X_BPCELL128's 128-bit batches. Counted for the timing line once per table and thread,
-/// and the masked batch's choice marked for `LOSAT_X_REACH`.
+/// and the masked batch's choice marked for `LOSAT_X_REACH`; a table without hits (that of a call
+/// whose searched batches NCBI all splits, `blast_engine::CallTableWords`) has no cell to test, so
+/// it takes neither cell test and is neither counted nor marked.
 fn x_bp_table_mode<K: XCell>(mode: XDiagMode, table: &BlastAaLookupTable<K>) -> XDiagMode {
     #[cfg(target_arch = "x86_64")]
     if mode == XDiagMode::Avx2DeferMasked {
         let (ratio, first) = x_bp_table_ratio(table);
         let masked = ratio >= x_bp_masked_min();
-        if first {
+        if first && ratio != 0 {
             use std::sync::atomic::Ordering::Relaxed;
             X_BP_TABLES[usize::from(!masked)].fetch_add(1, Relaxed);
             X_BP_RATIO_MIN.fetch_min(ratio, Relaxed);
@@ -503,7 +505,7 @@ fn x_bp_table_mode<K: XCell>(mode: XDiagMode, table: &BlastAaLookupTable<K>) -> 
     if mode == XDiagMode::W128 {
         let (ratio, first) = x_bp_table_ratio(table);
         let batched = ratio >= x_bp_masked_min();
-        if first {
+        if first && ratio != 0 {
             use std::sync::atomic::Ordering::Relaxed;
             X_BP_TABLES[usize::from(!batched)].fetch_add(1, Relaxed);
             X_BP_RATIO_MIN.fetch_min(ratio, Relaxed);

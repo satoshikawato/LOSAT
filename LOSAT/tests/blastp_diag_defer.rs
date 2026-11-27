@@ -291,7 +291,10 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
                 assert_eq!(d.mode, "avx2-defer", "{what_d}");
                 assert_eq!(m.mode, "avx2-defer-masked", "{what}");
                 assert!(m.cells > 0 && m.candidates > 0, "{what}: {m:?}");
-                // The query sets have enough hits per cell for the masked batch on every table.
+                // The query sets have enough hits per cell for the masked batch on every table
+                // with hits. The fixture pair's one batch (`BATCH_SIZE` 100000) is split into
+                // chunks: the call's table holds none of its words and, without a cell to test,
+                // is not counted; each chunk's table is.
                 let tables = masked_tables(&stderr);
                 assert!(
                     matches!(tables, Some((n, 0)) if n > 0),

@@ -9731,7 +9731,9 @@ fn x_bp_aa_vectors_reused(table: &crate::algorithm::tblastx::lookup::BlastAaLook
 /// `XAheadBlock::x_table_taken_later`), or with the switch off; otherwise dropped here, before the
 /// redo, instead of at the search's end. Item SC2d: first, where the next block's flat table is built
 /// ahead, the table's vectors go to that build, which goes on beside the rest of this block's search
-/// (`XAheadBlock::after_prelim`; `None`).
+/// (`XAheadBlock::after_prelim`; `None`). Called once per call (`run_call`): where a searched batch
+/// is split, after the call's scan and before the batch's chunks build their own tables (the call's
+/// table holds none of their words, `CallTableWords`), else after the preliminary stage.
 fn x_lookup_after_prelim(
     lookup: BlastpRuntimeLookup,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -10491,10 +10493,17 @@ fn run_call(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
     // NCBI frees each table before it builds the next. Where a searched batch of the call is split,
     // its chunks build their own tables now (`search_split_query_batches`) and the call's scan is
-    // over, so the call's table goes first (it holds no word of that batch, `CallTableWords`).
-    let lookup = (!CallTableWords::of(&args, &query_batches, &query_lengths, false)
-        .is_ok_and(|words| words.splits()))
-    .then_some(lookup);
+    // over: nothing reads the call's table any more (it holds no word of that batch,
+    // `CallTableWords`), so it is done with here, before the chunks' tables, as it is after the
+    // preliminary stage below where no searched batch is split (`x_lookup_after_prelim`: freed, or
+    // its vectors given to the next block's build ahead, or kept for a later block's build).
+    let chunks_follow = CallTableWords::of(&args, &query_batches, &query_lengths, false)
+        .is_ok_and(|words| words.splits());
+    let lookup = if chunks_follow {
+        x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead)
+    } else {
+        Some(lookup)
+    };
     search_split_query_batches(
         &args,
         query_records,
@@ -10599,9 +10608,13 @@ fn run_call(
     x_ih_pool::release();
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
-    // Item SC2d: a flat table's vectors go to the next block's build here.
-    let lookup =
-        lookup.and_then(|lookup| x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead));
+    // Item SC2d: a flat table's vectors go to the next block's build here. Where a searched batch
+    // is split, this was done before its chunks (above).
+    let lookup = if chunks_follow {
+        lookup
+    } else {
+        lookup.and_then(|lookup| x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead))
+    };
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every

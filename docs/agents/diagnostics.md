@@ -2794,7 +2794,8 @@ Rebuilding less:
   `LOSAT_X_BXDIAGMIN`'s measure. With `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer-masked`
   (the counts of every table), and a second line `[TIMING] x_bpmasked: min_hits_per_cell=<n>
   tables_masked=<a> tables_deferred=<b> hits_per_cell=<least>-<most>` gives the rule's (thread, table)
-  choices. Measured 2026-10-24 on the workstation (one pinned core, user-space cycles, medians of paired
+  choices (a table without hits, that of a call whose query batches are all split into chunks, has no cell
+  to test and is not counted). Measured 2026-10-24 on the workstation (one pinned core, user-space cycles, medians of paired
   per-round ratios, every output identical in every arm), against `dev` before the switch: stage7 Blast6_6 and
   Blast0_6 (`-subject`, about 100 hits per used cell) x0.954 and x0.941 (the cell test 7.28 -> 6.32 cycles per
   hit), 300 yeast proteins x the fly proteome (`-db`) x0.955, 567 human proteins x Species4 x0.957, WSSV x

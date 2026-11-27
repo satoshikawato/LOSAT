@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psw",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psw",
+  "number-of-letters": 166,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-27T20:47:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49720,
+  "bytes-to-cache": 265,
+  "files": [
+    "psw.pdb",
+    "psw.phr",
+    "psw.pin",
+    "psw.pog",
+    "psw.pos",
+    "psw.pot",
+    "psw.psq",
+    "psw.ptf",
+    "psw.pto"
+  ]
+}

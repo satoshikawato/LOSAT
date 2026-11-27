@@ -170,6 +170,7 @@ impl MakedbError {
     /// refusals and an input file that cannot be read.
     pub fn exit_code(&self) -> i32 {
         match self {
+            MakedbError::Build(WriteDbError::Native(native)) => native.exit,
             MakedbError::Build(
                 WriteDbError::Exception(_)
                 | WriteDbError::Other(_)
@@ -1110,10 +1111,7 @@ fn destructor_messages(db: &BuildDatabase<'_>, error: Option<&MakedbError>) -> V
     db.post_destruction_diagnostics(&mut |line: &[u8]| {
         messages.push(line.to_vec());
     });
-    messages.extend(
-        db.taxid_message()
-            .map(|message| message.as_bytes().to_vec()),
-    );
+    messages.extend(db.taxid_message());
     messages
 }
 
@@ -1569,6 +1567,12 @@ pub(crate) fn run_with_env(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    // The run's own diagnostic stream of the main thread, which the object manager fails on the
+    // ASN.1 input (`objmgr::annot_index`): its later posts are their headers alone
+    // (`ncbi_exception::post_text`), and its end the line feed of its report (`catch_all_report`).
+    let _diag = crate::ncbi_exception::MainDiag::enter(Some(std::sync::Arc::new(
+        crate::ncbi_exception::MainDiag::new(),
+    )));
     let mut end_messages = Vec::new();
     let name = match args.logfile.as_deref() {
         None => {
@@ -1720,7 +1724,7 @@ fn finish(result: Result<(), MakedbError>, end_messages: &[Vec<u8>], err: &mut d
         // `~CBuildDatabase`'s (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
         Err(error) if error.is_closed_pipe() => return error.exit_code(),
         Err(error) => {
-            let _ = err.write_all(&[error.message().as_slice(), b"\n"].concat());
+            let _ = err.write_all(&catch_all_report(&error));
             error.exit_code()
         }
     };
@@ -1728,6 +1732,23 @@ fn finish(result: Result<(), MakedbError>, end_messages: &[Vec<u8>], err: &mut d
         let _ = err.write_all(&[message.as_slice(), b"\n"].concat());
     }
     status
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-263
+/// What the run writes for `error` at its end: its message and a line feed. NCBI's end is its
+/// general handler's `LOG_POST`, of which a failed diagnostic stream of the main thread writes the
+/// line feed alone (`cli::catch_all_text`; the object manager fails it on the ASN.1 input,
+/// `objmgr::annot_index`); the end of the failed write of an object's text writes nothing
+/// (`WriteDbError::Native`). LOSAT's refusals keep their words.
+fn catch_all_report(error: &MakedbError) -> Vec<u8> {
+    if let MakedbError::Build(WriteDbError::Native(native)) = error {
+        return crate::cli::catch_all_text(&native.message).to_vec();
+    }
+    let report = [error.message().as_slice(), b"\n"].concat();
+    if is_losat_error(error) {
+        return report;
+    }
+    crate::cli::catch_all_text(&report).to_vec()
 }
 
 #[cfg(test)]

@@ -120,6 +120,14 @@ pub enum WriteDbError {
     /// clause of its general handler: "Error: " and the exception's report
     /// (`CException::what()`), exit status 255.
     Exception(NcbiException),
+    /// The end of makeblastdb's run by its general handler (`CATCH_ALL`) as `cli::NativeError`
+    /// gives its report and exit status, the text already in the form it has before the main
+    /// thread's diagnostic stream failed (`makeblastdb::finish` writes its line feed after,
+    /// `cli::catch_all_text`): the object manager's ends on the ASN.1 input
+    /// (`objmgr::annot_index::End`), among them the failed write of an object's text, which ends
+    /// the run with no report and exit status 0. The volumes written so far stay, as at an
+    /// `Exception`.
+    Native(crate::cli::NativeError),
     /// NCBI's `CSeqDBException` (the LMDB environment that could not be opened, `CBlastEnv`):
     /// the text makeblastdb prints after "BLAST Database error: ", exit status 2. At the close
     /// it is a creation error, as `EndBuild` makes every exception of `Close`.
@@ -206,6 +214,11 @@ impl WriteDbError {
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
             WriteDbError::Exception(e) => text("Error: ", &e.what()),
+            WriteDbError::Native(native) => native
+                .message
+                .strip_suffix(b"\n")
+                .unwrap_or(&native.message)
+                .to_vec(),
             WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
             WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
             WriteDbError::OutOfMemory => crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),

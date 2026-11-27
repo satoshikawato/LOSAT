@@ -636,9 +636,13 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1211-1213
     /// The message of `~CBuildDatabase` about the taxids: `Some` when `-taxid_map` matched no
     /// sequence.
-    pub fn taxid_message(&self) -> Option<&'static str> {
-        (!self.taxids.has_ever_fixed_id())
-            .then_some("Error: [makeblastdb] No sequences matched any of the taxids provided.")
+    pub fn taxid_message(&self) -> Option<Vec<u8>> {
+        (!self.taxids.has_ever_fixed_id()).then(|| {
+            crate::ncbi_exception::post_text(
+                b"Error: [makeblastdb] ",
+                b"No sequences matched any of the taxids provided.",
+            )
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
@@ -700,11 +704,12 @@ impl<'a> BuildDatabase<'a> {
     /// when mask data were read and no sequence matched.
     pub fn post_destruction_diagnostics(&self, warn: Warn<'_>) {
         if self.mask_data.is_some() && !self.found_matching_masks {
-            warn(
-                b"Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+            warn(&crate::ncbi_exception::post_text(
+                b"Error: [makeblastdb] ",
+                b"No sequences matched any of the masks provided.\n\
                   Please ensure that the -parse_seqids option is used in the\n\
                   filtering program as well as makeblastdb.",
-            );
+            ));
         }
     }
 
@@ -952,7 +957,10 @@ impl<'a> BuildDatabase<'a> {
             }
         }
         if !found {
-            warn(b"Warning: [makeblastdb] No sequences written");
+            warn(&crate::ncbi_exception::post_text(
+                b"Warning: [makeblastdb] ",
+                b"No sequences written",
+            ));
         }
         Ok(())
     }
@@ -1337,7 +1345,7 @@ impl<'a> BuildDatabase<'a> {
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
                 | WriteDbError::GiOnlyBetweenKeys { .. } => {
-                    [b"Error: [makeblastdb] ".as_slice(), &error.message()].concat()
+                    crate::ncbi_exception::post_text(b"Error: [makeblastdb] ", &error.message())
                 }
                 other => other.message(),
             });

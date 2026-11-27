@@ -1,5 +1,6 @@
-//! The PSSM's query Seq-entry as NCBI's object manager adds it to the scope (`AddTopLevelSeqEntry`):
-//! a Bioseq, or a Bioseq-set with its members at any depth. The TSE is made with every object's
+//! A Seq-entry as NCBI's object manager adds it to the scope (`AddTopLevelSeqEntry`): a PSSM's query
+//! entry, or an object of makeblastdb's ASN.1 input; a Bioseq, or a Bioseq-set with its members at
+//! any depth. The TSE is made with every object's
 //! information (phase C: a Bioseq-set makes its members, then its own annotations), then attached
 //! (each Bioseq-set's integer id and each Bioseq's Seq-ids, which NCBI keeps once per TSE), then
 //! its annotations are indexed (phase I: a Bioseq-set's own annotations, then its members').
@@ -20,7 +21,7 @@ use crate::report::serial::asn_types::table::named;
 use crate::report::serial::pssm::SeqEntry;
 use crate::seqid::ParsedSeqId;
 
-/// The TSE of a query Seq-entry: its annotations in phase I's order, phase C's order of what it
+/// The TSE of a Seq-entry: its annotations in phase I's order, phase C's order of what it
 /// makes, and what attaches, in NCBI's order.
 pub(super) struct Tse<'a> {
     pub(super) annots: Vec<V<'a>>,
@@ -83,6 +84,28 @@ impl<'a> Tse<'a> {
         tse
     }
 
+    /// The TSE of `object` as a reader read it: a Bioseq-set when `is_set`, else a Seq-entry.
+    pub(super) fn of_object(object: V<'a>, is_set: bool) -> Self {
+        let mut tse = Tse {
+            annots: Vec::new(),
+            construction: Vec::new(),
+            attach: Vec::new(),
+        };
+        let mut construction = Vec::new();
+        match if is_set {
+            ("set", object)
+        } else {
+            object.choice()
+        } {
+            ("seq", bioseq) => {
+                tse.add_member_bioseq(bioseq, &mut construction);
+            }
+            (_, set) => tse.add_set(set, &mut construction),
+        }
+        tse.construction = construction;
+        tse
+    }
+
     /// Adds a Bioseq of the Seq-ids `ids` and the annotations `annots`: phase C makes its Seq-id
     /// handles, then its annotations (`CBioseq_Info::x_SetObject`); the attach reads the
     /// annotations' names, then attaches the Seq-ids (`CBioseq_Info::x_TSEAttachContents`). Whether
@@ -136,14 +159,7 @@ impl<'a> Tse<'a> {
             }
             match member.choice() {
                 ("seq", bioseq) => {
-                    let ids: Vec<V<'a>> = bioseq.field("id").items().collect();
-                    if ids.iter().any(|id| id.is_null()) {
-                        construction.push(Made::Null);
-                        return;
-                    }
-                    let ids = ids.into_iter().map(V::seq_id).collect();
-                    let annots = bioseq.get("annot").into_iter().flat_map(V::items);
-                    if self.add_bioseq(ids, annots, construction) {
+                    if self.add_member_bioseq(bioseq, construction) {
                         return;
                     }
                 }
@@ -153,6 +169,21 @@ impl<'a> Tse<'a> {
                 }
             }
         }
+    }
+
+    /// Adds the Bioseq `bioseq` as read (`add_bioseq`): phase C stops at a Seq-id stated as `NULL`
+    /// (`Made::Null`) before it makes the Bioseq. Whether an element stated as `NULL` stopped
+    /// phase C.
+    // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:300-307
+    fn add_member_bioseq(&mut self, bioseq: V<'a>, construction: &mut Vec<Made>) -> bool {
+        let ids: Vec<V<'a>> = bioseq.field("id").items().collect();
+        if ids.iter().any(|id| id.is_null()) {
+            construction.push(Made::Null);
+            return true;
+        }
+        let ids = ids.into_iter().map(V::seq_id).collect();
+        let annots = bioseq.get("annot").into_iter().flat_map(V::items);
+        self.add_bioseq(ids, annots, construction)
     }
 
     /// The set `set` entered: its own annotations' names and its id attached, its own

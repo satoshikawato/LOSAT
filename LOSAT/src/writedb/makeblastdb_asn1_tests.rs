@@ -616,7 +616,7 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
             "null_id",
             null_id.as_slice(),
             env_default,
-            "NULL element in Bioseq.id",
+            "an ASN.1 input object with an element stated as NULL in a list that NCBI's makeblastdb reads",
         ),
     ] {
         let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));

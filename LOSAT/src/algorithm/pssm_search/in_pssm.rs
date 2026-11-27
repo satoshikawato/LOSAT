@@ -33,6 +33,14 @@ pub(crate) const NCBISTDAA_TO_AMINOACID: &[u8; BLASTAA_SIZE] = b"-ABCDEFGHIKLMNP
 /// `BLAST_SCORE_MAX` (`INT2_MAX`, blast_stat.h:122): the largest score of one letter pair.
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
+/// How LOSAT's refusals of the object manager's step name a PSSM's query entry
+/// (`objmgr::annot_index::Refusal::text`).
+pub(crate) const PSSM_QUERY: crate::objmgr::annot_index::Subject = crate::objmgr::annot_index::Subject {
+    annot: "a PSSM query whose annot",
+    entry: "a PSSM query entry",
+    null_lists: "NCBI's object manager reads when the entry joins its scope (a member of a Bioseq-set, a Seq-id of a member, an annotation, a feature, an alignment or a graph, an annotation's id or desc, the parts of a location, a feature's ids or xref, a Seq-table column, a list inside an alignment)",
+};
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:115-119
 /// The PSSM engine's error of a PSSM of frequency ratios only whose columns are not its query
 /// buffer's length (the Seq-inst's), `RATIOS_LENGTH_HOST_MEMORY` aside.
@@ -625,10 +633,13 @@ pub(crate) fn psi_search_and_object_of(
             .refused(exception, IN_PSSM_ANNOT)?;
         Some(reader.refuse(refused).to_string())
     };
-    let mut annot = crate::objmgr::annot_index::index_entry(&program, entry, reader.database, &get_refusal)
-        .unwrap_or_else(|refusal| {
-            crate::objmgr::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
-        });
+    let mut annot =
+        crate::objmgr::annot_index::index_entry(&program, entry, reader.database, &get_refusal)
+            .unwrap_or_else(|refusal| {
+                crate::objmgr::annot_index::AnnotOutcome::refused(
+                    reader.refuse(refusal.text(PSSM_QUERY)).to_string(),
+                )
+            });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (c++/src/app/blast/tblastn_app.cpp:228)
     // A query Seq-entry set that the object manager took ends the run here: `GetSeq()` of a set is
     // NCBI's `CInvalidChoiceSelection` (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 `r4/probe` s06, s07,

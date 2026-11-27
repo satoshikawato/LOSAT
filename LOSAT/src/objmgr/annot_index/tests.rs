@@ -487,7 +487,9 @@ fn refusals_name_their_condition() {
         Refusal::StdDim,
     ] {
         assert!(
-            refusal.text().starts_with("a PSSM query whose annot has "),
+            refusal
+                .text(crate::algorithm::pssm_search::in_pssm::PSSM_QUERY)
+                .starts_with("a PSSM query whose annot has "),
             "{refusal:?}"
         );
     }

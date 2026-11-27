@@ -39,11 +39,10 @@ pub(crate) fn post_seq_id_warning_of(name: &str, warning: SeqIdWarning, warn: Wa
 /// where the application sets none (`common::database::list_warning_line`).
 pub(crate) fn seq_id_warning_line(name: Option<&str>, warning: SeqIdWarning) -> Vec<u8> {
     let tag = name.map(|name| format!("[{name}] ")).unwrap_or_default();
-    [
+    crate::ncbi_exception::post_text(
         format!("Warning: (1306.{}) {tag}", warning.subcode).as_bytes(),
         &warning.message,
-    ]
-    .concat()
+    )
 }
 
 /// `CFastaDeflineReader::ParseRange` of `s` with its start and end: the length of the range suffix

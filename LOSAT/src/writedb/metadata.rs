@@ -620,12 +620,12 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         let old = self.fail;
         self.fail |= flags;
         if old == 0 && flags != 0 {
+            let header = format!("Error: (802.5) {}", self.tag());
             let line = format!(
-                "Error: (802.5) {}CObjectOStream: error at byte {}: stack is empty: {message}",
-                self.tag(),
+                "CObjectOStream: error at byte {}: stack is empty: {message}",
                 self.output.stream_pos()
             );
-            self.post(err, &line, false);
+            self.post(err, &header, &line, false);
         }
     }
 
@@ -698,22 +698,20 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         match self.close(err) {
             Err(Closed::Serial(exc)) => {
                 let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
-                self.post(err, &line, true);
+                self.post(err, &format!("Error: ({kind}) {tag}"), &msg, true);
+                let header = format!("Error: ({SERIAL_IO_ERROR}) {tag}");
+                self.post(err, &header, &exc.msg, true);
                 let line = format!(
-                    "Error: (802.4) {tag}Cannot close serializing output stream \
-                     ({SERIAL_IO_ERROR}) {}",
+                    "Cannot close serializing output stream ({SERIAL_IO_ERROR}) {}",
                     exc.msg
                 );
-                self.post(err, &line, true);
+                self.post(err, &format!("Error: (802.4) {tag}"), &line, true);
             }
             Err(Closed::Stream) => {
                 let line = format!(
-                    "Error: (802.4) {tag}[Cannot close serializing output stream] Exception: \
-                     {IOS_FAILURE_WHAT}"
+                    "[Cannot close serializing output stream] Exception: {IOS_FAILURE_WHAT}"
                 );
-                self.post(err, &line, true);
+                self.post(err, &format!("Error: (802.4) {tag}"), &line, true);
             }
             Ok(()) => {}
         }
@@ -731,31 +729,31 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
         match self.output.close() {
             Err(BufferError::Io(exc)) => {
                 let (kind, msg) = (exc.type_and_code(), exc.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!(
-                    "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
-                );
-                self.post(err, &line, true);
+                self.post(err, &format!("Error: ({kind}) {tag}"), &msg, true);
+                let line = format!("~COStreamBuffer: exception while closing ({kind}) {msg}");
+                self.post(err, &format!("Error: (205.2) {tag}"), &line, true);
             }
             Err(BufferError::Stream) => {
                 let line = format!(
-                    "Error: (205.2) {tag}[~COStreamBuffer: exception while closing] Exception: \
-                     {IOS_FAILURE_WHAT}"
+                    "[~COStreamBuffer: exception while closing] Exception: {IOS_FAILURE_WHAT}"
                 );
-                self.post(err, &line, true);
+                self.post(err, &format!("Error: (205.2) {tag}"), &line, true);
             }
             Ok(()) => {}
         }
     }
 
-    /// Writes the diagnostic line `line`, in LOSAT's words when `words` (`crate::wording::
-    /// losat_text`: without the exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-    /// exception 12). Nothing after a write found a closed pipe: SIGPIPE has ended NCBI's
-    /// process there (`StreamBuf::closed_pipe`).
-    fn post(&mut self, err: &mut dyn Write, line: &str, words: bool) {
+    /// Writes the diagnostic line of `header` and `message` (the header alone after the main
+    /// thread's diagnostic stream failed, `ncbi_exception::post_text`), in LOSAT's words when
+    /// `words` (`crate::wording::losat_text`: without the exception's class and code,
+    /// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12). Nothing after a write found a closed
+    /// pipe: SIGPIPE has ended NCBI's process there (`StreamBuf::closed_pipe`).
+    fn post(&mut self, err: &mut dyn Write, header: &str, message: &str, words: bool) {
         if self.output.output().rdbuf().closed_pipe() {
             return;
         }
+        let line = crate::ncbi_exception::post_text(header.as_bytes(), message.as_bytes());
+        let line = String::from_utf8(line).expect("the parts are UTF-8");
         let line = if words {
             crate::wording::losat_text(line)
         } else {

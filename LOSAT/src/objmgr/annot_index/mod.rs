@@ -1,9 +1,11 @@
-//! The annotations of a PSSM's query as NCBI's object manager takes them when psiblast and
-//! tblastn add the PSSM's query Seq-entry to their scope (line RG D3-1, `om/SPEC.md`; a Bioseq or a
-//! Bioseq-set, `entry`): the Seq-tables' column checks when each annotation is added (phase C,
-//! `CSeqTableInfo`), the attach of the entry's Bioseq-set and Bioseq ids (`entry::Tse::attach`),
-//! then the index of every annotation (phase I, `CSeq_annot_Info::x_InitAnnotKeys`), with NCBI's messages, its
-//! exceptions, and the failed diagnostic stream after its "Failed to parse location of" message
+//! The annotations of a Seq-entry as NCBI's object manager takes them when a program adds the entry
+//! to its scope (line RG D3-1, `om/SPEC.md`; a Bioseq or a Bioseq-set, `entry`): psiblast and
+//! tblastn add the query Seq-entry of a PSSM (`index_entry`), makeblastdb each object of its ASN.1
+//! input, each in a new scope (`index_object`, line RG D3c-6a). The Seq-tables' column checks when
+//! each annotation is added (phase C, `CSeqTableInfo`), the attach of the entry's Bioseq-set and
+//! Bioseq ids (`entry::Tse::attach`), then the index of every annotation (phase I,
+//! `CSeq_annot_Info::x_InitAnnotKeys`), with NCBI's messages, its exceptions, and the failed
+//! diagnostic stream after its "Failed to parse location of" message
 //! (`ncbi_exception::main_diag_failbit`), and BitMagic's decoding of a Seq-table's bit vectors
 //! (`bitmagic`). What NCBI does not do the same way on every run or every build (a message with a
 //! memory address, a crash, BitMagic data that NCBI reads past, decodes with undefined behaviour
@@ -12,6 +14,7 @@
 //! (`Refusal`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (c++/src/app/blast/tblastn_app.cpp:222-226)
+//! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:494-496
 //! NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:230-238 (`CScope_Impl::AddSeq_entry`:
 //! the TSE is made, each annotation's `CSeq_annot_Info` with it, then `x_ClearCacheOnNewData`
 //! asks for the TSE's annotation Seq-ids, `CTSE_Info::GetAnnotIds`, which indexes them all,
@@ -133,24 +136,45 @@ pub(crate) enum Refusal {
     DuplicateIdInScope,
 }
 
+/// What a refusal's text names (`Refusal::text`), as its caller calls the entry: the entry by its
+/// annotations, the entry itself, and the lists with an element stated as `NULL` that the
+/// caller's program dereferences (`Refusal::NullElement`: the object manager's, and the caller's
+/// own reads of the entry).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Subject {
+    /// "a PSSM query whose annot".
+    pub(crate) annot: &'static str,
+    /// "a PSSM query entry".
+    pub(crate) entry: &'static str,
+    /// "NCBI's object manager reads when the entry joins its scope (a member of a Bioseq-set,
+    /// ...)".
+    pub(crate) null_lists: &'static str,
+}
+
 impl Refusal {
-    /// The refusal's text, after "a PSSM query whose annot holds ...", in LOSAT's form
-    /// (`"... is not supported by LOSAT's <PROGRAM>"`, `in_pssm::PssmReader::refuse`).
-    pub(crate) fn text(self) -> &'static str {
+    /// The refusal's text, with the entry named as `subject` names it, in LOSAT's form (the caller
+    /// adds `" is not supported by LOSAT's <PROGRAM>"`: `in_pssm::PssmReader::refuse`, makeblastdb's
+    /// `asn_source`).
+    pub(crate) fn text(self, subject: Subject) -> String {
+        let Subject {
+            annot,
+            entry,
+            null_lists,
+        } = subject;
         match self {
-            Refusal::EmptyRegion => "a PSSM query whose annot has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)",
-            Refusal::NullPointer => "a PSSM query whose annot has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)",
-            Refusal::DivideByZero => "a PSSM query whose annot has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)",
-            Refusal::BitVector => "a PSSM query whose annot has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or that holds a GAP block that is not one which NCBI's builds of BitMagic (scalar, SSE2, SSE4.2) decode differently or answer differently for a row of the index",
-            Refusal::PackedOutOfBounds => "a PSSM query whose annot has a Packed-seg with fewer present, starts, ids or lens than its dim and numseg (NCBI's object manager reads past them)",
-            Refusal::DeltaOverflow => "a PSSM query whose annot has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)",
-            Refusal::ScaledOverflow => "a PSSM query whose annot has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)",
-            Refusal::FieldIdOverflow => "a PSSM query whose annot has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)",
-            Refusal::IdOrder => "a PSSM query whose annot has a location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)",
-            Refusal::TableRows => "a PSSM query whose annot has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)",
-            Refusal::StdDim => "a PSSM query whose annot has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)",
-            Refusal::NullElement => "a PSSM query entry with an element stated as NULL in a list that NCBI's object manager reads when the entry joins its scope (a member of a Bioseq-set, a Seq-id of a member, an annotation, a feature, an alignment or a graph, an annotation's id or desc, the parts of a location, a feature's ids or xref, a Seq-table column, a list inside an alignment), which it dereferences: a report of memory addresses or a crash",
-            Refusal::DuplicateIdInScope => "a PSSM query entry with a Seq-id twice in a search of -subject records, when the entry's Bioseqs have a Seq-id that NCBI's duplicate Bioseq id exception may write as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent with a letter, more than 64 letters in a local or general id or an accession)",
+            Refusal::EmptyRegion => format!("{annot} has an empty location (NCBI's object manager posts 'Empty region in' with a memory address)"),
+            Refusal::NullPointer => format!("{annot} has a Seq-table row without a Seq-id or a location (NCBI's object manager stops with a NULL pointer report of memory addresses)"),
+            Refusal::DivideByZero => format!("{annot} has a Dense-seg of no segments with starts or strands (NCBI's object manager divides by zero and crashes)"),
+            Refusal::BitVector => format!("{annot} has a Seq-table bit-bvector or bit-set-bvector with malformed BitMagic data that NCBI's object manager reads past, decodes with undefined behaviour (an XOR block, a shift of 32 bits or more, a write past BitMagic's blocks or buffers) or from memory it did not write, or that holds a GAP block that is not one which NCBI's builds of BitMagic (scalar, SSE2, SSE4.2) decode differently or answer differently for a row of the index"),
+            Refusal::PackedOutOfBounds => format!("{annot} has a Packed-seg with fewer present, starts, ids or lens than its dim and numseg (NCBI's object manager reads past them)"),
+            Refusal::DeltaOverflow => format!("{annot} has a Seq-table int-delta column whose sums leave their integer type (a signed overflow in NCBI's object manager)"),
+            Refusal::ScaledOverflow => format!("{annot} has a Seq-table int-scaled column whose values leave Int8 (a signed overflow in NCBI's object manager)"),
+            Refusal::FieldIdOverflow => format!("{annot} has a Seq-table column field-id below -2147483638 (a signed overflow in NCBI's object manager)"),
+            Refusal::IdOrder => format!("{annot} has a location whose Seq-ids get different messages and have no different gi, accession or general id numbers (NCBI's object manager writes them in the order of memory addresses)"),
+            Refusal::TableRows => format!("{annot} has a feature Seq-table of more than 10000000 rows (NCBI's object manager runs out of memory depending on the machine)"),
+            Refusal::StdDim => format!("{annot} has a Std-seg dim above 1000000 (NCBI's object manager allocates its rows depending on the machine's memory)"),
+            Refusal::NullElement => format!("{entry} with an element stated as NULL in a list that {null_lists}, which it dereferences: a report of memory addresses or a crash"),
+            Refusal::DuplicateIdInScope => format!("{entry} with a Seq-id twice in a search of -subject records, when the entry's Bioseqs have a Seq-id that NCBI's duplicate Bioseq id exception may write as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent with a letter, more than 64 letters in a local or general id or an accession)"),
         }
     }
 }
@@ -260,64 +284,140 @@ pub(super) struct Indexer<'p> {
     handles: LiveHandles,
 }
 
+/// How the object manager's step ends the run after its messages (`Indexed::end`).
+#[derive(Debug)]
+pub(crate) enum End {
+    /// An exception of NCBI's (`CException`), which `CATCH_ALL` reports.
+    Exception(NcbiException),
+    /// A `std::exception` and its `what()`.
+    Std(&'static str),
+    /// A null pointer that NCBI's code dereferences through a reference after the stream failed
+    /// (`CCoreException::eNullPtr`): `CATCH_ALL`'s report is its line feed alone (before the
+    /// stream failed the report holds memory addresses: `Refusal::NullPointer`,
+    /// `Refusal::NullElement`).
+    NullPointer,
+    /// The failed write of an object's ASN.1 text to the failed stream (`CIOException::eWrite`,
+    /// `Indexer::empty_region`), which `CATCH_ALL` ends with nothing more written and the run's
+    /// exit status, 0 (`cli::NativeError::silent_end`; `om/` cases f33, k04, k07, k08, k09, k13,
+    /// k16, k17; makeblastdb: survey D3c-6 x48, x51).
+    FailedWrite,
+}
+
+impl End {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-251, 260-263
+    /// `CATCH_ALL`'s report and exit status of the end, as the run writes it before the stream
+    /// failed (`cli::catch_all_text` turns a report into its line feed after it): of an
+    /// exception, of a `std::exception`, the line feed of a null pointer's report after the
+    /// stream failed, and no text for the failed write.
+    pub(crate) fn native(&self) -> crate::cli::NativeError {
+        match self {
+            End::Exception(e) => crate::cli::NativeError::exception(e),
+            End::Std(what) => crate::cli::NativeError::std_exception(what),
+            End::NullPointer => crate::cli::NativeError {
+                exit: 255,
+                message: b"\n".to_vec(),
+            },
+            End::FailedWrite => crate::cli::NativeError::silent_end(),
+        }
+    }
+}
+
+/// What NCBI's object manager made of an entry as it joined the scope: its messages in order, each
+/// one post of its severity, whether its last left the main thread's diagnostic stream failed, and
+/// how it ends the run (`End`), if it does.
+#[derive(Debug)]
+pub(crate) struct Indexed {
+    pub(crate) posts: Posts,
+    pub(crate) muted: bool,
+    pub(crate) end: Option<End>,
+}
+
+/// The object manager's step as the TSE `tse` joins the scope of `program` (the diagnostic
+/// prefix): phase C, the attach of its Bioseq-sets' and Bioseqs' ids, phase I, or LOSAT's refusal.
+/// `ids_known`: no other sequence is in NCBI's scope before it, so the attach's messages name the
+/// entry's own Seq-ids. `muted`: the main thread's diagnostic stream failed before (an earlier
+/// object of makeblastdb's input), so its posts are their headers alone from the start.
+fn index_tse(
+    program: &str,
+    tse: &entry::Tse<'_>,
+    ids_known: bool,
+    muted: bool,
+) -> Result<Indexed, Refusal> {
+    let mut ix = Indexer {
+        program,
+        posts: Posts::new(),
+        muted,
+        caches: table::Caches::default(),
+        handles: LiveHandles::default(),
+    };
+    let end = match ix.run(tse, ids_known) {
+        Ok(()) => None,
+        Err(Stop::Refuse(refusal)) => return Err(refusal),
+        Err(Stop::NullPointer(refusal)) if !ix.muted => return Err(refusal),
+        Err(Stop::NullPointer(_)) => Some(End::NullPointer),
+        Err(Stop::Exception(e)) => Some(End::Exception(e)),
+        Err(Stop::Std(what)) => Some(End::Std(what)),
+        Err(Stop::FailedWrite) => Some(End::FailedWrite),
+    };
+    Ok(Indexed {
+        posts: ix.posts,
+        muted: ix.muted,
+        end,
+    })
+}
+
 /// The object manager's step as the query's Seq-entry `entry` of a PSSM read by `program`
-/// (`psiblast`, `tblastn`: the diagnostic prefix) joins the scope (`entry::Tse`: phase C, the
-/// attach of its Bioseq-sets' and Bioseqs' ids, phase I), or LOSAT's refusal. `ids_known`: no other
-/// sequence is in NCBI's scope before it (a search of `-db`), so the attach's messages name the
-/// entry's own Seq-ids. `refusal` is LOSAT's refusal of an exception that a check of the data
-/// throws where the run's settings turn the check off (`ncbi_environment::ReadVerification`): the
-/// run stops there in LOSAT's words, as at a `Refusal`.
+/// (`psiblast`, `tblastn`: the diagnostic prefix) joins the scope (`index_tse`), or LOSAT's
+/// refusal. `ids_known`: no other sequence is in NCBI's scope before it (a search of `-db`), so the
+/// attach's messages name the entry's own Seq-ids. `refusal` is LOSAT's refusal of an exception
+/// that a check of the data throws where the run's settings turn the check off
+/// (`ncbi_environment::ReadVerification`): the run stops there in LOSAT's words, as at a
+/// `Refusal`.
 pub(crate) fn index_entry(
     program: &str,
     entry: &SeqEntry,
     ids_known: bool,
     refusal: &dyn Fn(&NcbiException) -> Option<String>,
 ) -> Result<AnnotOutcome, Refusal> {
-    let tse = entry::Tse::of(entry);
-    let mut ix = Indexer {
-        program,
-        posts: Posts::new(),
-        muted: false,
-        caches: table::Caches::default(),
-        handles: LiveHandles::default(),
-    };
-    let error = match ix.run(&tse, ids_known) {
-        Ok(()) => None,
-        Err(Stop::Refuse(refusal)) => return Err(refusal),
-        Err(Stop::Exception(e)) => match refusal(&e) {
+    let Indexed { posts, muted, end } =
+        index_tse(program, &entry::Tse::of(entry), ids_known, false)?;
+    let abort = match end {
+        None => None,
+        Some(End::Exception(e)) => match refusal(&e) {
             Some(text) => return Ok(AnnotOutcome::refused(text)),
-            None => Some(crate::cli::NativeError::exception(&e)),
+            None => Some(Abort::of(crate::cli::NativeError::exception(&e), muted)),
         },
-        Err(Stop::Std(what)) => Some(crate::cli::NativeError::std_exception(what)),
-        Err(Stop::NullPointer(_)) if ix.muted => Some(crate::cli::NativeError {
-            exit: 255,
-            message: String::new().into(),
-        }),
-        Err(Stop::NullPointer(refusal)) => return Err(refusal),
-        // The failed write (`CIOException::eWrite`) ends the run with nothing more written and
-        // its exit status unchanged, 0 (`cli::NativeError::silent_end`; `om/` cases f33, k04, k07,
-        // k08, k09, k13, k16, k17).
-        Err(Stop::FailedWrite) => {
-            let silent = crate::cli::NativeError::silent_end();
-            return Ok(AnnotOutcome {
-                posts: ix.posts,
-                muted: ix.muted,
-                abort: Some(Abort::Native {
-                    exit: silent.exit,
-                    message: silent.message,
-                }),
-            });
+        // The failed write ends the run with no text, whatever the stream's state.
+        Some(End::FailedWrite) => {
+            let silent = End::FailedWrite.native();
+            Some(Abort::Native {
+                exit: silent.exit,
+                message: silent.message,
+            })
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251, 260-263
+        // After the stream failed, the `LOG_POST` writes its line feed alone (`cli::catch_all_text`,
+        // which the run applies once the stream is failed; the text kept here is that line feed).
+        Some(end) => Some(Abort::of(end.native(), muted)),
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251, 260-263
-    // After the stream failed, the `LOG_POST` writes its line feed alone (`cli::catch_all_text`,
-    // which the run applies once the stream is failed; the text kept here is that line feed).
-    let abort = error.map(|error| Abort::of(error, ix.muted));
     Ok(AnnotOutcome {
-        posts: ix.posts,
-        muted: ix.muted,
+        posts,
+        muted,
         abort,
     })
+}
+
+/// The object manager's step as an object of makeblastdb's ASN.1 input joins a new scope of its
+/// own (`index_tse`; `CSeqEntrySource`): `object` is the Seq-entry, or the Bioseq-set when
+/// `is_set`, as the reader read it, and `muted` whether an earlier object left the main thread's
+/// diagnostic stream failed. No other sequence is in the scope.
+pub(crate) fn index_object(object: V<'_>, is_set: bool, muted: bool) -> Result<Indexed, Refusal> {
+    index_tse(
+        "makeblastdb",
+        &entry::Tse::of_object(object, is_set),
+        true,
+        muted,
+    )
 }
 
 /// `index_entry` of a query Bioseq with the Seq-ids `query_ids` and the annotations `annots`.

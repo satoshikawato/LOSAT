@@ -168,17 +168,18 @@ fn post_bad_title_chars(
     title: &[u8],
     bad: &[BadTitleChar],
 ) {
-    let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
+    let header = bad_char_header(diag_prefix);
     for bad_char in bad {
-        diagnostics.extend_from_slice(
+        let message = [
             format!(
-                "Error: (803.7) {tag}Blast-def-line-set.E.title\nBad char [0x{:X}] in string at \
-                 byte {}\n",
+                "Blast-def-line-set.E.title\nBad char [0x{:X}] in string at byte {}\n",
                 bad_char.byte, bad_char.stream_offset
             )
             .as_bytes(),
-        );
-        diagnostics.extend_from_slice(title);
+            title,
+        ]
+        .concat();
+        diagnostics.extend_from_slice(&crate::ncbi_exception::post_text(&header, &message));
         diagnostics.push(b'\n');
     }
 }
@@ -188,18 +189,26 @@ fn post_bad_title_chars(
 /// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
 /// p23_nonascii; the member paths of the other alternatives from the S3a probes).
 fn post_bad_chars(diagnostics: &mut Vec<u8>, diag_prefix: Option<&str>, bad: &[BadChar]) {
-    let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
+    let header = bad_char_header(diag_prefix);
     for bad_char in bad {
-        diagnostics.extend_from_slice(
+        let message = [
             format!(
-                "Error: (803.7) {tag}{}\nBad char [0x{:X}] in string at byte {}\n",
+                "{}\nBad char [0x{:X}] in string at byte {}\n",
                 bad_char.path, bad_char.byte, bad_char.stream_offset
             )
             .as_bytes(),
-        );
-        diagnostics.extend_from_slice(&bad_char.string);
+            &bad_char.string,
+        ]
+        .concat();
+        diagnostics.extend_from_slice(&crate::ncbi_exception::post_text(&header, &message));
         diagnostics.push(b'\n');
     }
+}
+
+/// The header of the 803.7 posts of `post_bad_title_chars` and `post_bad_chars`.
+fn bad_char_header(diag_prefix: Option<&str>) -> Vec<u8> {
+    let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
+    format!("Error: (803.7) {tag}").into_bytes()
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256

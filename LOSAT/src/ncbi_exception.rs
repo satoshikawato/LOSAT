@@ -586,6 +586,20 @@ pub(crate) fn post_line_in(
     }
 }
 
+/// A post's text in the state of the main thread's diagnostic stream (`main_diag_failbit`): its
+/// header (`<severity>: (<id>) [<prefix>] `), then `message` unless the stream has failed, in the
+/// words given (`post_line` builds the header and maps the words to LOSAT's). makeblastdb's posts,
+/// which follow the object manager's on its ASN.1 input (`objmgr::annot_index`), are made here.
+pub(crate) fn post_text(header: &[u8], message: &[u8]) -> Vec<u8> {
+    let failed = main_diag_failbit();
+    let mut text = Vec::with_capacity(header.len() + if failed { 0 } else { message.len() });
+    text.extend_from_slice(header);
+    if !failed {
+        text.extend_from_slice(message);
+    }
+    text
+}
+
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4389-4435 (`CDiagBuffer::Flush`)
 // `s` is an output string stream: its buffer gives nothing to read, so inserting `s.rdbuf()` adds no
@@ -681,9 +695,11 @@ impl Drop for MainDiagGuard {
 /// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X` of
 /// the object manager, subcode 6, with "Failed to parse location of " and `s.rdbuf()`,
 /// `objmgr::annot_index`): the run's later posts print their header only
-/// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast or
-/// tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`; each
-/// call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.
+/// (`post_line`, `post_text`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a
+/// psiblast or tblastn `-in_pssm` run or a makeblastdb run of ASN.1 input posted it: the command
+/// line's, or a library call's (`Inputs::pssm`; each call is a run with a stream of its own,
+/// `MainDiag`, as each makeblastdb run is, `makeblastdb::run_with_env`); LOSAT Web refuses
+/// `-in_pssm`.
 pub(crate) fn main_diag_failbit() -> bool {
     MainDiag::with_current(MainDiag::failed)
 }

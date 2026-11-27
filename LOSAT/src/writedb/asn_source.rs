@@ -3,10 +3,8 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:367-578
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:290-415
-//! NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-906
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:725-1375,2800-3045,3928-4107
 
-use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, OnceLock};
 
@@ -15,7 +13,8 @@ use super::deflines::best_non_local_rank;
 use super::fasta_source::pack::Ncbi4naBuilder;
 use super::fasta_source::{post_seq_id_warning, Warn};
 use super::WriteDbError;
-use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_exception::{main_diag_failbit, set_main_diag_failbit, NcbiException, ThrowSite};
+use crate::objmgr::annot_index::{self, End, Refusal, Subject};
 use crate::report::defline::{
     bioseq_facts_with_warn, generate_bioseq_defline, protein_title_suffix_adjustable,
 };
@@ -24,12 +23,11 @@ use crate::report::serial::asn_input::{Names, TextInput, Utf8TagOnce};
 use crate::report::serial::asn_text_reader::StreamSource;
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
 use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::{member_index, members, Value};
 use crate::report::serial::object_frame::UNASSIGNED_MEMBER;
 use crate::seqid::label;
-use crate::seqid::mask_handle::{
-    handle_seq_id, mask_handle_key, mask_info_key, GiimTree, TreeHandle,
-};
+use crate::seqid::mask_handle::mask_handle_key;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqid::rank::{best_rank_score, find_best};
 
@@ -296,8 +294,9 @@ impl<'a> AsnStream<'a> {
 
     /// Reads the next top-level object (`Bioseq-set` when the first non-whitespace byte is `'B'`
     /// or `'0'`, else `Seq-entry`), drains reader posts to `warn`, and constructs a
-    /// [`SeqEntrySource`] (including `Unverified` marking and intra-object duplicate Seq-id
-    /// checks). Returns `Ok(None)` on clean EOF or top-level `CEofException::eEof`.
+    /// [`SeqEntrySource`] (including `Unverified` marking and the object's join of its scope,
+    /// `join_scope`, whose posts go to `warn`). Returns `Ok(None)` on clean EOF or top-level
+    /// `CEofException::eEof`.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:437-497,559-578
     pub(crate) fn next_source(
@@ -334,7 +333,7 @@ impl<'a> AsnStream<'a> {
             Err(ReadError::Std(what)) => return Err(WriteDbError::Other(what.to_string())),
             Err(ReadError::Unsupported(what)) => return Err(WriteDbError::Unsupported(what)),
         };
-        SeqEntrySource::from_root(value, is_set, skip_unver).map(Some)
+        SeqEntrySource::from_root(value, is_set, skip_unver, warn).map(Some)
     }
 }
 
@@ -433,13 +432,22 @@ pub(crate) struct SeqEntrySource {
 
 impl SeqEntrySource {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:466-497
-    // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-906
-    fn from_root(root: Value, is_set: bool, skip_unver: bool) -> Result<Self, WriteDbError> {
+    fn from_root(
+        root: Value,
+        is_set: bool,
+        skip_unver: bool,
+        warn: Warn<'_>,
+    ) -> Result<Self, WriteDbError> {
+        let ty = if is_set {
+            named::BIOSEQ_SET
+        } else {
+            named::SEQ_ENTRY
+        };
+        join_scope(V::new(ty, &root), is_set, warn)?;
         let mut sets = Vec::new();
         let mut bioseqs = Vec::new();
         let mut annots = TseAnnotSummary::default();
         collect_tree(root, is_set, &mut sets, &mut bioseqs, &mut annots)?;
-        check_duplicate_bioseq_ids(&bioseqs)?;
         Ok(Self {
             sets,
             bioseqs: bioseqs.into_iter().map(Some).collect(),
@@ -645,9 +653,6 @@ fn collect_tree(
                 parent_set,
                 inherited_unver,
             } => {
-                if matches!(val, Value::Null) {
-                    return Err(null_element_refusal("Bioseq-set.seq-set"));
-                }
                 let Some((choice, inner)) = as_choice_mut(&mut val) else {
                     continue;
                 };
@@ -712,10 +717,113 @@ fn collect_tree(
     Ok(())
 }
 
-fn null_element_refusal(where_in: &str) -> WriteDbError {
+/// How LOSAT's refusals of the object manager's step, and of an element stated as NULL that
+/// makeblastdb reads, name an object of the ASN.1 input (`annot_index::Refusal::text`).
+const ASN_OBJECT: Subject = Subject {
+    annot: "an ASN.1 input object whose annot",
+    entry: "an ASN.1 input object",
+    null_lists: "NCBI's makeblastdb reads as it takes the object and makes its titles (a member of a Bioseq-set, a descriptor of a Bioseq or of a Bioseq-set, a Seq-id of a Bioseq, an annotation, a feature, an alignment or a graph, an annotation's id or desc, the parts of a location, a feature's ids or xref, a Seq-table column, a list inside an alignment)",
+};
+
+/// LOSAT's refusal `refusal` of an object of the ASN.1 input.
+fn refused(refusal: Refusal) -> WriteDbError {
     WriteDbError::Unsupported(format!(
-        "a NULL element in {where_in} (NCBI makeblastdb dereferences a NULL pointer there)"
+        "{} is not supported by LOSAT's makeblastdb",
+        refusal.text(ASN_OBJECT)
     ))
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+/// The end at an element stated as NULL that makeblastdb dereferences through its reference
+/// (`CCoreException::eNullPtr`): a report of memory addresses, which LOSAT refuses
+/// (`Refusal::NullElement`), or, after the main thread's diagnostic stream failed (`muted`), its
+/// line feed (`annot_index::End::NullPointer`; probe D3c-6a y02, y04, y05, y06, y10).
+fn null_pointer(muted: bool) -> WriteDbError {
+    if muted {
+        WriteDbError::Native(End::NullPointer.native())
+    } else {
+        refused(Refusal::NullElement)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:466-496
+/// The end of `CSeqEntrySource`'s constructor with `object` (a Bioseq-set when `is_set`, else a
+/// Seq-entry): the walks for `Unverified` and `Parentize` (`walk_reads_null`), then the object
+/// manager's step as the object joins the scope (`AddTopLevelSeqEntry`, `annot_index::index_object`),
+/// whose posts go to `warn` at this place and whose last may leave the main thread's diagnostic
+/// stream failed for the rest of the run (`set_main_diag_failbit`). Its exception ends the run as
+/// NCBI's does, the volumes written so far kept (`WriteDbError::Exception`, `WriteDbError::Native`,
+/// the failed write's silent end among them); what LOSAT refuses is `WriteDbError::Unsupported`,
+/// which leaves no volume (`makeblastdb::is_losat_error`).
+fn join_scope(object: V<'_>, is_set: bool, warn: Warn<'_>) -> Result<(), WriteDbError> {
+    let muted = main_diag_failbit();
+    if walk_reads_null(object, is_set) {
+        return Err(null_pointer(muted));
+    }
+    let indexed = annot_index::index_object(object, is_set, muted).map_err(refused)?;
+    let posts = indexed.posts.text();
+    if !posts.is_empty() {
+        warn(posts.strip_suffix(b"\n").unwrap_or(&posts));
+    }
+    if indexed.muted {
+        set_main_diag_failbit();
+    }
+    match indexed.end {
+        None => Ok(()),
+        Some(End::Exception(e)) => Err(WriteDbError::Exception(e)),
+        Some(end) => Err(WriteDbError::Native(end.native())),
+    }
+}
+
+/// Whether the constructor's walks of `object` dereference an element stated as NULL before the
+/// object joins the scope: a member of a Bioseq-set (`Parentize`), or a descriptor that
+/// `IsUnverified` reads, of a nuc-prot set or of a Bioseq, before its first `Unverified` user
+/// object (probe D3c-6a y03, y10b; y14: a NULL after it is read when the title is made,
+/// `generate_asn_title`).
+fn walk_reads_null(object: V<'_>, is_set: bool) -> bool {
+    let mut stack = vec![if is_set {
+        ("set", object)
+    } else {
+        object.choice()
+    }];
+    while let Some((kind, value)) = stack.pop() {
+        if kind == "seq" {
+            if unverified_reads_null(value) {
+                return true;
+            }
+            continue;
+        }
+        // `CBioseq_set::eClass_nuc_prot`.
+        if value.get("class").map(V::int) == Some(1) && unverified_reads_null(value) {
+            return true;
+        }
+        for member in value.get("seq-set").into_iter().flat_map(V::items) {
+            if member.is_null() {
+                return true;
+            }
+            stack.push(member.choice());
+        }
+    }
+    false
+}
+
+/// Whether `IsUnverified` of the descriptors of `object` (a Bioseq or a Bioseq-set) reads one
+/// stated as NULL: it reads them in order up to the first `Unverified` user object
+/// (makeblastdb.cpp:413-435).
+fn unverified_reads_null(object: V<'_>) -> bool {
+    for desc in object.get("descr").into_iter().flat_map(V::items) {
+        if desc.is_null() {
+            return true;
+        }
+        if let ("user", user) = desc.choice() {
+            if let Some(("str", name)) = user.get("type").map(V::choice) {
+                if name.str().eq_ignore_ascii_case(b"Unverified") {
+                    return false;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn extract_bioseq_ids(val: Option<Value>) -> Result<Vec<ParsedSeqId>, WriteDbError> {
@@ -723,10 +831,8 @@ fn extract_bioseq_ids(val: Option<Value>) -> Result<Vec<ParsedSeqId>, WriteDbErr
         return Ok(Vec::new());
     };
     let mut ids = Vec::with_capacity(items.len());
+    // The object manager's step stopped at a Seq-id stated as NULL (`join_scope`).
     for item in items {
-        if matches!(item, Value::Null) {
-            return Err(null_element_refusal("Bioseq.id"));
-        }
         if let Some(id) = item.into_seq_id() {
             ids.push(id);
         }
@@ -735,12 +841,12 @@ fn extract_bioseq_ids(val: Option<Value>) -> Result<Vec<ParsedSeqId>, WriteDbErr
 }
 
 fn extract_descr_list(val: Option<Value>) -> Result<Vec<Value>, WriteDbError> {
+    // A descriptor stated as NULL stays: makeblastdb reads it when it makes the title
+    // (`generate_asn_title`), or, before the first `Unverified` user object, in its walks
+    // (`walk_reads_null`).
     let Some(items) = take_list(val) else {
         return Ok(Vec::new());
     };
-    if items.iter().any(|v| matches!(v, Value::Null)) {
-        return Err(null_element_refusal("Seq-descr"));
-    }
     Ok(items)
 }
 
@@ -750,10 +856,9 @@ fn scan_annots(val: &Value, summary: &mut TseAnnotSummary) -> Result<(), WriteDb
     };
     let s = schema();
 
+    // The object manager's step stopped at an annotation or a feature stated as NULL
+    // (`join_scope`).
     for annot in annots {
-        if matches!(annot, Value::Null) {
-            return Err(null_element_refusal("Seq-annot list"));
-        }
         let Some((choice, inner)) = annot.member(s.seq_annot_data).and_then(as_choice) else {
             continue;
         };
@@ -764,9 +869,6 @@ fn scan_annots(val: &Value, summary: &mut TseAnnotSummary) -> Result<(), WriteDb
             continue;
         };
         for feat in feats {
-            if matches!(feat, Value::Null) {
-                return Err(null_element_refusal("Seq-annot.data.ftable"));
-            }
             let Some((fchoice, fval)) = feat.member(s.seq_feat_data).and_then(as_choice) else {
                 continue;
             };
@@ -805,81 +907,6 @@ fn is_unverified_descr(descr: &[Value]) -> bool {
             .and_then(object_id_str)
             .is_some_and(|name| name.eq_ignore_ascii_case(b"Unverified"))
     })
-}
-
-/// `CTSE_Info::x_SetBioseqIds`: checks intra-object duplicate Seq-ids under `CSeq_id_Handle`
-/// identity (`seqid::mask_handle`), throwing NCBI's exact `CObjMgrException::eAddDataError`.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-906
-fn check_duplicate_bioseq_ids(bioseqs: &[BioseqSlot]) -> Result<(), WriteDbError> {
-    const DUP_SITE: ThrowSite = ThrowSite {
-        file: "src/objmgr/tse_info.cpp",
-        line: 901,
-        kind: "CObjMgrException::eAddDataError",
-        function: Some("ncbi::objects::CTSE_Info::x_SetBioseqIds"),
-    };
-
-    #[derive(Clone, PartialEq, Eq, Hash)]
-    enum HandleKey {
-        Bytes(Vec<u8>),
-        Giim(i32, usize),
-    }
-
-    let mut info_first: HashMap<Vec<u8>, ParsedSeqId> = HashMap::new();
-    let mut giim = GiimTree::default();
-    let mut seen: HashMap<HandleKey, usize> = HashMap::new();
-    let mut id_strings: Vec<Vec<u8>> = Vec::with_capacity(bioseqs.len());
-
-    for (b_idx, slot) in bioseqs.iter().enumerate() {
-        let mut handles: Vec<(Option<HandleKey>, Vec<u8>)> = Vec::with_capacity(slot.ids.len());
-        let mut joined = Vec::new();
-        for (i, id) in slot.ids.iter().enumerate() {
-            let (hkey, shown_id) = match mask_handle_key(id) {
-                Ok(Some(key)) => {
-                    let info_key = mask_info_key(id)
-                        .expect("non-giim info key")
-                        .expect("non-empty info key");
-                    let first = info_first.entry(info_key).or_insert_with(|| id.clone());
-                    (Some(HandleKey::Bytes(key)), handle_seq_id(first, id))
-                }
-                Ok(None) => (None, id.clone()),
-                Err(TreeHandle::Giim { id: num }) => {
-                    let ParsedSeqId::Giim(g) = id else {
-                        unreachable!("TreeHandle::Giim only comes from ParsedSeqId::Giim");
-                    };
-                    let (h, _) = giim.find_or_create(g);
-                    let first = ParsedSeqId::Giim(giim.made_from(num, h).clone());
-                    (Some(HandleKey::Giim(num, h)), handle_seq_id(&first, id))
-                }
-            };
-            let mut fasta = Vec::new();
-            label::fasta(&shown_id, &mut fasta);
-            if i > 0 {
-                joined.extend_from_slice(b" | ");
-            }
-            joined.extend_from_slice(&fasta);
-            handles.push((hkey, fasta));
-        }
-        id_strings.push(joined);
-
-        for (hkey, fasta) in handles {
-            let Some(hkey) = hkey else {
-                continue;
-            };
-            if let Some(&prev_idx) = seen.get(&hkey) {
-                let mut msg = Vec::new();
-                msg.extend_from_slice(b"duplicate Bioseq id ");
-                msg.extend_from_slice(&fasta);
-                msg.extend_from_slice(b" present in\n  seq1: ");
-                msg.extend_from_slice(&id_strings[prev_idx]);
-                msg.extend_from_slice(b"\n  seq2: ");
-                msg.extend_from_slice(&id_strings[b_idx]);
-                return Err(WriteDbError::Exception(NcbiException::new(DUP_SITE, msg)));
-            }
-            seen.insert(hkey, b_idx);
-        }
-    }
-    Ok(())
 }
 
 /// `CUnassignedMember::eGet` at `src/serial/serialobject.cpp:306` (`object_frame::UNASSIGNED_MEMBER`).
@@ -1328,6 +1355,17 @@ fn generate_asn_title(
     let mut facts = bioseq_facts_with_warn(ids, &mut |w| {
         post_seq_id_warning(w, warn);
     });
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:876-877
+    // After the Seq-ids, `x_SetFlags` reads every descriptor of the Bioseq and of its sets
+    // through its reference (its loop needs the comments, so it ends at the last): one stated as
+    // NULL ends the run there (`null_pointer`; probe D3c-6a y13, y14).
+    if std::iter::once(bio_descr)
+        .chain(ancestors.iter().copied())
+        .flatten()
+        .any(|desc| matches!(desc, Value::Null))
+    {
+        return Err(null_pointer(main_diag_failbit()));
+    }
 
     let flags = scan_defline_descriptors(
         bio_descr,

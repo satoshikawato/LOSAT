@@ -217,7 +217,8 @@ fn run(
             None,
             Some(&mut warnings),
             None,
-        ),
+        )
+        .map(|stop| assert_eq!(stop, None)),
     }
     .unwrap();
     // The warnings end (`QueryWarnings`'s drop writes any read's text not placed) before the

@@ -186,7 +186,8 @@ where
             return Ok(());
         };
         next_ordinal = last.end_ordinal();
-        search_window(
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        if search_window(
             database,
             pool,
             &blocks,
@@ -194,7 +195,9 @@ where
             new_scratch,
             search,
             merge,
-        )?;
+        )? {
+            return Ok(());
+        }
     }
 }
 
@@ -238,7 +241,7 @@ fn search_window<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
-) -> Result<()>
+) -> Result<bool>
 where
     R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
@@ -248,27 +251,30 @@ where
     let (db, program) = (&database.db, database.program);
     let stop = AtomicBool::new(false);
     let waiting_bytes = AtomicUsize::new(0);
-    let search_block = |worker: &mut XWorker<T>, i: usize| -> Result<Vec<(u32, R)>> {
+    let search_block = |worker: &mut XWorker<T>, i: usize| -> Result<(Vec<(u32, R)>, bool)> {
         if stop.load(Ordering::Relaxed) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), false));
         }
         let range = blocks[i];
         let block = super::x_read_block(db, range, &mut worker.bytes)
             .map_err(|error| search_read_error(error, program))?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        let stopped = block.stopped_at_negative();
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
-            if let Some(result) = search(
-                &mut worker.scratch,
-                ordinal,
-                block_subject(&block, &range, j, program)?,
-            ) {
+            let subject = block_subject(&block, &range, j, program)?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            if subject.length == 0 {
+                continue;
+            }
+            if let Some(result) = search(&mut worker.scratch, ordinal, subject) {
                 kept.push((ordinal, result));
             }
         }
         super::x_done_kept_block(block, &mut worker.bytes);
         waiting_bytes.fetch_add(kept_bytes(&kept), Ordering::Relaxed);
-        Ok(kept)
+        Ok((kept, stopped))
     };
     let threads = pool.threads().max(1);
     let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
@@ -288,17 +294,26 @@ where
         crate::utils::xreach::x_reach!("LOSAT_X_BNDBWIDE", blocks.len() > floor);
     }
     let mut first_error: Option<anyhow::Error> = None;
-    let mut hand_over = |_: usize, found: Result<Vec<(u32, R)>>| {
-        if first_error.is_some() {
+    let mut stopped_early = false;
+    let mut hand_over = |_: usize, found: Result<(Vec<(u32, R)>, bool)>| {
+        if first_error.is_some() || stopped_early {
+            if let Ok((kept, _)) = found {
+                waiting_bytes.fetch_sub(kept_bytes(&kept), Ordering::Relaxed);
+            }
             return;
         }
         match found {
-            Ok(kept) => {
+            Ok((kept, stopped)) => {
                 let bytes = kept_bytes(&kept);
                 for (ordinal, result) in kept {
                     merge(ordinal, result);
                 }
                 waiting_bytes.fetch_sub(bytes, Ordering::Relaxed);
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+                if stopped {
+                    stop.store(true, Ordering::Relaxed);
+                    stopped_early = true;
+                }
             }
             Err(error) => {
                 // The blocks not claimed yet are not searched; those claimed are dropped.
@@ -324,7 +339,7 @@ where
             // Every block was handed over: a count that does not return to 0 would pin the window
             // at its floor, or lift the bound, without changing a report.
             debug_assert_eq!(waiting_bytes.load(Ordering::Relaxed), 0);
-            Ok(())
+            Ok(stopped_early)
         }
     }
 }

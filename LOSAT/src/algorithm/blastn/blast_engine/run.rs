@@ -55,8 +55,7 @@ use super::super::extension::{
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
-    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, ReevalParams,
+    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
 };
 use super::super::hsp::{
     adjust_blastn_offsets, evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
@@ -429,11 +428,12 @@ fn calculate_blastn_context_statistics(
     } else {
         raw_score
     };
-    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        -1.0
-    } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
-    };
+    let e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+        evalue_score,
+        params,
+        log_k,
+        eff_searchsp as f64,
+    );
     (bit_score, e_value)
 }
 
@@ -4957,33 +4957,6 @@ struct BlastnReportInputs<'a> {
 }
 
 impl BlastnReportInputs<'_> {
-    /// These inputs for the reports of the call's first `first` queries alone, the query batches
-    /// before a batch at which the call stops (`post_process_hits_and_write` at a
-    /// `FailedLookupRefusal`): their parts of the inputs by query and their batches, their hit
-    /// lists finished already, without the epilog.
-    fn head(&self, first: usize) -> Self {
-        let head = |len: usize| first.min(len);
-        Self {
-            queries: &self.queries[..head(self.queries.len())],
-            query_records: self.query_records.head(first),
-            query_reads: &self.query_reads[..head(self.query_reads.len())],
-            query_masks: &self.query_masks[..head(self.query_masks.len())],
-            archive_dust: &self.archive_dust[..head(self.archive_dust.len())],
-            archive_repeats: &self.archive_repeats[..head(self.archive_repeats.len())],
-            query_eff_searchsp: &self.query_eff_searchsp[..head(self.query_eff_searchsp.len())],
-            // Two contexts by query.
-            context_karlin: &self.context_karlin[..(2 * first).min(self.context_karlin.len())],
-            batch_spans: &self.batch_spans[..self
-                .batch_spans
-                .iter()
-                .take_while(|span| span.start < first)
-                .count()],
-            finished_hit_lists: true,
-            epilog: false,
-            ..self.clone()
-        }
-    }
-
     /// The number of sequences the reports print: the database's own (with a taxid list, the
     /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's; NCBI's `Int8`
     /// (`PairwiseDatabase::num_sequences`).
@@ -5260,7 +5233,7 @@ fn shift_to_records(
 /// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`); `None` where
 /// `GenerateDefline` throws (`common::tabular::SubjectId`) (a `Subject_` first word and a title in no encoding that
 /// `CUtf8::GuessEncoding` recognises), whose rows NCBI writes with its catch's values
-/// (`report::tabular::SubjectLookup::Failed`) or stops at (`check_failed_lookups`).
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-841
 fn tabular_subject_ids(
@@ -5279,147 +5252,24 @@ fn tabular_subject_ids(
         .collect()
 }
 
-/// Where NCBI stops at a tabular row that LOSAT refuses (`error`, a `FailedLookupRefusal` at a
-/// result set of `hit_lists`: those that are `Some`): the refusal, the first query of the row's
-/// batch and the row's query. The batches of the call are `report.batch_spans` (none: the call is
-/// one batch, the stream's).
-fn lookup_stop<'e>(
-    error: &'e anyhow::Error,
-    hit_lists: &[Option<BlastnHitList>],
-    report: &BlastnReportInputs<'_>,
-) -> Option<(
-    &'e crate::report::tabular::FailedLookupRefusal,
-    usize,
-    usize,
-)> {
-    let refusal = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>()?;
-    let stop = (0..hit_lists.len())
-        .filter(|&query| hit_lists[query].is_some())
-        .nth(refusal.set())?;
-    let first = report
-        .batch_spans
-        .iter()
-        .map(|span| span.start)
-        .take_while(|&start| start <= stop)
-        .last()
-        .unwrap_or(0);
-    Some((refusal, first, stop))
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-/// What NCBI writes to the standard error of the batch's reports before it stops at a tabular
-/// row that LOSAT refuses (`lookup_stop`): each query's posts (`query_warnings`) of that row's
-/// batch up to the row's query, its formatter's warning and its subject reads
-/// (`FailedLookupRefusal::posts_before_stop`; the reads name a subject by its HSP list's `oid`).
-fn posts_before_lookup_stop(
-    refusal: &crate::report::tabular::FailedLookupRefusal,
-    (first, stop): (usize, usize),
-    hit_lists: &[Option<BlastnHitList>],
-    query_warnings: &[Posts],
-    report: &BlastnReportInputs<'_>,
-) -> Posts {
-    let lists = hit_lists[stop]
-        .as_ref()
-        .map_or(&[][..], |hit_list| hit_list.hsplist_array.as_slice());
-    let end = (stop + 1).min(query_warnings.len());
-    refusal.posts_before_stop(
-        &query_warnings[first.min(end)..end],
-        report.query_reads.get(first..).unwrap_or_default(),
-        |s_idx| {
-            lists
-                .iter()
-                .find(|list| {
-                    list.hsps
-                        .first()
-                        .is_some_and(|hsp| hsp.s_idx as usize == s_idx)
-                })
-                .map_or(s_idx as u32, |list| list.oid)
-        },
-    )
-}
-
-/// The check of the rows of `hit_lists` whose subjects' lookups fail where NCBI has no result
-/// (`report::tabular::check_failed_lookups`), for each tabular format of `output_formats` (the
-/// formats of `outputs`, whose refusal each is: `FormatRefusal::check`), before any format is
-/// written; `subject_ids` are the formats' subject ids (`tabular_subject_ids`, or a database's).
-/// Out of line and called only for a tabular format whose subjects' lookups may fail
-/// (`common::tabular::lookups_may_fail`), so that the other reports do not change for it (no NCBI
-/// counterpart: code placement only).
-#[inline(never)]
-fn check_tabular_lookups(
-    outputs: &mut [crate::api::local_blast::FormatOutput<'_>],
-    output_formats: &[BlastnOutputFormat],
-    hit_lists: &[Option<BlastnHitList>],
-    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
-    report: &BlastnReportInputs<'_>,
-) -> Result<()> {
-    let database = report.database_ordinals.zip(report.database_reader);
-    for (output, format) in outputs
-        .iter_mut()
-        .zip(output_formats)
-        .filter(|(_, format)| format.is_tabular())
-    {
-        let spec = format.tabular_spec();
-        if !crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            subject_ids,
-            report.database_parsed,
-            report.database_loads,
-            crate::blastinput::app::Program::Blastn,
-        ) {
-            continue;
-        }
-        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
-        let checked = crate::report::tabular::check_failed_lookups(
-            spec,
-            hit_lists
-                .iter()
-                .enumerate()
-                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
-                .map(|(q_idx, hit_list)| {
-                    hit_list
-                        .hsplist_array
-                        .iter()
-                        .filter_map(|hsp_list| hsp_list.hsps.first())
-                        .map(move |hsp| {
-                            let s_idx = hsp.s_idx as usize;
-                            let ordinal = database.and_then(|(ordinals, _)| ordinals.get(s_idx));
-                            report.database_seen.row(q_idx, ordinal.copied(), s_idx)
-                        })
-                }),
-            |s_idx| {
-                if s_idx == crate::report::query_bioseq::SEEN_ROW {
-                    return None;
-                }
-                crate::algorithm::common::tabular::subject_lookup_failure(
-                    spec,
-                    subject_ids,
-                    report.database_parsed,
-                    report.database_loads,
-                    database.is_some(),
-                    false,
-                    s_idx,
-                )
-            },
-            |s_idx, failure| match database {
-                Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
-                    reader.oid_map().oid(ordinals[s_idx]),
-                    report.database_loads.thrown(s_idx),
-                    report.database_parsed.get(s_idx).and_then(Option::as_deref),
-                    failure,
-                ),
-                None => crate::report::tabular::failed_record_title(
-                    s_idx,
-                    report.subjects.records()[s_idx].shown_id(),
-                ),
-            },
-            crate::blastinput::app::Program::Blastn,
-            report.app.ncbi_name(),
-            report.tabular_taxdb_found,
-        );
-        output.refusal.check(checked)?;
+/// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
+/// (`report::tabular::RowStop`, the default fields' rows) says of it: a database sequence and the
+/// load that throws (`report::tabular::failed_database_subject`), or a `-subject` record's title
+/// (`report::tabular::failed_record_title`).
+#[cold]
+fn stopped_subject(report: &BlastnReportInputs<'_>, s_idx: usize) -> String {
+    match report.database_ordinals.zip(report.database_reader) {
+        Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
+            reader.oid_map().oid(ordinals[s_idx]),
+            report.database_loads.thrown(s_idx),
+            report.database_parsed.get(s_idx).and_then(Option::as_deref),
+            false,
+        ),
+        None => crate::report::tabular::failed_record_title(
+            s_idx,
+            report.subjects.records()[s_idx].shown_id(),
+        ),
     }
-    Ok(())
 }
 
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
@@ -5630,83 +5480,6 @@ fn post_process_hits_and_write(
     }
     let write_start = std::time::Instant::now();
 
-    // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
-    // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
-    let tabular = output_formats.iter().any(|format| format.is_tabular());
-    let subject_ids: std::borrow::Cow<'_, [crate::algorithm::common::tabular::SubjectId]> =
-        if tabular {
-            match (
-                report.database_subject_ids,
-                report.subject_cache.and_then(|cache| cache.ids.as_deref()),
-            ) {
-                (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
-                (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
-                (None, None) => {
-                    std::borrow::Cow::Owned(tabular_subject_ids(report.subjects.records()))
-                }
-            }
-        } else {
-            std::borrow::Cow::Owned(Vec::new())
-        };
-    // The rows of subjects whose lookups fail where NCBI has no result, before any format and the
-    // caller's hit records are written (and before the HSPs move to record coordinates, so that
-    // the call for the batches before starts from these hit lists); a refusal that fails the call
-    // after the reports of the batches before the row's and what NCBI writes to the standard error
-    // of the row's batch up to the row (`posts_before_lookup_stop`).
-    if tabular
-        && crate::algorithm::common::tabular::lookups_may_fail(&subject_ids, report.database_parsed)
-    {
-        if let Err(error) = check_tabular_lookups(
-            &mut outputs.formats,
-            output_formats,
-            &hit_lists,
-            &subject_ids,
-            report,
-        ) {
-            let Some((refusal, first, stop)) = lookup_stop(&error, &hit_lists, report) else {
-                return Err(error);
-            };
-            let posts = posts_before_lookup_stop(
-                refusal,
-                (first, stop),
-                &hit_lists,
-                query_warnings,
-                report,
-            );
-            // A call of several batches (the reports after the loop, `x_rpt_stream`'s off path)
-            // writes the reports of the batches before the row's first, as NCBI's run has written
-            // them when it stops (as TBLASTN's and TBLASTX's do, `FailedLookupRefusal::batch_start`).
-            if first > 0 {
-                let (mut before, mut unsearched) = (hit_lists, unsearched);
-                before.truncate(first);
-                unsearched.truncate(first);
-                let head = |len: usize| first.min(len);
-                post_process_hits_and_write(
-                    before,
-                    hitlist_size,
-                    max_hsps_per_subject,
-                    query_cov_hsp_perc,
-                    subject_besthit,
-                    &query_lengths[..head(query_lengths.len())],
-                    outputs,
-                    // Their hit lists were counted and timed above.
-                    false,
-                    &query_ids[..head(query_ids.len())],
-                    output_formats,
-                    &query_titles[..head(query_titles.len())],
-                    subject_title,
-                    None,
-                    &report.head(first),
-                    unsearched,
-                    &query_warnings[..head(query_warnings.len())],
-                    sam,
-                )?;
-            }
-            posts.write(&mut *outputs.diagnostics, report.archive)?;
-            return Err(error);
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3077-3106
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
     // Each requested format prints the same final result without searching again.
@@ -5837,6 +5610,24 @@ fn post_process_hits_and_write(
     } else {
         None
     };
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch where LOSAT
+    // refuses none of them (`x_rpt_stream::SubjectCache`), so they are the ids made here.
+    let tabular = output_formats.iter().any(|format| format.is_tabular());
+    let subject_ids: std::borrow::Cow<'_, [crate::algorithm::common::tabular::SubjectId]> =
+        if tabular {
+            match (
+                report.database_subject_ids,
+                report.subject_cache.and_then(|cache| cache.ids.as_deref()),
+            ) {
+                (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
+                (None, Some(ids)) => std::borrow::Cow::Borrowed(ids),
+                (None, None) => {
+                    std::borrow::Cow::Owned(tabular_subject_ids(report.subjects.records()))
+                }
+            }
+        } else {
+            std::borrow::Cow::Owned(Vec::new())
+        };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
     // The outfmt 0 descriptions and headings are made from the subjects' title bytes
@@ -6148,7 +5939,7 @@ fn post_process_hits_and_write(
                         report.ungapped,
                     ))
                 .then_some((&report.ranges.queries.placements, report.ungapped));
-                crate::algorithm::blastn::x_tab_par::write_output(
+                if let Some(stop) = crate::algorithm::blastn::x_tab_par::write_output(
                     report.x_tab_pool,
                     &hit_lists,
                     &mut writer,
@@ -6166,7 +5957,22 @@ fn post_process_hits_and_write(
                     format_warnings.as_mut(),
                     left_of_record,
                 )
-                .map_err(crate::cli::NativeError::of_writer)?;
+                .map_err(crate::cli::NativeError::of_writer)?
+                {
+                    // A row where NCBI has no result ends the run after the bytes before its stop.
+                    return Err(crate::report::tabular::row_stop_end(
+                        &mut writer,
+                        &[],
+                        stop,
+                        stopped_subject(report, stop.subject),
+                        report.app.name(),
+                        || {
+                            if let Some(warnings) = format_warnings.as_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
             }
             std::io::Write::flush(&mut writer)?;
             Ok(())
@@ -6746,6 +6552,16 @@ fn open_search_database(
                 crate::report::db_subject::FormatThrow::record_keeps_scope(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
+            );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let word_size =
+                crate::algorithm::blastn::coordination::determine_effective_word_size(args);
+            let database = database.with_mt_mode(
+                args.num_threads,
+                args.mt_mode,
+                word_size,
+                Some(args.query.as_path()),
             );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
@@ -7717,7 +7533,8 @@ fn search(
 /// prologs that come with the reports). Its errors: of a batch after the first that do not depend on
 /// the batch's queries (the Karlin-Altschul error of the scoring options, the average subject length,
 /// in `context_statistics`), which the first batch with a valid query meets after the reports of the
-/// batches before, whose queries were all invalid; and the stops of NCBI's search of the batch that
+/// batches before, whose queries were all invalid; those that do (a search space overflow, the
+/// ungapped word cutoff of a long query), after the reports of batches with hits; and the stops of NCBI's search of the batch that
 /// LOSAT refuses where NCBI meets them (the query chunks of a split batch, `search_query_chunks`; a
 /// header that the fetch under a negative seqid list cannot read, `database::fetch_refusal`), after
 /// the reports that NCBI's batch loop has printed (line RG item X-short-bat-2). The one place that
@@ -8639,7 +8456,6 @@ fn run_in_pool(
         source,
         subject_ranges,
         query_input,
-        &lengths,
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -9003,7 +8819,6 @@ fn run_in_pool(
             .into());
         }
         warnings[start].append(&batch_title_warnings);
-        check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
         // them (`query_split::restrict_masks_with_letter_before`); WindowMasker replaces the
@@ -9033,6 +8848,13 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err($error);
             }};
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in
+        // the batch whose concatenated query is too long, after the reports of the batches
+        // before (in both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
+        if let Err(error) = check_batch_window(&args, batch_records.batch_queries().records()) {
+            fail_batch!(error);
         }
         // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
         // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
@@ -11666,7 +11488,17 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
         prelim: x_prelim_cutoffs_owned,
-    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())?;
+    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())
+        .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let prelim_eff_searchsp_ref: &Vec<i64> =
         prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
     let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);

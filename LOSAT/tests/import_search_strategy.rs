@@ -261,11 +261,12 @@ fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
 
 /// Line RG-F item F2f: where a program runs another program's strategy, LOSAT's refusal of a row
 /// that NCBI BLAST+ 2.17.0 stops at with its null pointer exception (`sacc` of a subject whose
-/// title NCBI makes a `Subject_` id from: `report::tabular::check_failed_lookups`) names the
-/// running application, as NCBI's warnings before it do (`[blastn]`: NCBI's standard error up to
+/// title NCBI makes a `Subject_` id from: `report::tabular::RowStop`) names the running
+/// application, as NCBI's warnings before it do (`[blastn]`: NCBI's standard error up to
 /// its exception, frozen in `bytes/`). The pairs reach the callers of three engines: TBLASTX's
 /// under blastn and blastx, BLASTN's and BLASTX's under tblastx. NCBI writes the row's first field
-/// (`nq1\t`) and exits 255; LOSAT refuses the row before writing any of it and exits 1.
+/// (`nq1\t`) and exits 255; LOSAT writes the same bytes, then refuses the row and exits 1
+/// (`report::tabular::row_stop_end`).
 #[test]
 fn a_refusal_of_another_programs_strategy_names_the_running_application() {
     let pairs = [
@@ -328,7 +329,7 @@ fn a_refusal_of_another_programs_strategy_names_the_running_application() {
                 && line.ends_with(&format!("which is not supported by LOSAT's {app}\n"))
                 && line.matches('\n').count() == 1
         });
-        if output.status.code() != Some(case.rc) || !output.stdout.is_empty() || !named {
+        if output.status.code() != Some(case.rc) || output.stdout != b"nq1\t" || !named {
             failed.push(format!(
                 "{}: exit {:?}, stdout {} bytes, stderr {stderr:?}",
                 case.name,

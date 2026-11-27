@@ -3,7 +3,6 @@
 //! the fields `CBlastDeflineUtil::ExtractDataFromBlastDefline` extracts.
 
 use std::collections::BTreeSet;
-use std::io::Write;
 
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::label::{bare, fasta};
@@ -13,6 +12,7 @@ use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
 use crate::report::serial::blastdb::{write_defline_document, write_defline_set_document};
 use crate::report::serial::encoder::Encoder;
 
+use crate::report::ostream::CutBuffer;
 use crate::utils::decimal::push_decimal;
 
 use super::bioseq::AsnTextDocument;
@@ -44,7 +44,7 @@ pub(super) struct FormatSpec {
     need_seq: bool,
     need_hash: bool,
     /// The bytes of the line being written, kept from one line to the next.
-    line: std::cell::RefCell<Vec<u8>>,
+    line: std::cell::RefCell<CutBuffer>,
 }
 
 impl FormatSpec {
@@ -130,20 +130,20 @@ impl FormatSpec {
             .collect::<Result<Vec<String>, Stop>>()?;
         let length = source.length(oid)?;
         let mut line = self.line.borrow_mut();
-        let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
-            line.clear();
-            let mut texts = Vec::new();
-            let printed = self.x_print(
-                source, oid, length, defline, &seq, &hash, &masks, line, &mut texts,
-            );
-            for text in &texts {
-                out.post(text)?;
-            }
-            // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
-            // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-            out.write_all(line).map_err(Stop::write)?;
-            printed
-        };
+        let mut print =
+            |defline: Option<&BlastDefline>, line: &mut CutBuffer| -> Result<(), Stop> {
+                let mut texts = Vec::new();
+                let printed = self.x_print(
+                    source, oid, length, defline, &seq, &hash, &masks, line, &mut texts,
+                );
+                for text in &texts {
+                    out.post(text)?;
+                }
+                // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
+                // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
+                out.insertions(line)?;
+                printed
+            };
         if !self.get_defline {
             return print(None, &mut line);
         }
@@ -171,28 +171,28 @@ impl FormatSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:187-201
-    // `Write(-1, config)` (`-ipg` of a PIG no volume holds): the sequence, its hash and the
+    // `Write` on OID -1 (`-ipg` of a PIG no volume holds): the sequence, its hash and the
     // definition lines are read before the line (`x_GetSeq`, `x_GetSeqHash`, `GetHdr`), and
     // each read throws `OID not found`; without them the line is written up to `%l`, whose
     // length throws, and `%o` is `-1`.
     /// NCBI's `Write` of the OID -1: the part of the line it writes, then `OID not found`
     /// where it reads the database.
-    pub fn write_missing_oid(&self, out: &mut dyn Write) -> Result<(), Stop> {
+    pub fn write_missing_oid(&self, out: &mut Output<'_, '_>) -> Result<(), Stop> {
         let missing = || Stop::Ncbi(super::retrieve::OID_NOT_FOUND.to_string());
         if self.need_seq || self.need_hash || self.get_defline || !self.mask_algos.is_empty() {
             return Err(missing());
         }
-        let mut line = Vec::new();
+        let mut line = CutBuffer::default();
         for (i, &kind) in self.types.iter().enumerate() {
-            line.extend_from_slice(&self.separators[i]);
+            line.insertion(&self.separators[i]);
             match kind {
-                b'o' => line.extend_from_slice(b"-1"),
+                b'o' => line.insertion(b"-1"),
                 b'l' => {
-                    out.write_all(&line).map_err(Stop::write)?;
+                    out.insertions(&mut line)?;
                     return Err(missing());
                 }
                 other => {
-                    out.write_all(&line).map_err(Stop::write)?;
+                    out.insertions(&mut line)?;
                     let mut message = b"Unrecognized format specification: '%".to_vec();
                     message.push(other);
                     message.push(b'\'');
@@ -200,14 +200,15 @@ impl FormatSpec {
                 }
             }
         }
-        line.extend_from_slice(&self.separators[self.types.len()]);
-        line.push(b'\n');
-        out.write_all(&line).map_err(Stop::write)
+        line.insertion(&self.separators[self.types.len()]);
+        line.endl();
+        out.insertions(&mut line)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
     /// One line into `line`, the texts of its taxonomy lookups into `texts`; `Err` after the
-    /// part NCBI writes before an unknown specifier.
+    /// part NCBI writes before an unknown specifier. Each separator and each field is one of
+    /// NCBI's insertions; the line ends with the last separator and `endl`.
     fn x_print(
         &self,
         source: &Source,
@@ -217,7 +218,7 @@ impl FormatSpec {
         seq: &[u8],
         hash: &str,
         masks: &[String],
-        line: &mut Vec<u8>,
+        text: &mut CutBuffer,
         texts: &mut Vec<String>,
     ) -> Result<(), Stop> {
         let fields = match defline {
@@ -226,7 +227,8 @@ impl FormatSpec {
         };
         let mut masks = masks.iter();
         for (i, &kind) in self.types.iter().enumerate() {
-            line.extend_from_slice(&self.separators[i]);
+            text.insertion(&self.separators[i]);
+            let line = &mut text.bytes;
             match kind {
                 b's' => line.extend_from_slice(seq),
                 b'o' => push_decimal(line, i64::from(oid)),
@@ -256,9 +258,10 @@ impl FormatSpec {
                     return Err(Stop::NcbiBytes(message));
                 }
             }
+            text.end_insertion();
         }
-        line.extend_from_slice(&self.separators[self.types.len()]);
-        line.push(b'\n');
+        text.insertion(&self.separators[self.types.len()]);
+        text.endl();
         Ok(())
     }
 }

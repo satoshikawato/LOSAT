@@ -174,8 +174,8 @@ fn a_failing_block_in_the_middle_stops_the_window_as_it_stops_the_rounds() {
         }
     }
     let nsq = dir.join("nucl_mv.02.nsq");
-    let bytes = std::fs::read(&nsq).unwrap();
-    std::fs::write(&nsq, &bytes[..bytes.len() / 2]).unwrap();
+    // Empty `.nsq` (0 bytes, `mapped_length(0) == 0`) fails past the mapped file.
+    std::fs::write(&nsq, []).unwrap();
     let database = BlastnDatabase::open(
         dir.join("nucl_mv").to_str().unwrap(),
         &crate::blastinput::ncbi_environment::ApplicationSettings::default(),

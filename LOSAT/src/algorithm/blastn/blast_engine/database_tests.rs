@@ -1236,6 +1236,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         loaded_before_batch: Default::default(),
         parsed_seqids,
         program: "BLASTN",
+        mt_threads: 1,
     }
 }
 

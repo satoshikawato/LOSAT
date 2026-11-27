@@ -31,9 +31,7 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
-pub(super) use crate::algorithm::common::database::{
-    ErrorAfterPosts, PreliminaryReadError, Utf8Read,
-};
+pub(super) use crate::algorithm::common::database::{PreliminaryReadError, Utf8Read};
 use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -159,6 +157,13 @@ impl BlastpDatabase {
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Sets whether multithreaded DB-split scans stop at the first negative-length OID.
+    pub(super) fn with_mt_stop_at_negative(mut self, stop: bool) -> Self {
+        self.db.set_mt_stop_at_negative(stop);
         self
     }
 
@@ -510,10 +515,12 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
     };
     for bounds in offsets.windows(2) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
         // The sequence and the sentinel byte after it; proteins whose NCBI 32-bit length is <= 0
-        // (`0` or `>= 2^31`) are skipped and do not advance the diagonal offset.
+        // (`0`, `>= 2^31`, or non-ascending offsets) are skipped and do not advance the diagonal
+        // offset.
         let subject_length =
-            crate::seqdb::ncbi_protein_length((bounds[1] - bounds[0]).saturating_sub(1));
+            crate::seqdb::ncbi_protein_length(bounds[1].wrapping_sub(bounds[0]).wrapping_sub(1));
         if subject_length <= 0 {
             continue;
         }
@@ -704,15 +711,17 @@ where
             if round.is_empty() {
                 break;
             }
-            let found: Vec<Result<Vec<BlastpSubjectResult>>> = pool.install(|| {
+            let found: Vec<Result<(Vec<BlastpSubjectResult>, bool)>> = pool.install(|| {
                 round
                     .par_iter()
                     .map_init(
                         new_scratch,
                         |scratch,
                          &(range, first_diag_offset)|
-                         -> Result<Vec<BlastpSubjectResult>> {
+                         -> Result<(Vec<BlastpSubjectResult>, bool)> {
                             let block = read_search_block(db, range, database.program)?;
+                            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+                            let stopped = block.stopped_at_negative();
                             scratch.prepare_independent_subject(first_diag_offset);
                             let mut with_hits = Vec::new();
                             let mut subject_result = BlastpSubjectResult::new(0);
@@ -731,7 +740,7 @@ where
                                     ));
                                 }
                             }
-                            Ok(with_hits)
+                            Ok((with_hits, stopped))
                         },
                     )
                     .collect()
@@ -739,8 +748,13 @@ where
             // The subjects without HSP lists change no hit list, so the order of the
             // updates is the one-thread order.
             for block_results in found {
-                for mut subject_result in block_results? {
+                let (results, stopped) = block_results?;
+                for mut subject_result in results {
                     sink.add(&mut subject_result);
+                }
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+                if stopped {
+                    return Ok(());
                 }
             }
         }
@@ -757,6 +771,8 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = read_search_block(db, range, database.program)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             process_subject(
                 &mut scratch,
@@ -765,6 +781,9 @@ where
                 &mut subject_result,
             );
             sink.add(&mut subject_result);
+        }
+        if stopped {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }
@@ -1959,13 +1978,6 @@ impl ListedTitles<'_> {
         self.seen.numbered_from(self.seen_first)
     }
 
-    /// The subject index by which a check of the rows of the call's query `q_idx` takes the
-    /// subject of rank `rank` (`report::query_bioseq::SeenFrom::row`).
-    pub(super) fn seen_row(&self, q_idx: usize, rank: usize) -> usize {
-        self.seen()
-            .row(q_idx, self.listed.ordinals.get(rank).copied(), rank)
-    }
-
     /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
     /// refusal of a subject with parsed Seq-ids of the final hit lists `hit_lists` whose Seq-align
     /// id is the generated id (`lcl|Query_N`) of a query of the batch that reports it, as NCBI's
@@ -2949,7 +2961,7 @@ impl ListedTitles<'_> {
     /// listed subject, by rank (`shared::tabular_subject_id`); a
     /// subject without rows gets an empty id, one whose lookup fails none
     /// (`common::tabular::SubjectId`: `TabularSubjectId::Unknown`, a parsed subject's
-    /// `ParsedSubject::tabular_ids`; `report::tabular::check_failed_lookups`). A subject with rows
+    /// `ParsedSubject::tabular_ids`; `report::tabular::row_stop_end`). A subject with rows
     /// whose id LOSAT cannot write as NCBI is an error before any format is written where a
     /// tabular report `reads` the subject (`report::tabular::reads_subject`), else its ids are
     /// empty: a table of fields that read nothing of the subject prints none of them.
@@ -2979,16 +2991,22 @@ impl ListedTitles<'_> {
             }
             let ordinal = self.listed.ordinals[rank];
             if let Some(subject) = self.parsed_subject(rank) {
-                // No ids where the lookup throws (`ParsedSubject::tabular_ids`).
-                let found = match subject.tabular_ids(true) {
-                    Ok(ids) => ids,
-                    Err(_) if !reads => Some(Default::default()),
-                    Err(problem) => {
-                        return Err(shared::parsed_refusal(
-                            self.oids.oid(ordinal),
-                            &format!("has {problem}"),
-                            self.program,
-                        ))
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                // No ids where the scope gets no Bioseq (`scope_finds_none`) or the lookup throws
+                // (`ParsedSubject::tabular_ids`).
+                let found = if subject.scope_finds_none() {
+                    None
+                } else {
+                    match subject.tabular_ids(true) {
+                        Ok(ids) => ids,
+                        Err(_) if !reads => Some(Default::default()),
+                        Err(problem) => {
+                            return Err(shared::parsed_refusal(
+                                self.oids.oid(ordinal),
+                                &format!("has {problem}"),
+                                self.program,
+                            ))
+                        }
                     }
                 };
                 ids.push(found.as_ref().map(|[id, _, _]| Arc::from(id.as_slice())));

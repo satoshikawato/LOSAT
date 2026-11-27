@@ -13,6 +13,6 @@
   and does not read them. LOSAT Web still refuses a log over a window masker counts file that the
   page holds, as it refuses any file of the run's directory.
 - blastn and blastx running a TBLASTX strategy, and tblastx running a BLASTN or BLASTX one, name the
-  running program in the refusal of a subject field whose lookup fails, in the taxonomy database
-  warning written before that refusal (`Warning: [blastn] ...`, as NCBI BLAST+ 2.17.0 writes it), and
-  in LOSAT's other refusals of the run; they named the strategy's program.
+  running program in LOSAT's refusals of the run: the refusal of a tabular row whose subject lookup
+  fails where NCBI BLAST+ 2.17.0 stops, and the refusals of the strategy's values, of the environment,
+  of the inputs and of the search; they named the strategy's program.

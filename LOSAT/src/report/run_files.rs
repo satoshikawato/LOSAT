@@ -341,12 +341,30 @@ pub(crate) enum ToolLog {
 /// goes to the receiver as it is written (`FileReceiver::open`) or whole when the run ends; the
 /// run's files end when the run ends (when the last clone of this and every opening of a file is
 /// dropped), in the order the run opened them.
+///
+/// The tools' output streams that the run opened (`keep_stream`: NCBI's `-out` and `cout`,
+/// `ncbi_app::files::tool_stream`) are ended after the run and its texts (`finish_streams`), as
+/// NCBI's arguments close their streams after `Run`.
 #[derive(Clone)]
-pub(crate) struct OpenFiles(Option<Arc<FileTable>>);
+pub(crate) struct OpenFiles {
+    table: Option<Arc<FileTable>>,
+    streams: Arc<Mutex<Vec<crate::report::ostream::ReportStream>>>,
+    /// The run is the command line's process (`ncbi_app::run`, `of_command_line`): its output
+    /// streams are NCBI's and tied to its standard error (`ncbi_app::files::tool_stream`).
+    command_line: bool,
+    /// The run's `-logfile` shares standard output on a `Receiver` (`ToolLog::Stdout`):
+    /// `OutputFile::Caller` forwards NCBI's cuts and flushes to the shared buffered stdout stream
+    /// so interleaving matches the CLI's `Cout` stream.
+    tool_log_stdout: bool,
+}
 
 impl std::fmt::Debug for OpenFiles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.0.is_some() { "Receiver" } else { "Disk" })
+        f.write_str(if self.table.is_some() {
+            "Receiver"
+        } else {
+            "Disk"
+        })
     }
 }
 
@@ -369,18 +387,79 @@ enum Opening {
 impl OpenFiles {
     /// The files of a run whose files go to `files`.
     pub(crate) fn new(files: &RunFiles) -> Self {
-        OpenFiles(match files {
-            RunFiles::Disk => None,
-            RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
-                receiver: receiver.clone(),
-                files: Mutex::new(Vec::new()),
-            })),
-        })
+        OpenFiles {
+            table: match files {
+                RunFiles::Disk => None,
+                RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
+                    receiver: receiver.clone(),
+                    files: Mutex::new(Vec::new()),
+                })),
+            },
+            streams: Arc::default(),
+            command_line: false,
+            tool_log_stdout: false,
+        }
+    }
+
+    /// The run's files as the command line's process's (`ncbi_app::run`): its standard output
+    /// and its `-out` are NCBI's streams, tied to its standard error (`command_line`).
+    pub(crate) fn of_command_line(mut self) -> Self {
+        self.command_line = true;
+        self
+    }
+
+    /// Marks the run's files as sharing standard output with `-logfile /dev/stdout`
+    /// (`ToolLog::Stdout` in `ncbi_app::run_app`).
+    pub(crate) fn with_tool_log_stdout(mut self) -> Self {
+        self.tool_log_stdout = true;
+        self
+    }
+
+    /// Whether the run is the command line's process (`of_command_line`); a library run or a run
+    /// of LOSAT Web writes to its caller's writers.
+    pub(crate) fn command_line(&self) -> bool {
+        self.command_line
+    }
+
+    /// Whether `-logfile` writes to the run's shared standard output (`with_tool_log_stdout`).
+    pub(crate) fn tool_log_stdout(&self) -> bool {
+        self.tool_log_stdout
     }
 
     /// The files of a run on the file system (`RunFiles::Disk`).
     pub(crate) fn disk() -> Self {
-        OpenFiles(None)
+        OpenFiles {
+            table: None,
+            streams: Arc::default(),
+            command_line: false,
+            tool_log_stdout: false,
+        }
+    }
+
+    /// Keeps `stream`, a tool's output stream of the run, to end it after the run
+    /// (`finish_streams`).
+    pub(crate) fn keep_stream(&self, stream: crate::report::ostream::ReportStream) {
+        self.streams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(stream);
+    }
+
+    /// Ends the tools' output streams of the run, in the order it opened them
+    /// (`ReportStream::finish_tool`): whether a write met a closed pipe, which ended NCBI's
+    /// process (`report::ostream::ends_like_sigpipe`).
+    pub(crate) fn finish_streams(&self) -> bool {
+        let streams = std::mem::take(
+            &mut *self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let mut closed = false;
+        for stream in streams {
+            closed |= stream.finish_tool().is_err() || stream.closed();
+        }
+        closed
     }
 
     /// The target of the `-logfile` value `name` (`RunFiles::log_target`), whose file, for a
@@ -388,7 +467,7 @@ impl OpenFiles {
     /// (`DiagTarget::Stream`), or `ToolLog::Stdout` for `/dev/stdout`. `Err` with LOSAT's refusal
     /// reason when the name is a file of the run's directory.
     pub(crate) fn log_target(&self, name: Option<&OsStr>) -> Result<ToolLog, String> {
-        match &self.0 {
+        match &self.table {
             None => Ok(ToolLog::Target(diag_target(name))),
             Some(table) => received_log_target(
                 name,
@@ -414,7 +493,7 @@ impl OpenFiles {
         start: &crate::blastinput::ncbi_environment::ApplicationStart,
         name: Option<&OsStr>,
     ) -> Result<ToolLog, String> {
-        if self.0.is_none() {
+        if self.table.is_none() {
             crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
         }
         self.log_target(name)
@@ -433,7 +512,7 @@ impl OpenFiles {
     /// names whose writes LOSAT Web does not reproduce (`Created::Refused`).
     pub(crate) fn create(&self, name: &(impl AsRef<OsStr> + ?Sized)) -> Result<Created, Unopened> {
         let name = name.as_ref();
-        let Some(table) = &self.0 else {
+        let Some(table) = &self.table else {
             return File::create(name)
                 .map(|file| Created::File(OpenedFile::Disk(file)))
                 .map_err(|_| Unopened);
@@ -466,7 +545,7 @@ impl OpenFiles {
     /// `Receiver` and `receiver_output_name` resolves `name` to `OutputName::Existing`, else
     /// `None`. Always `None` on `Disk`.
     pub(crate) fn refused_output(&self, name: &OsStr) -> Option<String> {
-        let table = self.0.as_ref()?;
+        let table = self.table.as_ref()?;
         matches!(
             receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()),
             OutputName::Existing
@@ -666,6 +745,15 @@ impl Write for OpenedFile {
         match self {
             OpenedFile::Disk(file) => file.write_all(buf),
             _ => self.write(buf).map(|_| ()),
+        }
+    }
+
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        match self {
+            OpenedFile::Disk(file) => file.write_vectored(bufs),
+            OpenedFile::Shared(file) => file.write_vectored(bufs),
+            OpenedFile::Discard => Ok(bufs.iter().map(|b| b.len()).sum()),
+            OpenedFile::Full => Err(io::Error::from(io::ErrorKind::StorageFull)),
         }
     }
 

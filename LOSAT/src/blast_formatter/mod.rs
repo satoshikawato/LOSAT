@@ -85,6 +85,55 @@ pub(crate) fn run_with(
     crate::ncbi_app::run_with(&TOOL, words, input, out, err, run_body)
 }
 
+/// `run_with` of LOSAT Web's run (`ncbi_app::run_in`): the files that the run writes (`-out FILE`,
+/// `-logfile FILE`) go to `files`, and `-xmlhelp` prints NCBI's XML, as on the command line.
+pub(crate) fn run_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), run_body)
+}
+
+/// The checks of a blast_formatter run before it opens `-archive` (LOSAT Web's validation of the
+/// words, `web_adapter::check_blast_formatter`): `run_in` with `check_body`, which stops where
+/// `Run` would open `-archive`. The standard input is empty; the exit status is 0 for a valid argv
+/// (including help/version words), with errors on `err` and the `-logfile` target in `files`.
+pub(crate) fn check_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(
+        &TOOL,
+        words,
+        files,
+        (&mut std::io::empty(), out, err),
+        check_body,
+    )
+}
+
+// No NCBI counterpart: LOSAT Web checks `-logfile` against the input names the run opens for
+// reading, so a `-logfile` naming `-archive` (even when missing) is refused instead of creating
+// the file before `-archive` reads it. `-out` is opened only after `-archive` is read, so
+// `for_out` is empty (existing files in the run directory are still refused by `OpenFiles`).
+/// The input file names that a `blast_formatter` run with `words` opens for reading:
+/// `(for_logfile, for_out)`.
+pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut for_logfile = Vec::new();
+    crate::ncbi_app::args::scan_argv(TOOL.program, words, |name, value| {
+        if name == "archive" {
+            if let Some(path) = value.filter(|v| !v.is_empty() && *v != OsStr::new("-")) {
+                for_logfile.push(path.as_encoded_bytes().to_vec());
+            }
+        }
+    });
+    (for_logfile, Vec::new())
+}
+
 /// The command line of a run that formats an archive (`format_archive`), as `PrintFormattedOutput`
 /// reads it for each archive object (blast_formatter.cpp:329-343): the formatting arguments
 /// (`formatting::extract_formatting` reads `-outfmt` and the counts there, after the object), the
@@ -171,6 +220,45 @@ fn run_body(
             args.files(),
             diag,
         );
+    }
+    let rid = match args.as_bytes("rid") {
+        Ok(rid) => rid,
+        Err(error) => {
+            return catch_all(
+                diag,
+                crate::cli::command_line_argument_error(error.message()),
+            )
+        }
+    };
+    if rid.is_empty() {
+        return catch_all(
+            diag,
+            crate::blastinput::app::engine_error("Empty RID string specified"),
+        );
+    }
+    Refusal::Rid.refuse(diag)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
+/// The checks of `run_body` before opening `-archive` (LOSAT Web's validation, `check_in`):
+/// when `-archive` is given, only checks whether `-out` is a name LOSAT Web refuses to overwrite;
+/// without `-archive`, runs the `-rid` checks (missing value, empty RID, or LOSAT's `-rid`
+/// refusal), which open no files.
+fn check_body(
+    args: &Args,
+    _settings: &ApplicationSettings,
+    _input: &mut Cin<'_>,
+    _out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    if args.os_value("archive").is_some() {
+        let out = args.os_value("out").unwrap_or(OsStr::new("-"));
+        if out != OsStr::new("-") {
+            if let Some(reason) = args.files().refused_output(out) {
+                return diag.refuse(&crate::seqmasks_io::run::unsupported(&reason, PROGRAM));
+            }
+        }
+        return 0;
     }
     let rid = match args.as_bytes("rid") {
         Ok(rid) => rid,

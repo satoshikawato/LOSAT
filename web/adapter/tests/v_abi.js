@@ -1510,7 +1510,7 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       if (!c.db) assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
       const targetArgs = c.db ? ["-db", c.db] : ["-subject", c.subject[0]];
       const words = [c.program, "-query", c.query[0], ...targetArgs, ...T, ...(c.extra || []), "-logfile", c.logfile];
-      const validated = reactor.call("losat_web2_validate", words.join("\0"));
+      const validated = reactor.call("losat_web2_validate", `${words.join("\0")}\0`);
       const run = reactor.call("losat_web2_run", words.join("\0"), qHandle.status, sHandle.status);
       if (waitForWorkers) await waitForWorkers();
       if (c.expect === "refusal") {
@@ -1651,7 +1651,8 @@ function writeToolFiles(directory, files) {
 // the search's files, which the engine does not write to. Returns the results row.
 async function checkTool(engine, instance, directory, search, options, scratch) {
   const label = `${engine.name} ${search.cases.join(",")}`;
-  const words = ["windowmasker", ...search.argv];
+  const words = [search.program, ...search.argv];
+  const programLabel = search.program.toUpperCase();
   const before = new Set(filesIn(directory).map((file) => path.relative(directory, file)));
   // The CLI's run, in a folder of the same files.
   const folder = fs.mkdtempSync(path.join(scratch, "tool."));
@@ -1669,13 +1670,17 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
   const reactor = instance.reactor;
   let row;
   if (search.tool === "validate") {
-    const validated = reactor.call("losat_web2_validate", words.join("\0"));
+    const validated = reactor.call("losat_web2_validate", `${words.join("\0")}\0`);
     assert.equal(reactor.chunks.size, 0, `${label}: validate emits nothing`);
     if (search.expect === "refusal") {
-      // LOSAT's refusal of a -logfile naming a file of the run's directory (abi_v2.md §4).
-      const named = search.argv[search.argv.indexOf("-logfile") + 1];
+      // LOSAT's refusal of a -logfile or -out naming a file of the run's directory (abi_v2.md §4).
+      const isLog = search.argv.includes("-logfile") && !search.argv.includes("-out");
+      const named = search.argv[search.argv.indexOf(isLog ? "-logfile" : "-out") + 1];
+      const pattern = isLog
+        ? new RegExp(`^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's ${programLabel}$`)
+        : new RegExp(`^Error: an output file '.*' .* is not supported by LOSAT's ${programLabel}$`);
       assert.equal(validated.status, -1, `${label}: validate refuses the argv`);
-      assert.match(validated.error, /^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's WINDOWMASKER$/, `${label}: the refusal`);
+      assert.match(validated.error, pattern, `${label}: the refusal`);
       assert.ok(validated.error.includes(`'${named}'`), `${label}: the refusal names ${named}`);
       assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
     } else if (search.expect === "late_failure") {
@@ -1700,7 +1705,7 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
     row = { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
             tool: "validate", status: validated.status };
   } else {
-    const run = reactor.call("losat_web2_tool", words.join("\0"));
+    const run = reactor.call("losat_web2_tool", `${words.join("\0")}\0`);
     const frames = (reactor.chunks.get(12) || []).map((chunk) => Buffer.from(chunk));
     if (instance.waitForWorkers) await instance.waitForWorkers();
     assert.equal(run.status, 0, `${label}: ${run.error}`);
@@ -1711,8 +1716,8 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
       const isLog = search.argv.includes("-logfile") && !search.argv.includes("-out");
       const named = search.argv[search.argv.indexOf(isLog ? "-logfile" : "-out") + 1];
       const pattern = isLog
-        ? /^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's WINDOWMASKER\n$/
-        : /^Error: an output file '.*' .* is not supported by LOSAT's WINDOWMASKER\n$/;
+        ? new RegExp(`^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's ${programLabel}\n$`)
+        : new RegExp(`^Error: an output file '.*' .* is not supported by LOSAT's ${programLabel}\n$`);
       assert.equal(status, 1, `${label}: the refusal's exit status`);
       assert.match((run.streams.get(3) || "").toString(), pattern, `${label}: the refusal`);
       assert.ok((run.streams.get(3) || "").toString().includes(`'${named}'`), `${label}: the refusal names ${named}`);

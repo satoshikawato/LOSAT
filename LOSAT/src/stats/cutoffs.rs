@@ -102,8 +102,9 @@ pub fn karlin_etos_simple(
     }
 }
 
-/// `BLAST_GapDecayDivisor(rate, 1)` where `BLAST_Cutoffs` applies it: with the gap decay
-/// (`dodecay`, here `Some(rate)`) and `0 < rate < 1`.
+/// The gap decay divisor of one segment (`BLAST_GapDecayDivisor`, `gap_decay_divisor` with one
+/// segment) where `BLAST_Cutoffs` applies it: with the gap decay (`dodecay`, here `Some(rate)`) and
+/// a rate strictly between 0 and 1.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4113-4118,4137-4144
 #[inline]
@@ -114,8 +115,9 @@ fn single_segment_divisor(gap_decay: Option<f64>) -> Option<f64> {
 }
 
 /// The score part of `BLAST_Cutoffs`: the cutoff `score` raised to the score of `evalue` when
-/// that is higher, and whether NCBI then writes the e-value of the cutoff back into `E` (`esave <=
-/// 0` or the cutoff unchanged). A block of -1s returns at once (`score` kept, no write-back).
+/// that is higher, and whether NCBI then writes the e-value of the cutoff back into `E` (the
+/// e-value given was not above 0, or the cutoff did not change). A block of -1s returns at once
+/// (`score` kept, no write-back).
 #[inline]
 fn raise_cutoff(
     score: &mut i32,

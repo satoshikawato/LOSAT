@@ -98,8 +98,8 @@ const SPACES: [i64; 12] = [
 ];
 
 // The owner gives the bits of the code it replaced on valid blocks: the hit-saving and word
-// cutoffs of the protein programs (`cutoff_score_from_evalue(..).max(1)`, with and without the
-// decay) and BLASTN's two copies (x86-64 `INT_MIN`).
+// cutoffs of the protein programs (the port raised to 1, with and without the decay) and BLASTN's
+// two copies (x86-64 `INT_MIN`).
 #[test]
 fn the_owner_gives_the_cutoffs_of_the_copies_it_replaced() {
     for kbp in [blosum62_ungapped(), blosum62_gapped(), blastn_2_3()] {

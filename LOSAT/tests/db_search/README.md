@@ -967,9 +967,10 @@ NCBI's prefetch loads the Seq-id handles below the failing one in its map and en
 error of `gb|FFF00092.1|` (92, before the unpacked text tag), then the warning; `ntagx_t5` the warning alone (a report
 that reads `gb|FFF00094.1|` loads it then and writes the offset error after the warning); `ntagc_t5` one offset error
 (`gb|FFF00010.1|`), then the warning, and `gb|FFF00090.1|` takes no step through the slot there. NCBI wrote the same
-bytes of every `ncbi` row in four heap layouts. Its default `-outfmt 6` of these databases stops with a null pointer
-exception whose report carries a stack trace with the run's addresses: LOSAT refuses there after NCBI's texts before
-the exception (the `.6.reject` rows, `ncbi-stderr`). `pshare_t5`'s `lcl|555` and the text tag are both unpacked, so
+bytes of every `ncbi` row in four heap layouts. Its default `-outfmt 6` of these databases stops at the first row's
+`saccver` (after its `qaccver` and a tab) with a null pointer exception whose report carries a stack trace with the
+run's addresses: LOSAT writes NCBI's bytes before it (that stdout, and the texts before the exception) and refuses there
+(the `.6.reject` rows: NCBI's stdout, `ncbi-stderr`). `pshare_t5`'s `lcl|555` and the text tag are both unpacked, so
 NCBI's map orders them by address: LOSAT refuses where that load writes the offset error (`ids/pshare_q2.faa`,
 `-max_target_seqs 2`, one query per batch: NCBI wrote 0, 1, 1 and 0 offset errors in four heap layouts) and writes
 NCBI's bytes where the load of a packed id before the failure wrote it first (`ids/pfw_ps_q21.faa`, and
@@ -998,6 +999,21 @@ every lookup of the batch succeeded (rows `db.o4b2_10.bn.rc.*` on `ntag_t5`, `nt
 `BATCH_SIZE=1`), and `db.o4b2_10.psi.it{2,3}.*` run two and three rounds of psiblast on `ptagx_t5` and `ptagc_t5`.
 NCBI wrote the same bytes of every row in four heap layouts. The 200 ids of NCBI's map count every Seq-align id of the
 batch, also one that a query resolves (a query's own id, line RG-KB item 12; unit tests only).
+
+Every load that a failed prefetch made counts among the blobs that the cache of 10 takes after a load of a larger key,
+whatever its taxids (line NP item O4b2-10, round 3; rows `db.o4b2_10.bp.pslotmix*`, `db.o4b2_10.bp.pslotscope.*` and
+`db.o4b2_10.bp.pslottie.*`):
+`ids/pslotmix_t5` (`ids/pordslotmix.faa`, `ids/pordslotmix.taxid_map`) is `ids/pslot11_t5` with `gb|FFF00001.1|` of
+taxid 9606, another slot, so 10 releases follow `gb|FFF00011.1|`, which NCBI drops (an offset error after the 150 load),
+and `ids/pslotmix12_t5` puts the 9606 load at key 11, released first, so the cache keeps the 10 loads of 99990 after it.
+LOSAT counts such a load where NCBI's scope holds no read of the run since its reset and refuses where that decides the
+texts: `ids/pslotscope_t5` (`ids/pordslotscope.faa`, query `ids/pordslotscope_q.faa`, `BATCH_SIZE=1`, `-evalue 1e-10`)
+is `ids/pslotmix_t5` whose `gb|FFF00001.1|` is the first query's only hit, which the first batch reads; the pairwise
+report and outfmt 6 reset the scope after that batch (two offset errors in outfmt 0), and BLAST XML keeps it, so the
+second batch's prefetch resolves that load in the scope, which then releases nothing (one offset error; LOSAT refuses).
+`ids/pslottie_t5` (`ids/pordslottie.faa`): `gb|FFF00010.1|` to `gb|FFF00001.1|` and `gb|FFF00050.1|` of the failing
+tag's packed number, all of taxid 99990: NCBI loads `gb|FFF00050.1|` before the failure (released first and dropped
+after the 10 others) or not at all, and its report's read loads it either way (refused before).
 
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and

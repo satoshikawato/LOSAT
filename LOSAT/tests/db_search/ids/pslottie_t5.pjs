@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pslottie_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pslottie_t5 (parsed Seq-ids, taxids 99990 and 150)",
+  "number-of-letters": 1560,
+  "number-of-sequences": 13,
+  "last-updated": "2026-11-27T23:23:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 52555,
+  "bytes-to-cache": 1814,
+  "files": [
+    "pslottie_t5.pdb",
+    "pslottie_t5.phr",
+    "pslottie_t5.pin",
+    "pslottie_t5.pog",
+    "pslottie_t5.pos",
+    "pslottie_t5.pot",
+    "pslottie_t5.psq",
+    "pslottie_t5.ptf",
+    "pslottie_t5.pto"
+  ]
+}

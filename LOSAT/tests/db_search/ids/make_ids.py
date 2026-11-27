@@ -133,7 +133,14 @@ the order in which the cache takes them; `ptie_t5.*` and `ptie150_t5.*` from `po
 `gb|FFF00050.1|` with taxid 99990 (`pordtie.taxid_map`) or 150 (`pordtie150.taxid_map`); and the aliases
 `pvab_t5.pal` (`pva_t5` from `pordva.faa`: a load before the failing tag and the tag, `pvb_t5` from `pordvb.faa`: a
 load after it) and `pvcd_t5.pal` (`pvc_t5`, `pvd_t5` from `pordvc.faa`, `pordvd.faa`: the tag and a load after it, a
-load before it), taxid 99990. `nordtag_rc.fna` is the reverse complement of `nordtag_q.fna` (every BLASTN alignment
+load before it), taxid 99990. For the loads of other slots that the cache counts (re-review of item O4b2-10, R2-1):
+`pslotmix_t5.*` from `pordslotmix.faa` (as `pslot11_t5`, with `gb|FFF00001.1|` of taxid 9606) and `pslotmix12_t5.*`
+from `pordslotmix12.faa` (`gb|FFF00011.1|` of taxid 9606, then `gb|FFF00010.1|` to `gb|FFF00001.1|` of 99990); for a
+load of the failure's key after which the cache drops it (R2-2): `pslottie_t5.*` from `pordslottie.faa`
+(`gb|FFF00010.1|` to `gb|FFF00001.1|` and `gb|FFF00050.1|` of 99990, the failing `gnl|BL_ORD_ID|x050`); for a scope that
+resolves such a load (R2-1): `pslotscope_t5.*` from `pordslotscope.faa` (as `pslotmix_t5`, but `gb|FFF00001.1|` is half
+the first query of `pordslotscope_q.faa`, whose only hit it is, so that a batch of that query alone reads it before the
+second query's batch); each with the taxids of its `.taxid_map`. `nordtag_rc.fna` is the reverse complement of `nordtag_q.fna` (every BLASTN alignment
 on the query's minus strand). `--pfworder-only` builds only these. Line DBID
 weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM): `wkb_e3_v5.*` from `wkb_e3.faa`
 (`gb|FFF00043.1|`, `gb|ZZZ00001.1|`, then `gb|FFF00043|`, which the lookup finds as the first) and `wkb_p1_v5.*` from
@@ -338,12 +345,20 @@ def build_pfworder(args: argparse.Namespace) -> None:
                                         ("pslotm_t5", "pordslotm.faa", "prot", "pordslot11.taxid_map"),
                                         ("ptie_t5", "pordtie.faa", "prot", "pordtie.taxid_map"),
                                         ("ptie150_t5", "pordtie.faa", "prot", "pordtie150.taxid_map"),
+                                        ("pslotmix_t5", "pordslotmix.faa", "prot", "pordslotmix.taxid_map"),
+                                        ("pslotmix12_t5", "pordslotmix12.faa", "prot", "pordslotmix12.taxid_map"),
+                                        ("pslottie_t5", "pordslottie.faa", "prot", "pordslottie.taxid_map"),
+                                        ("pslotscope_t5", "pordslotscope.faa", "prot", "pordslotscope.taxid_map"),
                                         ("pva_t5", "pordva.faa", "prot", None), ("pvb_t5", "pordvb.faa", "prot", None),
                                         ("pvc_t5", "pordvc.faa", "prot", None), ("pvd_t5", "pordvd.faa", "prot", None)):
         if taxids is None:
             taxid_args, title = ["-taxid", "99990"], "taxid 99990"
         else:
-            taxid_args, title = ["-taxid_map", str(HERE / taxids)], "taxids 99990 and 150"
+            # The map's taxids, the largest first ("taxids 99990 and 150", "taxids 99990, 9606 and 150").
+            named = sorted({int(line.split()[1]) for line in (HERE / taxids).read_text().splitlines() if line.strip()},
+                           reverse=True)
+            listed = ", ".join(str(taxid) for taxid in named[:-1]) + f" and {named[-1]}"
+            taxid_args, title = ["-taxid_map", str(HERE / taxids)], f"taxids {listed}"
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
              "-blastdb_version", "5", *taxid_args, "-title", f"{name} (parsed Seq-ids, {title})",

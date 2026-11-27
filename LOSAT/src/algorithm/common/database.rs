@@ -5438,6 +5438,16 @@ struct VolumeLookups {
     /// (NCBI's prefetch asks its scope only for the ids that it resolved before, then its loader
     /// for every other handle: no blob of one prefetch stands in for another of it).
     prefetch_from: Option<rustc_hash::FxHashMap<u32, usize>>,
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 (`x_GetBioseqHandlesSorted`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    // A prefetch resolves in its scope the ids that the scope resolved before, which holds what it
+    // read until `ResetScopeHistory` (never in BLAST XML), and asks the data source for the others.
+    /// Whether NCBI's live scope may hold a blob that `slot_blobs` does not name: a prefetch or a
+    /// read of the run since the scope's last reset ([`Self::reset_scope`], which never clears it
+    /// where the run keeps its scope), whose sequences may look no taxid of the slot up
+    /// ([`TaxdbRun::note_scope_read`]). Without one, a load of a failed prefetch asks NCBI's data
+    /// source for its blob whatever it loads ([`Self::release_failed`]).
+    unrecorded_reads: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:209-209
@@ -5732,6 +5742,10 @@ impl VolumeLookups {
                 }
             }
         }
+        // The scope that the reset empties holds no read of the run.
+        if !self.keeps_scope {
+            self.unrecorded_reads = false;
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:453-462
@@ -5879,6 +5893,10 @@ impl VolumeLookups {
         last: i32,
         pins: bool,
     ) -> std::result::Result<Vec<bool>, SlotUncertain> {
+        // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+        // The read resolves its id in the scope, where a later prefetch finds it whatever its taxids
+        // (`unrecorded_reads`).
+        self.unrecorded_reads = true;
         let in_slot = |taxid: i32| tax_cache_slot(taxid) == tax_cache_slot(last);
         if !lookups.iter().any(|&taxid| in_slot(taxid)) {
             return Ok(vec![false; lookups.len()]);
@@ -5983,27 +6001,50 @@ impl VolumeLookups {
         // What the scope and the data source held before the walk decides which loads go
         // through the data source (the walk records the prefetch's own blobs).
         let releases: Vec<FailedRelease> = match failed {
-            Some(_) => loads.iter().map(|load| self.failed_release(load)).collect(),
+            Some(made) => made
+                .iter()
+                .map(|made| self.failed_release(loads, made))
+                .collect(),
             None => Vec::new(),
         };
         let misses = self.prefetch_walks(loads, unordered, last);
         self.prefetch_from = None;
         if let (Ok(_), Some(made)) = (&misses, failed) {
-            self.release_failed(loads, &releases, made);
+            self.release_failed(loads, made, &releases);
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1110-1153
+        // A prefetch that does not fail leaves every load in the scope (`unrecorded_reads`).
+        self.unrecorded_reads = true;
         misses
     }
 
-    /// How the load `load` of a prefetch whose lookup of a Seq-align id failed meets NCBI's data
-    /// source ([`FailedRelease`]), by the blobs before the prefetch ([`Self::prefetch_from`]): a
-    /// blob that the scope indexes for its handle is resolved there; one that only the data
-    /// source holds, or a first load, goes through the data source where NCBI surely makes the
-    /// load; any other read may.
-    fn failed_release(&self, load: &SlotLoad) -> FailedRelease {
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 (`x_GetBioseqHandlesSorted`)
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2000-2026
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2374-2396
+    // The prefetch asks its scope for the ids that it resolved before, then the data source for
+    // every other handle of the piece, which locks the blob that its loader loads or finds (taking
+    // it out of the cache of released blobs, `x_SetLock`), each handle a blob of its own.
+    /// How the load `made` of a prefetch whose lookup of a Seq-align id failed meets NCBI's data
+    /// source ([`FailedRelease`]), by the blobs before the prefetch ([`Self::prefetch_from`]). A
+    /// load of the slot (one of `loads`): a blob that the scope indexes for its handle is resolved
+    /// there; one that only the data source holds, or a first load, goes through the data source
+    /// where NCBI surely makes the load, and a first load that NCBI may make or not through it if
+    /// made; any other read may. Another load: through the data source where NCBI surely makes it
+    /// ([`FailedLoad::surely`]) and the scope has read nothing that the records do not name since
+    /// its reset ([`Self::unrecorded_reads`]).
+    fn failed_release(&self, loads: &[SlotLoad], made: &FailedLoad) -> FailedRelease {
+        let Some(load) = loads.iter().find(|load| load.ordinal == made.ordinal) else {
+            return if made.surely && !self.unrecorded_reads {
+                FailedRelease::Released
+            } else {
+                FailedRelease::Maybe
+            };
+        };
         let Some(handle) = &load.name.handle else {
             return FailedRelease::Maybe;
         };
-        match self.blob_read(load.blob, &load.name) {
+        let held = match self.blob_read(load.blob, &load.name) {
+            BlobRead::Fresh => false,
             BlobRead::Kept => {
                 let from = self
                     .prefetch_from
@@ -6016,15 +6057,16 @@ impl VolumeLookups {
                         .any(|blob| &blob.handle == handle && (blob.in_scope || blob.pinned))
                 });
                 if in_scope {
-                    FailedRelease::Scope
-                } else if load.maybe {
-                    FailedRelease::Maybe
-                } else {
-                    FailedRelease::Released
+                    return FailedRelease::Scope;
                 }
+                true
             }
-            BlobRead::Fresh if !load.maybe => FailedRelease::Released,
-            _ => FailedRelease::Maybe,
+            BlobRead::Again => return FailedRelease::Maybe,
+        };
+        match (load.maybe, held) {
+            (false, _) => FailedRelease::Released,
+            (true, false) => FailedRelease::Unheld,
+            (true, true) => FailedRelease::Maybe,
         }
     }
 
@@ -6032,37 +6074,42 @@ impl VolumeLookups {
     // NCBI reference (598d8ae6): c++/src/objmgr/data_loader.cpp:764-769
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:974-999
     // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2326-2369
-    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2375-2395
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2374-2396
     // `CDataSource::GetBlobs` holds the locks of the blobs that the prefetch's loads lock in its
     // local map of the batch's Seq-id handles until it returns them to the scope
     // (`CDataSource_ScopeInfo::GetBlobs`); a lookup that throws ends `CDataLoader::GetBlobs`
-    // before that, so the map's destruction releases every blob that the loads before it locked
-    // (one that the data loader loaded, or found in the data source's cache, which takes it out
-    // of the cache: `x_SetLock`) into that cache of released blobs (`x_ReleaseLastTSELock`), which
-    // drops its oldest where it holds more than `OBJMGR_BLOB_CACHE` (10, cited above
-    // `RELEASED_KEPT`). The scope never indexes them, and no `SetLinkUsedTSE` pins them. The map
-    // releases its entries from the largest key down: probe `O4b2/impl10/r2` (NCBI 2.17.0, four
-    // heap layouts each, outfmt 0 and 5): of 11 loads of taxid 99990 (`gb|FFF00011.1|` packed 11
-    // to `gb|FFF00001.1|` packed 1) before the failed lookup of `gnl|BL_ORD_ID|x050` (packed 50),
-    // the reports' read of `gb|FFF00011.1|` after a load of taxid 150 of the same slot writes a
-    // second offset error (`pslotm_t5`: NCBI loads it again), that of `gb|FFF00001.1|` none
-    // (`pslotr_t5`: the cache kept it). Within the batch nothing more is dropped where the scope
-    // keeps what it releases (`in_scope_kept`: the scope's queue and the cache hold every blob).
+    // before that, so the map's destruction releases every blob that the loads before it locked,
+    // whatever their taxids (one that the data loader loaded, or found in the data source's cache,
+    // which takes it out of the cache: `x_SetLock`), into that cache of released blobs
+    // (`x_ReleaseLastTSELock`), which takes each at its end and drops its oldest where it holds
+    // more than `OBJMGR_BLOB_CACHE` (10, cited above `RELEASED_KEPT`): a blob is dropped where 10
+    // or more are released after it, whatever the cache held before. The scope never indexes them,
+    // and no `SetLinkUsedTSE` pins them. The map releases its entries from the largest key down:
+    // probe `O4b2/impl10/r2` (NCBI 2.17.0, four heap layouts each, outfmt 0 and 5): of 11 loads of
+    // taxid 99990 (`gb|FFF00011.1|` packed 11 to `gb|FFF00001.1|` packed 1) before the failed
+    // lookup of `gnl|BL_ORD_ID|x050` (packed 50), the reports' read of `gb|FFF00011.1|` after a
+    // load of taxid 150 of the same slot writes a second offset error (`pslotm_t5`: NCBI loads it
+    // again), that of `gb|FFF00001.1|` none (`pslotr_t5`: the cache kept it); with `gb|FFF00001.1|`
+    // of taxid 9606 (another slot), the same (`pslotmix_t5`), and of the failure's key, made or not
+    // before 10 such loads, `gb|FFF00050.1|` is loaded again (`pslottie_t5`). Within the batch
+    // nothing more is dropped where the scope keeps what it releases (`in_scope_kept`: the scope's
+    // queue and the cache hold every blob).
     /// What NCBI's data source holds, after a prefetch whose lookup of a Seq-align id failed, of the
-    /// blobs of its loads `loads` that look the slot up (each met as `releases` says, before the
-    /// walk) among the loads that LOSAT's model makes, `made` ([`FailedLoad`]): a blob released
-    /// after [`RELEASED_KEPT`] others or more for certain is dropped (its record goes: a read again
-    /// loads it); one released after fewer whatever NCBI made stays in the cache to the end of the
-    /// batch ([`SlotBlob::cached`]); any other, and every load that NCBI may not make or whose id
-    /// its scope may resolve, is a load or none at a read again (not `sure`). None of them is in
-    /// the scope. A blob that a failed prefetch before left in the cache may be dropped by this
-    /// one (no longer `cached`). A run with sizes of the object manager that LOSAT does not read
+    /// blobs of its loads `loads` that look the slot up, among the loads that LOSAT's model makes,
+    /// `made` ([`FailedLoad`], each met as `releases` says before the walk, [`FailedRelease`]): a
+    /// blob that NCBI holds nowhere after [`RELEASED_KEPT`] others or more are released after it for
+    /// certain (one released, or not made of a blob that NCBI did not hold) loses its record (a read
+    /// again loads it); one released after fewer whatever NCBI made stays in the cache to the end of
+    /// the batch ([`SlotBlob::cached`]); any other, and every load that NCBI may not make or whose
+    /// id its scope may resolve, is a load or none at a read again (not `sure`). None of them is in
+    /// the scope. A blob that a failed prefetch before left in the cache may be dropped by this one
+    /// (no longer `cached`). A run with sizes of the object manager that LOSAT does not read
     /// ([`default_object_manager`]) keeps none of them for certain.
     fn release_failed(
         &mut self,
         loads: &[SlotLoad],
-        releases: &[FailedRelease],
         made: &[FailedLoad],
+        releases: &[FailedRelease],
     ) {
         if self.sequential || made.is_empty() {
             return;
@@ -6073,45 +6120,15 @@ impl VolumeLookups {
             }
         }
         let sizes = default_object_manager();
-        let key = |ordinal: u32| {
-            made.iter()
-                .find(|load| load.ordinal == ordinal)
-                .and_then(|load| load.order)
-        };
-        let resolved = |ordinal: u32| {
-            loads
-                .iter()
-                .zip(releases)
-                .any(|(load, &release)| load.ordinal == ordinal && release == FailedRelease::Scope)
-        };
-        for (load, &release) in loads.iter().zip(releases) {
+        for load in loads {
+            let Some(at) = made.iter().position(|made| made.ordinal == load.ordinal) else {
+                continue;
+            };
+            let release = releases[at];
             if release == FailedRelease::Scope {
                 continue;
             }
-            let own = key(load.ordinal);
-            // Whether a load of the key `other` is released after this one (a smaller key) for
-            // certain, and whether it may be (an equal key goes by address; an unknown key may).
-            let after = |other: Option<u64>| match (own, other) {
-                (Some(own), Some(other)) => (other < own, other <= own),
-                _ => (false, true),
-            };
-            let surely = loads
-                .iter()
-                .zip(releases)
-                .filter(|(other, &other_release)| {
-                    other.ordinal != load.ordinal
-                        && other_release == FailedRelease::Released
-                        && after(key(other.ordinal)).0
-                })
-                .count();
-            let most = made
-                .iter()
-                .filter(|other| {
-                    other.ordinal != load.ordinal
-                        && !resolved(other.ordinal)
-                        && after(other.order).1
-                })
-                .count();
+            let (surely, most) = released_after(made, releases, at);
             let Some(handle) = &load.name.handle else {
                 continue;
             };
@@ -6121,15 +6138,16 @@ impl VolumeLookups {
             let Some(index) = blobs.iter().position(|blob| &blob.handle == handle) else {
                 continue;
             };
-            let released = release == FailedRelease::Released && sizes;
-            if released && surely >= RELEASED_KEPT {
+            // Released, or not made of a blob that NCBI held nowhere: dropped either way.
+            let unheld = matches!(release, FailedRelease::Released | FailedRelease::Unheld);
+            if sizes && unheld && surely >= RELEASED_KEPT {
                 blobs.remove(index);
                 continue;
             }
             let blob = &mut blobs[index];
             blob.in_scope = false;
             blob.pinned = false;
-            blob.cached = released && most < RELEASED_KEPT;
+            blob.cached = sizes && release == FailedRelease::Released && most < RELEASED_KEPT;
             if !blob.cached {
                 blob.sure = false;
             }
@@ -6443,6 +6461,11 @@ struct SlotLoad {
     maybe: bool,
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 (`x_GetBioseqHandlesSorted`)
+// NCBI reference (598d8ae6): c++/src/objmgr/data_loader.cpp:764-769
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2000-2026
+// The loads of the handles before the failing one lock their blobs in the data source's map of
+// the batch's handles, which the failure releases from the largest key down.
 /// A load that LOSAT's model makes in a prefetch whose lookup of a Seq-align id failed
 /// ([`made_before_failure`]), for what NCBI's data source holds after the failure
 /// ([`VolumeLookups::release_failed`]), whether or not it looks the slot up.
@@ -6454,8 +6477,19 @@ struct FailedLoad {
     /// that map releases its blobs (the largest first); `None` where LOSAT does not know the map
     /// ([`LoadPlace::many`]).
     order: Option<u64>,
+    /// Whether NCBI surely makes it and loads a blob for it: a place before the failure that LOSAT
+    /// knows ([`LoadBeforeStop::Yes`]), a sequence that its data loader gives for the Seq-align id
+    /// ([`prefetch_reads`]), in a call with no calls of the run before it, whose scope LOSAT has
+    /// not followed ([`TaxdbRun::unrecorded_calls`]).
+    surely: bool,
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 (`x_GetBioseqHandlesSorted`)
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2326-2369
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2374-2396
+// A handle that the scope resolved before asks no data source; every other one locks a blob
+// there (taking it out of the cache of released blobs), which the failure releases into that
+// cache unless another lock holds it.
 /// How a load of a prefetch whose lookup of a Seq-align id failed meets NCBI's data source
 /// ([`VolumeLookups::failed_release`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6465,8 +6499,38 @@ enum FailedRelease {
     Scope,
     /// NCBI makes it through the data source, which releases the blob at the failure.
     Released,
-    /// Either, or NCBI does not make it at all.
+    /// NCBI makes it through the data source or does not make it at all, and holds no blob of it
+    /// before (a first load).
+    Unheld,
+    /// Any of these.
     Maybe,
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2000-2026
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2326-2369
+// The failure releases the locks of the data source's map from the largest key down (cited at
+// `VolumeLookups::release_failed`), each into the cache of released blobs at its end.
+/// Of the loads `made` of a prefetch whose lookup of a Seq-align id failed (each met as `releases`
+/// says, [`FailedRelease`]), how many NCBI's data source releases after that of `made[at]`: for
+/// certain (released, of a smaller key of a map that LOSAT knows) and at most (any that the scope
+/// does not resolve, of a key not larger or not known).
+fn released_after(made: &[FailedLoad], releases: &[FailedRelease], at: usize) -> (usize, usize) {
+    let own = made[at].order;
+    let mut surely = 0;
+    let mut most = 0;
+    for (index, (other, &release)) in made.iter().zip(releases).enumerate() {
+        if index == at || release == FailedRelease::Scope {
+            continue;
+        }
+        match (own, other.order) {
+            (Some(own), Some(key)) => {
+                surely += usize::from(key < own && release == FailedRelease::Released);
+                most += usize::from(key <= own);
+            }
+            _ => most += 1,
+        }
+    }
+    (surely, most)
 }
 
 /// The loads of one step of [`VolumeLookups::unordered_slot`], by the first and the last of their
@@ -6613,6 +6677,19 @@ impl TaxdbRun {
             .lock()
             .expect("the volume lookups")
             .reset_scope();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3280-3299 (`x_GetBioseqHandlesSorted`)
+    // A read resolves its id in the scope, where a later prefetch finds it without the data source.
+    /// Records that NCBI's live scope may hold a blob that the run's records of the slot do not
+    /// name (`VolumeLookups::unrecorded_reads`): a read of the reports, of a prefetch or of
+    /// psiblast's PSSM, of any sequence, until the scope's reset ([`TaxdbRun::reset_scope`]).
+    fn note_scope_read(&self) {
+        self.volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .unrecorded_reads = true;
     }
 
     /// Whether a prefetch of the run can stop at a lookup that fails on a file with NCBI's
@@ -8399,7 +8476,14 @@ fn load_read_texts<'s>(
     let mut fetched: std::collections::HashSet<(u32, u32)> = Default::default();
     let mut thrown: std::collections::HashSet<u32> = Default::default();
     let mut row_opened = false;
+    let mut scope_read = false;
     for (key, ordinal, load) in loads {
+        // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+        // The scope keeps the ids that its reads resolve until its reset
+        // ([`TaxdbRun::note_scope_read`]).
+        if !std::mem::replace(&mut scope_read, true) {
+            run.note_scope_read();
+        }
         // A subject whose lookup throws (`ParsedSubject::lookup_throws`, a report that reads one by
         // one reaches it: `HitLoads::reached`) has read the candidates' headers first, so its load
         // posts NCBI's warning of a UTF8String among them and nothing else: no blob is read, no
@@ -8794,6 +8878,10 @@ pub(crate) fn pssm_load_texts(
     lookups: &[i32],
     program: &str,
 ) -> Result<Vec<u8>> {
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+    // The scope keeps the id that the PSSM's read resolves until its reset
+    // ([`TaxdbRun::note_scope_read`]).
+    run.note_scope_read();
     let lead = if db.scope_utf8_loads() {
         scope_utf8_lead(db, parsed, &run.prefix(program))
     } else {
@@ -9459,17 +9547,21 @@ fn prefetch_slot_plan(
         if !seen.insert(ordinal) {
             continue;
         }
+        let maybe = stop.and_then(|failure| failure.unknown[index]);
+        let blob = match parsed {
+            Some(subject) => match prefetch_reads(db, ordinal, subject, true, false, program)? {
+                Ok(blob) => blob,
+                Err(reason) => return Err(parsed_refusal(db.oid(ordinal), &reason, program)),
+            },
+            None => Some(ordinal),
+        };
         made.push(FailedLoad {
             ordinal,
             order: place.many.is_none().then_some(place.order),
+            surely: maybe.is_none() && blob.is_some() && !run.unrecorded_calls(),
         });
-        let blob = match parsed {
-            Some(subject) => match prefetch_reads(db, ordinal, subject, true, false, program)? {
-                Ok(Some(blob)) => blob,
-                Ok(None) => continue,
-                Err(reason) => return Err(parsed_refusal(db.oid(ordinal), &reason, program)),
-            },
-            None => ordinal,
+        let Some(blob) = blob else {
+            continue;
         };
         let lookups = blob_taxids(db, ordinal, parsed, blob, program)?;
         if !lookups
@@ -9478,7 +9570,6 @@ fn prefetch_slot_plan(
         {
             continue;
         }
-        let maybe = stop.and_then(|failure| failure.unknown[index]);
         if let Some(why) = maybe {
             whys.push((blob, ordinal, why));
         }
@@ -9951,7 +10042,7 @@ fn load_places(
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_id_sort.cpp:154-163
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:659-699
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:658-699
 // `GetBioseqHandles` counts the distinct Seq-id handles of every id that the prefetch gives it
 // (`CSortedSeq_ids`, whose `GetSortedIds` keeps one of equal handles), one for each range of the
 // batch's Seq-aligns (`s_ExtractSeqidsAndRanges`), before it asks the scope or a data source for

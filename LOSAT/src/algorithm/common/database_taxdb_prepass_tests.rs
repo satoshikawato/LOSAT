@@ -3814,6 +3814,126 @@ fn a_load_of_the_failures_key_is_made_or_not() {
     }
 }
 
+/// Line NP item O4b2-10, re-review R2-1 and R2-2 (`make_ids.py --pfworder-only`, probe
+/// `O4b2/impl10/r3` of NCBI 2.17.0 in four heap layouts): every blob that a load locks before the
+/// failed lookup counts among those that NCBI's data source releases after the loads of larger keys,
+/// whatever its taxids; a load of the failure's key that NCBI makes or not, after which 10 or more
+/// are released, is held nowhere either way. `pslotmix_t5`: `gb|FFF00090.1|` (ordinal 0, taxid 150),
+/// `gb|FFF00011.1|` to `gb|FFF00002.1|` (ordinals 1 to 10, keys 11 to 2, taxid 99990),
+/// `gb|FFF00001.1|` (11, key 1, taxid 9606), the failing `gnl|BL_ORD_ID|x050`: 10 releases follow
+/// key 11, which is dropped. `pslotmix12_t5`: `gb|FFF00011.1|` (1) of taxid 9606, released first,
+/// then keys 10 to 1 (ordinals 2 to 11, 99990): all kept. `pslottie_t5`: keys 10 to 1 (ordinals 1 to
+/// 10, 99990), `gb|FFF00050.1|` (11, 99990) of the failure's key, then the failure: the tie is
+/// loaded again at its read, made or not. Where the scope may hold a sequence that the records of
+/// the slot do not name (a read since its reset), the load of another slot may ask no data source:
+/// key 11 is a load or none at a read again.
+#[test]
+fn every_load_before_a_failed_lookup_counts_among_the_releases_of_the_data_sources_cache() {
+    let cwd = empty_cwd("pfwmix");
+    let offset = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
+    let warning = "Warning: [blastp] Error pre-fetching sequence data\n";
+    let prefetch =
+        |db: &SeqDb,
+         run: &TaxdbRun,
+         parsed: &[std::sync::Arc<crate::report::db_subject::ParsedSubject>]| {
+            batch_prefetch(
+                db,
+                run,
+                std::iter::empty(),
+                (0..db.num_seqs()).rev().map(|ordinal| {
+                    PrefetchSubject::unflipped(ordinal, Some(&*parsed[ordinal as usize]))
+                }),
+                "BLASTP",
+                &stop_queries(0),
+            )
+            .map(|posts| String::from_utf8(posts.text()).unwrap())
+        };
+    let read = |db: &SeqDb, run: &TaxdbRun, ordinal: u32| {
+        run.volume_lookups(db)
+            .blob_read(ordinal, &blob_name(db, ordinal, ordinal, "BLASTP").unwrap())
+    };
+    for (name, fresh, kept) in [
+        ("pslotmix_t5", 1..2, 2..11),
+        ("pslotmix12_t5", 1..2, 2..12),
+        ("pslottie_t5", 11..12, 1..11),
+    ] {
+        let (db, parsed) = pfworder_db(&cwd, name, SeqType::Protein);
+        assert!(parsed[12].prefetch_fails(), "{name}");
+        let run = TaxdbRun::default();
+        assert_eq!(
+            prefetch(&db, &run, &parsed).unwrap(),
+            offset.to_owned() + warning,
+            "{name}"
+        );
+        for ordinal in fresh {
+            assert_eq!(
+                read(&db, &run, ordinal),
+                BlobRead::Fresh,
+                "{name}: {ordinal}"
+            );
+        }
+        for ordinal in kept {
+            assert_eq!(
+                read(&db, &run, ordinal),
+                BlobRead::Kept,
+                "{name}: {ordinal}"
+            );
+        }
+    }
+    // A read of the live scope before the prefetch: the load of taxid 9606 may be resolved there.
+    let (db, parsed) = pfworder_db(&cwd, "pslotmix_t5", SeqType::Protein);
+    let run = TaxdbRun::default();
+    run.note_scope_read();
+    prefetch(&db, &run, &parsed).unwrap();
+    assert_eq!(read(&db, &run, 1), BlobRead::Again);
+    assert_eq!(read(&db, &run, 2), BlobRead::Kept);
+    // Until the scope's reset, which a run that keeps its scope does not make.
+    for keeps_scope in [false, true] {
+        let mut lookups = VolumeLookups {
+            keeps_scope,
+            unrecorded_reads: true,
+            ..VolumeLookups::default()
+        };
+        lookups.reset_scope();
+        assert_eq!(lookups.unrecorded_reads, keeps_scope);
+        lookups.offset_slot(0, 0, &by(0), &[150], 99990).unwrap();
+        assert!(lookups.unrecorded_reads);
+    }
+}
+
+/// `released_after` (re-review of item O4b2-10, R2-1): of the loads of a failed prefetch, those that
+/// NCBI's data source releases after one for certain (released, of a smaller key) and at most (not
+/// resolved by the scope, of a key not larger or not known).
+#[test]
+fn the_releases_after_a_load_count_every_load_by_its_key() {
+    use FailedRelease::{Maybe, Released, Scope, Unheld};
+    let load = |ordinal: u32, order: Option<u64>| FailedLoad {
+        ordinal,
+        order,
+        surely: true,
+    };
+    let made = [
+        load(0, Some(5)),
+        load(1, Some(3)),
+        load(2, Some(3)),
+        load(3, Some(7)),
+        load(4, None),
+        load(5, Some(1)),
+        load(6, Some(5)),
+        load(7, Some(2)),
+    ];
+    let releases = [
+        Released, Released, Maybe, Released, Released, Scope, Released, Unheld,
+    ];
+    // Of the key 5: keys 3, 3 and 2 below it (one released for certain), 5 (by address), the
+    // unknown one.
+    assert_eq!(released_after(&made, &releases, 0), (1, 5));
+    // Of an unknown key: every load that the scope does not resolve, none for certain.
+    assert_eq!(released_after(&made, &releases, 4), (0, 6));
+    // Of the key 7: keys 5, 5 and 3 released for certain.
+    assert_eq!(released_after(&made, &releases, 3), (3, 6));
+}
+
 /// Line NP item O4b2-10, review F6: of several lookups of a batch that throw on their ids, the first
 /// in NCBI's map ends the loads (`pslot11_t5` with `gb|FFF00005.1|`, ordinal 7, key 5, made to throw
 /// beside the text tag of key 50): keys 4 to 1 (ordinals 8 to 11) are loaded before it, keys 11 to 6

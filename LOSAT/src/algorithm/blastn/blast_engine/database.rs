@@ -2453,7 +2453,7 @@ pub(super) fn reported_subjects(
     let db = &database.db;
     // The holders whose records the writers write for subjects (`shared::ShownHolders`), and the
     // end of each rank's aligned subject range (`shown_subject_ends`).
-    let holders = shared::ShownHolders::new(db, false, PROGRAM);
+    let holders = shared::ShownHolders::new(db, false, PROGRAM, shown.pairwise);
     let subject_ends = shown_subject_ends(hit_lists, ordinals.len(), &loads);
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles

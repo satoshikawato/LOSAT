@@ -4375,6 +4375,9 @@ pub(crate) struct ShownHolders<'d> {
     db: &'d SeqDb,
     protein: bool,
     program: &'d str,
+    /// Whether a pairwise report (outfmt 0) writes the records: its description line looks the
+    /// title up again by the display id (`ParsedSubject::displays_its_line`).
+    pairwise: bool,
     /// The texts of the taxonomy database's lookups (`LookupTexts`), read at the first holder.
     texts: std::sync::OnceLock<LookupTexts>,
 }
@@ -4386,12 +4389,13 @@ impl<'d> ShownHolders<'d> {
     }
 
     /// The holders of the reported subjects of `db` (`protein` for a protein database) for the
-    /// refusals of `program`.
-    pub(crate) fn new(db: &'d SeqDb, protein: bool, program: &'d str) -> Self {
+    /// refusals of `program`, whose reports include a pairwise one where `pairwise`.
+    pub(crate) fn new(db: &'d SeqDb, protein: bool, program: &'d str, pairwise: bool) -> Self {
         Self {
             db,
             protein,
             program,
+            pairwise,
             texts: std::sync::OnceLock::new(),
         }
     }
@@ -4413,7 +4417,8 @@ impl<'d> ShownHolders<'d> {
     /// a query's scope finds (`seen_by_scope`), a holder shorter than the subject's ranges
     /// (NCBI's rows then end in gaps) or of another length where `exact`, the light `slen`, and
     /// a holder whose own Seq-align id is the subject's in other letter case
-    /// (`differs_in_case_only`).
+    /// (`differs_in_case_only`), and in a pairwise report a holder whose description line is not
+    /// its loaded line (`ParsedSubject::displays_its_line`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shown<'r>(
         &self,
@@ -4499,6 +4504,11 @@ impl<'d> ShownHolders<'d> {
         ) {
             return Err(refuse(
                 "where its Seq-align id differs from this one in letter case only (NCBI takes the two for one handle, whose spelling decides the sequence that its places give)",
+            ));
+        }
+        if self.pairwise && !bioseq.record.displays_its_line() {
+            return Err(refuse(
+                "in a pairwise report where its description line is not the line that NCBI loaded it by (NCBI looks that line's title up again by its display id)",
             ));
         }
         Ok(Some(bioseq))

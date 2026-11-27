@@ -1220,7 +1220,7 @@ pub(crate) fn reported_subjects(
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     let mut sources = Vec::new();
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
-    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
+    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM, shown.pairwise);
     let titled = |ordinal: u32| match titles.get(&ordinal) {
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,

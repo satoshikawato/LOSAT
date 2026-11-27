@@ -1366,7 +1366,7 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
-    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
+    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM, shown.pairwise);
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         // The sequence whose letters and length the reports read: the subject's, or its holder's.
         let mut read_ordinal = ordinal;

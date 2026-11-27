@@ -3213,6 +3213,16 @@ impl ParsedSubject {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:376-394
+    /// Whether the description line of this record shows its target line (the B-line of a
+    /// holder's Bioseq, [`ParsedSubject::shown_by`]): the first line that holds the Seq-align id
+    /// (`GetDisplayIds`), whose title NCBI looks up again by its display id.
+    pub fn displays_its_line(&self) -> bool {
+        self.set
+            .display_defline(&self.alignment_id)
+            .is_some_and(|shown| shown.index == self.target)
+    }
+
     /// The sequence of the database whose Bioseq this record is (`in_database`; the holder of a
     /// record of [`ParsedSubject::shown_by`]), `None` for a `-subject` record: its length is the
     /// subject's `slen` (`report::shown_bioseq`).
@@ -6199,7 +6209,8 @@ impl HitLoads {
             }
             FormatThrow::Unread => None,
         };
-        loads.writes_shown = run.is_some_and(|run| !run.after.is_pairwise());
+        loads.writes_shown =
+            run.is_some_and(|run| !matches!(run.after, AfterThrow::EndsAtAlignment { .. }));
         // The answers of the prefetch of the batch of the reports read last (`ScopeWalk::bulk`).
         let mut batch_answers: std::collections::HashMap<usize, HitLoad> = Default::default();
         let mut loaded = std::collections::HashSet::new();
@@ -6298,7 +6309,7 @@ impl HitLoads {
                         reads,
                         &parsed,
                         (ended, &mut *walk),
-                        (&mut loaded, &mut passed),
+                        (&mut loaded, &mut passed, &mut own),
                     );
                     continue;
                 }
@@ -6636,7 +6647,8 @@ impl HitLoads {
         reads: &PairwiseReads,
         parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
         (ended, walk): (&std::cell::Cell<bool>, &mut ScopeWalk),
-        (loaded, passed): (
+        (loaded, passed, own): (
+            &mut std::collections::HashSet<usize>,
             &mut std::collections::HashSet<usize>,
             &mut std::collections::HashSet<usize>,
         ),
@@ -6650,6 +6662,9 @@ impl HitLoads {
         }
         let first = |hit: usize| reads.hits[hit].first().copied().and_then(parsed);
         let state = std::cell::RefCell::new(vec![None::<Read>; reads.hits.len()]);
+        // The hits whose read threw before a later one gave a sequence: the description line
+        // wrote the thrown record, so no one record is the hit's (`HitLoads::written`).
+        let threw = std::cell::RefCell::new(vec![false; reads.hits.len()]);
         let walk = std::cell::RefCell::new(walk);
         // A read of the hit `hit` where the report reaches it, in the report's order: a hit that
         // threw at a read before is looked up again (a holder may have been loaded since).
@@ -6666,6 +6681,9 @@ impl HitLoads {
                 },
                 None => Read::Loads,
             };
+            if matches!(now, Read::Throws) {
+                threw.borrow_mut()[hit] = true;
+            }
             state[hit] = Some(now);
             now
         };
@@ -6729,9 +6747,18 @@ impl HitLoads {
                 }
                 (Some(Read::Shown(shown)), Some((&first, _))) => {
                     self.shown.insert(first, shown);
+                    self.note_shown(first, shown);
+                    if threw.borrow()[hit] {
+                        own.insert(first);
+                    }
                     loaded.extend(keys);
                 }
-                (Some(Read::Loads), _) => loaded.extend(keys),
+                (Some(Read::Loads), split) => {
+                    if let Some((&first, _)) = split {
+                        own.insert(first);
+                    }
+                    loaded.extend(keys);
+                }
                 _ => passed.extend(keys),
             }
         }

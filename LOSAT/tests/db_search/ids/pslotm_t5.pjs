@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pslotm_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pslotm_t5 (parsed Seq-ids, taxids 99990 and 150)",
+  "number-of-letters": 1560,
+  "number-of-sequences": 13,
+  "last-updated": "2026-11-27T16:06:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 52476,
+  "bytes-to-cache": 1814,
+  "files": [
+    "pslotm_t5.pdb",
+    "pslotm_t5.phr",
+    "pslotm_t5.pin",
+    "pslotm_t5.pog",
+    "pslotm_t5.pos",
+    "pslotm_t5.pot",
+    "pslotm_t5.psq",
+    "pslotm_t5.ptf",
+    "pslotm_t5.pto"
+  ]
+}

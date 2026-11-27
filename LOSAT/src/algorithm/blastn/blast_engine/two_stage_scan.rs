@@ -163,8 +163,10 @@ pub(super) fn scan_two_stage_lookup<N: NegSteps>(
     } = scan;
     // The batch's table, the one its forms (`ScanBatch::forms`) were chosen from and the scan's
     // only source of it. Its callers (`prelim_chunk_hits`, `neg_window::neg_chunk_hits`) call the
-    // scan for a batch with a two-stage table only; a batch without one has nothing to scan here.
+    // scan for a batch with a two-stage table only. A call without one is a caller's error: debug
+    // builds stop at it; a release build returns without hits.
     let Some(two_stage) = scan.two_stage_lookup_ref else {
+        debug_assert!(false, "scan_two_stage_lookup without a two-stage table");
         return;
     };
     let ungapped_hits = &mut *state.ungapped_hits;
@@ -772,6 +774,28 @@ impl<'a> ScanForms<'a> {
     #[inline(always)]
     pub(super) fn scan_kind(&self, subject_masked: bool) -> Option<MbScanSubjectKind> {
         self.kinds[subject_masked as usize]
+    }
+
+    /// Whether these are the forms that `choose` gives for `two_stage`, `lut_word_length` and
+    /// `scan_step`, a CSR head the same form of the same table (by address: its arrays are not
+    /// compared element by element). For the debug checks of the strips of PAIRPAR and
+    /// LOSAT_X_PAIRPARNA (`x_pair_seed::run`, `x_pair_seed::run_na`), whose inputs carry the
+    /// batch's table and step beside the forms chosen from them.
+    pub(super) fn chosen_from(
+        &self,
+        two_stage: Option<&TwoStageLookup>,
+        lut_word_length: usize,
+        scan_step: usize,
+    ) -> bool {
+        let chosen = ScanForms::choose(two_stage, lut_word_length, scan_step);
+        let same_head = match (self.head, chosen.head) {
+            (None, None) => true,
+            (Some(MbCsrHead::PackedOnce(a)), Some(MbCsrHead::PackedOnce(b)))
+            | (Some(MbCsrHead::Packed(a)), Some(MbCsrHead::Packed(b))) => a.x_same(b),
+            (Some(MbCsrHead::Csr(a)), Some(MbCsrHead::Csr(b))) => std::ptr::eq(a, b),
+            _ => false,
+        };
+        same_head && self.rank_once == chosen.rank_once && self.kinds == chosen.kinds
     }
 
     /// No NCBI counterpart: the sides (`LOSAT_X_REACH`) of the forms that a scan of a contiguous

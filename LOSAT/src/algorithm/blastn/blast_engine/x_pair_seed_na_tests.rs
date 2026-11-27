@@ -156,8 +156,10 @@ fn seed_stage_on_strips_equals_one_scan() {
             vec![(0i32, s_len as i32)]
         };
         let diag_offset = 37 + rng.below(1000) as isize;
-        // the batch's forms (`ScanBatch::forms`), chosen as `ScanBatch::new` chooses them
-        let forms = ScanForms::choose(None, word_length, 1);
+        // the batch's forms (`ScanBatch::forms`), chosen as `ScanBatch::new` chooses them, from
+        // the inputs' word length and step
+        let scan_step = 1;
+        let forms = ScanForms::choose(None, word_length, scan_step);
         let x = NaInputs {
             pv_direct_lookup: Some(&lookup),
             na_lookup: None,
@@ -168,7 +170,7 @@ fn seed_stage_on_strips_equals_one_scan() {
             s_len,
             subject_seq_ranges: &seq_ranges,
             subject_masked: masked,
-            scan_step: 1,
+            scan_step,
             query_context_index: &index,
             query_contexts: &contexts,
             encoded_query_concat_blastna: &concat,
@@ -200,10 +202,10 @@ fn seed_stage_on_strips_equals_one_scan() {
             s_len,
             word_length,
             word_length,
-            1,
+            scan_step,
             &seq_ranges,
             masked,
-            select_mb_scan_kind(word_length, 1, masked),
+            select_mb_scan_kind(word_length, scan_step, masked),
             |kmer_start, s_range, kmer| {
                 for &q_off_1 in x.hits(kmer) {
                     if q_off_1 == 0 {

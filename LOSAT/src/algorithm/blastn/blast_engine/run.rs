@@ -2360,7 +2360,7 @@ fn scan_subject_kmers_range_mb_11_3mod4<F>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1635-1676
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum MbScanSubjectKind {
     Any,
     Scan9_1,

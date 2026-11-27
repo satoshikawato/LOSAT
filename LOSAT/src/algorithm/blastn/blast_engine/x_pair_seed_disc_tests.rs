@@ -6,7 +6,7 @@ use super::super::super::scan_subject_disc_words_with_ranges;
 use super::super::super::two_stage_scan::ScanForms;
 use super::super::super::{
     build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-    diag_hash_insert_window, QueryContext, QueryContextIndex,
+    diag_hash_insert_window, select_mb_scan_kind, QueryContext, QueryContextIndex,
 };
 use super::*;
 use crate::algorithm::blastn::disc_lookup::DiscWordType;
@@ -264,24 +264,26 @@ fn ctx_refs(c: &Case) -> Vec<&[u8]> {
     c.ctx_seqs.iter().map(Vec::as_slice).collect()
 }
 
-/// The batch's forms (`ScanBatch::forms`) of these cases, which the discontiguous stages do not
-/// read: a discontiguous table has no CSR head (`ScanForms::choose` gives it none) and its scans
-/// take no megablast scanner (these are for a lookup word of 11 letters at step 1). The one
-/// contiguous table of these cases is refused before any scan (a window above 0).
-fn disc_forms() -> &'static ScanForms<'static> {
-    static FORMS: std::sync::OnceLock<ScanForms<'static>> = std::sync::OnceLock::new();
-    FORMS.get_or_init(|| ScanForms::choose(None, 11, 1))
+/// The batch's forms (`ScanBatch::forms`) of a case's table `lookup`, chosen as `ScanBatch::new`
+/// chooses them: from the table, its lookup word length and the scan step of `inputs` (1). The
+/// discontiguous stages do not read them (a discontiguous table has no CSR head, and its scans
+/// take their scanners from its templates); the parent's `run` checks them against the table in
+/// debug builds (`ScanForms::chosen_from`).
+fn forms_of(lookup: &TwoStageLookup) -> ScanForms<'_> {
+    ScanForms::choose(Some(lookup), lookup.lut_word_length(), 1)
 }
 
+/// The inputs of a chunk of case `c` with the table `lookup` and its forms `forms` (`forms_of`).
 fn inputs<'a>(
     c: &'a Case,
     lookup: &'a TwoStageLookup,
+    forms: &'a ScanForms<'a>,
     diag_offset: isize,
     window_size: usize,
 ) -> Inputs<'a> {
     Inputs {
         two_stage: lookup,
-        forms: disc_forms(),
+        forms,
         search_seq_packed: &c.packed,
         s_len: c.s_len,
         subject_seq_ranges: &c.seq_ranges,
@@ -353,11 +355,12 @@ fn disc_two_hit_stage_on_strips_equals_one_scan() {
                     &c.masks,
                     c.concat.len(),
                 );
+                let forms = forms_of(&lookup);
                 let disc = lookup.disc().expect("a discontiguous table");
                 assert_eq!(lookup.word_length(), template_length);
                 let diag_offset = 37 + rng.below(1000) as isize;
                 let window_size = 40;
-                let x = inputs(&c, &lookup, diag_offset, window_size);
+                let x = inputs(&c, &lookup, &forms, diag_offset, window_size);
                 assert!(in_scope(&x));
                 let new_hash = || {
                     let mut h = DiagHashTable::new(window_size as i32);
@@ -765,12 +768,13 @@ fn disc_two_hit_array_stage_on_strips_equals_one_scan() {
                     &c.masks,
                     c.concat.len(),
                 );
+                let forms = forms_of(&lookup);
                 let disc = lookup.disc().expect("a discontiguous table");
                 let diag_offset = 37 + rng.below(1000) as isize;
                 let window_size = 40;
                 let x = Inputs {
                     use_array_indexing: true,
-                    ..inputs(&c, &lookup, diag_offset, window_size)
+                    ..inputs(&c, &lookup, &forms, diag_offset, window_size)
                 };
                 assert!(in_scope_array(&x) && !in_scope(&x));
                 let mut length = 1usize;
@@ -913,32 +917,33 @@ fn scope_is_the_two_hit_discontiguous_stage() {
         &c.masks,
         c.concat.len(),
     );
-    let x = inputs(&c, &disc, 40, 40);
+    let disc_forms = forms_of(&disc);
+    let x = inputs(&c, &disc, &disc_forms, 40, 40);
     assert!(in_scope(&x));
     assert!(!in_scope(&Inputs {
         window_size: 0,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     assert!(!in_scope(&Inputs {
         use_array_indexing: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     assert!(!in_scope(&Inputs {
         scan_range: 1,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     // a masked subject is scanned in its ranges by the stage (the stage tests compare both)
     assert!(in_scope(&Inputs {
         subject_masked: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     assert!(!in_scope(&Inputs {
         diagnostics: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     assert!(!in_scope(&Inputs {
         one_subject_owner: false,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     }));
     let contiguous = build_two_stage_lookup(
         &ctx_refs(&c),
@@ -951,7 +956,14 @@ fn scope_is_the_two_hit_discontiguous_stage() {
         c.concat.len(),
         false,
     );
-    assert!(!in_scope(&inputs(&c, &contiguous, 40, 40)));
+    let contiguous_forms = forms_of(&contiguous);
+    assert!(!in_scope(&inputs(
+        &c,
+        &contiguous,
+        &contiguous_forms,
+        40,
+        40
+    )));
     // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the same scope with the diagonal array.
     fn array(x: Inputs<'_>) -> Inputs<'_> {
         Inputs {
@@ -959,33 +971,45 @@ fn scope_is_the_two_hit_discontiguous_stage() {
             ..x
         }
     }
-    assert!(in_scope_array(&array(inputs(&c, &disc, 40, 40))));
-    assert!(!in_scope_array(&inputs(&c, &disc, 40, 40)));
+    assert!(in_scope_array(&array(inputs(
+        &c,
+        &disc,
+        &disc_forms,
+        40,
+        40
+    ))));
+    assert!(!in_scope_array(&inputs(&c, &disc, &disc_forms, 40, 40)));
     assert!(!in_scope_array(&array(Inputs {
         window_size: 0,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
     assert!(!in_scope_array(&array(Inputs {
         scan_range: 1,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
     assert!(in_scope_array(&array(Inputs {
         subject_masked: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
     assert!(!in_scope_array(&array(Inputs {
         small_na_word: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
     assert!(!in_scope_array(&array(Inputs {
         diagnostics: true,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
     assert!(!in_scope_array(&array(Inputs {
         one_subject_owner: false,
-        ..inputs(&c, &disc, 40, 40)
+        ..inputs(&c, &disc, &disc_forms, 40, 40)
     })));
-    assert!(!in_scope_array(&array(inputs(&c, &contiguous, 40, 40))));
+    assert!(!in_scope_array(&array(inputs(
+        &c,
+        &contiguous,
+        &contiguous_forms,
+        40,
+        40
+    ))));
     // The parent's `run` in a pool of two threads (where its one-hit stage would run):
     // a contiguous table with a window is refused and nothing is touched.
     #[cfg(all(
@@ -1000,7 +1024,7 @@ fn scope_is_the_two_hit_discontiguous_stage() {
         pool.install(|| {
             let mut hash = DiagHashTable::new(40);
             let mut hits = Vec::new();
-            let x = inputs(&c, &contiguous, 40, 40);
+            let x = inputs(&c, &contiguous, &contiguous_forms, 40, 40);
             let mut fold_scratch = PartScratch::default();
             let (mut levels, mut lens) = (Vec::new(), Vec::new());
             assert!(!super::super::run(
@@ -1020,6 +1044,127 @@ fn scope_is_the_two_hit_discontiguous_stage() {
             assert_eq!(hash.occupancy, 1);
         });
     }
+}
+
+// `ScanForms::choose`, the one place that chooses a batch's forms (`ScanBatch::forms`): a
+// discontiguous table gets no CSR head and no ranked runs (its scans take their forms from its
+// templates), and the megablast scanners of an unmasked and a masked chunk are those of
+// `select_mb_scan_kind` for the lookup word length and the scan step, with a table or without.
+// `chosen_from` holds for what `choose` was given, and not for another step whose scanners differ
+// or another table with a CSR head, even one of the same content.
+#[test]
+fn choose_gives_the_forms_of_the_table_width_and_step() {
+    let mut rng = Lcg(0xF04A5);
+    let c = make_case(&mut rng, 2_000);
+    for (word_size, template_length, word_type) in [
+        (11, 16, DiscWordType::Coding),
+        (12, 21, DiscWordType::Optimal),
+        (11, 18, DiscWordType::TwoTemplates),
+    ] {
+        let disc = build_disc_mb_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            word_size,
+            template_length,
+            word_type,
+            &c.masks,
+            c.concat.len(),
+        );
+        let lut = disc.lut_word_length();
+        for step in 1..=4 {
+            let at = format!("disc {word_size}/{template_length} step {step}");
+            let forms = ScanForms::choose(Some(&disc), lut, step);
+            assert!(forms.head.is_none(), "{at}");
+            assert!(!forms.rank_once, "{at}");
+            for masked in [false, true] {
+                assert_eq!(
+                    forms.scan_kind(masked),
+                    select_mb_scan_kind(lut, step, masked),
+                    "{at} masked {masked}"
+                );
+            }
+            assert!(forms.chosen_from(Some(&disc), lut, step), "{at}");
+        }
+    }
+    for lut in 7..=13 {
+        for step in 1..=5 {
+            let at = format!("no table, lookup width {lut} step {step}");
+            let forms = ScanForms::choose(None, lut, step);
+            assert!(forms.head.is_none(), "{at}");
+            assert!(!forms.rank_once, "{at}");
+            for masked in [false, true] {
+                assert_eq!(
+                    forms.scan_kind(masked),
+                    select_mb_scan_kind(lut, step, masked),
+                    "{at} masked {masked}"
+                );
+            }
+            assert!(forms.chosen_from(None, lut, step), "{at}");
+        }
+    }
+    // lookup width 11: steps 1 and 2 take different scanners
+    let build = || {
+        build_two_stage_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            28,
+            11,
+            &c.masks,
+            None,
+            0,
+            c.concat.len(),
+            false,
+        )
+    };
+    let (contiguous, same_content) = (build(), build());
+    let forms = forms_of(&contiguous);
+    assert!(forms.chosen_from(Some(&contiguous), 11, 1));
+    assert!(!forms.chosen_from(Some(&contiguous), 11, 2));
+    assert_eq!(forms.head.is_some(), contiguous.x_mb_csr().is_some());
+    if forms.head.is_some() {
+        assert!(!forms.chosen_from(Some(&same_content), 11, 1));
+    }
+}
+
+// The parent's `run` checks in debug builds that its inputs' forms were chosen from their table
+// and scan step (`ScanForms::chosen_from`): forms of another step stop it before any scan.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "forms not chosen from the inputs' table and scan step")]
+fn run_stops_at_forms_of_another_step() {
+    let mut rng = Lcg(0x5C09E);
+    let c = make_case(&mut rng, 2_000);
+    let contiguous = build_two_stage_lookup(
+        &ctx_refs(&c),
+        &c.offsets,
+        28,
+        11,
+        &c.masks,
+        None,
+        0,
+        c.concat.len(),
+        false,
+    );
+    let forms = forms_of(&contiguous);
+    let x = Inputs {
+        scan_step: 2,
+        ..inputs(&c, &contiguous, &forms, 0, 0)
+    };
+    let mut hash = DiagHashTable::new(0);
+    let (mut levels, mut lens) = (Vec::new(), Vec::new());
+    super::super::run(
+        &x,
+        &mut hash,
+        DiagArray {
+            levels: &mut levels,
+            lens: &mut lens,
+            length: 0,
+            mask: 0,
+            size: 0,
+        },
+        &mut Vec::new(),
+        &mut PartScratch::default(),
+    );
 }
 
 /// EXPERIMENT (LOSAT_X_DCLATEST): a fold's table that logs what the fold reads and writes: per
@@ -1292,11 +1437,12 @@ fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
                     &c.masks,
                     c.concat.len(),
                 );
+                let forms = forms_of(&lookup);
                 let wl = template_length;
                 let diag_offset = 37 + rng.below(1000) as isize;
-                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, diag_offset, 40));
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, &forms, diag_offset, 40));
                 for w in latest_windows(wl) {
-                    let x = inputs(&c, &lookup, diag_offset, w);
+                    let x = inputs(&c, &lookup, &forms, diag_offset, w);
                     let lv = super::super::super::x_diag_lv::LvSeeds::new(true, wl, w);
                     for ncbi in [true, false] {
                         let at = format!("case {case_no} wl {wl} w {w} ncbi {ncbi}");
@@ -1428,13 +1574,14 @@ fn disc_two_hit_stage_on_maps_gives_the_hits_of_the_chains() {
                     &c.masks,
                     c.concat.len(),
                 );
+                let forms = forms_of(&lookup);
                 let disc = lookup.disc().expect("a discontiguous table");
                 let wl = template_length;
-                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, &forms, 40, 40));
                 let mut windows = vec![1 + case_no % 6, wl - 1, wl + 1, 40, 64];
                 windows.dedup();
                 for w in windows {
-                    let x0 = inputs(&c, &lookup, w as isize, w);
+                    let x0 = inputs(&c, &lookup, &forms, w as isize, w);
                     // the reference: the chunks' offsets, hits and rejected seeds
                     let mut hash = plain_table(w, w as i32);
                     let mut offsets = Vec::new();
@@ -1580,10 +1727,11 @@ fn a_chunk_whose_ranges_step_back_goes_to_the_chains() {
             &c.masks,
             c.concat.len(),
         );
+        let forms = forms_of(&lookup);
         let tl = template_length as i32;
         let sorted = c.seq_ranges.clone();
         // two neighbouring ranges with seeds, both long enough to scan
-        let sorted_seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+        let sorted_seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, &forms, 40, 40));
         let seeded = |(left, right): (i32, i32)| {
             right - left > 2 * tl
                 && sorted_seeds
@@ -1636,7 +1784,7 @@ fn a_chunk_whose_ranges_step_back_goes_to_the_chains() {
             c.seq_ranges = ranges;
             c.masked = masked;
             let diag_offset = 37 + rng.below(1000) as isize;
-            let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, diag_offset, 40));
+            let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, &forms, diag_offset, 40));
             // S steps back only where the ranges do (and does, with the seeds of these sequences,
             // where whole ranges come out of order)
             let seeds_back = seeds.windows(2).any(|p| p[1].s < p[0].s);
@@ -1649,7 +1797,7 @@ fn a_chunk_whose_ranges_step_back_goes_to_the_chains() {
             }
             for w in [template_length + 1, 40] {
                 let at = format!("case {case_no} {name} w {w}");
-                let x = inputs(&c, &lookup, diag_offset, w);
+                let x = inputs(&c, &lookup, &forms, diag_offset, w);
                 let lv = super::super::super::x_diag_lv::LvSeeds::new(true, template_length, w);
                 assert_eq!(
                     latest_ranges_ascend(&x, template_length),
@@ -2106,13 +2254,14 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map() {
                     &c.masks,
                     c.concat.len(),
                 );
+                let forms = forms_of(&lookup);
                 let wl = template_length;
-                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, &forms, 40, 40));
                 let mut windows = vec![1 + case_no % 6, wl + 1, 40];
                 windows.dedup();
                 for w in windows {
                     let at = format!("case {case_no} wl {wl} w {w}");
-                    let x0 = inputs(&c, &lookup, 0, w);
+                    let x0 = inputs(&c, &lookup, &forms, 0, w);
                     let offsets = stage_offsets(37 + rng.below(1000) as i32, w, c.s_len, 3);
                     let got = reg_agrees_in_every_instance(&x0, &seeds, &offsets, &mut rng, &at);
                     if w == 40 {
@@ -2241,6 +2390,7 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges() {
             &c.masks,
             c.concat.len(),
         );
+        let forms = forms_of(&lookup);
         let wl = template_length;
         // the diagonals whose home is one bucket while the map has up to 2^7 buckets
         let top = |d: i32| (d as u32).wrapping_mul(0x9E37_79B1) >> 25;
@@ -2252,7 +2402,7 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges() {
         let seeds = edge_seeds(&mut rng, &c, wl, &crowd, 60_000);
         for w in [1 + case_no % 6, wl - 1, wl + 1, 40, 64] {
             let at = format!("edge case {case_no} wl {wl} w {w}");
-            let x0 = inputs(&c, &lookup, 0, w);
+            let x0 = inputs(&c, &lookup, &forms, 0, w);
             // the hash offset starts at the window and returns to it at the clear (`latest_bound`),
             // so a stage's offset is never below it (below it, at w 64, the chunk has no bounds)
             let first = (37 + rng.below(1000) as i32).max(w as i32);
@@ -2470,6 +2620,7 @@ fn the_hoisted_emit_gives_the_seeds_of_seed_of_pair() {
             &c.masks,
             c.concat.len(),
         );
+        let scan_forms = forms_of(&lookup);
         let word = lookup.word_length();
         assert_eq!(word, template_length);
         for round in 0..60 {
@@ -2483,7 +2634,7 @@ fn the_hoisted_emit_gives_the_seeds_of_seed_of_pair() {
             let x = Inputs {
                 query_context_index: &index,
                 query_contexts: &contexts,
-                ..inputs(&c, &lookup, 0, 40)
+                ..inputs(&c, &lookup, &scan_forms, 0, 40)
             };
             let view = index.x_view();
             let total = contexts
@@ -2667,6 +2818,7 @@ fn the_hoisted_csr_scan_gives_the_seeds_and_stops_of_the_csr_scan() {
             &c.masks,
             c.concat.len(),
         );
+        let forms = forms_of(&lookup);
         let disc = lookup.disc().expect("a discontiguous table");
         let Some(csr) = disc.x_csr() else {
             assert_eq!(
@@ -2690,7 +2842,7 @@ fn the_hoisted_csr_scan_gives_the_seeds_and_stops_of_the_csr_scan() {
                     subject_masked: masked,
                     query_context_index: &index,
                     query_contexts: contexts,
-                    ..inputs(&c, &lookup, 0, 40)
+                    ..inputs(&c, &lookup, &forms, 0, 40)
                 };
                 for strips in [1usize, 5, 33] {
                     let jobs = plan_strips(

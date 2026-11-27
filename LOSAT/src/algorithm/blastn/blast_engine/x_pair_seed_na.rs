@@ -82,7 +82,9 @@ static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 /// borrowed from `prelim_subject::prelim_chunk_hits` (the same names as there; `word_length` is
 /// its `safe_k`, the word length and the lookup word length of these tables; `forms` is the batch's
 /// word finder's forms, `ScanBatch::forms`, whose scanner the strips read instead of choosing it
-/// again; `recording`: the run records the switches' sides, `ScanBatch::x_recording`).
+/// again, chosen from `word_length` and `scan_step` (`run` checks the pair in debug builds,
+/// `ScanForms::chosen_from`); `recording`: the run records the switches' sides,
+/// `ScanBatch::x_recording`).
 pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) pv_direct_lookup: Option<&'a PvDirectLookup>,
     pub(in super::super) na_lookup: Option<&'a NaLookupTable>,
@@ -671,6 +673,12 @@ pub(in super::super) fn run(
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
+    // The batch's lookup word length and step and the forms chosen from them travel apart in
+    // `NaInputs`; debug builds check that they are a pair (these tables are not two-stage).
+    debug_assert!(
+        x.forms.chosen_from(None, x.word_length, x.scan_step),
+        "x_pair_seed::run_na: forms not chosen from the inputs' word length and scan step"
+    );
     if !on() {
         return false;
     }

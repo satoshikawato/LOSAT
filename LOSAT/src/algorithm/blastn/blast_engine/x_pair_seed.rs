@@ -99,8 +99,10 @@ static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 /// The inputs of the seed stage of one subject chunk, borrowed from
 /// `prelim_subject::prelim_chunk_hits` (the same names as there; `two_stage` and `forms` are the
 /// batch's table and the word finder's forms chosen once from it, `ScanBatch::two_stage_lookup_ref`
-/// and `ScanBatch::forms`, which the strips read instead of choosing them again; `recording`:
-/// the run records the switches' sides, `ScanBatch::x_recording`).
+/// and `ScanBatch::forms`, which the strips read instead of choosing them again, with `scan_step`
+/// the batch's; `run` checks in debug builds that `forms` were chosen from `two_stage` and
+/// `scan_step`, `ScanForms::chosen_from`; `recording`: the run records the switches' sides,
+/// `ScanBatch::x_recording`).
 pub(super) struct Inputs<'a> {
     pub(super) two_stage: &'a TwoStageLookup,
     pub(super) forms: &'a ScanForms<'a>,
@@ -432,9 +434,9 @@ fn chunk_free_scope(
 }
 
 /// No NCBI counterpart (scheduling only): the test of `run` for a chunk with a contiguous table
-/// (the names of `Inputs`): `chunk_free_scope` and a chunk the subject's owner searches by
-/// itself. `run` reads it; `wants` reads its parts (the batch's `owner_scope` and the chunk's
-/// `one_subject_owner`).
+/// (the names of `Inputs`): the batch's part (`owner_scope`) and a chunk the subject's owner
+/// searches by itself. `run` reads it; `wants` reads its parts (the batch's `owner_scope`, taken
+/// once per batch, and the chunk's `one_subject_owner`).
 #[inline(always)]
 fn owner_chunk(
     use_array_indexing: bool,
@@ -444,8 +446,7 @@ fn owner_chunk(
     diagnostics: bool,
     one_subject_owner: bool,
 ) -> bool {
-    chunk_free_scope(
-        false,
+    owner_scope(
         use_array_indexing,
         window_size,
         scan_range,
@@ -457,7 +458,7 @@ fn owner_chunk(
 /// No NCBI counterpart (scheduling only): the part of `run`'s test of a chunk with a contiguous
 /// table that is the same for every chunk and thread of a batch (`chunk_free_scope`, the names of
 /// `Inputs`), taken once per batch (`prelim_subject::ScanBatch::new`, its `x_pair_scope`) for
-/// `wants`.
+/// `wants`, and the one spelling of that part, which `owner_chunk` reads too.
 pub(super) fn owner_scope(
     use_array_indexing: bool,
     window_size: usize,
@@ -1757,6 +1758,16 @@ pub(super) fn run(
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
+    // The batch's table and step and the forms chosen from them travel apart in `Inputs`; debug
+    // builds check that they are a pair (the strips read both).
+    debug_assert!(
+        x.forms.chosen_from(
+            Some(x.two_stage),
+            x.two_stage.lut_word_length(),
+            x.scan_step
+        ),
+        "x_pair_seed::run: forms not chosen from the inputs' table and scan step"
+    );
     // A discontiguous megablast table: LOSAT_X_PAIRPARDISC (the diagonal hash) or
     // LOSAT_X_PAIRPARDISCARR (the diagonal array) decide.
     if x.two_stage.disc().is_some() {

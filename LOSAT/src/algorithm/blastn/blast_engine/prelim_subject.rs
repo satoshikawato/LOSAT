@@ -875,8 +875,14 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
 /// batch's forms, cachegrind, line FM s6). Inline for the chunks with a discontiguous table only,
 /// the loads and stores of about 30 of those values stayed at the start of every chunk, also of
 /// the chunks with a contiguous table, which never read them (line FM s7, the disassembly of
-/// `prelim_chunk_hits`); out of line, a chunk with a discontiguous table adds the call, small
-/// beside its strips stage. No NCBI counterpart (scheduling only).
+/// `prelim_chunk_hits`). Out of line, every chunk with a discontiguous table makes the call. dev
+/// built the same inputs inline for such a chunk and called `x_pair_seed::run`; with dc-megablast
+/// against a database on one thread a chunk now runs fewer instructions than on dev
+/// (`prelim_chunk_hits` and this function 538.5 per chunk, dev's `prelim_chunk_hits` and `run`
+/// 607.9; callgrind, line FM s7). On two threads or more a database search of several subjects
+/// searches them in parallel, so no chunk is searched by its subject's owner alone and
+/// `disc::run` sends each chunk back at once; that path was not measured, and it builds the same
+/// inputs and makes one call, as on dev. No NCBI counterpart (scheduling only).
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn pair_par_chunk(
@@ -894,8 +900,10 @@ fn pair_par_chunk(
     x_pair_fold: &mut x_pair_seed::PartScratch,
 ) -> bool {
     // The batch's table, the one its forms were chosen from and the strips' only source of it
-    // (`prelim_chunk_hits` comes here for a batch with one only).
+    // (`prelim_chunk_hits` comes here for a batch with one only; a call without one is a caller's
+    // error: debug builds stop at it, a release build returns without hits).
     let Some(two_stage) = scan.two_stage_lookup_ref else {
+        debug_assert!(false, "pair_par_chunk without a two-stage table");
         return false;
     };
     let use_array_indexing = scan.use_array_indexing;

@@ -390,6 +390,16 @@ impl<'a> XPacked<'a> {
     pub(crate) fn run_at(self, r: usize) -> &'a [u32] {
         &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize]
     }
+
+    /// Whether `other` reads the same head: the same arrays (by address, not element by element)
+    /// and the same form of the counts. For the debug checks that a scan's head is its table's
+    /// (`two_stage_scan::ScanForms::chosen_from`).
+    pub(crate) fn x_same(self, other: Self) -> bool {
+        std::ptr::eq(self.bits, other.bits)
+            && std::ptr::eq(self.offsets, other.offsets)
+            && std::ptr::eq(self.qs, other.qs)
+            && self.pop == other.pop
+    }
 }
 
 impl XHead for XPacked<'_> {

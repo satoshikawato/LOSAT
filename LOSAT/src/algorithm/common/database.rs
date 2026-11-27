@@ -466,11 +466,12 @@ pub(crate) fn setup_count_refused(setup_total: i64, setup_count: i32, gumbel: bo
 
 /// LOSAT's refusal of `setup_count_refused` for `program`, which each program makes where NCBI's
 /// setup meets the division: in the setup of the first query batch (or query chunk, RPS unit or
-/// PSI-BLAST round) with a valid context. BLASTN, TBLASTX, TBLASTN and RPSTBLASTN write the
-/// reports of the batches before it (NCBI's output before its crash in the tabular formats; in the
-/// others the crash cuts NCBI's buffered output short), BLASTP, PSI-BLAST and RPSBLAST refuse
-/// before any output. A run whose queries are all invalid is reported as NCBI reports it (exit 0;
-/// D1a-5 of line RG, DECISIONS D1a4-12).
+/// PSI-BLAST round) with a valid context. BLASTN, TBLASTX, TBLASTN, RPSTBLASTN, BLASTP and
+/// RPSBLAST write the reports of the batches before it (NCBI's output before its crash in the
+/// tabular formats; in the others the crash cuts NCBI's buffered output short; BLASTP and RPSBLAST
+/// since line RG item bp-SF1, `blastp::blast_engine::split_steps::batch_failure`), PSI-BLAST, which
+/// searches one query per batch, at the round of its query. A run whose queries are all invalid is
+/// reported as NCBI reports it (exit 0; D1a-5 of line RG, DECISIONS D1a4-12).
 pub(crate) fn check_setup_count(
     setup_total: i64,
     setup_count: i32,

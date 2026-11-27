@@ -76,6 +76,7 @@ pub(super) struct KappaResultList {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3125-3135,
 // 3243-3297,3420-3437:
 #[allow(dead_code)] // The public TBLASTN result path remains gated until C/D/E pass.
+#[derive(Clone)]
 pub(super) struct KappaResultHitList {
     lists: Vec<KappaResultList>,
     max: usize,

@@ -961,18 +961,18 @@ fn a_lookup_of_a_null_mapped_record_fails_its_batch_after_the_reports_before() {
     assert!(!other.is::<ErrorAfterBatchReports>());
     assert_eq!(other.to_string(), "another error");
     // A title made from the source that such a lookup names (`SourceTaxname::NullMapped`): NCBI
-    // crashes at the sequence's load, so the refusal, in the words of the title's refusal, fails
-    // the batch that shows it (TBLASTN's `title_stop`, through `batch_loads_failure`).
-    use crate::report::defline::{SourceTaxname, NULL_MAPPED_SOURCE};
+    // crashes at the sequence's load, before any title is made, so the refusal is the load's, in
+    // its words, and fails the batch that shows the title (TBLASTN's `title_stop`, through
+    // `batch_loads_failure`; line DBID rf-1 review 1 M1).
+    use crate::report::defline::{NullMappedLookup, SourceTaxname};
     let oid = crate::seqdb::Oid::of_unrestricted(3);
-    let title = source_name(&SourceTaxname::NullMapped, || oid, "TBLASTN").unwrap_err();
-    assert_eq!(
-        format!("{title:#}"),
-        format!(
-            "database sequence {oid} has {NULL_MAPPED_SOURCE}; this is not supported by LOSAT's \
-             TBLASTN"
-        )
-    );
+    let lookup = NullMappedLookup {
+        path: path.as_path().into(),
+        message: message.into(),
+    };
+    let null_mapped = SourceTaxname::NullMapped(lookup);
+    let title = source_name(&null_mapped, || oid, "TBLASTN").unwrap_err();
+    assert_eq!(format!("{title:#}"), words);
     let (span, failure) = batch_loads_failure(2..4, title).expect("the failure of the batch");
     assert_eq!(span, 2..4);
     assert!(TaxonomyRefusal::fails_its_batch(&failure));
@@ -981,6 +981,67 @@ fn a_lookup_of_a_null_mapped_record_fails_its_batch_after_the_reports_before() {
     let past = source_name(&SourceTaxname::Refused("a record"), || oid, "TBLASTN").unwrap_err();
     let past = batch_loads_failure(2..4, past).expect_err("not a failure of the batch");
     assert!(!past.is::<TaxonomyRefusal>(), "{past:#}");
+}
+
+/// Line DBID rf-2: the same title of a sequence with parsed Seq-ids (an empty title with taxid
+/// 9606, as `tests/db_search/multidb/rf2n`), which outfmt 0 to 4 make from its source: the pairwise
+/// check refuses it with the refusal of the sequence's load, in the words of a sequence without
+/// parsed Seq-ids, as a failure of the batch that shows it (`null_mapped_refusal`); a source that
+/// LOSAT refuses for another reason stays a `ParsedRefusal`, which comes before the run's first
+/// byte, and a load that throws shows no title (NCBI loads nothing, so it does not crash).
+#[test]
+fn a_parsed_title_made_from_a_null_mapped_source_fails_its_batch() {
+    use crate::report::db_subject::{HitLoad, ParsedSubject};
+    use crate::report::defline::{NullMappedLookup, SourceTaxname};
+    use crate::seqid::defline_set::{BlastDefline, DeflineSet};
+    let subject = |source: SourceTaxname| {
+        let id = crate::seqid::model::ParsedSeqId::Other(crate::seqid::model::TextseqId {
+            accession: Some(b"XM_820003".to_vec()),
+            version: Some(1),
+            ..Default::default()
+        });
+        let defline = BlastDefline {
+            title: Some(Vec::new()),
+            ids: vec![id],
+            taxid: Some(9606),
+            ..BlastDefline::default()
+        };
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![defline],
+            utf8: false,
+        })
+        .unwrap()
+        .with_source(false, |taxid| {
+            assert_eq!(taxid, 9606);
+            source
+        })
+    };
+    let oid = crate::seqdb::Oid::of_unrestricted(0);
+    let check = |source, load| {
+        check_pairwise_parsed(&subject(source), load, false, false, || oid, "TBLASTN")
+    };
+    let error = SeqDbError::TaxdbNullMap {
+        path: "/d/taxdb.btd".into(),
+        message: "the taxonomy record of taxid 9606 (bytes 0..9) reaches past the mapped end"
+            .to_owned(),
+    };
+    let null_mapped = SourceTaxname::NullMapped(NullMappedLookup {
+        path: std::path::Path::new("/d/taxdb.btd").into(),
+        message: "the taxonomy record of taxid 9606 (bytes 0..9) reaches past the mapped end"
+            .into(),
+    });
+    let crash = check(null_mapped.clone(), HitLoad::Loaded).unwrap_err();
+    assert!(TaxonomyRefusal::fails_its_batch(&crash));
+    let stored = source_name(&null_mapped, || oid, "TBLASTN").unwrap_err();
+    assert_eq!(format!("{crash:#}"), format!("{stored:#}"));
+    let load = taxdb_error(error, "TBLASTN");
+    assert_eq!(format!("{crash:#}"), format!("{load:#}"));
+    let (span, failure) = batch_loads_failure(1..2, crash).expect("the failure of the batch");
+    assert_eq!(span, 1..2);
+    assert!(TaxonomyRefusal::fails_its_batch(&failure));
+    let refused = check(SourceTaxname::Refused("a record"), HitLoad::Loaded).unwrap_err();
+    assert!(refused.is::<ParsedRefusal>(), "{refused:#}");
+    assert!(check(null_mapped, HitLoad::Throws).is_ok());
 }
 
 // RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every

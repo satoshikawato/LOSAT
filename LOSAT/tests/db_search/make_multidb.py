@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds tests/db_search/multidb/: the databases of the rows db.mdb.* (DI-8f: -db with several names).
 
-Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only | --pfoff3-only | --rf1-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
+Usage: make_multidb.py [--ordsl-only | --mixdb2-only | --mixtax-only | --mixsfx-only | --loadord-only | --loadord2-only | --loadord3-only | --loadord4-only | --loadord5-only | --loadord6-only | --loadord7-only | --v4late-only | --pfoff-only | --pfoff2-only | --pfoff3-only | --rf1-only | --rf2-only] MAKEBLASTDB   (writes multidb/*.fa, multidb/*.map and the databases below)
 
 The records are those of taxfilter/tfp.faa (23 protein globins) and taxfilter/tfn.fna (16 globin cDNAs); the definition
 lines (some records carry a second one) stay as they are, the taxids come from taxfilter/tfp.map and tfn.map.
@@ -170,6 +170,14 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   those of `q0_nohit` or `pfo_r`). `rf1_q0t.faa` holds `q0_nohit`, then `taxfilter/q.faa`'s P69905, whose report shows
   taxfilter's `tfe_nr` OID 3 (an empty stored title, taxid 9606: NCBI makes the title from the name of the taxid, and
   crashes at the sequence's load). `make_multidb.py --rf1-only MAKEBLASTDB` builds only these.
+- `rf2p`, `rf2n` and the query `rf2_q0t.fna` (line DBID rf-2, 2026-11-28; the rows db.rf2.*): one sequence each with parsed
+  Seq-ids and an empty title (`ref|XP_820003.1|`, `ref|XM_820003.1|`; the letters of taxfilter's `tfe.faa` and `tfe.fna`
+  record 3), `-parse_seqids -taxid 9606`, so that NCBI makes the title from the name of the taxid (with
+  `BLASTDB=btd_empty` it crashes at the sequence's load); `rf2_q0t.fna` holds `rf1_q0.fna`'s `q0_nohit`, then
+  `taxfilter/q.fna`'s HBA1 cDNA, which hits both (as `rf1_q0t.faa`'s P69905 does). `make_multidb.py --rf2-only
+  MAKEBLASTDB` builds only these, and the queries `rf1_rps.faa` and `rf1_rps.fna` (line DBID rf-1 review 1 L3; rpsblast's
+  and rpstblastn's rows db.rf1.rps.*, db.rf1.rpst.*): `q0_nohit`, then `../../fasta/rps/q649.faa`'s YP_009220649.1
+  (back-translated in the `.fna`), which hits a profile of each volume of the taxid copy of `rps_mini3v`.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -806,6 +814,42 @@ def write_rf1_title(write, q0):
     write("rf1_q0t.faa", [q0, (header.rstrip("\n"), "".join(line.strip() for line in lines))])
 
 
+def make_rf2(binary):
+    """Builds rf2p and rf2n and writes rf2_q0t.fna (line DBID rf-2)."""
+    for name, dbtype, path, header in (("rf2p", "prot", "tfe.faa", ">ref|XP_820003.1|"),
+                                       ("rf2n", "nucl", "tfe.fna", ">ref|XM_820003.1|")):
+        letters = "".join(line.strip() for line in read_fasta(path)[3][1])
+        with open(os.path.join(HERE, name + ".fa"), "w") as f:
+            f.write(header + "\n")
+            for at in range(0, len(letters), 60):
+                f.write(letters[at:at + 60] + "\n")
+        makeblastdb(binary, "-in", name + ".fa", "-dbtype", dbtype, "-out", name, "-parse_seqids", "-taxid", "9606",
+                    "-blastdb_version", "5", "-title", "multidb " + name)
+        os.remove(os.path.join(HERE, name + (".pjs" if dbtype == "prot" else ".njs")))
+    with open(os.path.join(HERE, "rf2_q0t.fna"), "w") as f:
+        for path in (os.path.join(HERE, "rf1_q0.fna"), os.path.join(SRC, "q.fna")):
+            with open(path) as part:
+                f.write(part.read())
+    write_rf1_rps()
+
+
+def write_rf1_rps():
+    """Writes rf1_rps.faa and rf1_rps.fna (line DBID rf-1, review 1 L3): `q0_nohit` (rf1_q0.faa, rf1_q0.fna), then
+    ../../fasta/rps/q649.faa's YP_009220649.1 (in rf1_rps.fna back-translated with RF1_CODONS), which hits a profile of
+    each volume of rpsblast's rps_mini3v, whose taxids (tx3v00 to tx3v02: 9606, 10090, 562) the loads look up."""
+    q0 = read_fasta_path(os.path.join(HERE, "rf1_q0.faa"))[0]
+    q0n = read_fasta_path(os.path.join(HERE, "rf1_q0.fna"))[0]
+    header, lines = read_fasta_path(os.path.join(HERE, "..", "..", "fasta", "rps", "q649.faa"))[0]
+    protein = "".join(line.strip() for line in lines)
+    for name, first, letters in (("rf1_rps.faa", q0, protein),
+                                 ("rf1_rps.fna", q0n, "".join(RF1_CODONS[residue] for residue in protein))):
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write(first[0] + "".join(first[1]))
+            f.write(header)
+            for at in range(0, len(letters), 60):
+                f.write(letters[at:at + 60] + "\n")
+
+
 def main(binary):
     os.makedirs(os.path.join(HERE, "d1"), exist_ok=True)
     os.makedirs(os.path.join(HERE, "d2"), exist_ok=True)
@@ -885,6 +929,8 @@ if __name__ == "__main__":
         make_pfoff3(sys.argv[2])
     elif sys.argv[1] == "--rf1-only":
         make_rf1(sys.argv[2])
+    elif sys.argv[1] == "--rf2-only":
+        make_rf2(sys.argv[2])
     else:
         main(sys.argv[1])
         make_ordsl(sys.argv[1])
@@ -903,3 +949,4 @@ if __name__ == "__main__":
         make_pfoff2(sys.argv[1])
         make_pfoff3(sys.argv[1])
         make_rf1(sys.argv[1])
+        make_rf2(sys.argv[1])

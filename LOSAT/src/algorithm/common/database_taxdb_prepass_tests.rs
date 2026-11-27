@@ -2299,7 +2299,11 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
             "db_search/ids/nbare_t",
             SeqType::Nucleotide,
             Some("btd_empty"),
-            SourceTaxname::NullMapped,
+            // The lookup is read from the sequence (below).
+            SourceTaxname::NullMapped(crate::report::defline::NullMappedLookup {
+                path: Path::new("taxdb.btd").into(),
+                message: "".into(),
+            }),
         ),
         (
             "fixtures/outfmt16/db/other_tax9606",
@@ -2316,14 +2320,27 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
         let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence without parsed Seq-ids");
         };
-        // An empty taxdb.btd: the refusal of a step where NCBI crashes, which fails the query
-        // batch that shows the title (`batch_loads_error`, line DBID rf-1).
-        let refused = want == SourceTaxname::NullMapped;
-        assert_eq!(stored.source, want, "{name} {taxdb:?}");
+        // An empty taxdb.btd: the refusal of the sequence's load, a step where NCBI crashes, in
+        // its words, which fails the query batch that shows the title (`batch_loads_error`, line
+        // DBID rf-1 and its review 1 M1).
+        let refused = want.null_mapped().is_some();
+        match stored.source.null_mapped() {
+            Some(lookup) if refused => assert!(
+                lookup.path.ends_with("taxdb.btd") && lookup.message.contains("taxid 9606"),
+                "{name} {lookup:?}"
+            ),
+            _ => assert_eq!(stored.source, want, "{name} {taxdb:?}"),
+        }
         let shown = stored.check_shown_source(|| crate::seqdb::Oid::of_unrestricted(0), "BLASTP");
         assert_eq!(shown.is_err(), refused, "{name} {taxdb:?}");
         if let Err(error) = shown {
             assert!(TaxonomyRefusal::fails_its_batch(&error), "{name} {taxdb:?}");
+            let words = format!("{error:#}");
+            assert!(
+                words
+                    .contains("taxdb.btd: unsupported database: the taxonomy record of taxid 9606"),
+                "{words}"
+            );
         }
         // TBLASTX's check before the search (`report_stream`) for outfmt 0 and for a report
         // that shows no title (outfmt 5 of a nucleotide database): only a source that LOSAT

@@ -1017,56 +1017,105 @@ pub(super) fn prefetch_stop(
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1169
 /// The first of the query batches `batches` (the searched queries of each) of the final hit lists
-/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose reports `formats`
-/// show the title that NCBI makes from the source of a reported sequence without parsed Seq-ids
-/// whose taxid's lookup reads a record of an empty `taxdb.btd` (`titles`,
-/// `SourceTaxname::NullMapped`): outfmt 0 to 4 (`StoredTitle::check_shown_source` in
-/// `reported_subjects`) and the tabular ids of a format whose rows read the subject
-/// (`shared::tabular_subject_id` in `stage_e_report::render`). NCBI crashes at that sequence's
-/// load, which the batch's prefetch, or where it is off its report, makes, after the reports of
-/// the batches before. So the batch fails with LOSAT's refusal of its first such sequence (by
-/// ordinal id, as `reported_subjects` refuses them; `shared::batch_loads_failure`), as a batch
-/// whose loads NCBI crashes in (`tblastn_app::search`'s `load_stop`; line DBID rf-1): it is not
-/// reported, nor are the batches after it. Only the batches before the query `before` are asked (a
-/// batch that ends the run earlier, `tblastn_app::search`'s `failed`). `Err`: an error that does
-/// not fail the batch.
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose reports `reading`
+/// show the title that NCBI makes from the source of a reported sequence whose taxid's lookup
+/// reads a record of an empty `taxdb.btd` (`titles`, `SourceTaxname::NullMapped`): without parsed
+/// Seq-ids, outfmt 0 to 4 (`StoredTitle::check_shown_source` in `reported_subjects`) and the
+/// tabular ids of a format whose rows read the subject (`shared::tabular_subject_id` in
+/// `stage_e_report::render`); with parsed Seq-ids, outfmt 0 to 4, where `reported_subjects`'s
+/// check of the run cut after that batch refuses the sequence for it (`cut_check`: a load that does
+/// not throw and a scope that finds the Bioseq, `shared::check_pairwise_parsed`; line DBID rf-2).
+/// NCBI crashes at that sequence's load, which the batch's prefetch, or where it is off its
+/// report, makes, after the reports of the batches before. So the batch fails with the refusal of
+/// the load of its first such sequence (by ordinal id, as `reported_subjects` refuses them;
+/// `shared::null_mapped_refusal`, `shared::batch_loads_failure`), as a batch whose loads NCBI
+/// crashes in (`tblastn_app::search`'s `load_stop`; line DBID rf-1): it is not reported, nor are
+/// the batches after it. Only the batches before the query `before` are asked (a batch that ends
+/// the run earlier, `tblastn_app::search`'s `failed`); `pssm` for a PSSM search (`has_nullb` of
+/// `report_loads`). `Err`: an error that does not fail the batch.
 pub(super) fn title_stop(
-    (database, titles, formats): (
+    (database, titles, reading, pssm): (
         Option<&TblastnDatabase>,
         &DatabaseTitles,
-        &[crate::api::local_blast::FormatOutput<'_>],
+        ReportReading<'_, '_>,
+        bool,
     ),
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
     before: Option<usize>,
 ) -> Result<Option<(std::ops::Range<usize>, anyhow::Error)>> {
-    use crate::report::defline::SourceTaxname;
-    let shown = parsed_shown(formats);
+    let shown = parsed_shown(reading.formats);
     let Some(database) = database.filter(|_| shown.pairwise || shown.tabular) else {
         return Ok(None);
     };
-    let null_mapped = |ordinal: &u32| {
-        matches!(titles.get(ordinal), Some(ReportedHeader::Stored(stored))
-            if stored.source == SourceTaxname::NullMapped)
+    let null_mapped = |ordinal: &u32| match titles.get(ordinal) {
+        Some(ReportedHeader::Stored(stored)) => stored.source.null_mapped(),
+        // Only outfmt 0 to 4 make a parsed sequence's title from its source.
+        Some(ReportedHeader::Parsed(subject)) if shown.pairwise => subject.source().null_mapped(),
+        _ => None,
     };
     let asked = |span: &&std::ops::Range<usize>| before.is_none_or(|at| span.start < at);
     for span in batches.iter().take_while(asked) {
         // The report drops the HSPs of score 0 first (`reported_subjects`).
-        let first = hitlists[span.clone()]
+        let mut shown_null: Vec<u32> = hitlists[span.clone()]
             .iter()
             .flat_map(KappaResultHitList::lists)
             .filter(|list| list.hsps.hsps.iter().any(|linked| linked.hsp.score != 0))
             .filter_map(|list| u32::try_from(list.oid).ok())
-            .filter(null_mapped)
-            .min();
-        if let Some(ordinal) = first {
-            let oid = || database.db.oid(ordinal);
-            let refusal = shared::source_name(&SourceTaxname::NullMapped, oid, PROGRAM)
-                .expect_err("a source that LOSAT refuses");
+            .filter(|ordinal| null_mapped(ordinal).is_some())
+            .collect();
+        shown_null.sort_unstable();
+        shown_null.dedup();
+        for ordinal in shown_null {
+            let (Some(header), Some(lookup)) = (titles.get(&ordinal), null_mapped(&ordinal)) else {
+                continue;
+            };
+            let refusal = match header {
+                ReportedHeader::Parsed(subject) => {
+                    let cut = (&hitlists[..span.end], batches, pssm);
+                    match cut_check(database, titles, reading, cut, (subject, ordinal))? {
+                        Some(refusal) => refusal,
+                        None => continue,
+                    }
+                }
+                ReportedHeader::Stored(_) => shared::null_mapped_refusal(lookup, PROGRAM),
+            };
             return shared::batch_loads_failure(span.clone(), refusal).map(Some);
         }
     }
     Ok(None)
+}
+
+/// LOSAT's refusal of the reported sequence `ordinal` with parsed Seq-ids `subject` where NCBI
+/// crashes (`shared::TaxonomyRefusal::fails_its_batch`) as `reported_subjects` checks it
+/// (`check_parsed`) in the run of the final hit lists `hitlists` (subjects named by ordinal id,
+/// with their HSPs of score 0; the queries up to the end of a batch of `batches`, whose reports
+/// are `reading`; `pssm` for a PSSM search) cut there: `None` where that check passes, or refuses
+/// the sequence for another reason, which `reported_subjects` makes before the run's first byte.
+/// For `title_stop`, where the subject's source is `SourceTaxname::NullMapped`.
+fn cut_check(
+    database: &TblastnDatabase,
+    titles: &DatabaseTitles,
+    reading: ReportReading<'_, '_>,
+    (hitlists, batches, pssm): (&[KappaResultHitList], &[std::ops::Range<usize>], bool),
+    (subject, ordinal): (&ParsedSubject, u32),
+) -> Result<Option<anyhow::Error>> {
+    let mut cut = hitlists.to_vec();
+    for hitlist in &mut cut {
+        hitlist.drop_zero_score_hsps();
+    }
+    let batches: Vec<std::ops::Range<usize>> = batches
+        .iter()
+        .filter(|span| span.end <= cut.len())
+        .cloned()
+        .collect();
+    let has_nullb = pssm && super::nullb_report::hitlists_have_nullb(hitlists);
+    let (_, reads, loads) = report_loads(database, titles, &cut, reading, &batches, has_nullb)?;
+    let shown = parsed_shown(reading.formats);
+    let taxdb = shown.pairwise && database.db.taxdb_found();
+    let facts = (ordinal, taxdb, scope_seen(reading.seen, &cut, ordinal));
+    let refusal = check_parsed(database, subject, shown, (&reads, &loads), facts).err();
+    Ok(refusal.filter(shared::TaxonomyRefusal::fails_its_batch))
 }
 
 /// The Seq-aligns of the results `hitlists` that NCBI's prefetch counts against
@@ -1260,32 +1309,24 @@ fn pairwise_read_order<'l>(
 /// subjects (`stores`, by ordinal id) when `letters` (`stage_e_report::reads_subject_letters`:
 /// outfmt 0, the XML family and the tabular rows read them, the other reports the lengths alone).
 /// A reported sequence whose stored title LOSAT does not report as
-/// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `formats` do
-/// not write as NCBI (what they show, `parsed_shown`: `common::database::check_reported_parsed`,
-/// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
-/// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
-/// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
-/// `-outfmt` values of its other searches and whether it has `-html` links, `call`, for the one
-/// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
-/// subjects, `pairwise`, after the loads of the calls before, whose loads nothing here records,
-/// `TaxdbRun::calls_before`). The packed subjects are read from the database
-/// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
-#[allow(clippy::too_many_arguments)]
+/// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `reading` do
+/// not write as NCBI (what they show, `parsed_shown`: `check_parsed`, and where they join hits
+/// `refuse_joined_hits`; where only the prefetch reads a subject, a batch of `batches`, the query
+/// ranges of the batches of `hitlists`, whose prefetch is on reports it; what the reports load,
+/// the one model of `report_loads`, with `has_nullb`, after the loads of the calls before, whose
+/// loads nothing here records, `TaxdbRun::calls_before`). The packed subjects are read from the
+/// database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
     titles: &DatabaseTitles,
     hitlists: &mut [KappaResultHitList],
-    stores: super::x_subject_store::SubjectLetters<'_>,
-    letters: bool,
-    formats: &[crate::api::local_blast::FormatOutput<'_>],
-    call: (&[&str], bool),
-    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    (stores, letters): (super::x_subject_store::SubjectLetters<'_>, bool),
+    reading: ReportReading<'_, '_>,
     batches: &[std::ops::Range<usize>],
-    gapped: bool,
     has_nullb: bool,
-    seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
+    let (formats, gapped) = (reading.formats, reading.gapped);
     let shown = parsed_shown(formats);
     for hitlist in hitlists.iter_mut() {
         hitlist.drop_zero_score_hsps();
@@ -1294,76 +1335,19 @@ pub(super) fn reported_subjects(
     for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
         ordinals.push(u32::try_from(list.oid).context("negative TBLASTN subject OID")?);
     }
-    // What the batches read of each subject (a batch whose Seq-aligns outnumber a positive
-    // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
-    // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
-    let format = prefetch_format(formats);
-    let titled = |ordinal: usize| match titles.get(&u32::try_from(ordinal).ok()?) {
-        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
-        _ => None,
-    };
-    let prefetch = shared::BatchPrefetch::of(
-        format,
-        hitlists.len(),
-        0,
-        batches,
-        |span| seq_aligns_of(&hitlists[span], gapped),
-        |span| {
-            (has_nullb
-                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
-                || shared::BatchPrefetch::prefetch_fails_among(
-                    hitlists[span]
-                        .iter()
-                        .flat_map(KappaResultHitList::lists)
-                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
-                )
-        },
-    );
-    let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
-        hitlist
-            .lists()
-            .iter()
-            .map(move |list| (query, list.oid as u32))
-    }));
-    // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let after = after_throw(formats, call);
-    // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
-    // batch reads them one by one.
-    let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
-        let Some(reading) = pairwise
-            .filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))
-            .filter(|_| prefetch.loads_one_by_one(query))
-        else {
-            return Ok(None);
-        };
-        let order = pairwise_read_order(
-            hitlists[query]
-                .lists()
-                .iter()
-                .filter(|list| !list.hsps.hsps.is_empty()),
-            |ordinal| shared::x_nucleotide_length(&database.db, ordinal as u32, PROGRAM),
-            |previous, ordinal| match (titled(previous as usize), titled(ordinal as usize)) {
-                (Some(earlier), Some(later)) => {
-                    crate::report::db_subject::joins_as_copy(earlier, later)
-                }
-                _ => false,
-            },
-            reading,
-        )?;
-        Ok(Some(order))
-    };
-    let pairwise_order = (0..hitlists.len())
-        .map(pairwise_keys)
-        .collect::<Result<Vec<_>>>()?;
-    let loads = hit_loads(
-        hitlists,
-        &prefetch,
-        (after, database.taxdb.calls_before()),
-        pairwise_order,
-        titled,
-    );
+    // What the batches read of each subject and what the reports do at its `Hit`, by ordinal id
+    // (the one model, `report_loads`).
+    let (prefetch, reads, loads) =
+        report_loads(database, titles, hitlists, reading, batches, has_nullb)?;
     ordinals.sort_unstable();
     ordinals.dedup();
+    // The subjects for which the scope of every query that reports them finds a query, read
+    // while the hit lists name them by ordinal id (`scope_seen`).
+    let seen_all: std::collections::HashSet<u32> = ordinals
+        .iter()
+        .copied()
+        .filter(|&ordinal| scope_seen(reading.seen, hitlists, ordinal))
+        .collect();
     for hitlist in hitlists.iter_mut() {
         for list in hitlist.lists_mut() {
             let rank = ordinals
@@ -1372,29 +1356,6 @@ pub(super) fn reported_subjects(
             list.oid = i32::try_from(rank).context("TBLASTN subject rank out of range")?;
         }
     }
-    let seen_all: std::collections::HashSet<u32> = if seen.any() {
-        ordinals
-            .iter()
-            .copied()
-            .filter(|&ordinal| {
-                seen.hides_ordinal(
-                    hitlists.iter().enumerate().filter_map(|(q_idx, hitlist)| {
-                        hitlist
-                            .lists()
-                            .iter()
-                            .any(|list| {
-                                !list.hsps.hsps.is_empty()
-                                    && u32::try_from(list.oid).ok() == Some(ordinal)
-                            })
-                            .then_some(q_idx)
-                    }),
-                    ordinal,
-                )
-            })
-            .collect()
-    } else {
-        std::collections::HashSet::new()
-    };
     let mut records = Vec::with_capacity(ordinals.len());
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();
@@ -1428,17 +1389,8 @@ pub(super) fn reported_subjects(
             ReportedHeader::Parsed(subject) => {
                 let taxdb =
                     shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
-                shared::check_reported_parsed(
-                    &database.db,
-                    subject,
-                    reads.shown(shown, ordinal),
-                    loads.load(ordinal as usize),
-                    false,
-                    taxdb,
-                    ordinal,
-                    seen_all.contains(&ordinal),
-                    PROGRAM,
-                )?;
+                let facts = (ordinal, taxdb, seen_all.contains(&ordinal));
+                check_parsed(database, subject, shown, (&reads, &loads), facts)?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }
@@ -1512,6 +1464,163 @@ pub(super) fn reported_subjects(
         prefetch,
         gapped,
     })
+}
+
+/// What the reports of a TBLASTN `-db` run read of their subjects, for the model of their loads
+/// (`report_loads`) and LOSAT's checks of the reported sequences (`reported_subjects`,
+/// `title_stop`).
+#[derive(Clone, Copy)]
+pub(super) struct ReportReading<'a, 'f> {
+    /// The run's formats.
+    pub(super) formats: &'a [crate::api::local_blast::FormatOutput<'f>],
+    /// The `-outfmt` values of the call's other searches and whether it has `-html` links
+    /// (`after_throw`).
+    pub(super) call: (&'a [&'a str], bool),
+    /// How the pairwise reports read each query's subjects (`pairwise_read_order`).
+    pub(super) pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    /// Whether the search is gapped (`shared::subject_seq_aligns`).
+    pub(super) gapped: bool,
+    /// The queries' scopes that find a query for a subject (`scope_seen`).
+    pub(super) seen: crate::report::query_bioseq::SeenFrom<'a>,
+}
+
+/// What the query batches `batches` of the final hit lists `hitlists` (subjects named by ordinal
+/// id, without their HSPs of score 0) read of each subject before their reports, its prefetch and
+/// those reads (a batch whose Seq-aligns outnumber a positive `PRE_FETCH_SEQS_LIMIT` reads nothing
+/// of them before its reports, which read them one by one; `shared::BatchPrefetch`,
+/// `shared::BatchReads::shown`), and what the reports `reading` do at each subject's `Hit`, by
+/// ordinal id (`hit_loads`; `has_nullb`: a PSSM search with NULLB rows, whose batches with an empty
+/// subject row prefetch nothing). The one model of the reports' loads, of `reported_subjects` and of
+/// `title_stop`'s check of a run cut after a batch.
+fn report_loads(
+    database: &TblastnDatabase,
+    titles: &DatabaseTitles,
+    hitlists: &[KappaResultHitList],
+    reading: ReportReading<'_, '_>,
+    batches: &[std::ops::Range<usize>],
+    has_nullb: bool,
+) -> Result<(shared::BatchPrefetch, shared::BatchReads, HitLoads)> {
+    let ReportReading {
+        formats,
+        call,
+        pairwise,
+        gapped,
+        ..
+    } = reading;
+    let format = prefetch_format(formats);
+    let titled = |ordinal: usize| match titles.get(&u32::try_from(ordinal).ok()?) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+        _ => None,
+    };
+    let prefetch = shared::BatchPrefetch::of(
+        format,
+        hitlists.len(),
+        0,
+        batches,
+        |span| seq_aligns_of(&hitlists[span], gapped),
+        |span| {
+            (has_nullb
+                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
+                || shared::BatchPrefetch::prefetch_fails_among(
+                    hitlists[span]
+                        .iter()
+                        .flat_map(KappaResultHitList::lists)
+                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
+                )
+        },
+    );
+    let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
+        hitlist
+            .lists()
+            .iter()
+            .map(move |list| (query, list.oid as u32))
+    }));
+    // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
+    let after = after_throw(formats, call);
+    // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
+    // batch reads them one by one.
+    let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
+        let Some(reading) = pairwise
+            .filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))
+            .filter(|_| prefetch.loads_one_by_one(query))
+        else {
+            return Ok(None);
+        };
+        let order = pairwise_read_order(
+            hitlists[query]
+                .lists()
+                .iter()
+                .filter(|list| !list.hsps.hsps.is_empty()),
+            |ordinal| shared::x_nucleotide_length(&database.db, ordinal as u32, PROGRAM),
+            |previous, ordinal| match (titled(previous as usize), titled(ordinal as usize)) {
+                (Some(earlier), Some(later)) => {
+                    crate::report::db_subject::joins_as_copy(earlier, later)
+                }
+                _ => false,
+            },
+            reading,
+        )?;
+        Ok(Some(order))
+    };
+    let pairwise_order = (0..hitlists.len())
+        .map(pairwise_keys)
+        .collect::<Result<Vec<_>>>()?;
+    let loads = hit_loads(
+        hitlists,
+        &prefetch,
+        (after, database.taxdb.calls_before()),
+        pairwise_order,
+        titled,
+    );
+    Ok((prefetch, reads, loads))
+}
+
+/// Whether the scope of every query of the final hit lists `hitlists` (subjects named by ordinal
+/// id) that reports the sequence `ordinal` finds a query for it (`SeenFrom::hides_ordinal`; none
+/// where `seen` asks nothing).
+fn scope_seen(
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
+    hitlists: &[KappaResultHitList],
+    ordinal: u32,
+) -> bool {
+    seen.any()
+        && seen.hides_ordinal(
+            hitlists.iter().enumerate().filter_map(|(query, hitlist)| {
+                hitlist
+                    .lists()
+                    .iter()
+                    .any(|list| {
+                        !list.hsps.hsps.is_empty() && u32::try_from(list.oid).ok() == Some(ordinal)
+                    })
+                    .then_some(query)
+            }),
+            ordinal,
+        )
+}
+
+/// LOSAT's refusals of the reported sequence `ordinal` with parsed Seq-ids `subject` in the
+/// reports that show `shown` (`shared::check_reported_parsed`), with what the batches read of it
+/// and what the reports do at its `Hit` (`report_loads`), whether `taxdb.bti` is found where outfmt
+/// 0 shows it (`taxdb`) and whether the scopes of the queries that report it find a query for it
+/// (`seen`, `scope_seen`). The one check of `reported_subjects` and `title_stop`.
+fn check_parsed(
+    database: &TblastnDatabase,
+    subject: &ParsedSubject,
+    shown: shared::ParsedShown,
+    (reads, loads): (&shared::BatchReads, &HitLoads),
+    (ordinal, taxdb, seen): (u32, bool, bool),
+) -> Result<()> {
+    shared::check_reported_parsed(
+        &database.db,
+        subject,
+        reads.shown(shown, ordinal),
+        loads.load(ordinal as usize),
+        false,
+        taxdb,
+        ordinal,
+        seen,
+        PROGRAM,
+    )
 }
 
 /// What the XML2 and JSON reports of `hitlists` (the final hit lists by query, in the order of the

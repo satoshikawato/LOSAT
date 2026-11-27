@@ -2374,7 +2374,14 @@ fn search(
         // An earlier batch whose report shows a title made from a source whose lookup NCBI
         // crashes at ends the run there, before that prefetch stop (`database::title_stop`).
         let failed_at = failed.as_ref().map(|(range, _)| range.start);
-        let titled = (database, &titles, &outputs.formats[..]);
+        let reading = super::database::ReportReading {
+            formats: &outputs.formats,
+            call: (outputs.other_outfmts, resolved.html.is_some()),
+            pairwise: pairwise_reading(&resolved, &outputs.formats),
+            gapped: resolved.gapped,
+            seen: query_bioseqs.numbered_from(0),
+        };
+        let titled = (database, &titles, reading, pssm.is_some());
         if let Some(stop) = super::database::title_stop(titled, &results, &spans, failed_at)? {
             (failed, prefetch_stop) = (Some(stop), None);
         }
@@ -2499,20 +2506,18 @@ fn search(
                     database,
                     &titles,
                     &mut results,
-                    search_letters,
-                    super::stage_e_report::reads_subject_letters(
-                        outputs,
-                        pssm.as_deref(),
-                        hard_masked,
-                        has_nullb,
+                    (
+                        search_letters,
+                        super::stage_e_report::reads_subject_letters(
+                            outputs,
+                            pssm.as_deref(),
+                            hard_masked,
+                            has_nullb,
+                        ),
                     ),
-                    &outputs.formats,
-                    (outputs.other_outfmts, resolved.html.is_some()),
-                    pairwise_reading(&resolved, &outputs.formats),
+                    reading,
                     &batch_spans,
-                    resolved.gapped,
                     has_nullb,
-                    query_bioseqs.numbered_from(0),
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.

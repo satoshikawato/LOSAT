@@ -138,7 +138,8 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   against `stdout_sha256`. Its `rc` and stderr are LOSAT's. A rejection row whose `covers` cell has
   `ncbi-near: ROW_ID` takes its stdout from the `ncbi` row ROW_ID of the same outfmt, NCBI's run of a near
   input that writes the bytes LOSAT writes before it refuses, and one with `ncbi-near: ROW_ID first N bytes`
-  takes the first N bytes of that run: an input that fails at the same step where NCBI crashes on the row's
+  takes the first N bytes of that run (a row of outfmt 13 or 14 with side files: the first N bytes of its master and
+  every side file of the near run, `rejection_side_problems`): an input that fails at the same step where NCBI crashes on the row's
   own (line RG item X4: the failed batch of a Smith-Waterman redo), the query batches before the batch that
   LOSAT refuses and NCBI searches on (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; X5: a copy
   row whose query file holds the batches that LOSAT writes before it refuses, where NCBI's own run of the
@@ -760,9 +761,33 @@ def frozen_id(row: dict[str, str]) -> str:
 
 def expected_stdout(row: dict[str, str]) -> bytes:
     """The frozen stdout that a `losat-rejection` row with stdout cells expects: the `.out` of `frozen_id`, its first N
-    bytes for `ncbi-near: ROW_ID first N bytes` (`near_cut`); empty where the file does not exist."""
+    bytes for `ncbi-near: ROW_ID first N bytes` (`near_cut`); empty where the file does not exist. Of a row with side
+    files (`xinclude.wants_files`) the master file."""
     path = FROZEN / f"{frozen_id(row)}.out"
     return path.read_bytes()[:near_cut(row)] if path.exists() else b""
+
+
+def rejection_side_problems(row: dict[str, str], written, first_diff) -> list[str]:
+    """What differs in the files of a `losat-rejection` row of outfmt 13 or 14 with side files (`xinclude.wants_files`;
+    line DBID rf-2, rf-1 review 1 L3) from its near row's (`ncbi-near: ROW_ID first N bytes`): the master, its first N
+    bytes (none where NCBI writes its list of the side files after the last batch, which LOSAT refuses), and every side
+    file that the near row froze, each the report of a query batch before the refused one. Both in LOSAT's words."""
+    near = near_row_id(row)
+    if near is None:
+        return ["a rejection row with side files takes them from an ncbi-near row"]
+    names = sorted(FROZEN.glob(f"{near}.out_*"), key=lambda path: int(path.name.removeprefix(f"{near}.out_").split(".")[0]))
+    sides = [losat_wording.losat_output_bytes(path.read_bytes()) for path in names]
+    problems = [f"stdout is not empty ({len(written.run.stdout)} bytes)"] if written.run.stdout else []
+    if ",".join(sha256(path.read_bytes()) for path in names) != row.get("side_sha256", ""):
+        problems.append(f"side_sha256 is not the frozen side files of {near}")
+    master = losat_wording.losat_output_bytes(expected_stdout(row))
+    if written.master is None or written.master != master:
+        problems.append("master " + ("missing" if written.master is None else first_diff(master, written.master)))
+    if len(written.sides) != len(sides):
+        problems.append(f"{len(written.sides)} side files, expected {len(sides)}")
+    problems += [f"side file {n} " + first_diff(want, got)
+                 for n, (want, got) in enumerate(zip(sides, written.sides), 1) if want != got]
+    return problems + ([f"unexpected files {written.stray}"] if written.stray else [])
 
 
 # Copy rows (`ncbi-copies:`): NCBI's run on a query file in which each query that ends a query batch of LOSAT's run
@@ -1359,6 +1384,9 @@ def freeze(args: argparse.Namespace) -> int:
                 raise SystemExit(f"{row['row_id']}: ncbi-near {near} wrote {len(out)} bytes, fewer than its first {cut}")
             out = out[:cut]
             row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
+            if xinclude.wants_files(row):
+                # Its master's first N bytes and all the near run's side files (`rejection_side_problems`).
+                row["side_sha256"] = source.get("side_sha256", "")
         print(f"{row['row_id']}\tncbi-near={near}" + (f" first {cut} bytes" if cut is not None else "")
               + f"\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
@@ -1504,7 +1532,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # near row's (blastx's `db.x2g.*`: the prolog; the refusals at a later query batch, as
         # tblastn's `db.xs.tblastn.bat.*`: the reports of the query batches before; psiblast's PSSM
         # file and rounds rows, which the library skips).
-        if row["stdout_bytes"]:
+        if files:
+            problems += rejection_side_problems(row, written, first_difference)
+        elif row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")

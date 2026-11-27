@@ -119,6 +119,17 @@ fn hitlist(lists: &[(i32, i32)]) -> KappaResultHitList {
     hitlist
 }
 
+/// What the reports of these tests read (`reported_subjects`): no format, a gapped search.
+fn reading() -> ReportReading<'static, 'static> {
+    ReportReading {
+        formats: &[],
+        call: (&[], false),
+        pairwise: None,
+        gapped: true,
+        seen: Default::default(),
+    }
+}
+
 // Reports that read no letters get the lengths of the reported sequences and no store; the
 // others get both, by rank.
 #[test]
@@ -140,15 +151,10 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             &database,
             &titles,
             &mut hitlists,
-            SubjectLetters::Stream(&stream),
-            letters,
+            (SubjectLetters::Stream(&stream), letters),
+            reading(),
             &[],
-            (&[], false),
-            None,
-            &[],
-            true,
             false,
-            Default::default(),
         )
         .unwrap()
     };
@@ -200,15 +206,10 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             database,
             &titles,
             &mut hitlists,
-            SubjectLetters::Stream(&stream),
-            true,
+            (SubjectLetters::Stream(&stream), true),
+            reading(),
             &[],
-            (&[], false),
-            None,
-            &[],
-            true,
             false,
-            Default::default(),
         )
         .unwrap();
         let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);

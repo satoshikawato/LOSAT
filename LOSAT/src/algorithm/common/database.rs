@@ -1208,29 +1208,42 @@ impl StoredTitle {
 
 /// The name of the source `source` of a database sequence without parsed Seq-ids (`oid` gives its
 /// OID, which a refusal names), from which NCBI makes its empty title; `Err` with LOSAT's refusal
-/// of a source that it refuses (`SourceTaxname::Refused`; `program` names the program), a
-/// [`TaxonomyRefusal`] of a step where NCBI crashes for `SourceTaxname::NullMapped`.
+/// of a source that it refuses (`SourceTaxname::Refused`; `program` names the program), the
+/// refusal of the sequence's load for `SourceTaxname::NullMapped` ([`null_mapped_refusal`]).
 pub(crate) fn source_name(
     source: &crate::report::defline::SourceTaxname,
     oid: impl Fn() -> crate::seqdb::Oid,
     program: &str,
 ) -> Result<Option<std::sync::Arc<[u8]>>> {
-    source.name().map_err(|reason| {
-        let text = format!(
+    source.name().map_err(|reason| match source.null_mapped() {
+        Some(lookup) => null_mapped_refusal(lookup, program),
+        None => anyhow::anyhow!(
             "database sequence {} has {reason}; this is not supported by LOSAT's {program}",
             oid()
-        );
-        // A lookup that reads a record of an empty `taxdb.btd`: NCBI crashes at the sequence's
-        // load, so the refusal fails the query batch that shows the title ([`batch_loads_error`]).
-        if *source == crate::report::defline::SourceTaxname::NullMapped {
-            return anyhow::Error::new(TaxonomyRefusal {
-                text,
-                load_throws: false,
-                ncbi_crashes: true,
-            });
-        }
-        anyhow::anyhow!(text)
+        ),
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1169
+/// LOSAT's refusal of the title that NCBI makes from the source of a database sequence, with or
+/// without parsed Seq-ids, whose taxid's lookup `lookup` reads a record of an empty `taxdb.btd`
+/// (`SourceTaxname::NullMapped`; `program` names the program). NCBI's load of the sequence looks
+/// up the names of every taxid of its definition lines before any title is made, and crashes
+/// there: so the refusal is the load's ([`taxdb_error`] of the lookup's
+/// `SeqDbError::TaxdbNullMap`), in its words in every program and format, a [`TaxonomyRefusal`]
+/// of a step where NCBI crashes, which fails the query batch that shows the title
+/// ([`batch_loads_error`]; line DBID rf-1 review 1 M1). Made by [`source_name`] (stored titles),
+/// [`check_shown_parsed_subject`] (parsed Seq-ids, line DBID rf-2) and TBLASTN's
+/// `database::title_stop`.
+pub(crate) fn null_mapped_refusal(
+    lookup: &crate::report::defline::NullMappedLookup,
+    program: &str,
+) -> anyhow::Error {
+    let error = SeqDbError::TaxdbNullMap {
+        path: lookup.path.to_path_buf(),
+        message: lookup.message.to_string(),
+    };
+    taxdb_error(error, program)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310
@@ -2903,7 +2916,12 @@ impl<'a> HeaderReader<'a> {
                 "a title that NCBI BLAST+ makes from its taxid with the taxonomy database (an empty one, or the end of a protein title ending in ']'), whose lookup of that taxid reads the record past NCBI BLAST+'s mapping of taxdb.btd (NCBI BLAST+ 2.17.0 reads memory past its mapping there: its bytes, or whether it faults, depend on its memory map)",
             )),
             // NCBI crashes at the sequence's load (`SourceTaxname::NullMapped`).
-            Err(SeqDbError::TaxdbNullMap { .. }) => Err(SourceTaxname::NullMapped),
+            Err(SeqDbError::TaxdbNullMap { path, message }) => Err(SourceTaxname::NullMapped(
+                crate::report::defline::NullMappedLookup {
+                    path: path.into(),
+                    message: message.into(),
+                },
+            )),
             Err(_) => Err(SourceTaxname::Refused(
                 crate::report::defline::NULL_MAPPED_SOURCE,
             )),
@@ -4029,7 +4047,10 @@ const LONG_DESCRIPTION_ID: &str = "has an outfmt 0 description id longer than 65
 /// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
 /// of the string, as for a database without parsed Seq-ids), a title
 /// that NCBI makes from a source that LOSAT refuses (`ParsedSubject::source`,
-/// `SourceTaxname::Refused`), and one that it makes from the
+/// `SourceTaxname::Refused`; `SourceTaxname::NullMapped`, where NCBI crashes at the sequence's
+/// load, is the load's refusal, [`null_mapped_refusal`], which fails the query batch that shows
+/// the title), and one
+/// that it makes from the
 /// taxids of the same record that it can show for the sequence where `taxdb.bti` is found
 /// (`taxdb_found`, `ParsedSubject::generated_title_fetched`). A title made from the sequence's
 /// own source names its organism, and a generated heading title ending in `]` gets its end from
@@ -4066,6 +4087,12 @@ pub(crate) fn check_shown_parsed_subject(
             .map_err(|reason| parsed_refusal(oid(), &reason, program))?;
     }
     if let Err(reason) = subject.source().name() {
+        // A lookup that reads a record of an empty `taxdb.btd`, where NCBI crashes at the
+        // sequence's load: the load's refusal, which fails the query batch that shows the title,
+        // as for a sequence without parsed Seq-ids ([`null_mapped_refusal`]).
+        if let Some(lookup) = subject.source().null_mapped() {
+            return Err(null_mapped_refusal(lookup, program));
+        }
         return Err(parsed_refusal(oid(), &format!("has {reason}"), program));
     }
     Ok(())
@@ -7255,8 +7282,8 @@ pub(crate) struct TaxonomyRefusal {
     load_throws: bool,
     /// The refusal is of a lookup that reads a record of an empty `taxdb.btd`
     /// (`SeqDbError::TaxdbNullMap`), or of a title made from the source that such a lookup names
-    /// (`report::defline::SourceTaxname::NullMapped`, [`source_name`]), where NCBI crashes
-    /// ([`batch_loads_error`]).
+    /// (`report::defline::SourceTaxname::NullMapped`, [`null_mapped_refusal`]), where NCBI
+    /// crashes ([`batch_loads_error`]).
     ncbi_crashes: bool,
 }
 

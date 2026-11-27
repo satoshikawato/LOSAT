@@ -772,10 +772,14 @@ input[type='radio'] {
   white-space: nowrap;
 }
 
+/* One column: a control and its "?" are one item (`.control-tip`), a sentence and its "?" another
+   (`.hint-line`). A second column for the "?" would stay empty and its 8 px gap would narrow the
+   control, so a phone wrapped one more radio name of the task and cut 8 px more off the genetic
+   code selects. */
 .param-control {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, max-content) max-content;
+  grid-template-columns: minmax(0, max-content);
   align-content: start;
   align-items: center;
   justify-items: start;
@@ -1374,6 +1378,12 @@ textarea {
 
 .control-tip > input[type='checkbox'] {
   flex: none;
+}
+
+/* A tool option's checkbox row (Format Archive's -parse_deflines): the sentence takes the rest of the
+   line and wraps there, so the box is never alone on its line on a phone. */
+.parameter-form .param-row .param-control:has(> .control-tip > input[type='checkbox']) > .hint-line {
+  flex: 1 1 0;
 }
 
 /* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
@@ -2882,4 +2892,97 @@ pre.range-text {
 
 .parameter-form .param-row[data-kind='database'] .db-picker {
   margin-top: 6px;
+}
+
+/* Format Archive (blast_formatter) tab and OutputsView "Format archive…" action, beside Export; on narrow
+   screens a primary action fills the row (above), so it goes under Export, at its left edge. */
+.outputs-panel > button + button {
+  margin-left: 8px;
+}
+
+@media (max-width: 800px) {
+  .outputs-panel > button + button {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+}
+
+.bf-archive-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.bf-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.bf-dropzone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.bf-dropzone.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.bf-chosen-file {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bf-paste-area {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.88em;
+  resize: vertical;
+}
+
+.bf-outfmt-row {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.bf-outfmt-row.custom {
+  flex-wrap: wrap;
+}
+
+.bf-outfmt-row > select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 28px);
+}
+
+.bf-outfmt-row.custom > select {
+  max-width: 100%;
+}
+
+.bf-outfmt-tail {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.bf-outfmt-tail > input {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 28px);
 }

@@ -62,10 +62,13 @@
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). Search space overflows
-//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) and tabular failed-lookup
-//!   refusals (`FailedLookupRefusal`, including a subject set's refused tabular id from
-//!   `tabular_subject_ids`) follow the same path, so both stream on and stream off write the
-//!   reports of the batches before and then the refusal, matching NCBI. Any other error that LOSAT
+//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) follow the same path, so
+//!   both stream on and stream off write the reports of the batches before and then the refusal,
+//!   matching NCBI. Tabular row stops (`FailedLookupRefusal`, including a subject set's failed
+//!   tabular id from `tabular_subject_ids`) are met while writing the rows in query order
+//!   (`report::tabular::row_stop_end`), so both stream on and stream off write the reports of the
+//!   batches before, the stopping batch's posts and report bytes up to the stopping field, and
+//!   then the refusal, matching NCBI. Any other error that LOSAT
 //!   raises where NCBI would not stop (LOSAT's other refusals: stored title, ambiguity data,
 //!   prefetch, parsed Seq-id, taxonomy record, and the like) is written without the reports of the
 //!   batches before by the off path, and after them with the switch (drop-in DECISIONS 44: as NCBI

@@ -1015,10 +1015,14 @@ impl<S: AsnSource> Input for XmlInput<S> {
         StreamPosition::Line(self.x.line as u64)
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:84-101
     /// Each object of a stream is read by a stream of its own in NCBI (its line count starts
-    /// again); no frame, nothing posted.
+    /// again), or by the one stream of a program that reads all the objects of a file with it
+    /// (`Names::one_stream`: the line count goes on); no frame, nothing posted.
     fn new_object(&mut self) {
-        self.x.line = 1;
+        if !self.names.one_stream {
+            self.x.line = 1;
+        }
         self.frames.clear();
         self.posts.clear();
         self.x.replaced.clear();

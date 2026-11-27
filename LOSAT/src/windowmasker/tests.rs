@@ -641,7 +641,10 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
         want.extend_from_slice(&out_plain);
         assert_eq!(out, want, "{extra:?}");
     }
-    // Case 3 with binary `-out -` prefix before `pass 1\n`: prefix comes first, then messages, then counts.
+    // Case 3 with binary `-out -` and `-logfile /dev/stdout`: NCBI's `cout` buffers the 4-byte
+    // binary prefix (4 KiB block on pipes), while `-logfile /dev/stdout` writes `pass 1\npass 2\n`
+    // directly, so the log lines precede the binary prefix and counts (matching CLI and NCBI
+    // 2.17.0).
     let (s_bin, out_bin, _, _) = run_web(&[
         "-mk_counts",
         "-in",
@@ -672,11 +675,9 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
     assert!(files_both.is_empty());
     let prefix = crate::utils::winmask::CountsFormat::Binary.stream_prefix();
     assert!(!prefix.is_empty());
-    assert!(out_both.starts_with(prefix));
-    assert!(out_both[prefix.len()..].starts_with(b"pass 1\npass 2\n"));
-    let mut expected_both = prefix.to_vec();
-    expected_both.extend_from_slice(b"pass 1\npass 2\n");
-    expected_both.extend_from_slice(&out_bin[prefix.len()..]);
+    assert!(out_bin.starts_with(prefix));
+    let mut expected_both = b"pass 1\npass 2\n".to_vec();
+    expected_both.extend_from_slice(&out_bin);
     assert_eq!(out_both, expected_both);
     // Case 4: normalized file names for both `-logfile` and `-out`.
     let (status, _, err, mut files) = run_web(&[

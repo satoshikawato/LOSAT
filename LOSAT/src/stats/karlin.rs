@@ -22,7 +22,12 @@ pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
 /// database's K, or the failed Karlin calculation of a PSSM's round (which sets Lambda, K and H
 /// to -1); NCBI's other searches leave no hit in a context without valid statistics (its block
 /// is freed and the context masked).
-#[inline]
+///
+/// No NCBI counterpart (code placement only): out of line, so that its check does not change the
+/// register allocation of its callers' loops (inlined, the linking loop of TBLASTN's
+/// `x_link_values` reloaded two values from the stack, +3 % of its instructions in a search
+/// with a Gumbel block, which never calls this function).
+#[inline(never)]
 pub fn evalue_from_raw_score_with_log_k(
     raw_score: i32,
     params: &KarlinParams,
@@ -49,7 +54,7 @@ pub fn evalue_from_raw_score_with_log_k(
 /// the tables, a copy, the rescaling of composition-based statistics, a PSSM's blocks, an RPS
 /// database's K); its one other value, `HUGE_VAL` beside the -1s of a failed calculation, is
 /// behind the check.
-#[inline]
+#[inline(never)]
 pub fn evalue_from_raw_score(raw_score: i32, params: &KarlinParams, search_space: f64) -> f64 {
     evalue_from_raw_score_with_log_k(raw_score, params, params.k.glibc_ln(), search_space)
 }

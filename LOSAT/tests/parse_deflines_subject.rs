@@ -892,7 +892,7 @@ fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
 // description line (and its letters in the rows of the Seq-align id; probes `bn.t3b.d.qid.f1`,
 // `bn.t3b.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.124): so does its outfmt 0 (NCBI
 // BLAST+ 2.17.0, exit 0: `Query_1 bnq query` in the description line and the alignment's title,
-// `Identities = 299/299` where the sequence's own letters give 274/299; probe `bn.qid.f0` of
+// identities of 299 of 299 where the sequence's own letters give 274 of 299; probe `bn.qid.f0` of
 // `x71/probe2` and `x71/fix2/of0`; rows `db.x7.bn.qid.f0.reject`, `db.x7.bn.qgi.f0.reject` hold
 // NCBI's bytes before the first query's report). BLASTN refuses them all after its prolog.
 #[test]

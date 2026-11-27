@@ -3610,6 +3610,7 @@ fn check_found_queries(
             .map_or_else(Default::default, |record| {
                 crate::report::query_bioseq::compare_found(
                     &record.sequence,
+                    record.sequence.len(),
                     &database.db,
                     ordinal,
                     ranges,

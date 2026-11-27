@@ -338,10 +338,12 @@ fn a_generated_id_is_refused_where_a_report_differs() {
     let same = || FoundMatch {
         length: true,
         aligned: true,
+        unstraddled: true,
     };
     let aligned = || FoundMatch {
         length: false,
         aligned: true,
+        unstraddled: true,
     };
     let sam = |target_letters, found: &dyn Fn() -> FoundMatch| {
         writers(Program::Blastn, vec![FoundWriter::Sam { target_letters }]).generated_effect(
@@ -360,6 +362,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         sam(false, &|| FoundMatch {
             length: true,
             aligned: false,
+            unstraddled: true,
         }),
         None
     );
@@ -367,6 +370,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         sam(true, &|| FoundMatch {
             length: true,
             aligned: false,
+            unstraddled: true,
         }),
         Some(SAM_EFFECT)
     );
@@ -503,32 +507,52 @@ LSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR";
     let both = FoundMatch {
         length: true,
         aligned: true,
+        unstraddled: true,
     };
-    assert_eq!(compare_found(q, &protein, 0, &whole), both);
+    assert_eq!(compare_found(q, q.len(), &protein, 0, &whole), both);
     assert_eq!(
-        compare_found(&q.to_ascii_lowercase(), &protein, 0, &whole),
+        compare_found(&q.to_ascii_lowercase(), q.len(), &protein, 0, &whole),
         both
     );
     // A record cut at its start: neither the length nor the letters over the whole sequence; its
     // letters over a range that it shares at the same place would be, here they are shifted.
     assert_eq!(
-        compare_found(&q[1..], &protein, 0, &whole),
-        FoundMatch::default()
+        compare_found(&q[1..], q.len() - 1, &protein, 0, &whole),
+        FoundMatch {
+            length: false,
+            aligned: false,
+            unstraddled: false,
+        }
     );
     // A record that ends early: its letters over the HSPs before its end are the sequence's.
     assert_eq!(
-        compare_found(&q[..100], &protein, 0, &[3..40, 50..100]),
+        compare_found(&q[..100], 100, &protein, 0, &[3..40, 50..100]),
         FoundMatch {
             length: false,
             aligned: true,
+            unstraddled: true,
         }
     );
-    assert!(!compare_found(&q[..100], &protein, 0, &[50..101]).aligned);
-    assert!(!compare_found(q, &protein, 1, &whole).aligned);
+    let past = compare_found(&q[..100], 100, &protein, 0, &[50..101]);
+    assert!(!past.aligned && !past.unstraddled);
+    // A range wholly past the record's end reads gaps (`tx.tail.f6`) but straddles nothing.
+    let beyond = compare_found(&q[..100], 100, &protein, 0, &[110..120]);
+    assert!(!beyond.aligned && beyond.unstraddled);
+    assert!(!compare_found(q, q.len(), &protein, 1, &whole).aligned);
+    // A record whose letters the caller dropped (BLASTN's `x_query_drop`) has the sequence's
+    // length, and no letters over any HSP.
+    assert_eq!(
+        compare_found(&[], q.len(), &protein, 0, &whole),
+        FoundMatch {
+            length: true,
+            aligned: false,
+            unstraddled: true,
+        }
+    );
     let mut gap = q.to_vec();
     gap[10] = b'X';
-    assert!(!compare_found(&gap, &protein, 0, &[5..20]).aligned);
-    assert!(compare_found(&gap, &protein, 0, &[20..60]).aligned);
+    assert!(!compare_found(&gap, gap.len(), &protein, 0, &[5..20]).aligned);
+    assert!(compare_found(&gap, gap.len(), &protein, 0, &[20..60]).aligned);
     let nucleotide =
         SeqDb::open(dir.join("of1/bnqid").to_str().unwrap(), SeqType::Nucleotide).unwrap();
     let copy = std::fs::read(dir.join("of1/bnqid.fa")).unwrap();
@@ -542,14 +566,21 @@ LSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR";
         .copied()
         .collect();
     assert_eq!(
-        compare_found(&first, &nucleotide, 0, &[0..first.len()]),
+        compare_found(&first, first.len(), &nucleotide, 0, &[0..first.len()]),
         both
     );
     assert_eq!(
-        compare_found(&first[..first.len() - 1], &nucleotide, 0, &[0..10]),
+        compare_found(
+            &first[..first.len() - 1],
+            first.len() - 1,
+            &nucleotide,
+            0,
+            &[0..10]
+        ),
         FoundMatch {
             length: false,
             aligned: true,
+            unstraddled: true,
         }
     );
 }

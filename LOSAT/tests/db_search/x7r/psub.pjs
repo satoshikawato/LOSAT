@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "psub",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "psub.fa",
+  "number-of-letters": 148,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-27T23:48:00",
+  "number-of-volumes": 1,
+  "bytes-total": 405,
+  "bytes-to-cache": 230,
+  "files": [
+    "psub.phr",
+    "psub.pin",
+    "psub.pog",
+    "psub.psd",
+    "psub.psi",
+    "psub.psq"
+  ]
+}

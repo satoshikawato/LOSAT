@@ -12,10 +12,10 @@
 //! on it and that the default run took the new path where the rule says so: with `LOSAT_TIMING`
 //! the default run prints `[TIMING] x_bn_q_drop: batches= records= letters=` and
 //! `[TIMING] x_bn_q_pack: records= letters= ...`, and `=0` prints no such line. The formats that
-//! show no query letter (outfmt 6, 7, 8, 9, 12 and SAM without `SR`)
+//! show no query letter (outfmt 6, 7, 8, 9, 12 and SAM without `SQ`)
 //! drop the letters of every record, in a search of several batches (`BATCH_SIZE`) with a query
 //! without letters and a query without a valid context among them; the formats that show them
-//! (outfmt 0, 5, SAM `SQ SR`) and `-query_loc` keep them; a batch split into query chunks
+//! (outfmt 0, 5, SAM with `SQ`) and `-query_loc` keep them; a batch split into query chunks
 //! (`CHUNK_SIZE`), which cuts its chunks from the records' letters after the encoding, drops them
 //! after its chunks. The records are packed whatever the size of the file and from standard input.
 //! That those bytes equal NCBI's is the business of the fixture suites.
@@ -232,7 +232,7 @@ fn the_reports_without_query_letters_do_not_depend_on_the_drop() {
         // records leave with their batch): the store holds the records read before the search.
         let base = [("BATCH_SIZE", "3000"), ("LOSAT_X_QSTREAM", "0")];
         for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
-            for format in ["6", "7", "8", "9", "12", "17", "17 SQ"] {
+            for format in ["6", "7", "8", "9", "12", "17"] {
                 let words = ["-outfmt", format];
                 let what = format!("{task} {} -outfmt {format:?}", subjects.0);
                 let run = |threads: u32, extra: &[(&'static str, &'static str)]| {
@@ -261,16 +261,19 @@ fn the_reports_without_query_letters_do_not_depend_on_the_drop() {
 }
 
 // The formats that show the queries' letters, and `-query_loc`, keep them (no line); the reports
-// are those of `LOSAT_X_BNQPACK=0`.
+// are those of `LOSAT_X_BNQPACK=0`. SAM's `SQ` without `SR` shows the subject's letters, which a
+// query that NCBI finds for the subject by its generated id replaces (line RG item X7-1 compares
+// them, `BlastnOutputFormat::reads_query_letters`).
 #[test]
 fn the_reports_with_query_letters_keep_them() {
     let dir = TestDir::new("letters");
     let (query, _) = inputs(&dir);
     let subject = fasta("LC738868.fasta");
     let subjects = ("-subject", subject.as_path());
-    let cases: [&[&str]; 4] = [
+    let cases: [&[&str]; 5] = [
         &["-outfmt", "0"],
         &["-outfmt", "5"],
+        &["-outfmt", "17 SQ"],
         &["-outfmt", "17 SQ SR"],
         &["-outfmt", "6", "-query_loc", "101-1900"],
     ];

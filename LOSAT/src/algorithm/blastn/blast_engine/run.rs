@@ -9120,18 +9120,22 @@ fn run_in_pool(
             };
             let writers = found_writers(&output_formats);
             // How the found query's record compares with the sequence (`compare_found`): the
-            // batch's input records are whole without `-query_loc` (`LOSAT_X_BNQPACK`'s records
-            // without letters compare as neither).
+            // batch's input records are whole without `-query_loc`. Their lengths are the input
+            // lengths read before the search: a run whose reports read no query letter drops the
+            // records' letters after the encoding (`x_query_drop`, `reads_query_letters`), and
+            // keeps them where a report reads the found query's letters (the fields of the
+            // letters, SAM's `SQ`).
             let ranged = query_input.placements.ranged();
             let input_records = batch_records.input();
             let found = |subject: &crate::report::db_subject::ParsedSubject,
                          ordinal: u32,
                          ranges: &[std::ops::Range<usize>]| {
-                crate::report::query_bioseq::found_record(subject, input_records)
+                crate::report::query_bioseq::found_index(subject, input_records)
                     .filter(|_| !ranged)
-                    .map_or_else(Default::default, |record| {
+                    .map_or_else(Default::default, |index| {
                         crate::report::query_bioseq::compare_found(
-                            &record.sequence,
+                            &input_records[index].sequence,
+                            query_input.input_lengths[input_start + index],
                             &database.db,
                             ordinal,
                             ranges,

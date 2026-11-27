@@ -1635,6 +1635,7 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
     let both = || crate::report::query_bioseq::FoundMatch {
         length: true,
         aligned: true,
+        unstraddled: true,
     };
     let same = |spec: Option<&TabularSpec>, program| {
         crate::report::query_bioseq::tabular_differs_for_generated_id(
@@ -1672,6 +1673,7 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
     let aligned = || crate::report::query_bioseq::FoundMatch {
         length: false,
         aligned: true,
+        unstraddled: true,
     };
     let tail = |fields: &str| {
         crate::report::query_bioseq::tabular_differs_for_generated_id(

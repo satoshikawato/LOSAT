@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pb2",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pb2.fa",
+  "number-of-letters": 298,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-27T23:48:00",
+  "number-of-volumes": 1,
+  "bytes-total": 621,
+  "bytes-to-cache": 389,
+  "files": [
+    "pb2.phr",
+    "pb2.pin",
+    "pb2.pog",
+    "pb2.psd",
+    "pb2.psi",
+    "pb2.psq"
+  ]
+}

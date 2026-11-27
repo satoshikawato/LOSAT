@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "ptail",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "ptail.fa",
+  "number-of-letters": 208,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-27T23:48:00",
+  "number-of-volumes": 1,
+  "bytes-total": 466,
+  "bytes-to-cache": 290,
+  "files": [
+    "ptail.phr",
+    "ptail.pin",
+    "ptail.pog",
+    "ptail.psd",
+    "ptail.psi",
+    "ptail.psq"
+  ]
+}

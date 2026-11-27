@@ -1145,6 +1145,7 @@ pub(super) fn refuse_unreportable(
                     .map_or_else(Default::default, |(database, record)| {
                         crate::report::query_bioseq::compare_found(
                             &record.sequence,
+                            record.sequence.len(),
                             database.seqdb(),
                             ordinal,
                             ranges,

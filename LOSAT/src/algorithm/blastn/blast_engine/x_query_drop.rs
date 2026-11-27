@@ -30,8 +30,9 @@
 //!
 //! The rule (`Rule::acts`; the reach of the switch is recorded where `search_cli` decides): every
 //! output format reads no query letter after the search (`BlastnOutputFormat::reads_query_letters`:
-//! the tabular formats 6 and 7, the Seq-aligns of 8, 9 and 12, and SAM without both `SQ` and `SR`;
-//! not outfmt 0, 5, 11, 13 to 16, nor SAM's `SQ SR`) and no caller takes the hits' records (their
+//! the tabular formats 6 and 7, the Seq-aligns of 8, 9 and 12, and SAM without `SQ`; not outfmt 0,
+//! 5, 11, 13 to 16, nor SAM with `SQ`, whose subject letters line RG item X7-1 compares with a
+//! query's that NCBI finds for the subject) and no caller takes the hits' records (their
 //! query rows), without `-query_loc` (its input records keep their letters), and for the records
 //! read before the search only (not a streamed search, and not `run_local`, whose caller holds its
 //! records).
@@ -41,8 +42,9 @@
 //! it (`query_lengths` in the traceback, the loop's searched lengths for an invalid query's
 //! message, `QueryNames::searched_lengths` in the Seq-aligns), and no format of the rule reads a
 //! query letter (the HSP rows of outfmt 0 and the XML and JSON formats, the archive's Bioseqs and
-//! its DUST, and SAM's SEQ of the query with `SQ SR` do). Dropping memory changes no value that the
-//! search computes. No floating-point operation is involved.
+//! its DUST, and SAM's SEQ of the query with `SQ SR` do; X7-1's check reads the records' lengths
+//! from those lengths too). Dropping memory changes no value that the search computes. No
+//! floating-point operation is involved.
 //!
 //! Memory: the peak of a megablast batch is the scan (with BNLUTDROP, graduated), where the letters
 //! of a 5.5 Mb query (E. coli Sakai x MG1655) were 5.2 MiB beside the 10.5 MiB of the BLASTNA

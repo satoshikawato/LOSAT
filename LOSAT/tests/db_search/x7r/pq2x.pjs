@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pq2x",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pq2x.fa",
+  "number-of-letters": 100,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-27T23:48:00",
+  "number-of-volumes": 1,
+  "bytes-total": 355,
+  "bytes-to-cache": 182,
+  "files": [
+    "pq2x.phr",
+    "pq2x.pin",
+    "pq2x.pog",
+    "pq2x.psd",
+    "pq2x.psi",
+    "pq2x.psq"
+  ]
+}

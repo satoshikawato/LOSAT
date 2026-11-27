@@ -271,16 +271,19 @@ impl BlastnOutputFormat {
 
     /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQPACK's rule): the
     /// HSP rows of outfmt 0 and of the XML / JSON documents, the archive's Bioseqs and DUST, and
-    /// SAM's SEQ where the query is the target (`SQ SR`). The default tabular formats, the
-    /// Seq-aligns and the other SAM documents show none; a custom tabular report shows them
-    /// where its fields need the alignment rows (`TabularNeeds::rows`).
+    /// SAM's SEQ (`SQ`): the query's where the query is the target (`SQ SR`), else the
+    /// subject's, which NCBI reads from a query's Bioseq where its scope finds that query for the
+    /// subject by a generated id, so LOSAT compares the query's letters with the subject's there
+    /// (line RG item X7-1, `report::query_bioseq::compare_found`). The default tabular formats,
+    /// the Seq-aligns and SAM without `SQ` show none; a custom tabular report shows them where its
+    /// fields need the alignment rows (`TabularNeeds::rows`).
     pub(crate) fn reads_query_letters(self) -> bool {
         match self {
             BlastnOutputFormat::Tabular
             | BlastnOutputFormat::TabularWithComments
             | BlastnOutputFormat::Seqalign(_) => false,
             BlastnOutputFormat::CustomTabular(spec) => spec.needs().rows,
-            BlastnOutputFormat::Sam(spec) => spec.sequence && spec.subject_as_reference,
+            BlastnOutputFormat::Sam(spec) => spec.sequence,
             BlastnOutputFormat::Pairwise(_)
             | BlastnOutputFormat::Xml
             | BlastnOutputFormat::Xml2(_)

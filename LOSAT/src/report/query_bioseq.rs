@@ -578,12 +578,13 @@ pub(crate) fn tabular_shows(
 /// NCBI's formatter finds that query by the id, so its row differs where it shows what it found
 /// beyond the id (`FoundFields::names`), the found query's length (`length`) unless it is the
 /// sequence's (`found().length`), the letters of the alignment's subject row (`letters`;
-/// `nident` where the block opens for it, `num_ident > 0`; TBLASTX's `qseq`, which translates the
-/// found Bioseq where an HSP straddles its length, `tblastx_qseq_throws`) unless the found query
-/// has the sequence's letters over the HSP (`found().aligned`: NCBI then reads the letters that
+/// `nident` where the block opens for it, `num_ident > 0`) unless the found query has the
+/// sequence's letters over the HSP (`found().aligned`: NCBI then reads the letters that
 /// LOSAT reads of the sequence; BLASTP `q` against its copy `lcl|Query_1`,
 /// `tests/non_utf8_names` R3_7 and R7; a found query shorter than the HSP's end reads gaps there,
-/// TBLASTX `0.000`, probe `x71/fix2/ev2` `tx.tail.f6`), and the sequence's taxid where it has
+/// TBLASTX `0.000`, probe `x71/fix2/ev2` `tx.tail.f6`), TBLASTX's `qseq` where an HSP straddles
+/// the found query's end (`found().unstraddled`; it translates the found Bioseq and can throw,
+/// `tblastx_qseq_throws`), and the sequence's taxid where it has
 /// one (`subject_taxid`; a query has none: `N/A`), with a taxonomy database (`taxdb`) also its
 /// names; in BLASTX and RPSTBLASTN, whose found query is nucleotide, every row that enters the
 /// alignment block ends the run with an exception of the Seq-align's conversion. The organism
@@ -613,14 +614,14 @@ pub(crate) fn tabular_differs_for_generated_id(
         return subject_taxid && taxdb;
     }
     let fields = found_fields(spec, program, num_ident);
-    let reads_letters = fields.letters
-        || (program == Program::Tblastx
-            && spec.has(crate::report::tabular::TabularField::QuerySeq));
+    let tblastx_qseq =
+        program == Program::Tblastx && spec.has(crate::report::tabular::TabularField::QuerySeq);
     fields.names
         || (subject_taxid && (fields.taxid || (taxdb && fields.taxonomy)))
         || fields.throws
         || (fields.length && !found().length)
-        || (reads_letters && !found().aligned)
+        || (fields.letters && !found().aligned)
+        || (tblastx_qseq && !found().unstraddled)
 }
 
 /// How the query record that NCBI's scope finds by the generated id of a reported database
@@ -634,29 +635,39 @@ pub(crate) struct FoundMatch {
     /// Over the subject range of each HSP the record has the sequence's letters (the fields that
     /// read the letters of the alignment's subject row; SAM's SEQ; psiblast's PSSM).
     pub aligned: bool,
+    /// No HSP's subject range straddles the record's end (TBLASTX's `qseq`, which throws only
+    /// where one does, `tblastx_qseq_throws`; a range wholly past the end translates nothing).
+    pub unstraddled: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:946-947 (a masked residue is
 // kept in upper case)
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector.cpp:1082-1085 (a gap reads `-` in ncbieaa)
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:343,411-460 (the PSSM
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:343,411-452 (the PSSM
 // reads the subject over its alignment)
-/// How the query record whose whole letters are `record` (as the FASTA reader keeps them: IUPAC,
-/// in lower case where the mask covers them) compares with the database sequence `ordinal` of
-/// `db` over the subject ranges `ranges` (0-based, end exclusive, on its plus strand) of the
-/// reported HSPs, as NCBI's formatter reads the found query's Bioseq: its residues in upper case,
-/// a protein's as ncbieaa letters (`tabular.cpp`'s `SetAaCoding`). A protein record's `X` is
-/// never the sequence's: a `>?` gap line reads as `X` in the record and `-` in NCBI's Bioseq. A
-/// range past the record's end is not the sequence's (NCBI reads gaps there). A sequence that the
-/// database cannot read compares as neither (LOSAT refuses).
+/// How the query record of length `length` whose whole letters are `record` (as the FASTA reader
+/// keeps them: IUPAC, in lower case where the mask covers them; empty where the caller dropped
+/// them, BLASTN's records of a run whose reports read no query letter, `x_query_drop`, which keeps
+/// them wherever a report reads the found query's letters) compares with the database sequence
+/// `ordinal` of `db` over the subject ranges `ranges` (0-based, end exclusive, on its plus
+/// strand) of the reported HSPs, as NCBI's formatter reads the found query's Bioseq: its residues
+/// in upper case, a protein's as ncbieaa letters (`tabular.cpp`'s `SetAaCoding`). A protein
+/// record's `X` is never the sequence's: a `>?` gap line reads as `X` in the record and `-` in
+/// NCBI's Bioseq. A range past the record's end, or past the letters kept, is not the sequence's
+/// (NCBI reads gaps there). A sequence that the database cannot read compares as neither (LOSAT
+/// refuses).
 pub(crate) fn compare_found(
     record: &[u8],
+    length: usize,
     db: &crate::seqdb::SeqDb,
     ordinal: u32,
     ranges: &[std::ops::Range<usize>],
 ) -> FoundMatch {
     let compare = |letters: &[u8], protein: bool| FoundMatch {
-        length: letters.len() == record.len(),
+        length: letters.len() == length,
+        unstraddled: ranges
+            .iter()
+            .all(|range| !(range.start < length && length < range.end)),
         aligned: ranges.iter().all(|range| {
             match (record.get(range.clone()), letters.get(range.clone())) {
                 (Some(found), Some(letters)) => {
@@ -694,6 +705,14 @@ pub(crate) fn found_record<'r>(
     subject: &ParsedSubject,
     records: &'r [crate::record::FastaRecord],
 ) -> Option<&'r crate::record::FastaRecord> {
+    records.get(found_index(subject, records)?)
+}
+
+/// The index in `records` of [`found_record`].
+pub(crate) fn found_index(
+    subject: &ParsedSubject,
+    records: &[crate::record::FastaRecord],
+) -> Option<usize> {
     let crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(text)) =
         subject.alignment_id()
     else {
@@ -701,7 +720,7 @@ pub(crate) fn found_record<'r>(
     };
     records
         .iter()
-        .find(|record| record.local_id.as_bytes().eq_ignore_ascii_case(text))
+        .position(|record| record.local_id.as_bytes().eq_ignore_ascii_case(text))
 }
 
 /// What `check` reads of a run besides the sequence: whether its reports show NCBI's bytes for a

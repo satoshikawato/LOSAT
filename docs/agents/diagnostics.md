@@ -4067,8 +4067,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (perf/mb-query-letters, 2026-10-25): megablast of E. coli Sakai against MG1655 `RssAnon` 131.6 -> 126.4 MiB at one
   thread and 135.2 -> 129.9 at 16, 31,168 cDNAs at one thread 219.7 -> 215.3 MiB, time x0.98-1.00, outputs identical.
   The rule (class conditional, `x_reach!("LOSAT_X_BNQPACK", store_rule_acts)` recorded in `search_cli`): every output
-  format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without both
-  `SQ` and `SR`; BLASTN takes no custom tabular column), no `-query_loc`, no caller takes the hits' records, and the
+  format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without `SQ`,
+  whose `SQ` without `SR` line RG item X7-1 compares with a query that NCBI finds for the subject, 2026-11-28; a custom
+  tabular report without the alignment rows), no `-query_loc`, no caller takes the hits' records, and the
   records are read before the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records);
   the formats that show a query's letters and `-query_loc` keep the records whole. A batch split into query chunks cuts
   them from the records' letters, so it drops them after its chunks, before its traceback. The records keep their IDs,

@@ -1,0 +1,4 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:300
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -db tests/db_search/x7r/nsub -query tests/db_search/x7r/nq.fa -outfmt 17 -num_threads 1 	PN:blastn
+Query_1	0	Query_1	1	255	300M	*	0	0	*	*	AS:i:297	EV:f:3.06312e-161	NM:i:0	PI:f:99.67	BS:f:549.575

@@ -1013,7 +1013,10 @@
   query, widened from outfmt 1 to 4 of five programs to every format that shows that query in its
   place in all eight search programs, and its display id to outfmt 0: 153 outputs that differed from
   NCBI's without a refusal and 12 where NCBI throws, line RG item X7-1, decisions XT-X7-1a to
-  XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
+  XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; in its fix
+  round 2 of 2026-11-28 (review 1) the letters and the length are compared over the HSPs, SAM,
+  psiblast's saved PSSM and a damaged taxonomy database's texts refuse, the organism report only
+  with a taxonomy database found, decisions XT-X7-1n to XT-X7-1t; numbered after
   1.123 at the merge of dev of 2026-11-27 that brought line RG-KB item 18b's 1.123; first 1.123)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -5277,19 +5280,27 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
   the run, also the id of a later batch's query, which NCBI then searches as the database
   sequence, probe `b1.bp.q2x.f5`), in the tables (outfmt 6, 7, 10 and 20) whose fields show what
-  NCBI finds by that id (its ids and titles; its length or letters, the default fields outside
-  BLASTN among them, unless the found query's record is the sequence letter for letter),
-  in the organism report (outfmt 18) of a sequence with a taxid that the taxonomy database names,
-  and in psiblast's rounds that make the next PSSM; as the display id in outfmt 0 to 4 (TBLASTN's
+  NCBI finds by that id (its ids and titles; its length where the found query's is not the
+  sequence's; its letters, the default fields outside BLASTN among them, where the found query's
+  letters differ from the sequence's over an HSP or an HSP passes its end; `staxid` of a sequence
+  with a taxid and, with a taxonomy database found, its taxonomy names), in the organism report
+  (outfmt 18) of a sequence with a taxid when a taxonomy database is found, in SAM (17) where the
+  found query's length is not the sequence's or, with `SQ` without `SR`, its letters differ over
+  an HSP (rows `db.x7.bn.tail.f17*`), in psiblast's PSSM of the next round or of
+  `-save_pssm_after_last_round` where its letters differ over an HSP, and where the run's loads of
+  a sequence with a taxid write texts of a damaged taxonomy database (NCBI loads nothing of the
+  sequence, row `db.x7.bp.tax.badmagic.reject`); as the display id in outfmt 0 to 4 (TBLASTN's
   merge then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's
   and TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`, as BLASTX's and RPSTBLASTN's tables of a field of the
   alignment): NCBI shows the query's title and letters for the id (its second lookup, by the
-  display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM
-  (17), the tables of fields that read nothing of the sequence, or only its letters and length
-  where the found query's record is the sequence letter for letter (a database copy of the query:
-  NCBI reads the same letters, rows `db.x7.bp.qid.same.*`), and the organism report of a sequence
-  without such a taxid are NCBI's bytes.
+  display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM and
+  the tables of fields that read nothing of the sequence, or only its letters and length where the
+  found query has them (a database copy of the query, or the query with more letters after it:
+  NCBI reads the same letters over the HSPs, rows `db.x7.bp.qid.same.*`, `db.x7.bp.tail.*`), and
+  the organism report of a sequence without a taxid, or without a taxonomy database, are NCBI's
+  bytes. BLASTP, PSIBLAST and RPSBLAST refuse after the reports of the query batches before (review
+  1 of line RG item X7-1, S5).
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
   cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with

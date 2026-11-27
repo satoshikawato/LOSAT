@@ -649,20 +649,24 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
 
     // 1b. Filtered protein DB where the negative-length OID (OID 2) is excluded by a list:
     // NCBI's `CSeqDBImpl::x_FillSeqBuffer` still stops at OID 2 before applying the OID bitmap.
+    // Block 0 (OIDs 0..2) precedes the gap; block 1 (OID 3) checks its preceding gap [2..3) and
+    // returns an empty stopped block.
     let mut fdb = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
     fdb.x_keep_oids(|oid| oid != 2);
     assert_eq!(fdb.num_seqs(), 3);
     fdb.set_mt_stop_at_negative(true);
-    assert_eq!(fdb.mt_filtered_stop_ordinal().unwrap(), Some(2));
     let r0 = fdb.next_block(0, 1 << 20).unwrap();
     let b0 = fdb.read_protein_search_block(r0).unwrap();
-    assert!(b0.stopped_at_negative());
+    assert!(!b0.stopped_at_negative());
     assert_eq!(b0.len(), 2);
-    // Excluded negative OID preceding all included OIDs stops with 0 scanned ordinals.
+    let r1 = fdb.next_block(r0.end_ordinal(), 1 << 20).unwrap();
+    let b1 = fdb.read_protein_search_block(r1).unwrap();
+    assert!(b1.stopped_at_negative());
+    assert_eq!(b1.len(), 0);
+    // Excluded negative OID preceding all included OIDs stops block 0 with 0 scanned ordinals.
     let mut fdb_after = SeqDb::open_search_in(b"pneg", SeqType::Protein, &path).unwrap();
     fdb_after.x_keep_oids(|oid| oid == 3);
     fdb_after.set_mt_stop_at_negative(true);
-    assert_eq!(fdb_after.mt_filtered_stop_ordinal().unwrap(), Some(0));
     let r_after = fdb_after.next_block(0, 1 << 20).unwrap();
     let b_after = fdb_after.read_protein_search_block(r_after).unwrap();
     assert!(b_after.stopped_at_negative());
@@ -804,16 +808,19 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
     assert!(nblk_mt.stopped_at_negative());
     assert_eq!(nblk_mt.len(), 1);
 
-    // 2b. Filtered nucleotide DB where negative OID 1 is excluded still stops at ordinal 1, and
-    // `exact_totals` sums signed `GetSeqLengthExact` lengths (including negative OID 1 when kept).
+    // 2b. Filtered nucleotide DB where negative OID 1 is excluded still stops at block 1 (after
+    // checking excluded gap [1..2)), and `exact_totals` sums signed `GetSeqLengthExact` lengths.
     let mut fndb = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
     fndb.x_keep_oids(|oid| oid != 1);
     fndb.set_mt_stop_at_negative(true);
-    assert_eq!(fndb.mt_filtered_stop_ordinal().unwrap(), Some(1));
     let nr0 = fndb.next_block(0, 1 << 20).unwrap();
     let nb0 = fndb.read_nucleotide_search_block(nr0).unwrap();
-    assert!(nb0.stopped_at_negative());
+    assert!(!nb0.stopped_at_negative());
     assert_eq!(nb0.len(), 1);
+    let nr1 = fndb.next_block(nr0.end_ordinal(), 1 << 20).unwrap();
+    let nb1 = fndb.read_nucleotide_search_block(nr1).unwrap();
+    assert!(nb1.stopped_at_negative());
+    assert_eq!(nb1.len(), 0);
 
     let mut fndb_all = SeqDb::open_search_in(b"nirr", SeqType::Nucleotide, &path).unwrap();
     fndb_all.x_keep_oids(|_| true);
@@ -856,6 +863,25 @@ fn mt_negative_length_stop_and_irregular_nucleotide_ambiguity_offsets() {
     let npast_mt = npast.read_nucleotide_search_block(npast_range).unwrap();
     assert!(npast_mt.stopped_at_negative());
     assert_eq!(npast_mt.len(), 0);
+
+    // 2d. Excluded nucleotide OID whose last-byte offset lies past the mapped 4 KiB page with
+    // positive `whole_bytes` below 2^29 must fail the MT gap check because NCBI reads that tail
+    // byte for every OID it scans (`seqdbvol.cpp:1835`).
+    write_v4_index(
+        &root.join("npast_excl.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[10_000, 0, 2],
+        Some(&[10_002, 2, 2]),
+    );
+    std::fs::write(root.join("npast_excl.nsq"), [0u8; 4]).unwrap();
+    std::fs::write(root.join("npast_excl.nhr"), b"").unwrap();
+    let mut npast_excl = SeqDb::open_search_in(b"npast_excl", SeqType::Nucleotide, &path).unwrap();
+    npast_excl.x_keep_oids(|oid| oid == 1);
+    npast_excl.set_mt_stop_at_negative(true);
+    let r_excl = npast_excl.next_block(0, 1 << 20).unwrap();
+    assert!(npast_excl.read_nucleotide_search_block(r_excl).is_err());
 
     // 3. Nucleotide volume with amb[0] == 0 -> reads before mmap -> NcbiCrashes refusal.
     write_v4_index(

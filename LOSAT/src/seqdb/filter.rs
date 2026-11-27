@@ -2441,7 +2441,6 @@ impl SeqDb {
         // The scan is that of `included_length` when it visited every included OID.
         self.set_included_length((scan.count == filter.count()).then_some(scan.searchable_total));
         self.filter = Some(Box::new(filter));
-        self.mt_filter_stop = std::sync::OnceLock::new();
         self.update_first_oid_length()?;
         Ok(scan)
     }

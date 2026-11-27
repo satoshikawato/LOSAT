@@ -346,8 +346,9 @@ impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:694-710
     /// Relative index of the first nucleotide in `first..end` whose NCBI `x_GetSequence` length is
-    /// negative, or `None`. Validates only the `file[start + whole_bytes]` byte NCBI reads when
-    /// `whole_bytes` is negative or overflows 32-bit `whole_bytes * 4`.
+    /// negative, or `None`. Checks that the byte NCBI reads (`file[start + whole_bytes]`) lies
+    /// within the mapped readable length for every scanned OID, reading the byte only when
+    /// `whole_bytes >= 2^29` can overflow 32-bit `whole_bytes * 4`.
     pub(super) fn x_first_negative_nucleotide_in(
         &self,
         first: u32,
@@ -361,24 +362,27 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        let file = self.open_non_empty_seq_file()?;
+        let readable = file.readable_len();
         for (i, &amb) in amb_offsets.iter().enumerate() {
             let start = seq_offsets[i];
             let whole_bytes = (amb as i32).wrapping_sub(start as i32).wrapping_sub(1);
+            let last_pos = i64::from(start) + i64::from(whole_bytes);
+            if last_pos < 0 {
+                return Err(SeqDbError::NcbiCrashes {
+                    path: file.path().to_path_buf(),
+                    message: format!(
+                        "sequence {}: ambiguity offset {amb} causes NCBI to read before the \
+                         start of the sequence file mapping",
+                        u64::from(first_oid) + i as u64
+                    ),
+                });
+            }
+            if (last_pos as u64) >= readable {
+                file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
+            }
             if !(0..(1 << 29)).contains(&whole_bytes) {
-                let last_pos = i64::from(start) + i64::from(whole_bytes);
-                let file = self.open_non_empty_seq_file()?;
-                if last_pos < 0 {
-                    return Err(SeqDbError::NcbiCrashes {
-                        path: file.path().to_path_buf(),
-                        message: format!(
-                            "sequence {}: ambiguity offset {amb} causes NCBI to read before the \
-                             start of the sequence file mapping",
-                            u64::from(first_oid) + i as u64
-                        ),
-                    });
-                }
                 if whole_bytes < 0 {
-                    file.x_check_range(last_pos as u64, last_pos as u64 + 1)?;
                     return Ok(Some(i as u32));
                 }
                 let last = file.with_range(last_pos as u64, last_pos as u64 + 1, |b| b[0])?;
@@ -2814,12 +2818,6 @@ impl SequenceBlock {
             stopped_at_negative: true,
             amb_error: None,
         }
-    }
-
-    /// Marks this block as having stopped a multithreaded DB-split scan at a negative-length OID
-    /// (`CSeqDBImpl::x_FillSeqBuffer`, seqdbimpl.cpp:699-707).
-    pub(super) fn set_stopped_at_negative(&mut self, stopped: bool) {
-        self.stopped_at_negative = stopped;
     }
 
     /// Whether a multithreaded DB-split scan stopped at a negative-length sequence before the

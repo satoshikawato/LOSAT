@@ -349,29 +349,34 @@ impl BlastxDatabase {
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
         let stop_at_negative = self.db.mt_stop_at_negative();
-        let limit = if stop_at_negative {
-            match self.db.mt_filtered_stop_ordinal() {
-                Ok(Some(stop)) => stop,
-                Ok(None) => self.db.num_seqs(),
-                Err(_) => {
-                    return x_check_whole_named(&self.db, self.program, allow_long)
-                        .map(|l| (l, self.db.num_seqs() as usize))
-                }
-            }
-        } else {
-            self.db.num_seqs()
-        };
+        let limit = self.db.num_seqs();
         let mut longest = 0;
         let mut first = 0;
         let mut scan_count = limit as usize;
         'scan: while first < limit {
             let end = limit.min(first.saturating_add(X_LENGTHS_PER_READ));
+            let Some(range) = self.db.x_block_range(first, end) else {
+                break;
+            };
+            if stop_at_negative {
+                match self.db.x_mt_gap_stopped_before(range) {
+                    Ok(true) => {
+                        scan_count = first as usize;
+                        break 'scan;
+                    }
+                    Ok(false) => {}
+                    Err(_) => {
+                        return x_check_whole_named(&self.db, self.program, allow_long)
+                            .map(|l| (l, self.db.num_seqs() as usize))
+                    }
+                }
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
             // Proteins whose NCBI 32-bit length is <= 0 (`0`, `>= 2^31`, or non-ascending offsets)
             // are skipped at 1 thread and do not contribute to the searchable longest sequence;
             // negative lengths terminate the scan in multithreaded DB-split mode.
-            let lengths = match self.db.x_protein_lengths_i32(first, end) {
+            let lengths = match self.db.x_protein_lengths_i32_range(range) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
                 _ => {
                     return x_check_whole_named(&self.db, self.program, allow_long)
@@ -388,7 +393,7 @@ impl BlastxDatabase {
                 }
                 longest = longest.max(len as usize);
             }
-            first += lengths.len() as u32;
+            first = range.end_ordinal();
         }
         if !allow_long && longest > MAX_DBSEQ_LEN {
             return self.x_check_stores().map(|l| (l, scan_count));

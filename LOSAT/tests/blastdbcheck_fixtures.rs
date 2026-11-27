@@ -816,11 +816,24 @@ fn load_nonasc_expected(name: &str) -> (Vec<u8>, Vec<u8>, i32) {
     (out, err, rc)
 }
 
-/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`.
-fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>, Vec<u8>, i32) {
+/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`,
+/// optionally wrapped by an executable prefix (such as `["taskset", "-c", "0"]`).
+fn run_losat_sub_prefixed(
+    root: &Path,
+    dir: &Path,
+    prefix: &[&str],
+    sub: &str,
+    args: &[&str],
+) -> (Vec<u8>, Vec<u8>, i32) {
     let home = root.join("home");
     fs::create_dir_all(&home).unwrap();
-    let mut sub_cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
+    let mut sub_cmd = if let Some((prog, rest)) = prefix.split_first() {
+        let mut cmd = Command::new(prog);
+        cmd.args(rest).arg(env!("CARGO_BIN_EXE_losat"));
+        cmd
+    } else {
+        Command::new(env!("CARGO_BIN_EXE_losat"))
+    };
     sub_cmd
         .arg(sub)
         .args(args)
@@ -842,6 +855,11 @@ fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>,
         with_run(&out.stderr, root),
         out.status.code().unwrap_or(-1),
     )
+}
+
+/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`.
+fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>, Vec<u8>, i32) {
+    run_losat_sub_prefixed(root, dir, &[], sub, args)
 }
 
 /// Cross-program parity for non-ascending index offsets (`d_p4_nonasc_seq`, `d_p4_nonasc_hdr`,
@@ -1198,6 +1216,37 @@ fn nonasc_cross_program_parity() {
         let got = run_losat_sub(&root, &d_seq, sub, &args);
         let want = load_nonasc_expected(name);
         assert_eq!(got, want, "{name}");
+    }
+    // Under Linux CPU affinity (`taskset -c 0`), NCBI's `CSystemInfo::GetCpuCount` still counts
+    // online CPUs (`_SC_NPROCESSORS_ONLN`) and keeps the 4-thread DB-split stop on both unfiltered
+    // and list-filtered searches.
+    #[cfg(target_os = "linux")]
+    if Command::new("taskset")
+        .args(["-c", "0", "true"])
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        let base = [
+            "-query",
+            q3s,
+            "-db",
+            "p4",
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        for (name, extra) in [
+            ("nonasc_seq_blastp_t4", &[][..]),
+            ("nonasc_seq_blastp_neggi_t4", &["-negative_gilist", neg_gis]),
+        ] {
+            let mut args = base.to_vec();
+            args.extend_from_slice(extra);
+            let got =
+                run_losat_sub_prefixed(&root, &d_seq, &["taskset", "-c", "0"], "blastp", &args);
+            let want = load_nonasc_expected(name);
+            assert_eq!(got, want, "{name} under taskset -c 0");
+        }
     }
 
     // 2. d_p4_nonasc_hdr (p4.pin@68 = 00000000 -> hdr=[0, 79, 167, 0, 334, ...]).

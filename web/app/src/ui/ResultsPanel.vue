@@ -9,7 +9,7 @@
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
-import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
+import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionArchiveEntry, type SessionCountsEntry } from '../application/coordinator';
 import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
@@ -18,7 +18,7 @@ import { fromText, inputLabel, leavesOut, readDifferenceText } from '../domain/i
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal, runInputRecords } from '../domain/run';
-import { windowMaskerStageById } from '../domain/tools';
+import { toolLabel, toolStageLabel } from '../domain/tools';
 import { withUnit } from '../domain/units';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -51,6 +51,7 @@ const emit = defineEmits<{
   'use-in-blastn': [file: File];
   'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
+  'format-archive': [entry: SessionArchiveEntry];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
@@ -204,14 +205,15 @@ watch(
 
 function runLabel(run: AnyRunView): string {
   if (isToolRun(run)) {
-    const { number, stage } = run.snapshot;
+    const { number, tool, stage } = run.snapshot;
     const status =
       run.status === 'completed'
         ? ''
         : run.status === 'failed' && run.record.exitStatus !== undefined
           ? ` (exit status ${run.record.exitStatus})`
           : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-    return `Run ${number} · WindowMasker · ${windowMaskerStageById(stage).label}${status}`;
+    const suffix = tool === 'windowmasker' ? ` · ${toolStageLabel(tool, stage)}` : '';
+    return `Run ${number} · ${toolLabel(tool)}${suffix}${status}`;
   }
   const { number, program, query, subject, database, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
@@ -317,7 +319,11 @@ async function toAlignments(id: HspId): Promise<void> {
           <template v-if="selectedTool">
             <dt>Tool</dt>
             <dd class="results-program">
-              <span data-testid="results-program">WindowMasker · {{ windowMaskerStageById(selectedTool.snapshot.stage).label }}</span>
+              <span data-testid="results-program">{{
+                selectedTool.snapshot.tool === 'windowmasker'
+                  ? `${toolLabel(selectedTool.snapshot.tool)} · ${toolStageLabel(selectedTool.snapshot.tool, selectedTool.snapshot.stage)}`
+                  : `${toolLabel(selectedTool.snapshot.tool)} (blast_formatter)`
+              }}</span>
               <VerificationBadge v-if="state.toolBadge" :badge="state.toolBadge" compact @details="toolSection = 'details'" />
             </dd>
             <dt>Options</dt>
@@ -482,7 +488,7 @@ async function toAlignments(id: HspId): Promise<void> {
           <RunDetails :run="loaded.run" :loaded="loaded" />
         </div>
         <div v-if="view === 'outputs'" v-bind="panel('outputs')" class="results-group">
-          <OutputsView :coordinator="coordinator" :run="loaded.run" />
+          <OutputsView :coordinator="coordinator" :run="loaded.run" @format-archive="emit('format-archive', $event)" />
         </div>
       </template>
     </template>

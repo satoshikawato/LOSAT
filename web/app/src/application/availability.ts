@@ -8,6 +8,7 @@
 import { isUnavailable } from 'losat/ports';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
+import type { BlastFormatterDraft, BlastFormatterDraftState } from './blast-formatter-draft';
 import type { ToolDraft, ToolDraftState } from './tool-draft';
 
 export interface AvailabilityState {
@@ -23,6 +24,8 @@ export interface AvailabilityDeps {
   readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain'>;
   /** The WindowMasker form, whose describeTool and validateTool can also observe an unavailable engine. */
   readonly toolDraft?: { readonly state: Store<ToolDraftState> } & Pick<ToolDraft, 'askAgain'>;
+  /** The Format Archive form, whose describeTool and validateTool can also observe an unavailable engine. */
+  readonly blastFormatterDraft?: { readonly state: Store<BlastFormatterDraftState> } & Pick<BlastFormatterDraft, 'askAgain'>;
   /** Settles when the Data worker could not start or ended: for good, as no call of it can succeed again. */
   readonly dataWorkerEnded: Promise<Error>;
 }
@@ -35,6 +38,7 @@ export class Availability {
   constructor(private readonly deps: AvailabilityDeps) {
     deps.draft.state.subscribe(() => this.update());
     deps.toolDraft?.state.subscribe(() => this.update());
+    deps.blastFormatterDraft?.state.subscribe(() => this.update());
     void deps.dataWorkerEnded.then((error) => {
       this.ended = error.message;
       this.update();
@@ -52,7 +56,7 @@ export class Availability {
    */
   async recheck(): Promise<string | undefined> {
     if (this.ended === undefined) {
-      await Promise.all([this.deps.draft.askAgain(), this.deps.toolDraft?.askAgain()]);
+      await Promise.all([this.deps.draft.askAgain(), this.deps.toolDraft?.askAgain(), this.deps.blastFormatterDraft?.askAgain()]);
     }
     return this.state.get().problem;
   }
@@ -61,14 +65,23 @@ export class Availability {
     const draftProblem = unavailableOf(this.deps.draft.state.get());
     const toolState = this.deps.toolDraft?.state.get();
     const toolProblem = toolState === undefined ? undefined : unavailableOfTool(toolState);
-    if (this.draftWasUnavailable && draftProblem === undefined && toolProblem !== undefined && this.ended === undefined) {
-      void this.deps.toolDraft?.askAgain();
+    const bfState = this.deps.blastFormatterDraft?.state.get();
+    const bfProblem = bfState === undefined ? undefined : unavailableOfBlastFormatter(bfState);
+    if (this.draftWasUnavailable && draftProblem === undefined && this.ended === undefined) {
+      if (toolProblem !== undefined) void this.deps.toolDraft?.askAgain();
+      if (bfProblem !== undefined) void this.deps.blastFormatterDraft?.askAgain();
     }
     this.draftWasUnavailable = draftProblem !== undefined;
-    const problem = this.ended ?? draftProblem ?? toolProblem;
+    const problem = this.ended ?? draftProblem ?? toolProblem ?? bfProblem;
     if (problem === this.state.get().problem) return;
     this.state.set(problem === undefined ? {} : { problem });
   }
+}
+
+export function unavailableOfBlastFormatter(state: BlastFormatterDraftState): string | undefined {
+  if (state.descriptionUnavailable === true && state.descriptionError !== undefined) return state.descriptionError;
+  if (state.validation.state === 'unavailable') return state.validation.message;
+  return undefined;
 }
 
 export function unavailableOfTool(state: ToolDraftState): string | undefined {

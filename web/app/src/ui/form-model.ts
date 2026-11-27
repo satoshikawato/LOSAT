@@ -2,6 +2,7 @@
 // both the Search form (`searchFormModel`) and tool forms provide one, so one field component
 // draws every option with its defaults, changed marker, help tip and refusal marks.
 import type { ParameterDescription } from 'losat/ports';
+import type { BlastFormatterDraft, BlastFormatterDraftState } from '../application/blast-formatter-draft';
 import { registryName } from '../application/conffile';
 import type { CountsLoader } from '../application/counts';
 import type { DatabasePickDraft, DraftState, SearchDraft } from '../application/draft';
@@ -23,7 +24,14 @@ import {
 import { NO_TAXID_EXPANSION_FLAG } from '../domain/blast-db';
 import { programById, type ParameterField, type ParameterSection } from '../domain/programs';
 import { refusedToolFields } from '../domain/tool-argv';
-import { allStageParameters, stageOptionParameters, toToolEngineOption, toToolParameterField } from '../domain/tools';
+import {
+  allBlastFormatterParameters,
+  allStageParameters,
+  blastFormatterOptionParameters,
+  stageOptionParameters,
+  toToolEngineOption,
+  toToolParameterField,
+} from '../domain/tools';
 import { refusal, REFUSAL_ID } from './refusal';
 
 export interface FormRefusal {
@@ -209,5 +217,46 @@ export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): 
     sections,
     extra: state.extra[stage],
     extraHelp: WM_EXTRA_HELP,
+  };
+}
+
+/** DOM id of the Format Archive argv refusal element, pointed to by refused fields via `aria-describedby`. */
+export const BF_REFUSAL_ID = 'bf-argv-validation-message';
+
+const BF_EXTRA_HELP =
+  'Other options of the losat blast_formatter command line, written as there: -logfile run.log -conffile app.ini -h -version';
+
+/** Adapts `BlastFormatterDraft` + `BlastFormatterDraftState` into a `FormModel` driven by `-xmlhelp`. */
+export function blastFormatterFormModel(draft: BlastFormatterDraft, state: BlastFormatterDraftState): FormModel {
+  const allParams = allBlastFormatterParameters(state.description);
+  const options: readonly ParameterDescription[] | undefined =
+    state.description === undefined ? undefined : allParams.map(toToolEngineOption);
+  const optionFields = blastFormatterOptionParameters(state.description).map(toToolParameterField);
+  const sections: readonly ParameterSection[] =
+    state.descriptionUnavailable === true || optionFields.length === 0
+      ? []
+      : [{ title: 'Options', placement: 'algorithm', fields: optionFields }];
+  const currentRefusal =
+    state.validation.state === 'invalid' ? refusedToolFields(state.validation.message, state.extra) : undefined;
+
+  return {
+    key: 'bf-format',
+    values: state.values,
+    options,
+    files: {},
+    knownDefault: (flag) => {
+      const def = options?.find((option) => option.flag === flag)?.defaultValue;
+      return def === undefined ? undefined : { defaultValue: def };
+    },
+    fieldList: () => [],
+    refusal: currentRefusal,
+    refusalId: BF_REFUSAL_ID,
+    idPrefix: 'bf-param',
+    ...descriptionFields(state),
+    ...draftActions(draft),
+    setFile: () => undefined,
+    sections,
+    extra: state.extra,
+    extraHelp: BF_EXTRA_HELP,
   };
 }

@@ -97,12 +97,12 @@ const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_ho
 const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 const { directoryReads } = require(path.join(ROOT, "LOSAT/tests/wasi_files"));
 
-const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
+const FORMATS = { blastp: [0, 6, 7], psiblast: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
 // The stream of the output of the argv's -outfmt.
 const CUSTOM_STREAM = 4;
 // The signals that discard what the host received of an output stream (abi_v2.md §5).
 const DISCARD_STREAM = 9;
-const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
+const WITH_HITS = new Set(["blastp", "psiblast", "tblastn", "blastn", "tblastx", "blastx"]);
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -630,7 +630,10 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
-  const rows = out6.toString().split("\n").filter(Boolean);
+  const rows = out6
+    .toString()
+    .split("\n")
+    .filter((line) => line.length > 0 && !(program === "psiblast" && line === "Search has CONVERGED!"));
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map(), subjectOf = new Map();
   // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
@@ -639,9 +642,10 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
   const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
-    const rank = ranks.get(record.q_idx) || 0;
+    const rankKey = `${record.q_idx}:${record.round ?? 0}`;
+    const rank = ranks.get(rankKey) || 0;
     assert.equal(record.rank, rank, `${label}: rank`);
-    ranks.set(record.q_idx, rank + 1);
+    ranks.set(rankKey, rank + 1);
     const row = out6.subarray(record.out6[0], record.out6[1]).toString();
     assert.equal(row.trimEnd(), rows[index], `${label}: out6 of HSP ${index}`);
     const fields = row.trimEnd().split("\t");
@@ -649,11 +653,15 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
     // The records come in query order, each with the index of its query among the registered
     // records (a block search numbers a block's queries from the block's first query); where the
     // query's id (`register`'s response) is an accession-like word, it is the row's qseqid.
-    assert.ok(record.q_idx < queryIds.length, `${label}: q_idx of HSP ${index} within the registered queries`);
-    if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
-    const id = queryIds[record.q_idx];
-    if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
-    if (shownIds) assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+    if (queryIds) {
+      assert.ok(record.q_idx < queryIds.length, `${label}: q_idx of HSP ${index} within the registered queries`);
+      if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
+      const id = queryIds[record.q_idx];
+      if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
+      if (shownIds) assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+    } else {
+      assert.ok(record.query_length > 0, `${label}: query_length of file-query HSP ${index}`);
+    }
     if (database) {
       // A subject of a database is no registered record: `s_idx` is its OID in the database (abi_v2.md §8),
       // and every row of one OID shows that subject's ID.
@@ -704,7 +712,15 @@ function checkSurface(reactor, native) {
     assert.ok(flags.includes("-evalue") && flags.includes("-query"), `${program}: parameters`);
     assert.ok(!flags.includes("-outfmt") && !flags.includes("-out") && !flags.includes("-num_threads"), `${program}: adapter-owned options`);
     assert.ok(flags.includes("-num_descriptions") && flags.includes("-num_alignments"), `${program}: hit list options`);
-    if (program === "tblastn") assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
+    if (program === "tblastn") {
+      assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
+      assert.ok(flags.includes("-in_pssm"), "tblastn: -in_pssm");
+    }
+    if (program === "psiblast") {
+      for (const flag of ["-in_msa", "-in_pssm", "-num_iterations", "-out_pssm", "-out_ascii_pssm", "-save_pssm_after_last_round", "-save_each_pssm"]) {
+        assert.ok(flags.includes(flag), `psiblast: ${flag}`);
+      }
+    }
     if (program === "blastx") assert.ok(description.query_gencodes.includes(11) && !("subject_gencodes" in description), "blastx: the query's genetic codes");
     if (program === "blastn") {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
@@ -716,15 +732,34 @@ function checkSurface(reactor, native) {
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
-  // with NCBI's data loaders on (the *validation* JSON, abi_v2.md §9; line WQA's D16, 2026-11-20).
+  // with NCBI's data loaders on and with -parse_deflines on (the *validation* JSON, abi_v2.md §9; D16 and X7-5).
   const accepted = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0"));
   assert.equal(accepted.status, 0);
-  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true });
+  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
+  const acceptedPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  assert.equal(acceptedPd.status, 0);
+  assert.deepEqual(JSON.parse(acceptedPd.streams.get(2).toString()), { data_loaders: true, parse_deflines: true });
+  const acceptedPdDry = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-dryrun"].join("\0"));
+  assert.equal(acceptedPdDry.status, 0);
+  assert.deepEqual(JSON.parse(acceptedPdDry.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
   // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", log_file_name: "run.log", strategy_file: null, dry_run: true, register_inputs: false, prints: null, database: false });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), {
+    conffile: "e1w3a.ini",
+    log_file: "run.log",
+    log_file_name: "run.log",
+    strategy_file: null,
+    dry_run: true,
+    register_inputs: false,
+    prints: null,
+    database: false,
+    query_file: null,
+    out_pssm: null,
+    out_ascii_pssm: null,
+    save_each_pssm: false,
+  });
   const normalizedLog = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-logfile", "logs/"].join("\0"));
   assert.equal(normalizedLog.status, 0, normalizedLog.error);
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file, "logs/");
@@ -748,7 +783,10 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_file_end", begunNoLoaders.status).status, 0);
   const off = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"].join("\0"));
   assert.equal(off.status, 0, off.error);
-  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false });
+  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false, parse_deflines: false });
+  const offPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini", "-parse_deflines"].join("\0"));
+  assert.equal(offPd.status, 0, offPd.error);
+  assert.deepEqual(JSON.parse(offPd.streams.get(2).toString()), { data_loaders: false, parse_deflines: true });
   assert.equal(reactor.call("losat_web2_file_release", begunNoLoaders.status).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
@@ -846,10 +884,10 @@ function checkSurface(reactor, native) {
   // register and the scan of the program's input (the TBLASTN query, NCBI's protein reader) agree on a
   // multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));
-  const registered = reactor.call("losat_web2_register", "tblastn", 0, 1, input);
+  const registered = reactor.call("losat_web2_register", "tblastn", 0, 1, 0, input);
   assert.ok(registered.status > 0, registered.error);
   const records = JSON.parse(registered.streams.get(2).toString()).records;
-  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1).status;
+  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1, 0).status;
   assert.ok(scanner > 0);
   for (let at = 0; at < input.length; at += 37) {
     assert.equal(reactor.call("losat_web2_scan_chunk", scanner, input.subarray(at, at + 37)).status, 0);
@@ -862,29 +900,67 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_release", registered.status).status, -1, "a released handle is gone");
   // NCBI's protein reader reads a first record without a defline (its ID is empty), and a gap line's letters
   // are its record's, as the CLI reads them (abi_v2.md §4, §9; line WQA's D13, 2026-11-20).
-  const headless = reactor.call("losat_web2_register", "blastp", 0, 1, Buffer.from("ACGT\n>x\nAC\n"));
+  const headless = reactor.call("losat_web2_register", "blastp", 0, 1, 0, Buffer.from("ACGT\n>x\nAC\n"));
   assert.ok(headless.status > 0, headless.error);
   assert.deepEqual(JSON.parse(headless.streams.get(2).toString()).records.map((r) => [r.id, r.length]),
                    [["", 4], ["x", 2]]);
   assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
-  const gap = reactor.call("losat_web2_register", "blastn", 1, 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
+  const gap = reactor.call("losat_web2_register", "blastn", 1, 1, 0, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
   assert.ok(gap.status > 0, gap.error);
   assert.deepEqual(JSON.parse(gap.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["s", 18]]);
   assert.equal(reactor.call("losat_web2_release", gap.status).status, 0);
   // A first line that may be a Seq-id: the CLI's refusal with the data loaders on, data with them off (D13 (c), D16).
   const seqId = Buffer.from("2HHB\nMKTAYIAKQR\n");
-  const refused = reactor.call("losat_web2_register", "blastp", 0, 1, seqId);
+  const refused = reactor.call("losat_web2_register", "blastp", 0, 1, 0, seqId);
   assert.equal(refused.status, -1);
   assert.match(refused.error, /^the first line of the query \("2HHB"\) is not a defline and may be a sequence identifier .* LOSAT's BLASTP /);
-  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1).status;
+  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1, 0).status;
   assert.equal(reactor.call("losat_web2_scan_chunk", scanRefused, seqId).status, 0);
   assert.equal(reactor.call("losat_web2_scan_end", scanRefused).error, refused.error, "the scan refuses in the same words");
-  const data = reactor.call("losat_web2_register", "blastp", 0, 0, seqId);
+  const data = reactor.call("losat_web2_register", "blastp", 0, 0, 0, seqId);
   assert.ok(data.status > 0, data.error);
   assert.deepEqual(JSON.parse(data.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["", 13]]);
   assert.equal(reactor.call("losat_web2_release", data.status).status, 0);
-  for (const [args, error] of [[["blastp", 2, 1], /^unknown input role 2$/], [["blastp", 0, 2], /^data_loaders must be 0 or 1, not 2$/],
-                               [["nosuch", 0, 1], /./]]) {
+  // scan_begin and register with parse_deflines=1 read other-molecule Seq-id records with NCBI's alphabet and
+  // encoding, matching register_inputs (line RG-XT item X7-5, ABI version 15).
+  for (const [program, file, plainLens, pdLens] of [
+    ["blastn", "LOSAT/tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa", [287], [300]],
+    ["blastp", "LOSAT/tests/fasta/outfmt0/pd_mol/s_ti_prot.fa", [150, 110], [107, 110]],
+  ]) {
+    const bytes = fs.readFileSync(path.join(ROOT, file));
+    for (const [pd, want] of [[0, plainLens], [1, pdLens]]) {
+      const s = reactor.call("losat_web2_scan_begin", program, 1, 1, pd).status;
+      assert.ok(s > 0, `${program} pd=${pd}`);
+      assert.equal(reactor.call("losat_web2_scan_chunk", s, bytes).status, 0);
+      const done = reactor.call("losat_web2_scan_end", s);
+      assert.equal(done.status, 0, done.error);
+      assert.deepEqual(JSON.parse(done.streams.get(2).toString()).records.map((r) => r.length), want, `${file} scan pd=${pd}`);
+      const reg = reactor.call("losat_web2_register", program, 1, 1, pd, bytes);
+      assert.ok(reg.status > 0, `${file} register pd=${pd}: ${reg.error}`);
+      assert.deepEqual(JSON.parse(reg.streams.get(2).toString()).records.map((r) => r.length), want, `${file} register pd=${pd}`);
+      assert.equal(reactor.call("losat_web2_release", reg.status).status, 0);
+    }
+  }
+  // register with parse_deflines=1 matches register_inputs on CheckDataLine boundary inputs (Finding 2).
+  const spJunk = Buffer.from(">sp|P99987.1|NAME_J\nEEEEEE\n%%%%%%\n");
+  const tiJunk = Buffer.from(">gnl|TI|12400\nEEEEEE\n%%%%%%\n");
+  assert.equal(reactor.call("losat_web2_register", "blastn", 1, 1, 0, spJunk).status, -1);
+  const spJunkPd = reactor.call("losat_web2_register", "blastn", 1, 1, 1, spJunk);
+  assert.ok(spJunkPd.status > 0, spJunkPd.error);
+  assert.deepEqual(JSON.parse(spJunkPd.streams.get(2).toString()).records.map((r) => r.length), [6]);
+  assert.equal(reactor.call("losat_web2_release", spJunkPd.status).status, 0);
+  const tiJunkPlain = reactor.call("losat_web2_register", "blastp", 1, 1, 0, tiJunk);
+  assert.ok(tiJunkPlain.status > 0, tiJunkPlain.error);
+  assert.deepEqual(JSON.parse(tiJunkPlain.streams.get(2).toString()).records.map((r) => r.length), [6]);
+  assert.equal(reactor.call("losat_web2_release", tiJunkPlain.status).status, 0);
+  assert.equal(reactor.call("losat_web2_register", "blastp", 1, 1, 1, tiJunk).status, -1);
+  assert.match(reactor.call("losat_web2_register", "blastp", 1, 1, 2, tiJunk).error, /^parse_deflines must be 0 or 1, not 2$/);
+  // validate omits parse_deflines when an argv fails to parse (Finding 3).
+  const unparsedVal = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-evalue"].join("\0"));
+  assert.equal(unparsedVal.status, -1);
+  assert.deepEqual(JSON.parse(unparsedVal.streams.get(2).toString()), { data_loaders: true });
+  for (const [args, error] of [[["blastp", 2, 1, 0], /^unknown input role 2$/], [["blastp", 0, 2, 0], /^data_loaders must be 0 or 1, not 2$/],
+                               [["blastp", 0, 1, 2], /^parse_deflines must be 0 or 1, not 2$/], [["nosuch", 0, 1, 0], /./]]) {
     const begun = reactor.call("losat_web2_scan_begin", ...args);
     assert.equal(begun.status, -1, args.join(" "));
     assert.match(begun.error, error);
@@ -991,7 +1067,7 @@ async function checkPrints(engine, reactor, native) {
   // The help words that are an option's value (line WQA's D14, 2026-11-21): the run is the CLI's, which fails, given the
   // registered inputs: `-query -h` names no subject (NCBI's error before the query is read), `-outfmt -h` and
   // `-evalue -h` are values that the CLI rejects.
-  const sequences = { blastp: ["MKVLAAGIVG", "MKVLAAGIVG"], blastx: ["ACGTACGTAC", "MKVLAAGIVG"], tblastn: ["MKVLAAGIVG", "ACGTACGTAC"],
+  const sequences = { blastp: ["MKVLAAGIVG", "MKVLAAGIVG"], psiblast: ["MKVLAAGIVG", "MKVLAAGIVG"], blastx: ["ACGTACGTAC", "MKVLAAGIVG"], tblastn: ["MKVLAAGIVG", "ACGTACGTAC"],
                       tblastx: ["ACGTACGTAC", "ACGTACGTAC"], blastn: ["ACGTACGTAC", "ACGTACGTAC"] };
   const fails = (argv) => {
     const label = argv.join(" ");
@@ -1003,7 +1079,7 @@ async function checkPrints(engine, reactor, native) {
     assert.equal(validated.status, -1, `${label}: validate fails`);
     assert.equal(validated.error.trimEnd(), message, `${label}: validate gives the CLI's message`);
     const [query, subject] = sequences[argv[0]].map((residues, kind) =>
-      reactor.call("losat_web2_register", argv[0], kind, 1, Buffer.from(`>r${kind}\n${residues}\n`)).status);
+      reactor.call("losat_web2_register", argv[0], kind, 1, 0, Buffer.from(`>r${kind}\n${residues}\n`)).status);
     assert.ok(query > 0 && subject > 0, `${label}: the inputs are registered`);
     const run = reactor.call("losat_web2_run", argv.join("\0"), query, subject);
     for (const handle of [query, subject]) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
@@ -1200,7 +1276,7 @@ async function checkLogfileNames(engine, native, scratch) {
   try {
     for (const program of ["blastn", "tblastx"]) {
       const handles = [0, 1].map((role) => {
-        const registered = reactor.call("losat_web2_register", program, role, 1, fs.readFileSync(role === 0 ? query : subject));
+        const registered = reactor.call("losat_web2_register", program, role, 1, 0, fs.readFileSync(role === 0 ? query : subject));
         assert.ok(registered.status > 0, registered.error);
         return registered.status;
       });
@@ -1341,7 +1417,7 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
     fs.writeFileSync(path.join(directory, "q.fa"), query.text);
     fs.writeFileSync(path.join(directory, "s.fa"), subjectText);
     const handles = [query.text, subjectText].map((text, role) => {
-      const registered = reactor.call("losat_web2_register", program, role, 1, Buffer.from(text));
+      const registered = reactor.call("losat_web2_register", program, role, 1, 0, Buffer.from(text));
       assert.ok(registered.status > 0, registered.error);
       return registered.status;
     });
@@ -1424,6 +1500,8 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s-wmdb-folder", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/run.log" },
     { id: "s-wmdb-dir", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm" },
     { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal", cliRefuses: "wm/c.obinary" },
+    // D19b: `-db` missing alias file `.nal` refused at validate and run (CLI creates and reads it back).
+    { id: "s2-db-nal", program: "blastn", query: ["q.fa", Q], db: "db/wm", work: { "db/wm.nin": Buffer.from("") }, logfile: "db/wm.nal", expect: "refusal" },
   ];
   const { reactor, close, waitForWorkers } = await engine.open(workDir);
   try {
@@ -1441,7 +1519,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       };
       // `/work` holds only the non-registered files (`c.work`), while the CLI directory holds everything.
       writeInto(workDir, c.work);
-      writeInto(cliDir, { [c.query[0]]: c.query[1], [c.subject[0]]: c.subject[1], ...c.work, ...c.registry, ...c.counts });
+      const cliInputs = c.db
+        ? { [c.query[0]]: c.query[1], ...c.work, ...c.registry, ...c.counts }
+        : { [c.query[0]]: c.query[1], [c.subject[0]]: c.subject[1], ...c.work, ...c.registry, ...c.counts };
+      writeInto(cliDir, cliInputs);
       const regHandles = [];
       for (const [kind, map] of [[2, c.registry], [1, c.counts]]) {
         for (const [name, bytes] of Object.entries(map || {})) {
@@ -1452,11 +1533,12 @@ async function checkLogfileRunFiles(engine, native, scratch) {
           regHandles.push(begun.status);
         }
       }
-      const qHandle = reactor.call("losat_web2_register", c.program, 0, 1, c.query[1]);
+      const qHandle = reactor.call("losat_web2_register", c.program, 0, 1, 0, c.query[1]);
       assert.ok(qHandle.status > 0, `${label} query: ${qHandle.error}`);
-      const sHandle = reactor.call("losat_web2_register", c.program, 1, 1, c.subject[1]);
-      assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
-      const words = [c.program, "-query", c.query[0], "-subject", c.subject[0], ...T, ...(c.extra || []), "-logfile", c.logfile];
+      const sHandle = c.db ? { status: 0 } : reactor.call("losat_web2_register", c.program, 1, 1, 0, c.subject[1]);
+      if (!c.db) assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
+      const targetArgs = c.db ? ["-db", c.db] : ["-subject", c.subject[0]];
+      const words = [c.program, "-query", c.query[0], ...targetArgs, ...T, ...(c.extra || []), "-logfile", c.logfile];
       const validated = reactor.call("losat_web2_validate", words.join("\0"));
       const run = reactor.call("losat_web2_run", words.join("\0"), qHandle.status, sHandle.status);
       if (waitForWorkers) await waitForWorkers();
@@ -1527,7 +1609,7 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3`);
       }
       assert.equal(reactor.call("losat_web2_release", qHandle.status).status, 0);
-      assert.equal(reactor.call("losat_web2_release", sHandle.status).status, 0);
+      if (!c.db) assert.equal(reactor.call("losat_web2_release", sHandle.status).status, 0);
       for (const h of regHandles) assert.equal(reactor.call("losat_web2_file_release", h).status, 0);
     }
   } finally {
@@ -1699,6 +1781,173 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
   return row;
 }
 
+// PSW1: psiblast (-subject, -db, -query, -in_msa, -in_pssm, -num_iterations, -out_pssm,
+// -out_ascii_pssm, -save_pssm_after_last_round, -save_each_pssm) and tblastn -in_pssm (-subject, -db),
+// compared byte-for-byte with native CLI across formats 0, 6, 7, diagnostics, HSP records, and stream 8 PSSM files.
+async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
+  const losatDir = path.join(ROOT, "LOSAT");
+  const subjIds = "tests/fasta/psiblast/q1_subj_ids.faa";
+  const pssmAsn = "tests/fixtures/pssm/q1b_gi.asn";
+  const cases = [
+    {
+      id: "psiblast.subject.it2.pssm",
+      program: "psiblast",
+      query: "tests/fasta/psiblast/q1b_gi.faa",
+      subject: subjIds,
+      extra: ["-num_iterations", "2", "-out_pssm", "out.asn", "-out_ascii_pssm", "out.ascii", "-save_pssm_after_last_round"],
+    },
+    {
+      id: "psiblast.db.it2.each",
+      program: "psiblast",
+      query: "tests/fasta/psiblast/ps5_pk.faa",
+      db: "tests/db_search/paja",
+      extra: ["-num_iterations", "2", "-out_pssm", "each.asn", "-out_ascii_pssm", "each.ascii", "-save_each_pssm", "-save_pssm_after_last_round"],
+    },
+    {
+      id: "psiblast.db.in_msa",
+      program: "psiblast",
+      queryFileFlag: "-in_msa",
+      queryFile: "tests/fixtures/msa/ps6_b_db_0.aln",
+      db: "tests/db_search/paja",
+      extra: ["-msa_master_idx", "2", "-out_pssm", "msa.asn", "-save_pssm_after_last_round"],
+    },
+    {
+      id: "psiblast.subject.in_pssm.it2",
+      program: "psiblast",
+      queryFileFlag: "-in_pssm",
+      queryFile: pssmAsn,
+      subject: subjIds,
+      extra: ["-num_iterations", "2", "-out_ascii_pssm", "inpssm.ascii", "-save_pssm_after_last_round"],
+    },
+    {
+      id: "psiblast.subject.in_pssm.parse_deflines",
+      program: "psiblast",
+      queryFileFlag: "-in_pssm",
+      queryFile: pssmAsn,
+      subject: "tests/fasta/psiblast/q1_ref.faa",
+      extra: ["-parse_deflines"],
+    },
+    {
+      id: "tblastn.subject.in_pssm",
+      program: "tblastn",
+      queryFileFlag: "-in_pssm",
+      queryFile: pssmAsn,
+      subject: "tests/fasta/psiblast/q1b_gi_nt.fna",
+      extra: [],
+    },
+  ];
+  const { reactor, close, waitForWorkers } = await engine.open(losatDir);
+  let runs = 0;
+  try {
+    for (const c of cases) {
+      const cliDir = fs.mkdtempSync(path.join(scratch, `psw1-cli-${c.id}.`));
+      const baseArgv = [
+        c.program,
+        ...(c.queryFile ? [c.queryFileFlag, c.queryFile] : ["-query", c.query]),
+        ...(c.db ? ["-db", c.db] : ["-subject", c.subject]),
+        ...c.extra,
+      ];
+      const formats = FORMATS[c.program];
+      const cliOut = new Map();
+      let cliStderr = null;
+      let cliPssmFiles = [];
+      for (const format of formats) {
+        const out = path.join(cliDir, `out.${format}`);
+        const cliArgv = baseArgv.map((w, i, arr) => {
+          if (i > 0 && (arr[i - 1] === "-out_pssm" || arr[i - 1] === "-out_ascii_pssm")) return path.join(cliDir, w);
+          return w;
+        });
+        const res = require("node:child_process").spawnSync(native, [...cliArgv, "-outfmt", String(format), "-num_threads", "1", "-out", out], {
+          cwd: losatDir,
+          maxBuffer: 1 << 28,
+        });
+        assert.equal(res.status, 0, `${c.id} native outfmt ${format}: ${res.stderr}`);
+        cliOut.set(format, fs.readFileSync(out));
+        fs.rmSync(out);
+        if (format === 0) {
+          cliStderr = res.stderr;
+          cliPssmFiles = fs.readdirSync(cliDir).sort().map((name) => [name, fs.readFileSync(path.join(cliDir, name))]);
+        }
+        for (const name of fs.readdirSync(cliDir)) fs.rmSync(path.join(cliDir, name), { force: true });
+      }
+      fs.rmSync(cliDir, { recursive: true, force: true });
+      const started = reactor.call("losat_web2_start", baseArgv.join("\0"));
+      assert.equal(started.status, 0, `${c.id}: start: ${started.error}`);
+      const start = JSON.parse(started.streams.get(2).toString());
+      assert.equal(start.database, Boolean(c.db), `${c.id}: start.database`);
+      assert.equal(start.query_file, c.queryFile ?? null, `${c.id}: start.query_file`);
+      const queryBytes = c.queryFile ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.query));
+      const subjectBytes = c.db ? Buffer.alloc(0) : fs.readFileSync(path.join(losatDir, c.subject));
+      const registerPair = (argvStr, ctxLabel) => {
+        const reg = reactor.call("losat_web2_register_inputs", argvStr, queryBytes, subjectBytes);
+        assert.equal(reg.status, 0, `${ctxLabel}: register_inputs: ${reg.error}`);
+        return JSON.parse(reg.streams.get(2).toString());
+      };
+      let qHandle = 0, qIds, sHandle = 0, shownIds;
+      if (start.register_inputs) {
+        const parsed = registerPair([...baseArgv, "-num_threads", "1"].join("\0"), c.id);
+        qHandle = parsed.query ? parsed.query.handle : 0;
+        qIds = parsed.query ? parsed.query.records.map((r) => r.id) : undefined;
+        sHandle = parsed.subject ? parsed.subject.handle : 0;
+        if (parsed.subject) {
+          shownIds = {
+            query: parsed.query ? parsed.query.records.map((r) => r.shown_id) : [],
+            subject: parsed.subject.records.map((r) => r.shown_id),
+          };
+        }
+      } else {
+        if (!c.queryFile) {
+          const regQ = reactor.call("losat_web2_register", c.program, 0, 1, 0, queryBytes);
+          assert.ok(regQ.status > 0, `${c.id}: register query: ${regQ.error}`);
+          qHandle = regQ.status;
+          qIds = JSON.parse(regQ.streams.get(2).toString()).records.map((r) => r.id);
+        }
+        if (!c.db) {
+          const regS = reactor.call("losat_web2_register", c.program, 1, 1, 0, subjectBytes);
+          assert.ok(regS.status > 0, `${c.id}: register subject: ${regS.error}`);
+          sHandle = regS.status;
+        }
+      }
+      for (const threads of engine.threads) {
+        const label = `${engine.name} n${threads} ${c.id}`;
+        const argv = [...baseArgv, "-num_threads", String(threads)].join("\0");
+        let runQHandle = qHandle, runSHandle = sHandle, releasePerThread = false;
+        if (start.register_inputs && threads !== 1) {
+          const pair = registerPair(argv, label);
+          runQHandle = pair.query ? pair.query.handle : 0;
+          runSHandle = pair.subject ? pair.subject.handle : 0;
+          releasePerThread = true;
+        }
+        const val = reactor.call("losat_web2_validate", argv);
+        assert.equal(val.status, 0, `${label}: validate: ${val.error}`);
+        const run = reactor.call("losat_web2_run", argv, runQHandle, runSHandle);
+        if (waitForWorkers) await waitForWorkers();
+        assert.equal(run.status, 0, `${label}: run: ${run.error}`);
+        for (const fmt of formats) {
+          assert.equal(sha256(run.streams.get(fmt) || Buffer.alloc(0)), sha256(cliOut.get(fmt)), `${label}: outfmt ${fmt}`);
+        }
+        assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(cliStderr), `${label}: diagnostics`);
+        const sentFiles = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).sort((a, b) => a[0].localeCompare(b[0])) : [];
+        assert.deepEqual(sentFiles.map(([n]) => n), cliPssmFiles.map(([n]) => n), `${label}: stream 8 PSSM files`);
+        for (let i = 0; i < sentFiles.length; i++) {
+          assert.equal(sha256(sentFiles[i][1]), sha256(cliPssmFiles[i][1]), `${label}: PSSM file ${sentFiles[i][0]}`);
+        }
+        checkHits(run.streams, c.program, label, qIds, shownIds, Boolean(c.db), false);
+        if (releasePerThread) {
+          if (runQHandle > 0) assert.equal(reactor.call("losat_web2_release", runQHandle).status, 0);
+          if (runSHandle > 0) assert.equal(reactor.call("losat_web2_release", runSHandle).status, 0);
+        }
+        runs++;
+      }
+      if (qHandle > 0) assert.equal(reactor.call("losat_web2_release", qHandle).status, 0);
+      if (sHandle > 0) assert.equal(reactor.call("losat_web2_release", sHandle).status, 0);
+    }
+  } finally {
+    await close();
+  }
+  return runs;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
@@ -1711,9 +1960,11 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor: own, close, waitForWorkers } = await engine.open();
-    assert.equal(own.exports.losat_web2_abi_version(), 14);
+    assert.equal(own.exports.losat_web2_abi_version(), 16);
     checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
+    const psw1Rows = await checkPsiblastAndTblastnPssm(engine, options.native, scratch);
+    console.log(`ok ${engine.name} psiblast and tblastn -in_pssm: ${psw1Rows} runs + PSSM files as the CLI's`);
     const logRows = await checkLogfileNames(engine, options.native, scratch);
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     const runFileLogRows = await checkLogfileRunFiles(engine, options.native, scratch);
@@ -1779,7 +2030,7 @@ async function main() {
         if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
       };
       if (!together && !search.database && !subjects.has(subjectKey)) {
-        const registered = reactor.call("losat_web2_register", program, 1, dataLoaders ? 1 : 0, fs.readFileSync(subject));
+        const registered = reactor.call("losat_web2_register", program, 1, dataLoaders ? 1 : 0, 0, fs.readFileSync(subject));
         if (registered.status < 0) {
           refusedInput(registered, "subject");
           continue;
@@ -1787,7 +2038,7 @@ async function main() {
         subjects.set(subjectKey, registered.status);
         subjectReactors.set(subjectKey, reactor);
       }
-      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
+      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, 0, fs.readFileSync(query));
       if (q && q.status < 0) {
         refusedInput(q, "query");
         continue;

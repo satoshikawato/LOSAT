@@ -356,12 +356,6 @@ pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
 // `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
-/// Whether `name` is one of the arguments that every NCBI application has after its own
-/// (`FILE_ARGUMENTS`: `-logfile`, `-conffile`), which the application start reads.
-pub(crate) fn is_file_argument(name: &str) -> bool {
-    FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
-}
-
 /// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
 pub(crate) fn arguments(program: &str) -> Option<Arguments> {
     PROGRAMS
@@ -667,11 +661,6 @@ impl Args {
         self.given.iter().map(|&name| (name, self.os_value(name)))
     }
 
-    /// Whether the value of the key `name` is not UTF-8.
-    pub(crate) fn is_bytes(&self, name: &str) -> bool {
-        matches!(self.values.get(name), Some(Some(Value::Bytes(_))))
-    }
-
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
     /// `args[name]` (and `AsBoolean`) of the flag `name`: whether its word was given.
     pub(crate) fn flag(&self, name: &'static str) -> bool {
@@ -741,21 +730,6 @@ impl Args {
         self.read.lock().unwrap().clone()
     }
 
-    /// The arguments with the value of each key that `lossy` takes and that is not UTF-8 read as
-    /// text, each byte that is not UTF-8 replaced (U+FFFD): what a dry run's caller, which ends
-    /// before LOSAT's refusal of such a value (`cli::reader::refusal_after_read`), reads.
-    pub(crate) fn with_lossy_text(&self, lossy: impl Fn(&str) -> bool) -> Args {
-        let mut args = self.clone();
-        for (name, value) in &mut args.values {
-            if let Some(Value::Bytes(bytes)) = value {
-                if lossy(name) {
-                    *value = Some(Value::Text(bytes.to_string_lossy().into_owned()));
-                }
-            }
-        }
-        args
-    }
-
     /// `args[name].AsString()` inside `Run`: the value of the key `name`, or NCBI's exception
     /// of an argument without a value (`CArg_NoValue`), which the application reports as one of
     /// the reader's (`Diag::run_arg_exception`).
@@ -766,6 +740,16 @@ impl Args {
             return Err(excluded_value(name));
         }
         self.value(name).ok_or_else(|| no_value(name))
+    }
+
+    /// `args[name].AsString()` inside `Run`, as raw bytes (for free-form string keys like `-rid`
+    /// whose value is not constrained to ASCII): returns `eExcludedValue` if excluded, or
+    /// `eNoValue` if missing.
+    pub(crate) fn as_bytes(&self, name: &str) -> Result<std::borrow::Cow<'_, [u8]>, ArgException> {
+        if self.excluded.contains(&name) {
+            return Err(excluded_value(name));
+        }
+        self.bytes(name).ok_or_else(|| no_value(name))
     }
 
     /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.

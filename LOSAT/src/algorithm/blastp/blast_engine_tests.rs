@@ -276,7 +276,7 @@ fn context_block_is_the_gapped_block_or_the_contexts_own() {
         karlin_params: own,
     };
     let mut args = make_blastp_args();
-    args.comp_based_stats = "0".to_string();
+    args.comp_based_stats = std::ffi::OsString::from("0");
     let gapped = args.resolve().expect("gapped");
     args.ungapped = true;
     let ungapped = args.resolve().expect("ungapped");
@@ -311,10 +311,10 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
     let report = |extra: &[(&str, &str)], ungapped: bool| -> String {
         let mut args = make_blastp_args();
         args.ungapped = ungapped;
-        args.comp_based_stats = "0".to_string();
+        args.comp_based_stats = std::ffi::OsString::from("0");
         for &(name, value) in extra {
             match name {
-                "matrix" => args.matrix = Some(value.to_string()),
+                "matrix" => args.matrix = Some(std::ffi::OsString::from(value)),
                 "gapopen" => args.gap_open = Some(value.parse().unwrap()),
                 "gapextend" => args.gap_extend = Some(value.parse().unwrap()),
                 _ => unreachable!(),
@@ -328,7 +328,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     refusal: FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -510,14 +510,14 @@ fn make_blastp_args() -> BlastpArgs {
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: "2".to_string(),
+        comp_based_stats: std::ffi::OsString::from("2"),
         seg: None,
         soft_masking: None,
         lcase_masking: false,
         use_sw_tback: false,
         query_loc: None,
         subject_loc: None,
-        outfmt: "6".to_string(),
+        outfmt: std::ffi::OsString::from("6"),
         archive: None,
         export_search_strategy: None,
         import_search_strategy: None,
@@ -1347,7 +1347,7 @@ fn test_validate_requested_blastp_support_accepts_word_size_two() {
 fn test_validate_requested_blastp_support_takes_unified_p_modes() {
     for value in ["1u", "2u", "3U", "Du", "tu"] {
         let mut args = make_blastp_args();
-        args.comp_based_stats = value.to_string();
+        args.comp_based_stats = std::ffi::OsString::from(value);
         let resolved = args.resolve().expect("resolved blastp args");
         assert!(resolved.comp_based_stats.unified_p, "{value}");
         validate_requested_blastp_support(&resolved).expect(value);
@@ -1368,7 +1368,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
                 matrix.ncbi_name().to_lowercase(),
             ] {
                 let mut args = make_blastp_args();
-                args.matrix = Some(name.clone());
+                args.matrix = Some(std::ffi::OsString::from(&name));
                 args.gap_open = Some(gap_open);
                 args.gap_extend = Some(gap_extend);
                 let resolved = args.resolve().expect("resolved blastp args");
@@ -1381,7 +1381,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
         // there (psiblast takes the standard matrices only, blast_options.c:913-917).
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         if matrix == ScoringMatrix::Identity {
             let err = args.resolve().expect_err("psiblast IDENTITY");
             assert!(err
@@ -1414,7 +1414,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     ] {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.matrix = Some("IDENTITY".to_string());
+        args.matrix = Some(std::ffi::OsString::from("IDENTITY"));
         args.word_size = word_size;
         let resolved = args.resolve().expect("resolved blastp args");
         validate_requested_blastp_support(&resolved).expect("IDENTITY's options");
@@ -1432,7 +1432,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     }
     for word_size in [6, 7] {
         let mut args = make_blastp_args();
-        args.matrix = Some("identity".to_string());
+        args.matrix = Some(std::ffi::OsString::from("identity"));
         args.word_size = Some(word_size);
         let err = args.resolve().expect_err("IDENTITY word 6 and 7");
         assert!(
@@ -1467,8 +1467,7 @@ fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table(
         let resolved = args.resolve().expect("resolved blastp args");
         validate_requested_blastp_support(&resolved)
             .unwrap_or_else(|err| panic!("{gap_open}/{gap_extend}: {err}"));
-        // psiblast takes them too (its later rounds search the PSSM with them); only a PSSM
-        // query (`-in_pssm`) keeps BLOSUM62 11/1 (line PS, PS7b; `db.ps.inpssm.rej.gap`).
+        // psiblast takes them too (both FASTA rounds and `-in_pssm`/`-in_msa`, line PS, PS7b).
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
         args.gap_open = Some(gap_open);
@@ -1476,6 +1475,47 @@ fn test_validate_requested_blastp_support_takes_blosum62_gap_costs_of_the_table(
         let resolved = args.resolve().expect("resolved psiblast args");
         validate_requested_blastp_support(&resolved)
             .unwrap_or_else(|err| panic!("psiblast {gap_open}/{gap_extend}: {err}"));
+    }
+    // PS7b: `-in_pssm` and `-in_msa` accept every supported matrix and gap pair.
+    let pssm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/db_search/db.ps.asn.rnd.6.asn");
+    let msa_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/msa/ps6_b_db_0.aln");
+    for (matrix, gap_open, gap_extend) in [
+        ("BLOSUM45", None, None),
+        ("BLOSUM45", Some(14), Some(2)),
+        ("BLOSUM50", None, None),
+        ("BLOSUM62", Some(9), Some(2)),
+        ("BLOSUM62", Some(32767), Some(32767)),
+        ("BLOSUM80", None, None),
+        ("BLOSUM80", Some(9), Some(2)),
+        ("BLOSUM90", None, None),
+        ("PAM30", None, None),
+        ("PAM70", None, None),
+        ("PAM250", None, None),
+    ] {
+        for is_msa in [false, true] {
+            let mut args = make_blastp_args();
+            args.app = BlastpApp::Psiblast;
+            args.matrix = Some(matrix.into());
+            args.gap_open = gap_open;
+            args.gap_extend = gap_extend;
+            args.psiblast_pssm = Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
+                in_pssm: (!is_msa).then(|| pssm_path.clone()),
+                in_msa: is_msa.then(|| crate::algorithm::psiblast::in_msa::MsaInput {
+                    path: msa_path.clone(),
+                    master_index: None,
+                    ignore_master: false,
+                }),
+                ..Default::default()
+            });
+            let resolved = args.resolve().unwrap_or_else(|err| {
+                panic!("resolve {matrix} {gap_open:?}/{gap_extend:?} msa={is_msa}: {err}")
+            });
+            validate_requested_blastp_support(&resolved).unwrap_or_else(|err| {
+                panic!("support {matrix} {gap_open:?}/{gap_extend:?} msa={is_msa}: {err}")
+            });
+        }
     }
 }
 
@@ -1501,9 +1541,9 @@ fn test_psi_contexts_take_the_search_matrix() {
     let resolved = |matrix: Option<&str>| {
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.seg = Some("no".to_string());
+        args.seg = Some(std::ffi::OsString::from("no"));
         if let Some(matrix) = matrix {
-            args.matrix = Some(matrix.to_string());
+            args.matrix = Some(std::ffi::OsString::from(matrix));
         }
         args.resolve().expect("resolved psiblast args")
     };
@@ -2628,7 +2668,7 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
         let mut args = make_blastp_args();
         args.task = "blastp-fast".to_string();
         // An ungapped search takes no composition adjustment.
-        args.comp_based_stats = "0".to_string();
+        args.comp_based_stats = std::ffi::OsString::from("0");
         args.ungapped = ungapped;
         args.resolve().expect("resolved blastp-fast args")
     };
@@ -2704,9 +2744,9 @@ fn x_blocks_contexts_are_the_builders_contexts() {
     for (task, matrix, word_size) in configs {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.seg = Some("yes".to_string());
+        args.seg = Some(std::ffi::OsString::from("yes"));
         args.lcase_masking = true;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         args.word_size = word_size;
         let resolved = match args.resolve() {
             Ok(resolved) => resolved,
@@ -3019,6 +3059,36 @@ fn the_rows_read_each_residue_by_the_operations() {
     );
 }
 
+// psiblast `-phi_pattern` (PS8a fix round 1): the rows of a batch whose first query has no letters
+// show a gap character at each position of the searched query, read as a Bioseq's letters
+// (`ShownQueries::phi_shown`; NCBI BLAST+ 2.17.0 `PS/tmp/rev8a/ncbi3/er.first.0`).
+#[test]
+fn phi_shown_letters_replace_the_record_s() {
+    let records = vec![
+        FastaRecord::new("e1".to_string(), b"", b""),
+        FastaRecord::new("p".to_string(), b"", b"MKV"),
+        FastaRecord::new("q".to_string(), b"", b"MKV"),
+    ];
+    let phi_shown = vec![None, Some(b"---".to_vec().into_boxed_slice()), None];
+    let queries = ShownQueries {
+        records: &records,
+        bioseq: None,
+        phi_shown: &phi_shown,
+    };
+    assert_eq!(queries.record(1), b"---");
+    assert_eq!(queries.record(2), b"MKV");
+    assert!(matches!(
+        queries.letters(1),
+        Some(ShownLetters::Bioseq(b"---"))
+    ));
+    assert!(matches!(
+        queries.letters(2),
+        Some(ShownLetters::Ascii(b"MKV"))
+    ));
+    assert!(queries.shown(1).recounted());
+    assert!(matches!(queries.shown(3), ShownLetters::Ascii(b"")));
+}
+
 /// BLASTP's table as the `-db_hard_mask` search moves it between sequences (`db_masked.rs`:
 /// `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread offset (entries 0, or
 /// the window less than 0 after a clear), the clear (offset the window) before the move, and the
@@ -3111,8 +3181,8 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sallacc".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
         },
         crate::report::archive::options::RequestKind::Blastp,
     )
@@ -3123,7 +3193,10 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
             Some(&spec),
             [vec![0], vec![0], vec![1]],
             |s_idx| (s_idx == 1).then_some(lineless),
-            |s_idx, failure| crate::report::tabular::failed_database_subject(s_idx, None, failure),
+            |s_idx, failure| {
+                crate::report::tabular::failed_database_subject(s_idx, None, None, failure)
+            },
+            crate::blastinput::app::Program::Blastp,
             "BLASTP",
             true,
         )

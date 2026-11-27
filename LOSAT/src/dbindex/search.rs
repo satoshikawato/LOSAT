@@ -129,7 +129,7 @@ impl VolumeSeeds {
 /// scans).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IndexedVolume {
-    pub(crate) path: String,
+    pub(crate) path: Vec<u8>,
     pub(crate) start_oid: u32,
     pub(crate) n_oids: u32,
     pub(crate) has_index: bool,

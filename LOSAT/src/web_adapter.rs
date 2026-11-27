@@ -86,6 +86,85 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::windowmasker::read_files(words)
 }
 
+/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
+/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
+/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
+/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
+/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+pub fn search_database_read_files(
+    program: crate::api::Program,
+    arguments: &[&str],
+    registry: &dyn RegistryFiles,
+    dbs: &[&str],
+    filtering_dbs: &[&str],
+    outfmt: &str,
+    expands_taxids: bool,
+) -> Vec<Vec<u8>> {
+    use crate::algorithm::common::database::{
+        outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
+    };
+    use crate::report::archive::options::RequestKind;
+    let request_kind = match program {
+        crate::api::Program::Blastp => RequestKind::Blastp,
+        crate::api::Program::Blastn => RequestKind::Blastn,
+        crate::api::Program::Blastx => RequestKind::Blastx,
+        crate::api::Program::Tblastn => RequestKind::Tblastn,
+        crate::api::Program::Tblastx => RequestKind::Tblastx,
+        crate::api::Program::Psiblast => RequestKind::Psiblast,
+    };
+    let has_db = !dbs.is_empty();
+    let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
+    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+        return Vec::new();
+    }
+    let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
+        program.name(),
+        arguments,
+        &[],
+        registry,
+    )
+    .settings()
+    .ok()
+    .and_then(|settings| settings.blastdb);
+    let seqtype = match program {
+        crate::api::Program::Blastp
+        | crate::api::Program::Blastx
+        | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
+        crate::api::Program::Blastn
+        | crate::api::Program::Tblastn
+        | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
+    };
+    let mut out = Vec::new();
+    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
+        let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
+        out.extend(crate::seqdb::alias::database_lookup_files(
+            trimmed,
+            db_type,
+            blastdb.as_deref(),
+        ));
+    };
+    for db in dbs {
+        push_db(&mut out, db, seqtype);
+    }
+    let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
+    out.extend(crate::seqdb::taxdb::lookup_files_for_use(
+        blastdb.as_deref(),
+        taxdb_use,
+        prefetches,
+    ));
+    if has_db && expands_taxids {
+        let tax_file = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
+        let search = crate::seqdb::SearchPath::from_environment(blastdb.as_deref());
+        if search.resolve_file(tax_file).is_some() {
+            out.push(tax_file.to_vec());
+        }
+    }
+    for fdb in filtering_dbs {
+        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
+    }
+    out
+}
+
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host
 // registered (`RegistryFiles`), and where the run's files go (`RunFiles`: the file of `-logfile`).
@@ -112,75 +191,85 @@ struct SearchFiles<'a> {
     label: &'a str,
     query: &'a std::path::Path,
     subject: Option<&'a std::path::Path>,
-    masker: Option<&'a str>,
+    in_pssm: Option<&'a std::path::Path>,
+    in_msa: Option<&'a std::path::Path>,
+    out_pssm: Option<&'a std::path::Path>,
+    out_ascii_pssm: Option<&'a std::path::Path>,
+    masker: Option<&'a std::ffi::OsStr>,
     filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
-    repeats: Option<&'a str>,
+    repeats: Option<&'a std::ffi::OsStr>,
+}
+
+impl<'a> SearchFiles<'a> {
+    fn new(
+        label: &'static str,
+        strategy: Option<&'a std::path::Path>,
+        query: &'a std::path::Path,
+        subject: Option<&'a std::path::Path>,
+        filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
+    ) -> Self {
+        Self {
+            strategy,
+            label,
+            query,
+            subject,
+            in_pssm: None,
+            in_msa: None,
+            out_pssm: None,
+            out_ascii_pssm: None,
+            masker: None,
+            filter,
+            repeats: None,
+        }
+    }
 }
 
 /// `SearchFiles` of the arguments `command`: `None` for a program that writes no strategy file.
 fn search_files(command: &Commands) -> Option<SearchFiles<'_>> {
-    let (strategy, label, query, subject, db, filter, masker, repeats) = match command {
-        Commands::Blastp(args) => (
-            &args.export_search_strategy,
-            args.app.name(),
-            &args.query,
-            &args.subject,
-            &args.db,
-            &args.db_filter,
-            None,
-            None,
-        ),
-        Commands::Blastn(args) => (
-            &args.export_search_strategy,
-            "BLASTN",
-            &args.query,
-            &args.subject,
-            &args.db,
-            &args.db_filter,
-            args.window_masker_db.as_deref(),
-            args.filtering_db.as_deref(),
-        ),
-        Commands::Tblastn(args) => (
-            &args.export_search_strategy,
-            "TBLASTN",
-            &args.query,
-            &args.subject,
-            &args.db,
-            &args.db_filter,
-            None,
-            None,
-        ),
-        Commands::Tblastx(args) => (
-            &args.export_search_strategy,
-            "TBLASTX",
-            &args.query,
-            &args.subject,
-            &args.db,
-            &args.db_filter,
-            None,
-            None,
-        ),
-        Commands::Blastx(args) => (
-            &args.export_search_strategy,
-            "BLASTX",
-            &args.query,
-            &args.subject,
-            &args.db,
-            &args.db_filter,
-            None,
-            None,
-        ),
-        _ => return None,
-    };
-    Some(SearchFiles {
-        strategy: strategy.as_deref(),
-        label,
-        query: query.as_path(),
-        subject: subject.as_deref(),
-        masker,
-        filter: db.is_some().then_some(filter),
-        repeats,
-    })
+    macro_rules! base_files {
+        ($label:expr, $args:expr) => {
+            SearchFiles::new(
+                $label,
+                $args.export_search_strategy.as_deref(),
+                $args.query.as_path(),
+                $args.subject.as_deref(),
+                $args.db.is_some().then_some(&$args.db_filter),
+            )
+        };
+    }
+    match command {
+        Commands::Blastp(args) => {
+            let mut files = base_files!(args.app.name(), args);
+            if let Some(pssm) = args.psiblast_pssm.as_ref() {
+                files.in_pssm = pssm.in_pssm.as_deref();
+                files.in_msa = pssm.in_msa.as_ref().map(|m| m.path.as_path());
+                files.out_pssm = pssm.out_pssm.as_deref();
+                files.out_ascii_pssm = pssm.out_ascii_pssm.as_deref();
+            }
+            Some(files)
+        }
+        Commands::Psiblast(args) => {
+            let mut files = base_files!("PSIBLAST", args);
+            files.in_pssm = args.in_pssm.as_deref();
+            files.in_msa = args.in_msa.as_deref();
+            files.out_pssm = args.out_pssm.as_deref();
+            files.out_ascii_pssm = args.out_ascii_pssm.as_deref();
+            Some(files)
+        }
+        Commands::Blastn(args) => {
+            let mut files = base_files!("BLASTN", args);
+            files.masker = args.window_masker_db.as_deref();
+            files.repeats = args.filtering_db.as_deref();
+            Some(files)
+        }
+        Commands::Tblastn(args) => Some(SearchFiles {
+            in_pssm: args.in_pssm.as_deref(),
+            ..base_files!("TBLASTN", args)
+        }),
+        Commands::Tblastx(args) => Some(base_files!("TBLASTX", args)),
+        Commands::Blastx(args) => Some(base_files!("BLASTX", args)),
+        _ => None,
+    }
 }
 
 /// The `-export_search_strategy` file of the arguments `command` (`words`: the arguments after the
@@ -208,13 +297,29 @@ pub fn open_strategy_file(
         option: "subject",
         name: subject.as_os_str(),
     }));
+    others.extend(files.in_pssm.map(|in_pssm| RunFileName {
+        option: "in_pssm",
+        name: in_pssm.as_os_str(),
+    }));
+    others.extend(files.in_msa.map(|in_msa| RunFileName {
+        option: "in_msa",
+        name: in_msa.as_os_str(),
+    }));
+    others.extend(files.out_pssm.map(|out_pssm| RunFileName {
+        option: "out_pssm",
+        name: out_pssm.as_os_str(),
+    }));
+    others.extend(files.out_ascii_pssm.map(|out_ascii_pssm| RunFileName {
+        option: "out_ascii_pssm",
+        name: out_ascii_pssm.as_os_str(),
+    }));
     others.extend(log_file(words).map(|name| RunFileName {
         option: "logfile",
         name,
     }));
     others.extend(files.masker.map(|masker| RunFileName {
         option: "window_masker_db",
-        name: std::ffi::OsStr::new(masker),
+        name: masker,
     }));
     // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
     // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
@@ -246,9 +351,8 @@ pub fn open_strategy_file(
         if let Some(path) = read_there {
             let repeats = files.filter.is_none()
                 || files.repeats.is_some_and(|repeats| {
-                    path.as_os_str()
-                        .as_encoded_bytes()
-                        .starts_with(repeats.as_bytes())
+                    crate::utils::os_bytes::os_str_bytes(path.as_os_str())
+                        .starts_with(&crate::utils::os_bytes::os_str_bytes(repeats))
                 });
             others.push(RunFileName {
                 option: if repeats { "filtering_db" } else { "db" },
@@ -409,13 +513,48 @@ pub use crate::algorithm::blastn::BlastnArgs;
 pub fn resolve_blastn_repeat_filter(args: &mut BlastnArgs, settings: &ApplicationSettings) {
     args.resolve_repeat_filter(settings);
 }
+pub use crate::algorithm::blastp::args::ListCut;
 pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_options;
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;
 pub use crate::algorithm::tblastn::check_options as check_tblastn_options;
-pub use crate::algorithm::tblastn::refuse_browser_pssm_query as refuse_tblastn_pssm_query;
 pub use crate::algorithm::tblastx::blast_engine::check_options as check_tblastx_options;
 pub use crate::utils::threading::validate_threads;
+
+/// Routes a `psiblast` run's `-out_pssm` and `-out_ascii_pssm` writes through `run_files`
+/// (`RunFiles::Receiver` in LOSAT Web). Nothing if `args` is not a `psiblast` search.
+pub fn give_pssm_run_files(args: &mut crate::algorithm::blastp::BlastpArgs, run_files: RunFiles) {
+    if let Some(pssm) = args.psiblast_pssm.as_mut() {
+        pssm.run_files = run_files;
+    }
+}
+
+/// Checks `outfmt` against the output formats that LOSAT's `psiblast` supports
+/// (`PsiblastArgs::check_outfmt`).
+pub fn check_psiblast_outfmt(outfmt: &str, strategy: bool) -> anyhow::Result<()> {
+    crate::algorithm::psiblast::PsiblastArgs::check_outfmt(outfmt, None, strategy, false)
+}
+
+/// Refuses `-phi_pattern` in LOSAT Web's `psiblast` (PHI-BLAST pattern files are not supported in
+/// the browser host yet; `records_refused_options`).
+pub fn refuse_psiblast_phi_pattern(
+    args: &crate::algorithm::blastp::BlastpArgs,
+) -> anyhow::Result<()> {
+    if args
+        .psiblast_pssm
+        .as_ref()
+        .is_some_and(|pssm| pssm.phi_pattern.is_some())
+    {
+        anyhow::bail!("option -phi_pattern is not supported by LOSAT Web's PSIBLAST yet");
+    }
+    Ok(())
+}
+
+/// How `psiblast`'s formatter of `outfmt` cuts hit lists (`BlastpApp::Psiblast.list_cut`), used
+/// by `web/adapter` to group formats into searches.
+pub fn psiblast_list_cut(outfmt: i32) -> ListCut {
+    crate::algorithm::blastp::args::BlastpApp::Psiblast.list_cut(outfmt)
+}
 
 // The searches: each program's `run_local` over records in memory and its `run_local_database`
 // over the database of `-db` (opened by name with the run's application settings, as the command
@@ -426,6 +565,7 @@ pub use crate::api::local_blast::{
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
     FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, ReportOutputs,
+    ReportedSubject,
 };
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
@@ -466,8 +606,11 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 // The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
-// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
-// the refusal of a record longer than LOSAT reads.
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line,
+// the refusal of a record longer than LOSAT reads, and the `-parse_deflines` molecule and letter
+// rules (`defline_named_molecule`, `DataLineAlphabet`).
+pub use crate::blastinput::fasta_reader::believed::defline_named_molecule;
+pub use crate::blastinput::fasta_reader::reader::DataLineAlphabet;
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 
 /// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
@@ -479,15 +622,13 @@ pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Par
     crate::api::described_parameters(program).collect()
 }
 
-/// The options of `program`'s command line that the browser's searches of records do not take:
-/// tblastn's `-in_pssm` (the query as a PSSM file), which the browser refuses until line PS's PSW1
-/// (`tblastn::refuse_browser_pssm_query`; the library API's records take it, `api::Inputs::pssm`).
-/// The adapter's `describe` leaves them out. The search strategy file, which the library API
-/// refuses (`api::search::file_options`), is a file of the run in the browser
-/// (`open_strategy_file`, line RG item F1w).
+/// The options of `program`'s command line that the browser's searches of records do not take.
+/// Since line PS's PSW1, tblastn's `-in_pssm` and psiblast's `-in_pssm`/`-in_msa`/`-out_pssm`/
+/// `-out_ascii_pssm` are supported in the browser; psiblast's `-phi_pattern` (item PS8a) is
+/// refused in LOSAT Web until pattern files are wired.
 pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
     match program {
-        crate::api::Program::Tblastn => &["in_pssm"],
+        crate::api::Program::Psiblast => &["phi_pattern"],
         _ => &[],
     }
 }

@@ -111,7 +111,7 @@ fn batch_sizes(
         Commands::Blastn(args) => match args.database_name() {
             Some(name) => {
                 let settings = start.settings();
-                QueryBatchSizes::of_database(args, name, &settings)?
+                QueryBatchSizes::of_database(args, &name, &settings)?
             }
             None => QueryBatchSizes::of_subjects(args, inputs.subject)?,
         },
@@ -504,7 +504,7 @@ impl Batches<'_> {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],

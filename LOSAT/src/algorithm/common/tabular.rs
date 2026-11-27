@@ -94,6 +94,10 @@ pub(crate) enum TabularSubjects<'a> {
         /// key here): a subject whose load throws writes its rows as NCBI's `catch` leaves them
         /// (`report::tabular::SubjectLookup::Throws`).
         loads: &'a crate::report::db_subject::HitLoads,
+        /// The queries whose Bioseqs NCBI's scope finds for reported sequences, by the call's
+        /// query and the ordinal id (`report::query_bioseq`): such a row shows the query's
+        /// (`TabularSubjects::values_for`).
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
@@ -126,24 +130,31 @@ pub(crate) struct FailedValues<'a> {
     /// Where the load of the subject throws before both (`report::tabular::ThrownLookup`): the
     /// Seq-align id's GI and the exception.
     pub(crate) thrown: Option<(i64, &'a crate::ncbi_exception::NcbiException)>,
+    /// Whether the scope's Bioseq handle of the subject is empty (`FailedLookup::empty_handle`).
+    pub(crate) empty_handle: bool,
 }
 
 impl<'a> FailedValues<'a> {
     /// The failure of a `-subject` record or a database sequence with parsed Seq-ids whose
     /// `SetSubjectId` throws where `subject_id` (`ParsedSubject::tabular_ids` gave none) and whose
     /// `x_SetSubjectIds` throws where `all_ids` (`AllTabularIds::failed`), `None` where neither.
+    /// A database sequence whose Bioseq the scope does not get (`ParsedSubject::scope_finds_none`)
+    /// fails on its empty handle instead (`FailedLookup::empty_handle`): `SetSubjectId` throws,
+    /// and `GetBioseqLength` before `x_SetSubjectIds`.
     pub(crate) fn of_parsed(
         subject: &ParsedSubject,
         subject_id: bool,
         all_ids: bool,
     ) -> Option<Self> {
-        (subject_id || all_ids).then(|| {
+        let empty_handle = subject.scope_finds_none();
+        (subject_id || all_ids || empty_handle).then(|| {
             let [full, accession] = subject.alignment_tabular_ids();
             FailedValues {
                 align_id: [Cow::Owned(full), Cow::Owned(accession)],
-                subject_id,
-                all_ids,
+                subject_id: subject_id || empty_handle,
+                all_ids: all_ids && !empty_handle,
                 thrown: None,
+                empty_handle,
             }
         })
     }
@@ -160,6 +171,7 @@ impl<'a> FailedValues<'a> {
             subject_id: false,
             all_ids: false,
             thrown: Some((subject.alignment_gi(), exception)),
+            empty_handle: false,
         }
     }
 
@@ -184,6 +196,7 @@ impl<'a> FailedValues<'a> {
                     accession: &self.align_id[1],
                     subject_id: self.subject_id,
                     all_ids: self.all_ids.then_some(all_ids),
+                    empty_handle: self.empty_handle,
                 },
             ),
         }
@@ -210,6 +223,36 @@ impl<'a> SubjectValues<'a> {
             length: 0,
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
+            index,
+        }
+    }
+}
+
+impl<'a> SubjectValues<'a> {
+    /// The values of the query Bioseq `bioseq` that NCBI's scope finds for the reported sequence
+    /// of subject index `index` (`report::query_bioseq::QueryBioseq`): the query's ids (its one
+    /// line for `sall*` where `all_deflines`), no title (`N/A`), the query record's length, no
+    /// taxonomy, as a `-subject` record of those ids.
+    pub(crate) fn of_query_bioseq(
+        bioseq: &'a crate::report::query_bioseq::QueryBioseq,
+        all_deflines: bool,
+        index: usize,
+    ) -> Self {
+        let [id, accession, accession_version] = bioseq.tabular_ids();
+        SubjectValues {
+            id: Cow::Borrowed(id.as_slice()),
+            accession: Cow::Borrowed(accession.as_slice()),
+            accession_version: Cow::Borrowed(accession_version.as_slice()),
+            gi: bioseq.gi(),
+            all_ids: if all_deflines {
+                bioseq.all_ids().to_vec()
+            } else {
+                Vec::new()
+            },
+            titles: None,
+            length: bioseq.length(),
+            taxonomy: Cow::Owned(bioseq.taxonomy()),
+            failed: None,
             index,
         }
     }
@@ -274,6 +317,9 @@ pub(crate) fn subject_lookup_failure(
     }
     let failed_id = matches!(ids.get(s_idx), Some(None));
     match parsed.get(s_idx).and_then(Option::as_deref) {
+        Some(subject) if subject.scope_finds_none() => {
+            Some(crate::report::tabular::LookupFailure::empty_handle())
+        }
         Some(subject) if spec.is_some_and(reports_all_ids) => {
             subject.lookup_failure(protein).ok().flatten()
         }
@@ -281,6 +327,7 @@ pub(crate) fn subject_lookup_failure(
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
             lineless: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
@@ -307,20 +354,25 @@ pub(crate) fn lookups_may_fail(ids: &[SubjectId], parsed: &[Option<Arc<ParsedSub
 /// Whether a tabular report of `spec` is checked for rows whose lookups fail
 /// (`report::tabular::check_failed_lookups`) where the subjects' `ids` (`None` for a failed
 /// `SetSubjectId`) and `parsed` are as given: some id failed, a subject with parsed Seq-ids
-/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`), or the load of some subject throws
-/// (`loads`).
+/// may fail in `x_SetSubjectIds` (`subject_lookup_failure`) or has no Bioseq
+/// (`ParsedSubject::scope_finds_none`), or the load of some subject throws (`loads`).
 pub(crate) fn checks_failed_lookups(
     spec: Option<&TabularSpec>,
     ids: &[SubjectId],
     parsed: &[Option<Arc<ParsedSubject>>],
     loads: &crate::report::db_subject::HitLoads,
+    program: crate::blastinput::app::Program,
 ) -> bool {
     (ids.iter().any(Option::is_none)
         || loads.any_throws()
         || (!parsed.is_empty()
             && spec.is_some_and(reports_all_ids)
-            && parsed.iter().any(Option::is_some)))
-        && crate::report::tabular::may_stop_at_failed_lookup(spec)
+            && parsed.iter().any(Option::is_some))
+        || parsed
+            .iter()
+            .flatten()
+            .any(|subject| subject.scope_finds_none()))
+        && crate::report::tabular::may_stop_at_failed_lookup_for(spec, program)
 }
 
 impl<'a> TabularSubjects<'a> {
@@ -371,6 +423,44 @@ impl<'a> TabularSubjects<'a> {
                     .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
                 taxid: taxonomy.get(s_idx).map_or(0, |taxonomy| taxonomy.taxid),
             },
+        }
+    }
+
+    /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
+    /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
+    pub(crate) fn seen_at(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+    ) -> Option<&'a crate::report::query_bioseq::QueryBioseq> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { ordinals, seen, .. } => {
+                if !seen.any() {
+                    return None;
+                }
+                seen.of(q_idx, *ordinals.get(s_idx)?)
+            }
+        }
+    }
+
+    /// `values` of subject `s_idx` in the report of the call's query `q_idx`: the values of the
+    /// query Bioseq that NCBI's scope finds for it there (`seen_at`,
+    /// `SubjectValues::of_query_bioseq`), else its own.
+    pub(crate) fn values_for(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+        spec: &TabularSpec,
+        program: &str,
+    ) -> Result<SubjectValues<'a>> {
+        match self.seen_at(q_idx, s_idx) {
+            Some(bioseq) => Ok(SubjectValues::of_query_bioseq(
+                bioseq,
+                spec.needs().all_deflines,
+                s_idx,
+            )),
+            None => self.values(s_idx, spec, program),
         }
     }
 
@@ -448,6 +538,7 @@ impl<'a> TabularSubjects<'a> {
                             subject_id: true,
                             all_ids: false,
                             thrown: None,
+                            empty_handle: false,
                         })
                     }
                     _ => None,
@@ -475,6 +566,7 @@ impl<'a> TabularSubjects<'a> {
                 lengths,
                 taxonomy,
                 loads,
+                seen: _,
             } => {
                 if let (Some(exception), Some(subject)) = (
                     loads.thrown(s_idx),
@@ -547,6 +639,7 @@ impl<'a> TabularSubjects<'a> {
                                 subject_id: true,
                                 all_ids: true,
                                 thrown: None,
+                                empty_handle: false,
                             }
                         });
                         Ok(SubjectValues {
@@ -662,6 +755,7 @@ pub(crate) fn write_tax_report(
     html: bool,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report};
+    let seen = |q_idx: usize, s_idx: usize| subjects.seen_at(q_idx, s_idx);
     let report = report_batch(
         queries,
         subjects.parsed(),
@@ -672,6 +766,7 @@ pub(crate) fn write_tax_report(
         program,
         app,
         html,
+        Some(&seen),
     )?;
     write_report(writer, warnings, queries, &report)?;
     Ok(())

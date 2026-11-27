@@ -34,6 +34,7 @@ Other programs (losat <program> -help shows each one's options):
   blastdb_aliastool           Application to create BLAST database aliases
   blastdbcheck                BLAST database integrity and validity checking application
   cleanup-blastdb-volumes.py  Remove needless BLAST database volumes.
+  blast_formatter             Stand-alone BLAST formatter client, version LOSAT 0.2.0
 
 To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:
   losat -install-shims [DIR]   (default: the directory of this executable)

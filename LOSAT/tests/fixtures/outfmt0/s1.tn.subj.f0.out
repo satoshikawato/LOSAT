@@ -1,0 +1,192 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_sp_nuc_tn.fa).
+           2 sequences; 962 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P99992.1 swissprot subject (nucleotide letters)                       138     1e-46
+okt ok                                                                133     3e-45
+
+
+>P99992.1 swissprot subject (nucleotide letters)
+Length=541
+
+ Score = 138 bits (347),  Expect = 1e-46, Method: Compositional matrix adjust.
+ Identities = 71/90 (79%), Positives = 73/90 (81%), Gaps = 0/90 (0%)
+ Frame = -1
+
+Query  61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+            SKS CVTCTS +         Q+   EQFSANDWFCRWR CFKGWLINPDVPC TKVRVD
+Sbjct  541  SKSRCVTCTSSKTLPGDHHHLQRIAVEQFSANDWFCRWRGCFKGWLINPDVPCRTKVRVD  362
+
+Query  121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+            TYLNCGCCEVWDKEITE DAQNYIHEANAE
+Sbjct  361  TYLNCGCCEVWDKEITEVDAQNYIHEANAE  272
+
+
+ Score = 136 bits (342),  Expect = 6e-46, Method: Compositional matrix adjust.
+ Identities = 65/70 (93%), Positives = 66/70 (94%), Gaps = 0/70 (0%)
+ Frame = +1
+
+Query  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+            AYTHGMRFCPKVKQQCTFYCMEQDNVT+VMV  FKTEDFSTHGT WKHCMWKCWDTSF T
+Sbjct  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTEVMVRPFKTEDFSTHGTFWKHCMWKCWDTSFKT  180
+
+Query  61   SKSHCVTCTS  70
+            SKSHCVTCTS
+Sbjct  181  SKSHCVTCTS  210
+
+
+>okt ok
+Length=421
+
+ Score = 133 bits (334),  Expect = 3e-45, Method: Compositional matrix adjust.
+ Identities = 67/85 (79%), Positives = 70/85 (82%), Gaps = 0/85 (0%)
+ Frame = +2
+
+Query  46   WKHCMWKCWDTSFPTSKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGW  105
+            WKHCMWKCWDTSFP SKSHCVTCTS +         Q+   EQFSANDWFCRW FCFKGW
+Sbjct  167  WKHCMWKCWDTSFPYSKSHCVTCTSSKTLPGDHIHLQRIAVEQFSANDWFCRWDFCFKGW  346
+
+Query  106  LINPDVPCPTKVRVDTYLNCGCCEV  130
+            LINPDVPCPTKVRV+TYLNCGCCEV
+Sbjct  347  LINPDVPCPTKVRVNTYLNCGCCEV  421
+
+
+ Score = 107 bits (268),  Expect = 2e-35, Method: Compositional matrix adjust.
+ Identities = 51/55 (93%), Positives = 51/55 (93%), Gaps = 0/55 (0%)
+ Frame = +1
+
+Query  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWD  55
+            AYTHGMRFC KVKQQCTF CMEQ NVTQVMVCS KTEDFSTHGTIWKHCMWKCWD
+Sbjct  1    AYTHGMRFCFKVKQQCTFMCMEQMNVTQVMVCSDKTEDFSTHGTIWKHCMWKCWD  165
+
+
+ Score = 19.6 bits (39),  Expect = 0.031, Method: Compositional matrix adjust.
+ Identities = 6/25 (24%), Positives = 11/25 (44%), Gaps = 0/25 (0%)
+ Frame = -1
+
+Query  35   KTEDFSTHGTIWKHCMWKCWDTSFP  59
+            +   ++    +WK C+     T FP
+Sbjct  241  RRARYTVRLAVWKRCVPALPHTVFP  167
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.135    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 35862
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+okt ok                                                                150     1e-52
+P99992.1 swissprot subject (nucleotide letters)                       120     2e-40
+
+
+>okt ok
+Length=421
+
+ Score = 150 bits (378),  Expect = 1e-52, Method: Compositional matrix adjust.
+ Identities = 72/85 (85%), Positives = 73/85 (86%), Gaps = 0/85 (0%)
+ Frame = +2
+
+Query  16   WKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFSANDWRCRWRFCFKSW  75
+            WKHCMWKCWDTSF  SKSHC TCTS KTL GDHI LQRIAV  FSANDW CRW FCFK W
+Sbjct  167  WKHCMWKCWDTSFPYSKSHCVTCTSSKTLPGDHIHLQRIAVEQFSANDWFCRWDFCFKGW  346
+
+Query  76   LINPYVPCPTKVRVDTYLNCGCCEV  100
+            LINP VPCPTKVRV+TYLNCGCCEV
+Sbjct  347  LINPDVPCPTKVRVNTYLNCGCCEV  421
+
+
+ Score = 53.1 bits (126),  Expect = 1e-14, Method: Compositional matrix adjust.
+ Identities = 23/25 (92%), Positives = 23/25 (92%), Gaps = 0/25 (0%)
+ Frame = +1
+
+Query  1    VCSFKTEDFSTFGTIWKHCMWKCWD  25
+            VCS KTEDFST GTIWKHCMWKCWD
+Sbjct  91   VCSDKTEDFSTHGTIWKHCMWKCWD  165
+
+
+ Score = 13.9 bits (24),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 3/16 (19%), Positives = 8/16 (50%), Gaps = 0/16 (0%)
+ Frame = -1
+
+Query  5    KTEDFSTFGTIWKHCM  20
+            +   ++    +WK C+
+Sbjct  241  RRARYTVRLAVWKRCV  194
+
+
+>P99992.1 swissprot subject (nucleotide letters)
+Length=541
+
+ Score = 120 bits (301),  Expect = 2e-40, Method: Compositional matrix adjust.
+ Identities = 62/80 (78%), Positives = 62/80 (78%), Gaps = 0/80 (0%)
+ Frame = -1
+
+Query  31   SKSHCATCTSEKTLYGDHIILQRIAVSVFSANDWRCRWRFCFKSWLINPYVPCPTKVRVD  90
+            SKS C TCTS KTL GDH  LQRIAV  FSANDW CRWR CFK WLINP VPC TKVRVD
+Sbjct  541  SKSRCVTCTSSKTLPGDHHHLQRIAVEQFSANDWFCRWRGCFKGWLINPDVPCRTKVRVD  362
+
+Query  91   TYLNCGCCEVTGKVITESKA  110
+            TYLNCGCCEV  K ITE  A
+Sbjct  361  TYLNCGCCEVWDKEITEVDA  302
+
+
+ Score = 84.3 bits (207),  Expect = 2e-26, Method: Compositional matrix adjust.
+ Identities = 41/49 (84%), Positives = 41/49 (84%), Gaps = 0/49 (0%)
+ Frame = +1
+
+Query  1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHI  49
+            V  FKTEDFST GT WKHCMWKCWDTSF TSKSHC TCTS KTL GDHI
+Sbjct  91   VRPFKTEDFSTHGTFWKHCMWKCWDTSFKTSKSHCVTCTSSKTLPGDHI  237
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25662
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_sp_nuc_tn.fa).
+    Posted date:  Unknown
+  Number of letters in database: 962
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

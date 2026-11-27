@@ -181,3 +181,289 @@ fn trim_keeps_the_first_hsps() {
     trim_by_max_hsps(&mut hsps, 2);
     assert_eq!(hsps, vec![3, 1]);
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TestChunkHsp {
+    context: i32,
+    subject_frame: i32,
+    q_start: i32,
+    q_end: i32,
+    s_start: i32,
+    s_end: i32,
+    q_gapped_start: i32,
+    s_gapped_start: i32,
+    score: i32,
+    tag: i32,
+}
+
+impl ChunkMergeHsp for TestChunkHsp {
+    fn merge_context(&self) -> i32 {
+        self.context
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.subject_frame
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.q_start
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.s_start
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end
+    }
+    fn merge_score(&self) -> i32 {
+        self.score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.q_gapped_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.s_gapped_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = q_start;
+        self.q_end = q_end;
+        self.s_start = s_start;
+        self.s_end = s_end;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.q_gapped_start = q_gapped_start;
+        self.s_gapped_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.score = score;
+    }
+}
+
+fn test_score_cmp(a: &TestChunkHsp, b: &TestChunkHsp) -> std::cmp::Ordering {
+    b.score
+        .cmp(&a.score)
+        .then_with(|| a.s_start.cmp(&b.s_start))
+        .then_with(|| b.s_end.cmp(&a.s_end))
+        .then_with(|| a.q_start.cmp(&b.q_start))
+        .then_with(|| b.q_end.cmp(&a.q_end))
+}
+
+fn hsp(context: i32, q: (i32, i32), s: (i32, i32), gapped: (i32, i32), score: i32) -> TestChunkHsp {
+    TestChunkHsp {
+        context,
+        subject_frame: 0,
+        q_start: q.0,
+        q_end: q.1,
+        s_start: s.0,
+        s_end: s.1,
+        q_gapped_start: gapped.0,
+        s_gapped_start: gapped.1,
+        score,
+        tag: 0,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+#[test]
+fn merge_subject_chunk_hsps_joins_gapped_and_ungapped_across_overlap() {
+    // Gapped merge with diagonal shift of 2 (< 10) across a 5,000,000-residue boundary:
+    // higher-scoring incoming HSP transfers its gapped_start, and score uses density scaling.
+    let mut combined = vec![hsp(
+        0,
+        (0, 180),
+        (4_999_840, 5_000_020),
+        (40, 4_999_880),
+        400,
+    )];
+    let mut incoming = vec![hsp(
+        0,
+        (78, 218),
+        (4_999_920, 5_000_060),
+        (120, 4_999_962),
+        500,
+    )];
+    merge_subject_chunk_hsps(
+        &mut combined,
+        &mut incoming,
+        4_999_920,
+        100,
+        i32::MAX as usize,
+        true,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert!(incoming.is_empty());
+    assert_eq!(combined.len(), 1);
+    assert_eq!(
+        (
+            combined[0].q_start,
+            combined[0].q_end,
+            combined[0].s_start,
+            combined[0].s_end
+        ),
+        (0, 218, 4_999_840, 5_000_060)
+    );
+    assert_eq!(
+        (combined[0].q_gapped_start, combined[0].s_gapped_start),
+        (120, 4_999_962)
+    );
+    // density = (400 + 500) / (180 + 140) = 900 / 320 = 2.8125; 2.8125 * 218 = 613.125 -> 613
+    assert_eq!(combined[0].score, 613);
+
+    // Same off-diagonal pair in ungapped mode (allow_gap = false): does NOT merge.
+    let mut ungapped = vec![hsp(
+        0,
+        (0, 180),
+        (4_999_840, 5_000_020),
+        (40, 4_999_880),
+        400,
+    )];
+    let mut incoming = vec![hsp(
+        0,
+        (78, 218),
+        (4_999_920, 5_000_060),
+        (120, 4_999_962),
+        500,
+    )];
+    merge_subject_chunk_hsps(
+        &mut ungapped,
+        &mut incoming,
+        4_999_920,
+        100,
+        i32::MAX as usize,
+        false,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert!(incoming.is_empty());
+    assert_eq!(ungapped.len(), 2);
+    assert_eq!(ungapped[0].score, 500);
+    assert_eq!(ungapped[1].score, 400);
+
+    // Diagonal difference of 10 (not < OVERLAP_DIAG_CLOSE): does NOT merge even in gapped mode.
+    let mut far_diag = vec![hsp(0, (0, 180), (100, 280), (10, 110), 400)];
+    let mut incoming = vec![hsp(0, (40, 190), (130, 280), (50, 140), 450)];
+    merge_subject_chunk_hsps(
+        &mut far_diag,
+        &mut incoming,
+        130,
+        100,
+        i32::MAX as usize,
+        true,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert_eq!(far_diag.len(), 2);
+}
+
+#[test]
+fn merge_subject_chunk_hsps_respects_zero_overlap_context_frame_and_undefined_zero_sum() {
+    // Zero overlap: incoming starting at split_offset (130) is NOT < 130 + 0, so no merge.
+    let mut combined = vec![hsp(0, (0, 140), (110, 250), (10, 120), 600)];
+    let mut incoming = vec![hsp(0, (20, 150), (130, 260), (30, 140), 550)];
+    merge_subject_chunk_hsps(
+        &mut combined,
+        &mut incoming,
+        130,
+        0,
+        i32::MAX as usize,
+        false,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert_eq!(combined.len(), 2);
+
+    // Different context or different subject frame: no merge.
+    let mut diff_ctx = vec![hsp(0, (0, 140), (110, 250), (10, 120), 600)];
+    let mut incoming = vec![hsp(1, (20, 150), (130, 260), (30, 140), 550)];
+    merge_subject_chunk_hsps(
+        &mut diff_ctx,
+        &mut incoming,
+        130,
+        100,
+        i32::MAX as usize,
+        true,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert_eq!(diff_ctx.len(), 2);
+
+    let mut diff_frame = vec![hsp(0, (0, 140), (110, 250), (10, 120), 600)];
+    let mut neg_frame = hsp(0, (20, 150), (130, 260), (30, 140), 550);
+    neg_frame.subject_frame = -1;
+    let mut incoming = vec![neg_frame];
+    merge_subject_chunk_hsps(
+        &mut diff_frame,
+        &mut incoming,
+        130,
+        100,
+        i32::MAX as usize,
+        true,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert_eq!(diff_frame.len(), 2);
+
+    // Zero query length sum in ungapped one-hit merge: returns ChunkMergeUndefined.
+    let mut zero_len = vec![hsp(0, (10, 10), (150, 150), (10, 150), 15)];
+    let mut incoming = vec![hsp(0, (10, 10), (150, 150), (10, 150), 15)];
+    assert_eq!(
+        merge_subject_chunk_hsps(
+            &mut zero_len,
+            &mut incoming,
+            130,
+            100,
+            i32::MAX as usize,
+            false,
+            test_score_cmp,
+        ),
+        Err(ChunkMergeUndefined)
+    );
+}
+
+#[test]
+fn merge_subject_chunk_hsps_preserves_swap_displacement_and_hsp_num_max_tie_order() {
+    // Three equal-score HSPs in `combined`: non-strip N1 (tag 1), N2 (tag 2), strip S (tag 3).
+    // Swap moves S to index 0, displacing N1 to index 2 -> [S(3), N2(2), N1(1)].
+    // Adding an equal-score non-merging incoming I (tag 4) with identical coordinates keeps
+    // NCBI's swap order under stable sort.
+    let make = |s_end, tag| TestChunkHsp {
+        context: 0,
+        subject_frame: 0,
+        q_start: 0,
+        q_end: 50,
+        s_start: 10,
+        s_end,
+        q_gapped_start: 10,
+        s_gapped_start: 20,
+        score: 100,
+        tag,
+    };
+    let mut combined = vec![make(80, 1), make(80, 2), make(150, 3)];
+    let mut incoming = vec![make(80, 4)];
+    let incoming_cap = incoming.capacity();
+    merge_subject_chunk_hsps(
+        &mut combined,
+        &mut incoming,
+        100,
+        0,
+        i32::MAX as usize,
+        true,
+        test_score_cmp,
+    )
+    .unwrap();
+    assert!(incoming.is_empty());
+    assert!(incoming.capacity() >= incoming_cap);
+    // S (s_end=150) sorts before s_end=80; among the three s_end=80 ties, N2(2) precedes N1(1)
+    // because S swapped with N1 at index 0, and incoming I(4) follows both.
+    let tags: Vec<i32> = combined.iter().map(|h| h.tag).collect();
+    assert_eq!(tags, vec![3, 2, 1, 4]);
+
+    // With hsp_num_max = 2, ties prefer `combined` over `incoming`.
+    let mut capped = vec![make(80, 10), make(80, 11)];
+    let mut incoming = vec![make(80, 20), make(80, 21)];
+    merge_subject_chunk_hsps(&mut capped, &mut incoming, 100, 0, 2, true, test_score_cmp).unwrap();
+    assert!(incoming.is_empty());
+    let tags: Vec<i32> = capped.iter().map(|h| h.tag).collect();
+    assert_eq!(tags, vec![10, 11]);
+}

@@ -106,7 +106,7 @@ describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on
     const worker = runtime();
     await worker.tool(toolOf(['windowmasker', '-version']), posts());
     const loaded = (worker as unknown as { loaded: { retained?: unknown; instance: { abi: ReactorAbi } } }).loaded;
-    const registered = loaded.instance.abi.register('blastp', ROLE_SUBJECT, false, new TextEncoder().encode('>s\nMKVLAGG\n'));
+    const registered = loaded.instance.abi.register('blastp', ROLE_SUBJECT, false, false, new TextEncoder().encode('>s\nMKVLAGG\n'));
     loaded.retained = { key: 'k', dataLoaders: false, handle: registered.handle, records: registered.records };
     await worker.tool(toolOf(['windowmasker', '-version']), posts());
     expect(loaded.retained).toBeUndefined();

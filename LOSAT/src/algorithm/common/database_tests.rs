@@ -353,7 +353,7 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     }
     // Line DBID weakbatch: what the batches read of each subject they report, by ordinal id:
     // 7 in both batches, 8 in the first (3 Seq-aligns, on under limit 3), 9 in the second
-    // (4, off), whose reports read it one by one.
+    // (4, off), whose reports read it one by one (the walk's, `report::db_subject::ScopeWalk`).
     let sum = |span: std::ops::Range<usize>| counts[span].iter().sum();
     let never = |_: std::ops::Range<usize>| false;
     let reads = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([
@@ -362,22 +362,22 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         (1, 8),
         (3, 9),
     ]);
-    assert!(reads.prefetched(7) && reads.one_by_one(7));
-    assert!(reads.prefetched(8) && !reads.one_by_one(8));
-    assert!(!reads.prefetched(9) && reads.one_by_one(9));
+    assert!(reads.prefetched(7));
+    assert!(reads.prefetched(8));
+    assert!(!reads.prefetched(9));
     let every = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
-    assert!(every.prefetched(9) && !every.one_by_one(9));
+    assert!(every.prefetched(9));
     let none = BatchPrefetch::at(Some(0), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(0, 7)]);
-    assert!(!none.prefetched(7) && none.one_by_one(7));
+    assert!(!none.prefetched(7));
     // Review 5 of line DBID pfoff-4, H3: psiblast's outfmt 8 reads its subjects one by one.
     let seq_annot = PrefetchFormat::of(8, RequestKind::Psiblast);
     let annot =
         BatchPrefetch::at(None, seq_annot, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
-    assert!(!annot.prefetched(9) && annot.one_by_one(9));
+    assert!(!annot.prefetched(9));
     // Review 1 M1: a query of no batch (5, beyond the call's 5) is taken both ways.
     let beyond =
         BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(5, 6)]);
-    assert!(beyond.prefetched(6) && beyond.one_by_one(6));
+    assert!(beyond.prefetched(6));
     // Line DBID pfoff-7: a batch whose prefetch fails at a subject whose lookup throws on the id
     // (the second, `2..5`) prefetches, and its reports load its subjects one by one after it; the
     // reads whose texts its reports write stay the prefetch's. A batch whose prefetch is off is
@@ -401,9 +401,9 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         (false, false)
     );
     let fails_reads = failing.reads([(0, 7), (4, 7), (1, 8), (3, 9)]);
-    assert!(fails_reads.prefetched(9) && fails_reads.one_by_one(9));
-    assert!(fails_reads.prefetched(8) && !fails_reads.one_by_one(8));
-    assert!(fails_reads.prefetched(7) && fails_reads.one_by_one(7));
+    assert!(fails_reads.prefetched(9));
+    assert!(fails_reads.prefetched(8));
+    assert!(fails_reads.prefetched(7));
     let off = BatchPrefetch::at(
         Some(0),
         table,
@@ -418,7 +418,7 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         ..ParsedShown::default()
     };
     let of_9 = reads.shown(shown, 9);
-    assert!(!of_9.prefetched && of_9.one_by_one);
+    assert!(!of_9.prefetched);
     assert!(prefetch_off_at(Some(1), 2) && !prefetch_off_at(Some(2), 2));
     assert!(prefetch_off_at(Some(0), 0) && !prefetch_off_at(Some(i32::MAX), usize::MAX));
     assert!(!prefetch_off_at(None, usize::MAX));
@@ -898,6 +898,66 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     }
 }
 
+// RG-KB 9(b): only NCBI's Seq-aligns read a reported subject's definition line where every
+// format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
+// subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
+// may set), for the five search programs (not psiblast, rpsblast or rpstblastn);
+// the others read it again (`TitleReads::Reports`, LOSAT's refusal).
+#[test]
+fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
+    use crate::report::archive::options::RequestKind;
+    for app in [
+        RequestKind::Blastn,
+        RequestKind::Blastp,
+        RequestKind::Blastx,
+        RequestKind::Tblastn,
+        RequestKind::Tblastx,
+    ] {
+        let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied());
+        assert_eq!(of(&[11]), TitleReads::SeqAligns, "{app:?}");
+        assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
+        for outfmts in [
+            &[][..],
+            &[0],
+            &[3],
+            &[5],
+            &[6],
+            &[7],
+            &[10],
+            &[13],
+            &[17],
+            &[18],
+            &[11, 6],
+            &[11, 0],
+        ] {
+            assert_eq!(of(outfmts), TitleReads::Reports, "{app:?} {outfmts:?}");
+        }
+        for outfmt in [8, 9, 12] {
+            let expected = if prefetches_subjects(Some(PrefetchFormat::of(outfmt, app))) {
+                TitleReads::Reports
+            } else {
+                TitleReads::SeqAligns
+            };
+            assert_eq!(of(&[outfmt, 11]), expected, "{app:?} {outfmt}");
+        }
+    }
+    // psiblast, rpsblast and rpstblastn always stay `TitleReads::Reports`.
+    for app in [
+        RequestKind::Psiblast,
+        RequestKind::Rpsblast,
+        RequestKind::Rpstblastn,
+    ] {
+        for outfmts in [&[][..], &[8], &[9], &[11], &[12], &[8, 11], &[0], &[6]] {
+            assert_eq!(
+                TitleReads::of_outfmts(app, outfmts.iter().copied()),
+                TitleReads::Reports,
+                "{app:?} {outfmts:?}"
+            );
+        }
+    }
+    assert_eq!(TitleReads::default(), TitleReads::Reports);
+}
+
 // Line RG D1c-1c (review 2 G2 of D1c-1b): under a negative seqid list, a list of a redo's stream
 // whose subject's header cannot be read (lr's sequence 1, `gnl|BL_ORD_ID|xyz` in its second
 // volume, a string tag that NCBI's read of a later volume cannot make an OID of) stays in the
@@ -946,4 +1006,190 @@ fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
         refusal.contains("those of sequence 1 cannot be read") && refusal.contains("string tag"),
         "{refusal}"
     );
+}
+
+// RG-KB 9(b) review 1 (F1): NCBI BLAST+ 2.17.0 (`db.tchar.*.dmg.*`) posts the 803.7 of the
+// title of OID 0 (0xE9), which the batch's Seq-aligns read before OID 1, whose title tag it
+// cannot read, and then fails; a later read of OID 0 finds it in the cache of header records.
+#[test]
+fn a_failed_header_read_keeps_the_posts_of_the_seq_aligns_before_it() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_dmg_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    use crate::blastinput::app::ErrorAfterBatchReports;
+    let failure = |title_reads: Vec<u32>| {
+        anyhow::Error::new(ErrorAfterBatchReports {
+            query: Some(0),
+            error: anyhow::anyhow!("unreadable"),
+            utf8: None,
+            title_reads,
+        })
+    };
+    // The reads of the batch's Seq-aligns before the first read of the failed one, then it.
+    let error = ErrorAfterBatchReports::after_seq_aligns(failure(vec![1]), [2, 0, 1, 2, 1]);
+    let failed = error.downcast_ref::<ErrorAfterBatchReports>().unwrap();
+    assert_eq!(failed.title_reads, [2, 0, 1]);
+    // A failure elsewhere (a fetch, the prefetch) has no such reads.
+    let elsewhere = ErrorAfterBatchReports::after_seq_aligns(failure(Vec::new()), [0, 1]);
+    let elsewhere = elsewhere.downcast_ref::<ErrorAfterBatchReports>().unwrap();
+    assert!(elsewhere.title_reads.is_empty());
+    assert_eq!(
+        elsewhere.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+    assert!(!db.replaced_titles());
+    // With NCBI's warning of a UTF8String header in the batch: LOSAT's refusal.
+    let utf8 = failed
+        .title_posts(&db, true, "BLASTP")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        utf8.contains("database sequence 0 has a stored title"),
+        "{utf8}"
+    );
+    db.restart_header_reads();
+    let mut posted = crate::report::diag_log::Posts::default();
+    posted.post(
+        crate::report::diag_log::ERROR,
+        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at byte \
+          18\nd0 fam\xe9one\n"
+            .to_vec(),
+    );
+    assert_eq!(failed.title_posts(&db, false, "BLASTP").unwrap(), posted);
+    assert!(db.replaced_titles());
+    assert_eq!(
+        failed.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+}
+
+// RG-KB 9(b) review 1 (F3): a call's first UTF8String read posts NCBI's warning in its own
+// batch alone.
+#[test]
+fn the_utf8_read_of_a_call_is_of_its_batch_alone() {
+    let call = CallUtf8::default();
+    assert!(!call.of_batch(0));
+    let read = Utf8Read {
+        query: 1,
+        path: "Blast-def-line-set.E.title".to_string(),
+    };
+    call.note(2, Some(&read));
+    call.note(4, Some(&read));
+    assert!(call.of_batch(2));
+    assert!(!call.of_batch(0) && !call.of_batch(4));
+}
+
+#[test]
+fn outfmt_taxdb_use_matches_ncbi_format_rules() {
+    use super::{outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse};
+    use crate::report::archive::options::RequestKind;
+    let app = RequestKind::Blastp;
+    // Formats that check taxdb.bti even when absent: XML2/JSON (13..=16) on `-db`, and plural
+    // tabular taxonomy columns (6/7/10/20) on both `-db` and `-subject`.
+    for fmt in ["13", "14", "15", "16"] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::Always,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    for fmt in [
+        "6 qseqid sseqid sscinames",
+        "6 qseqid sseqid scomnames",
+        "6 qseqid sseqid sblastnames",
+        "6 qseqid sseqid sskingdoms",
+        "7 qseqid sseqid sscinames",
+        "10 qseqid sseqid sscinames",
+        "20 qseqid sseqid sscinames",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::Always,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::Always,
+            "{fmt} subj"
+        );
+    }
+    // Formats that read taxonomy names only when taxdb.bti already exists on the search path:
+    // singular tabular name fields, outfmt 18, pairwise/query-anchored 0..=4 on `-db`, and
+    // tabular formats (6/7/10/20) that print a subject id column (`PrintedIds`, including `std`).
+    for fmt in [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "6",
+        "6 std",
+        "7",
+        "10",
+        "18",
+        "20",
+        "6 qseqid sseqid ssciname",
+        "6 qseqid sseqid scomname",
+        "6 qseqid sseqid sblastname",
+        "6 qseqid sseqid sskingdom",
+        "7 qseqid sseqid ssciname",
+        "10 qseqid sseqid ssciname",
+        "20 qseqid sseqid ssciname",
+        "6 qseqid sseqid staxid",
+        "6 qseqid sseqid staxids",
+        "6 qseqid sacc",
+        "6 qseqid saccver",
+        "6 qseqid sallseqid",
+        "6 qseqid sallacc",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::WhenPresent,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    // Formats that do not consult taxdb for formatting: 5, 6/7/10/20 without tax name or
+    // printed subject id columns (including staxid/staxids/sgi/stitle alone), 8, 9, 11, 12, 17.
+    for fmt in [
+        "5",
+        "6 qseqid pident",
+        "6 qseqid staxid",
+        "6 qseqid staxids",
+        "6 qseqid sgi sallgi stitle",
+        "7 qseqid pident",
+        "10 qseqid pident",
+        "20 qseqid pident",
+        "8",
+        "9",
+        "11",
+        "12",
+        "17",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::None,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    for fmt in ["0", "4", "5", "6", "7", "17"] {
+        assert!(outfmt_prefetches_taxdb(fmt), "{fmt}");
+    }
+    for fmt in ["8", "9", "10", "11", "12", "13", "15", "18", "20"] {
+        assert!(!outfmt_prefetches_taxdb(fmt), "{fmt}");
+    }
 }

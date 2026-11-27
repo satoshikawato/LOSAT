@@ -1,0 +1,117 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: pdbtwo
+           2 sequences; 440 total letters
+
+
+
+<b>Query=</b> pdq query of the duplicated record
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for 1AB1_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB1_A?report=genbank&log$=prottop&blast_rank=1&RID=" >1AB1_A </a>t1                                                             <a href=#1AB1_A>462</a>     3e-173
+<a title="Show report for 1AB2_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB2_A?report=genbank&log$=prottop&blast_rank=2&RID=" >1AB2_A </a>t1                                                             <a href=#1AB2_A>462</a>     4e-173
+
+
+><a title="Show report for 1AB1_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB1_A?report=genbank&log$=protalign&blast_rank=1&RID=0" >1AB1_A</a><a name=1AB1_A></a> t1
+ <a title="Show report for 1AB1_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB1_A?report=genbank&log$=protalign&blast_rank=1&RID=0" >1AB1_A</a><a name=1AB1_A></a> t1
+Length=220
+
+ Score = 462 bits (1190),  Expect = 3e-173, Method: Compositional matrix adjust.
+ Identities = 219/220 (99%), Positives = 219/220 (99%), Gaps = 0/220 (0%)
+
+Query  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+            MNQDKEFGQD YVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH
+Sbjct  1    MNQDKEFGQDWYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+
+Query  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+            TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC
+Sbjct  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+
+Query  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+            HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM
+Sbjct  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+
+Query  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+            CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM
+Sbjct  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+
+
+><a title="Show report for 1AB2_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB2_A?report=genbank&log$=protalign&blast_rank=2&RID=0" >1AB2_A</a><a name=1AB2_A></a> t0
+ <a title="Show report for 1AB2_A" href="https://www.ncbi.nlm.nih.gov/protein/1AB2_A?report=genbank&log$=protalign&blast_rank=2&RID=0" >1AB2_A</a><a name=1AB2_A></a> t1
+Length=220
+
+ Score = 462 bits (1190),  Expect = 4e-173, Method: Compositional matrix adjust.
+ Identities = 219/220 (99%), Positives = 219/220 (99%), Gaps = 0/220 (0%)
+
+Query  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+            MNQDKEFGQDAYVPTEFFDN DCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH
+Sbjct  1    MNQDKEFGQDAYVPTEFFDNWDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+
+Query  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+            TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC
+Sbjct  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+
+Query  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+            HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM
+Sbjct  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+
+Query  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+            CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM
+Sbjct  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.139    0.522    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 74498
+
+
+  Database: pdbtwo
+    Posted date:  Nov 24, 2026  3:23 PM
+  Number of letters in database: 440
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

@@ -32,7 +32,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
     let parsed = vec![Some(Arc::new(thrown)), found("AAA00002"), found("AAA00003")];
     // One report read one by one: rank 1, then rank 0 (whose lookup throws), then rank 2.
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(crate::report::db_subject::RunThrow::every_row(
             crate::report::db_subject::AfterThrow::EndsReport,
         )),
@@ -81,7 +81,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
     assert!(HitNames::of(&loads, 0, None, refused).is_err());
     // Where the run writes another format, every subject is loaded and named.
     let every = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         None,
         [(true, vec![Some(0), Some(2)])],
         |rank: usize| parsed[rank].as_deref(),

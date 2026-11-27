@@ -14,7 +14,15 @@ import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
-import { printSummaryParts, programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
+import {
+  BLASTP_TASK_CHOICES,
+  MODE_TABS,
+  modeTabOf,
+  printSummaryParts,
+  programById,
+  PSIBLAST_ALGORITHM_LABEL,
+  searchSummaryParts,
+} from '../domain/programs';
 import { announce } from './announcer';
 import { searchFormModel } from './form-model';
 import { REFUSAL_ID } from './refusal';
@@ -91,6 +99,11 @@ watch(
 );
 onUnmounted(() => clearTimeout(engineWait));
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
+const blastpTaskField = programById('blastp').sections[0]!.fields[0]!;
+const proteinAlgorithmChoices = [...BLASTP_TASK_CHOICES, 'psiblast'] as const;
+const proteinAlgorithmLabel = (choice: string): string =>
+  choice === 'psiblast' ? PSIBLAST_ALGORITHM_LABEL : (blastpTaskField.choiceLabels?.[choice] ?? choice);
+const activeModeTab = computed(() => modeTabOf(state.value.program));
 const summaryParts = computed(() => {
   void state.value; // recompute with the draft
   // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
@@ -102,7 +115,14 @@ const summaryParts = computed(() => {
         ? {}
         : { name: state.value.database.selected }
       : undefined;
-  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database);
+  const queryFile =
+    state.value.querySource !== 'fasta'
+      ? {
+          flag: state.value.querySource === 'msa' ? ('-in_msa' as const) : ('-in_pssm' as const),
+          ...(state.value.queryFile.file === undefined ? {} : { name: state.value.queryFile.file.name }),
+        }
+      : undefined;
+  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database, queryFile);
 });
 /**
  * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of
@@ -178,16 +198,16 @@ defineExpose({ focusRepeats });
     <fieldset class="program-tabs" data-testid="program-tabs">
       <legend class="visually-hidden">Mode</legend>
       <label
-        v-for="p in PROGRAMS"
+        v-for="p in MODE_TABS"
         :key="p.id"
         class="program-tab"
-        :class="{ selected: state.program === p.id }"
+        :class="{ selected: activeModeTab === p.id }"
       >
         <input
           type="radio"
           name="program"
           :value="p.id"
-          :checked="state.program === p.id"
+          :checked="activeModeTab === p.id"
           :data-testid="`program-${p.id}`"
           @change="draft.setProgram(p.id)"
         />
@@ -199,9 +219,43 @@ defineExpose({ focusRepeats });
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
-    <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
+    <fieldset v-if="taskFields.length > 0 || state.program === 'psiblast'" class="search-block" data-testid="program-selection">
       <legend>Task Selection</legend>
-      <ParameterField v-for="field in taskFields" :key="field.flag" :model="formModel" :field="field" />
+      <template v-if="state.program === 'psiblast'">
+        <div class="param-row" data-kind="radio" data-testid="param-task-field">
+          <span id="param-task-label" class="param-label">Algorithm</span>
+          <div class="param-control">
+            <div class="radios" role="radiogroup" aria-labelledby="param-task-label" data-testid="param-task">
+              <label v-for="choice in proteinAlgorithmChoices" :key="choice" class="radio">
+                <input
+                  type="radio"
+                  name="param-task"
+                  :value="choice"
+                  :checked="choice === 'psiblast'"
+                  :data-testid="`param-task-${choice}`"
+                  @change="draft.selectProteinAlgorithm(choice)"
+                />
+                {{ proteinAlgorithmLabel(choice) }}
+              </label>
+            </div>
+          </div>
+        </div>
+      </template>
+      <ParameterField v-for="field in taskFields" v-else :key="field.flag" :model="formModel" :field="field">
+        <template v-if="state.program === 'blastp' && field.flag === '-task'" #after-radios>
+          <label class="radio">
+            <input
+              type="radio"
+              name="param-task"
+              value="psiblast"
+              :checked="false"
+              data-testid="param-task-psiblast"
+              @change="draft.selectProteinAlgorithm('psiblast')"
+            />
+            {{ PSIBLAST_ALGORITHM_LABEL }}
+          </label>
+        </template>
+      </ParameterField>
     </fieldset>
 
     <div class="blast-row">

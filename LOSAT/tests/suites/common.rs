@@ -97,6 +97,8 @@ mod makeblastdb_rename_lock;
 mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_closed_pipe.rs"]
+mod makeprofiledb_closed_pipe;
 #[path = "../makeprofiledb_fixtures.rs"]
 mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
@@ -163,6 +165,8 @@ mod pairwise_par;
 mod parse_deflines_subject;
 #[path = "../protein_db_32bit_lengths.rs"]
 mod protein_db_32bit_lengths;
+#[path = "../protein_db_hard_long.rs"]
+mod protein_db_hard_long;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]

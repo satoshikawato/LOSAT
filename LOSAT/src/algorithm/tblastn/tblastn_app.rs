@@ -339,7 +339,8 @@ impl TblastnArgs {
             args.export_search_strategy.as_deref(),
             "TBLASTN",
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -350,7 +351,7 @@ impl TblastnArgs {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         // The search strategy's request, with the archive's options handle.
         args.strategy = strategy_file.map(|file| {
             crate::report::archive::strategy::StrategyExport::for_args(
@@ -424,7 +425,6 @@ impl TblastnArgs {
                     crate::report::archive::read::import::ImportRun::input_of("subject", imported.expect("imported subjects"))?,
                 ),
                 RunIo::Files => {
-                    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
                     Input::File(input_files::open_input(&subject_path, "subject", "TBLASTN")?)
                 }
                 RunIo::Memory { subject, .. } => Input::Bytes(subject),
@@ -523,7 +523,6 @@ impl TblastnArgs {
             // (`check_options`); NCBI opens the default `-query -` and never reads it.
             RunIo::Files if args.in_pssm.is_some() => Input::Bytes(&[]),
             RunIo::Files => {
-                input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
                 // NCBI opens the query file inside `Run` too: its error is saved and an error
                 // archive follows.
                 match crate::report::archive::read::import::ImportRun::open_query(
@@ -545,9 +544,9 @@ impl TblastnArgs {
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
         // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
-        let outfmt = match choice.parsed() {
+        let outfmt: Vec<u8> = match choice.parsed() {
             Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
-            _ => args.outfmt.clone(),
+            _ => outfmt_bytes,
         };
         let strategy = args.strategy.clone();
         let result = {
@@ -737,7 +736,7 @@ fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::Repor
         RunIo::Files => crate::cli::ReportStream::of_cli(
             open_out_file(args)?,
             "tblastn",
-            &args.outfmt,
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
             args.strategy.as_ref(),
         ),
         RunIo::Memory { report, .. } => {
@@ -751,7 +750,7 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -779,7 +778,7 @@ fn open_search_database(
                 outputs.formats.first().map(|format| format.outfmt),
             );
             let database = super::database::TblastnDatabase::open_restricted(
-                name,
+                &name,
                 settings,
                 list,
                 args.db_mask.option().as_ref(),
@@ -787,7 +786,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -901,7 +906,8 @@ fn search_cli(
     };
     let resolved = args.check_options(outputs.diagnostics)?;
     // The options' handlers have read a value that the early reading left to them (`Deferred`).
-    let choice = &choice.at_formatting_handler(&args.outfmt)?;
+    let choice =
+        &choice.at_formatting_handler(crate::utils::os_bytes::os_str_bytes(&args.outfmt))?;
     let joins_scope = resolved
         .pssm
         .as_deref()
@@ -1898,7 +1904,9 @@ fn search(
             )?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-285
+        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`), which
+        // names `PSITBLASTN` for a PSSM query (`-in_pssm`).
         write_first_batch_prologs(
             outputs,
             subject_path.map(|path| path.as_path()),
@@ -1906,7 +1914,7 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            "TBLASTN",
+            pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
             resolved.html.as_deref(),
         )?;
     } else {
@@ -1970,6 +1978,10 @@ fn search(
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
+        // The query Bioseqs that NCBI's scope finds for reported sequences
+        // (`report::query_bioseq`), noted at each batch's refusal of a sequence with the id of a
+        // query of its scope (below).
+        let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
         // XML report data of the first result NCBI formats: the matrix of its formatting table,
         // found by the name as typed)
@@ -2024,11 +2036,7 @@ fn search(
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
         let prefetch_format = super::database::prefetch_format(&outputs.formats);
-        let reads = super::database::CallReads::of(
-            database,
-            || query_input.batches(batch_size),
-            prefetch_format,
-        );
+        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2240,6 +2248,28 @@ fn search(
             // NCBI's own errors of the batch: the reports would show it (the prefetch's error
             // above comes first).
             if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+                // The batch's searched queries (`range`), the scope's span.
+                let record = |query: usize| {
+                    crate::report::query_bioseq::QueryRecordRef::of(
+                        queries.get(query).filter(|_| query < range.end)?,
+                    )
+                };
+                let shows = outputs
+                    .formats
+                    .iter()
+                    .all(|format| super::stage_e_report::shows_query_bioseqs(format.outfmt))
+                    && resolved.query_range.is_none()
+                    && !database.loads_write_texts();
+                let run = crate::report::query_bioseq::SeenRun {
+                    shows,
+                    known: range.start..if scopes.span_of(range.start).end == usize::MAX {
+                        usize::MAX
+                    } else {
+                        range.end
+                    },
+                    record: &record,
+                    protein: true,
+                };
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
@@ -2252,6 +2282,9 @@ fn search(
                         }),
                     database.oid_map(),
                     scopes,
+                    super::database::parsed_shown(&outputs.formats),
+                    &mut query_bioseqs,
+                    &run,
                     "TBLASTN",
                 )?;
             }
@@ -2327,7 +2360,7 @@ fn search(
                 &titles,
                 &results,
                 &spans,
-                (prefetch_format, resolved.gapped),
+                (prefetch_format, resolved.gapped, pssm.is_some()),
             )
             .filter(|(span, _)| {
                 failed
@@ -2459,6 +2492,7 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
+        let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(&results);
         let reported = match database {
             Some(database) => Some(
                 super::database::reported_subjects(
@@ -2470,12 +2504,15 @@ fn search(
                         outputs,
                         pssm.as_deref(),
                         hard_masked,
+                        has_nullb,
                     ),
                     &outputs.formats,
                     (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
+                    has_nullb,
+                    query_bioseqs.numbered_from(0),
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
@@ -2538,7 +2575,7 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            if first_prefetches && (taxdb_found || database.parsed_seqids()) {
+            if first_prefetches && (taxdb_found || database.parsed_seqids() || has_nullb) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
                 // taxid 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the
                 // prefetch does not: the rows of a batch with hits may open the taxonomy database
@@ -2571,8 +2608,21 @@ fn search(
                 } else {
                     crate::algorithm::common::database::RowLookups::None
                 };
-                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    database.open_for_rows(reported, hitlists, row_lookups)
+                let ends_on_throw = super::database::after_throw(
+                    &outputs.formats,
+                    (outputs.other_outfmts, resolved.html.is_some()),
+                )
+                .run()
+                .is_some_and(|run| {
+                    matches!(
+                        run.after,
+                        crate::report::db_subject::AfterThrow::EndsReport
+                            | crate::report::db_subject::AfterThrow::EndsRun
+                    )
+                });
+                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList],
+                                 stop_on_throw| {
+                    database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)
                 };
                 for span in &batch_spans {
                     // No batch after the run's end is prefetched, nor read one by one.
@@ -2607,50 +2657,65 @@ fn search(
                         seq_aligns,
                     ) && seq_aligns > 0
                     {
-                        let prefetched = |query: usize| {
-                            prefetch_posts
-                                .iter()
-                                .find(|(first, _)| *first == query)
-                                .map(|(_, posts)| posts)
-                        };
-                        let xml_before =
-                            xml_cuts.reports_before(subject_reads.queries(), &prefetched);
-                        let scope = || batch_scope(span);
-                        // The batches before (`results`): what NCBI's data loader loaded for them
-                        // (`super::database::LoadedBefore`), read only where this batch stops; a call
-                        // of the library's batches after the first (`api::run_batches`) has those of
-                        // the calls before unrecorded.
-                        let messages = database.batch_prefetch(
-                            reported,
-                            super::database::LoadedBefore {
-                                hits: &results[..span.start],
-                                spans: &batch_spans,
-                                format: prefetch_format,
-                                rows: first_rows,
-                                cuts: xml_cuts,
-                            },
-                            hitlists,
-                            &crate::algorithm::common::database::PrefetchQueries::new(
-                                span.start, &scope,
-                            )
-                            .after_xml_reports(xml_before.as_ref())
-                            .where_reports_unchanged_by_load_throws(
-                                crate::report::db_subject::unchanged_by_load_throws_outfmts(
-                                    outputs.formats.iter().map(|format| format.outfmt),
-                                    crate::blastinput::app::Program::Tblastn,
-                                    crate::report::archive::options::RequestKind::Tblastn,
+                        if has_nullb
+                            && super::nullb_report::hitlists_have_empty_subject_row_db(hitlists)
+                        {
+                            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679,778-786
+                            // `s_ExtractSeqidsAndRanges` calls `GetSeqRange` on row 1 before
+                            // `LoadSequencesToScope`, throwing `Row is empty` and posting the
+                            // prefetch warning without loading any subject.
+                            prefetch_posts.push((
+                                span.start,
+                                crate::report::diag_log::Posts::of_lines(
+                                    crate::algorithm::common::database::prefetch_warning("tblastn"),
                                 ),
-                            ),
-                        )?;
-                        // The rows of a batch whose reports load one by one open it with each
-                        // query's reads (below).
-                        if !one_by_one {
-                            rows_open(hitlists)?;
-                        }
-                        // After the reader's messages of the batch, in its first query
-                        // (`query_warnings::query_posts`).
-                        if !messages.is_empty() {
-                            prefetch_posts.push((span.start, messages));
+                            ));
+                        } else if taxdb_found || database.parsed_seqids() {
+                            let prefetched = |query: usize| {
+                                prefetch_posts
+                                    .iter()
+                                    .find(|(first, _)| *first == query)
+                                    .map(|(_, posts)| posts)
+                            };
+                            let xml_before =
+                                xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                            let scope = || batch_scope(span);
+                            // The batches before (`results`): what NCBI's data loader loaded for them
+                            // (`super::database::LoadedBefore`), read only where this batch stops; a call
+                            // of the library's batches after the first (`api::run_batches`) has those of
+                            // the calls before unrecorded.
+                            let messages = database.batch_prefetch(
+                                reported,
+                                super::database::LoadedBefore {
+                                    hits: &results[..span.start],
+                                    spans: &batch_spans,
+                                    format: prefetch_format,
+                                    rows: first_rows,
+                                    cuts: xml_cuts,
+                                },
+                                hitlists,
+                                &crate::algorithm::common::database::PrefetchQueries::new(
+                                    span.start, &scope,
+                                )
+                                .after_xml_reports(xml_before.as_ref())
+                                .where_reports_unchanged_by_load_throws(
+                                    crate::report::db_subject::unchanged_by_load_throws_outfmts(
+                                        outputs.formats.iter().map(|format| format.outfmt),
+                                        crate::blastinput::app::Program::Tblastn,
+                                        crate::report::archive::options::RequestKind::Tblastn,
+                                    ),
+                                ),
+                            )?;
+                            // The rows of a batch whose reports load one by one open it with each
+                            // query's reads (below).
+                            if !one_by_one {
+                                rows_open(hitlists, false)?;
+                            }
+                            // After the reader's messages of the batch, in its first query
+                            // (`query_warnings::query_posts`).
+                            if !messages.is_empty() {
+                                prefetch_posts.push((span.start, messages));
+                            }
                         }
                     }
                     if one_by_one {
@@ -2673,6 +2738,9 @@ fn search(
                                 // The first format writes the texts where it reads each subject
                                 // (`places_subject_reads`), else before the report.
                                 if places_reads {
+                                    let joins_copies = first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                    );
                                     subject_reads.set(
                                         query,
                                         database.subject_read_texts(
@@ -2681,6 +2749,7 @@ fn search(
                                             rows,
                                             row_lookups,
                                             pairwise,
+                                            (joins_copies, ends_on_throw),
                                         )?,
                                     );
                                 } else {
@@ -2689,7 +2758,7 @@ fn search(
                                     query_warning_lines[query].extend(messages);
                                 }
                             }
-                            rows_open(shown)?;
+                            rows_open(shown, ends_on_throw)?;
                         }
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
@@ -2820,6 +2889,7 @@ fn search(
                     reported,
                     oids: database.oid_map(),
                     hard_masked,
+                    seen: query_bioseqs.numbered_from(0),
                 },
             ),
             _ => (
@@ -2848,7 +2918,13 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
-            prefetch_posts,
+            // The posts of the titles that the batches' Seq-aligns read come before their
+            // prefetches' (a stable sort by the batch's first query).
+            reads
+                .take_title_posts()
+                .into_iter()
+                .chain(prefetch_posts)
+                .collect(),
             |query| batches.warnings[query].len(),
             reads.header_read(queries.len()),
         );

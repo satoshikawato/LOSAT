@@ -8,8 +8,8 @@ fn spec(fields: &str) -> TabularSpec {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastn,
     )

@@ -132,7 +132,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         app: "blastp",
         version: "BLASTP 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
-        db_name,
+        db_name: db_name.as_bytes(),
         matrix: Some("BLOSUM62"),
         expect: 10.0,
         gap_open: 11,
@@ -673,6 +673,7 @@ fn one_hsp_named(
                     taxonomy,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -831,6 +832,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -1363,6 +1365,7 @@ fn many_hits_16(
                         taxonomy: crate::report::blast_xml::records::UNNAMED,
                         descriptions: &[],
                         defline_thrown: false,
+                        unloaded: false,
                         lookup_throws: None,
                     },
                     |hsps| {

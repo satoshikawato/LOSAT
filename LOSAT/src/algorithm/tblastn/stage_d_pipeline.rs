@@ -2039,6 +2039,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -2885,7 +2886,7 @@ impl BatchSplit {
             Some(records) => records.iter().map(|&(length, _)| length).collect(),
             None => queries.iter().map(Vec::len).collect(),
         };
-        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false)
+        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false, false)
             .then(|| split_protein_batch(&lengths, sizes))
             .flatten();
         Ok(Self { sizes, chunks })
@@ -4538,6 +4539,7 @@ fn finish_local_ungapped(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4733,6 +4735,7 @@ fn finish_local_mode0_no_sum_stats(
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

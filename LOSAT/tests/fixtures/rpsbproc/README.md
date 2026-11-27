@@ -357,3 +357,23 @@ same bytes (2026-11-24), run as above:
   delayed member `Auth-list.names`: its post quotes no piece), and in the `pub`'s title.
 - `t_cr_typed.asn` (`t_cr_typed.doms`) has a lone CR (0x0D) inside a `comment`, followed by 0xE9. The CR ends a line,
   so the post names the next line and quotes the piece after the CR.
+
+## Title-less annotated queries (line RG-KB, item 9c)
+
+When a query `Bioseq` has no `title` descriptor but has `annot`, NCBI's `GetDescrTitleFromBioseq` scans its `ftable`
+annotations in order, taking `Gene-ref.desc` when `CBioseq::IsNa` (`dna`, `rna`, `na`) and the first `Prot-ref.name`
+otherwise (`aa`, `not-set`, `other`). An explicit `title` descriptor (even empty `""`) takes precedence over `annot`,
+and a `NULL` `Seq-annot` or `Seq-feat` reached before a matching feature throws `CCoreException::eNullPtr` with a
+host-dependent stack trace (refused by LOSAT). NCBI's official 0.5.1 binary and Bioconda's 0.5.1 gave the same bytes
+on the compare rows below (2026-11-26), run as above:
+
+- `annot_title_prot.asn` (`annot_title_prot.doms`, `annot_title_prot.full`) holds 6 `aa` queries covering `Prot-ref.name`
+  selection (skipping non-`ftable` annotations, non-`prot` features, `Prot-ref` without `name`, and empty `name {}`, with
+  a 0xE9 byte in `Prot-ref.name` posting 803.7 and replaced by `#`), `:Seq-annot`/`:Seq-feat` pointer syntax with a
+  `name` descriptor and ignored `Seq-feat.title`, empty first `Prot-ref.name` stopping before a later feature, empty
+  `title ""` overriding `annot`, explicit `title` overriding `annot { NULL }`, and a match preceding `NULL` elements.
+- `annot_title_na.asn` (`annot_title_na.doms`) holds 7 queries covering `dna` with `gene` lacking `desc` (empty title),
+  `dna` taking `Gene-ref.desc` with 0x7F posting 803.7, empty `Gene-ref.desc ""` stopping before a later feature, `rna`
+  and `na` taking `Gene-ref.desc`, and `not-set`/`other` printing `Nucleotide` while taking `Prot-ref.name`.
+- `refuse_annot_null.asn` (`refuse_annot_null.doms`) and `refuse_ftable_null.asn` (`refuse_ftable_null.doms`) are
+  title-less queries whose `annot` or `ftable` reaches `NULL` before a matching feature (refused).

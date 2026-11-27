@@ -40,8 +40,8 @@ fn run_inputs_of(
     subject: &[u8],
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, false, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,
@@ -554,7 +554,7 @@ fn database_run(words: &[&str], query: &str) -> (Result<(), String>, BTreeMap<u3
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
     let bytes = std::fs::read(format!("{DB_ROOT}/{query}")).unwrap();
     let loaders = data_loaders(&words).unwrap();
-    let (handle, _) = crate::store::register(words[0], 0, loaders, &bytes).unwrap();
+    let (handle, _) = crate::store::register(words[0], 0, loaders, false, &bytes).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let program = Program::parse(words[0]).unwrap();
     let result = crate::store::with_inputs(

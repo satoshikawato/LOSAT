@@ -13,7 +13,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastnDatabase {
-    BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
+    BlastnDatabase::open(fixture(name), &ApplicationSettings::default())
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -237,7 +237,7 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         format!("{error:#}"),
         "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
     );
-    BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+    BlastnDatabase::open(path("tests/seqdb/db/nucl_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
 }
 
@@ -511,9 +511,9 @@ fn ungapped_query_loc_read_order_matches_writer_for_lifted_and_class_n_hsps() {
         .collect();
     let writer_scores: Vec<HspScores> = writer_rows.iter().map(HspScores::of).collect();
     assert_eq!(model_scores, writer_scores);
-    assert!(!writer_rows[0].query_left_of_record);
-    assert!(writer_rows[3].query_left_of_record);
-    assert!(writer_rows[4].query_left_of_record);
+    assert!(!writer_rows[0].query_left_of_record());
+    assert!(writer_rows[3].query_left_of_record());
+    assert!(writer_rows[4].query_left_of_record());
 
     for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
         for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
@@ -558,7 +558,7 @@ fn database_numbers_come_from_the_index_files() {
     assert_eq!(shown.definition, b"nucleotide in volumes");
     assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
     assert_eq!((shown.num_sequences, shown.total_letters), (12, 850));
-    assert_eq!(database.name(), fixture("nucl_mv"));
+    assert_eq!(database.name(), fixture("nucl_mv").as_bytes());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
@@ -623,7 +623,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A protein database is not found as a nucleotide one.
     for name in ["no_such_database", "prot_v4"] {
-        let Err(error) = BlastnDatabase::open(&fixture(name), &settings) else {
+        let Err(error) = BlastnDatabase::open(fixture(name), &settings) else {
             panic!("{name} opened")
         };
         let (exit, message) = native(error);
@@ -964,7 +964,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         None,
         hit_list(vec![(middle, 1e-9), (first_volume_ordinal, 1e-3)], 1),
     ];
-    read_titles(&database, &batch, (Default::default(), false), &mut titles).unwrap();
+    read_titles(&database, &batch, Default::default(), &mut titles).unwrap();
     assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
     assert_eq!(
         titles[&middle].stored().title,
@@ -977,7 +977,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         hit_list(vec![(middle, 1e-9)], 1),
         hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
     ];
-    let error = read_titles(&database, &batch, (Default::default(), false), &mut titles)
+    let error = read_titles(&database, &batch, Default::default(), &mut titles)
         .expect_err("a missing header file")
         .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
@@ -1014,13 +1014,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         hit_list(vec![(5, 1e-9), (11, 1e-5)], 2),
     ];
     let mut titles = DatabaseTitles::new();
-    read_titles(
-        &database,
-        &hit_lists,
-        (Default::default(), false),
-        &mut titles,
-    )
-    .unwrap();
+    read_titles(&database, &hit_lists, Default::default(), &mut titles).unwrap();
     // A list left without HSPs (its HSPs had score 0) is not reported.
     hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
     let placements = crate::blastinput::seq_range::Placements::default();
@@ -1035,6 +1029,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1093,6 +1088,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
@@ -1121,7 +1117,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
     let mut titles = DatabaseTitles::new();
     let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
-    read_titles(&database, &clean, (Default::default(), false), &mut titles).unwrap();
+    read_titles(&database, &clean, Default::default(), &mut titles).unwrap();
     let placements = crate::blastinput::seq_range::Placements::default();
     reported_subjects(
         &database,
@@ -1134,11 +1130,12 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .unwrap();
     let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
-    read_titles(&database, &bad, (Default::default(), false), &mut titles).unwrap();
+    read_titles(&database, &bad, Default::default(), &mut titles).unwrap();
     assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
     let error = reported_subjects(
         &database,
@@ -1151,6 +1148,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &[],
         0,
         true,
+        Default::default(),
         None,
     )
     .err()
@@ -1218,7 +1216,8 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         &search,
     )
     .unwrap();
-    db.read_name_records(path.to_str().unwrap(), false).unwrap();
+    db.read_name_records(path.to_str().unwrap().as_bytes(), false)
+        .unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {
         metadata: SubjectMetadata {
@@ -1226,7 +1225,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
             db_num_seqs: db.num_seqs() as i32,
         },
         db,
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         loaded_before_batch: Default::default(),
         parsed_seqids,

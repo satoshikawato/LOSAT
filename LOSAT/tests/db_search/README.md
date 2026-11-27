@@ -2049,6 +2049,12 @@ times, 4,970 letters) and `BATCH_SIZE=1`: the first batch has hits, the second's
 (NCBI wraps it and goes on); `aliaskeys/q_hba.faa` alone is the near run. `../fasta/rps/x6only.faa` (the six X-only
 queries of `x6q.faa`) is the near run of the count-0 refusal after six unsearched batches, and over `p_l55` an input
 whose invalid contexts NCBI computes no space for (exit 0).
+Rows `db.ub.*` (line RG series D, item bp-SF2): NCBI's engine error of a query batch's setup (`The average subject length
+is too short`, exit 3) after first batches that NCBI does not search, in every format: `OLD_FSC=1 BATCH_SIZE=1` with
+`../fasta/rps/allx_q649.faa` (two X-only queries, then a valid one) against `-subject q1c/avg_s.faa` (2, 0 and 0 letters;
+BLASTP) or `rps_mini` with the alias `n1000rps` (RPSBLAST, `-comp_based_stats 0`). Rows `db.empty.unsearched.bs1.{5,11}`,
+`db.nopsq.unsearched.bs1.{7,5,11}` and `db.archtitle.blastp.nosq.{next,unsearched}` give BLASTP's database errors after such
+batches in the formats that LOSAT refused there before.
 Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
 `../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
 with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`

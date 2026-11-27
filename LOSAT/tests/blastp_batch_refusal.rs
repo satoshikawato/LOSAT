@@ -545,7 +545,7 @@ fn the_chunk_stops_come_before_the_setup_failures() {
 /// Line RG item bp-SF1 (NCBI BLAST+ 2.17.0 probes of the item, remaining-gaps-20261112/D/logs/bp_sf1/PROBES.md):
 /// the part of the near run `near` that NCBI writes before the batch that a refusal of the same input with one more
 /// batch meets: outfmt 7 up to its last line (`# BLAST processed`), outfmt 0 up to its epilog (`  Database:`),
-/// outfmt 6 all of it.
+/// outfmt 5 up to the line that ends its iterations (item bp-SF2), outfmt 6 all of it.
 fn reports_before(near: &Run, outfmt: &str) -> String {
     assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
     let end = match outfmt {
@@ -557,6 +557,13 @@ fn reports_before(near: &Run, outfmt: &str) -> String {
             .stdout
             .rfind("  Database: ")
             .expect("outfmt 0's epilog"),
+        "5" => {
+            let end = near
+                .stdout
+                .rfind("</BlastOutput_iterations>")
+                .expect("outfmt 5's end");
+            near.stdout[..end].rfind('\n').map_or(0, |line| line + 1)
+        }
         _ => near.stdout.len(),
     };
     near.stdout[..end].to_string()
@@ -760,4 +767,70 @@ fn the_long_subject_refusal_of_an_ungapped_search_follows_the_unsearched_batches
         assert_eq!(run.stdout, before, "n{threads}");
     }
     std::fs::remove_dir_all(&dir).ok();
+}
+
+// Line RG item bp-SF2: NCBI's engine error of a batch's setup (`The average subject length is too
+// short`: `OLD_FSC` over subjects of 2, 0 and 0 letters) after first batches that NCBI does not
+// search (`BATCH_SIZE=1`: two X-only queries, then a valid one): the reports of those batches come
+// first, without the epilog, then the error (exit status 3), in every format (rows `db.ub.*`). The
+// same bytes with the block search's blocks of one batch (`LOSAT_X_BPQBLOCK=1`: the failing block
+// starts with the valid query), of x1 and then x2 with the valid query (`=13`: the failing block
+// starts with a batch that NCBI does not search), its default (one block, the search of all
+// queries) and without it (`=0`).
+#[test]
+fn the_average_subject_length_error_follows_the_unsearched_batches_in_every_format() {
+    let subjects = ["-subject", "tests/db_search/q1c/avg_s.faa"];
+    let env = [("OLD_FSC", "1"), ("BATCH_SIZE", "1")];
+    let blocks: [&[(&str, &str)]; 4] = [
+        &[],
+        &[("LOSAT_X_BPQBLOCK", "1")],
+        &[("LOSAT_X_BPQBLOCK", "13")],
+        &[("LOSAT_X_BPQBLOCK", "0")],
+    ];
+    for outfmt in ["0", "7", "6", "5", "11", "15", "10"] {
+        let before = matches!(outfmt, "0" | "7" | "6" | "5").then(|| {
+            let near = search_in(
+                "blastp",
+                "tests/fasta/rps/allx.faa",
+                &subjects,
+                outfmt,
+                1,
+                &env,
+            );
+            reports_before(&near, outfmt)
+        });
+        let mut first: Option<Run> = None;
+        for blocks in blocks {
+            for threads in [1, 4] {
+                let mut env = env.to_vec();
+                env.extend_from_slice(blocks);
+                let run = search_in(
+                    "blastp",
+                    "tests/fasta/rps/allx_q649.faa",
+                    &subjects,
+                    outfmt,
+                    threads,
+                    &env,
+                );
+                let case = format!("outfmt {outfmt} n{threads} {blocks:?}");
+                assert_eq!(run.code, Some(3), "{case}: {}", run.stderr);
+                assert!(
+                    run.stderr
+                        .ends_with("engine error: The average subject length is too short\n"),
+                    "{case}: {}",
+                    run.stderr
+                );
+                if let Some(before) = &before {
+                    assert_eq!(&run.stdout, before, "{case}");
+                }
+                match &first {
+                    Some(first) => {
+                        assert_eq!(run.stdout, first.stdout, "{case}");
+                        assert_eq!(run.stderr, first.stderr, "{case}");
+                    }
+                    None => first = Some(run),
+                }
+            }
+        }
+    }
 }

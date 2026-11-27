@@ -229,7 +229,8 @@ the WASI imports.
   and `a\0b\0` are one argv, and an argv whose last word is empty ends in two NULs. The
   package ends every word with NUL in every call (`encodeArgv`,
   web/packages/losat/src/infra/reactor/abi.ts). The first word is the program name
-  (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`).
+  (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`; for `losat_web2_tool`, and
+  for `losat_web2_validate` of a tool's argv, the tool: `windowmasker` or `blast_formatter`).
 - `-query <name>` and `-subject <name>` are required. The names are used only in
   output text (for example the `# Database:` line of outfmt 7); the sequences come from
   the handles.

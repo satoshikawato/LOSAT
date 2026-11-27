@@ -250,3 +250,24 @@ fn hit_list_helpers_keep_the_same_lists_on_both_types() {
     assert_eq!(full_hits.hsplist_count, 3);
     assert_same_hit_lists(0, Some(&full_hits), Some(compact_hits));
 }
+
+// `XPrelimHsp` stays 64 bytes (64-bit) while carrying `PhiPrelimOrdinal` in `query_frame`.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn x_prelim_hsp_size_stays_64_bytes() {
+    assert_eq!(std::mem::size_of::<XPrelimHsp>(), 64);
+}
+
+#[test]
+fn phi_ordinal_round_trips_and_leaves_default_unset() {
+    let base = prelim(57, (4, 90), (10, 97), 0.0);
+    assert_eq!(base.phi_ordinal(), None);
+    for index in [0usize, 1, 70_000] {
+        let tagged = base.with_phi_ordinal(PhiPrelimOrdinal::new(index));
+        assert_eq!(tagged.phi_ordinal(), Some(PhiPrelimOrdinal::new(index)));
+        assert_eq!(tagged.offsets(), base.offsets());
+        assert_eq!(tagged.raw_score(), base.raw_score());
+        assert_eq!(tagged.e_value().to_bits(), base.e_value().to_bits());
+        assert_eq!(tagged.query_length(), base.query_length());
+    }
+}

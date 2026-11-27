@@ -475,7 +475,6 @@ impl<I: Input> ObjectStream<I> {
     /// one after another asks before each (a binary object that is not a SEQUENCE ends inside its
     /// frames, where the end of the input is NCBI's `CSerialException`). True after a failed
     /// read, whose fail flags NCBI's stream keeps.
-    #[cfg(test)]
     pub(crate) fn end_of_data(&mut self) -> bool {
         self.failed || self.reader.inp.end_of_data()
     }

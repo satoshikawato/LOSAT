@@ -175,14 +175,15 @@ fn a_file_sink_gets_the_bytes_of_a_writer_in_every_program() {
             );
         }
     }
-    // A refusal where NCBI starts the search: the file holds the prolog, as the writer.
+    // A refusal where NCBI starts the search: the file holds the prolog, as the writer
+    // (`-use_sw_tback -comp_based_stats 0 -ungapped`: `redo_run::sw_ungapped_check`).
     let (bytes, error) = same_as_writer(
-        "blastp -use_sw_tback -comp_based_stats 0",
+        "blastp -use_sw_tback -comp_based_stats 0 -ungapped",
         writer_and_file("0", |outputs| {
             run(
                 "blastp",
                 (&proteins, &proteins),
-                &["-use_sw_tback", "-comp_based_stats", "0"],
+                &["-use_sw_tback", "-comp_based_stats", "0", "-ungapped"],
                 outputs,
             )
         }),

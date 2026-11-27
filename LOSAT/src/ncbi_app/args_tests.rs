@@ -21,6 +21,7 @@ fn tool(program: &'static str) -> Tool {
         "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
         "blastdb_aliastool" => include_str!("../blastdb_aliastool/help.txt"),
         "blastdbcheck" => include_str!("../blastdbcheck/help.txt"),
+        "blast_formatter" => include_str!("../blast_formatter/help.txt"),
         _ => "",
     };
     Tool {
@@ -37,7 +38,7 @@ fn tool(program: &'static str) -> Tool {
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 9] = [
+const ON_THE_READER: [&str; 10] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
@@ -47,6 +48,7 @@ const ON_THE_READER: [&str; 9] = [
     "makeprofiledb",
     "blastdb_aliastool",
     "blastdbcheck",
+    "blast_formatter",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -286,16 +288,17 @@ fn every_argument_of_the_xml_is_in_its_table() {
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
     // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid),
-    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype) and blastdbcheck's 2 (-dbtype,
-    // -verbosity).
-    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2);
+    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype), blastdbcheck's 2 (-dbtype,
+    // -verbosity) and blast_formatter's 6 (its counts and sort keys).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2 + 6);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
     // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
     // makeprofiledb's 2 (-taxid and -taxid_map exclude each other), blastdb_aliastool's 178
-    // (26 requirements, 76 exclusions each in both directions) and blastdbcheck's 10 (exclusions:
-    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways).
+    // (26 requirements, 76 exclusions each in both directions), blastdbcheck's 10 (exclusions:
+    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways) and
+    // blast_formatter's 6 (its 3 exclusions, each in both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10 + 6);
 }
 
 /// Which class a constraint is.
@@ -791,6 +794,39 @@ fn the_tables_hold_no_pointer() {
     assert!(tables > 0);
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:161-184
+// NCBI BLAST+ 2.17.0 blast_formatter `-sorthits 5` and `-sorthsps 5` (line RG item F3, probes
+// P2.055 and P2.073) print the illegal value error with the range 0 to 4 written as below; both
+// ends are allowed.
+#[test]
+fn blast_formatter_s_sort_keys_take_0_to_4() {
+    for name in ["sorthits", "sorthsps"] {
+        for (text, number) in [("0", 0), ("4", 4), ("+2", 2), ("004", 4)] {
+            let flag = format!("-{name}");
+            assert_eq!(
+                parse_words("blast_formatter", &[&flag, text])
+                    .unwrap()
+                    .integer(name),
+                Some(number),
+                "{name} {text}"
+            );
+        }
+        for text in ["5", "-1", "2147483647"] {
+            let flag = format!("-{name}");
+            assert_eq!(
+                messages("blast_formatter", &[&flag, text]),
+                (
+                    "eConstraint",
+                    strings(&[&format!(
+                        "Argument \"{name}\". Illegal value, expected (>=0 and =<4):  `{text}'"
+                    )])
+                ),
+                "{name} {text}"
+            );
+        }
+    }
+}
+
 // No NCBI counterpart: PD-TLOSAN-LOCAL-GENCODE-32. tblastn's `-db_gencode` allows LOSAT's code 32
 // beside NCBI's codes, with NCBI's usage text; tblastx's keys and the other programs' keep NCBI's
 // codes alone.
@@ -845,7 +881,12 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     // makeblastdb's `-gi_mask` and `-gi_mask_name` run (line NP item M4c-1): it refuses none.
     assert_eq!(refusal("makeblastdb", "gi_mask"), None);
     assert_eq!(refusal("makeblastdb", "gi_mask_name"), None);
-    // The programs on NCBI's reader refuse none of their arguments.
+    // blast_formatter refuses `-rid` where NCBI asks its servers for the results (line RG
+    // DECISIONS F3-5); the other programs on NCBI's reader refuse none of their arguments.
+    assert_eq!(
+        refusal("blast_formatter", "rid"),
+        Some(Refusal::Run("the results of a search on NCBI's servers"))
+    );
     // (No count of the rows: un-refusing an argument is deleting its row of `REFUSED`.)
     let rows = refusals();
     for program in [

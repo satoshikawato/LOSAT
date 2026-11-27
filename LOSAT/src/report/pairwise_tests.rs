@@ -663,6 +663,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
             Default::default(),
             None,
             &config,
+            &PlainRows,
         )
         .unwrap();
         String::from_utf8(output).unwrap()
@@ -712,6 +713,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
         Default::default(),
         None,
         &config,
+        &PlainRows,
     )
     .unwrap();
     assert_eq!(
@@ -867,6 +869,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                     program: "blastp".into(),
                     ..config(line_length)
                 },
+                &PlainRows,
             )
         })
     };
@@ -918,6 +921,7 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
                 program: "blastp".into(),
                 ..PairwiseConfig::default()
             },
+            &PlainRows,
         )
         .unwrap();
         let estimate = crate::report::x_pairwise_par::hit_estimate(300, line_length);
@@ -1566,6 +1570,7 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
             Default::default(),
             masks,
             &config,
+            &PlainRows,
         )
         .unwrap();
         String::from_utf8(output).unwrap()
@@ -1638,7 +1643,11 @@ fn later_part_html_posts_wait_for_first_shown_hsp_with_class_n() {
     let make = |left_of_record: bool| {
         let mut hit = PairwiseHit::from(make_hit());
         hit.subject_length = Some(100);
-        hit.query_left_of_record = left_of_record;
+        hit.edge = if left_of_record {
+            PairwiseEdge::QueryLeftOfRecord
+        } else {
+            PairwiseEdge::Normal
+        };
         hit
     };
     // 0: shown (starts heading, skipped + 1 InitConfig post)
@@ -1743,4 +1752,218 @@ fn header_gaps_leave_out_the_query_rows_end_gaps() {
     let plain = PairwiseHit::from(make_hit());
     assert_eq!(plain.query_range_lengths().gaps, 0);
     assert_eq!(plain.query_range_lengths().length, plain.hit.length);
+}
+
+#[test]
+fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
+    use crate::report::html_ids::{HtmlPost, HtmlReport};
+    use crate::report::query_warnings::ReportPlace;
+
+    let links = Arc::new(html_links_with(None));
+    let db_report = HtmlReport::new(&links, [crate::seqdb::Oid::of_unrestricted(0)]);
+    let subj_report = HtmlReport::new(&links, []);
+
+    let make = |edge: PairwiseEdge| {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.subject_length = Some(59);
+        hit.edge = edge;
+        hit
+    };
+    // 0: skipped (NullbSkipTranslate)
+    // 1: shown (emits heading once)
+    // 2: skipped (NullbSkipTranslate)
+    // 3: shown (no duplicate heading)
+    let owned = [
+        make(PairwiseEdge::NullbSkipTranslate),
+        make(PairwiseEdge::Normal),
+        make(PairwiseEdge::NullbSkipTranslate),
+        make(PairwiseEdge::Normal),
+    ];
+    let hits: Vec<&PairwiseHit> = owned.iter().collect();
+    let indices: Vec<HspIndex> = (0..hits.len()).collect();
+
+    let run_parts = |report: &HtmlReport,
+                     parts: &[std::ops::Range<usize>],
+                     is_db: bool|
+     -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let source = crate::report::defline::SourceTaxname::default();
+        let mut out = Vec::new();
+        let mut placed = Vec::new();
+        for part in parts {
+            let posts = std::cell::RefCell::new(Vec::new());
+            let html = HtmlHeading {
+                report,
+                s_idx: 0,
+                rank: 1,
+                posts: &posts,
+            };
+            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+                if let ReportPlace::Html(post) = place {
+                    placed.push((writer.len(), post));
+                }
+                Ok(())
+            };
+            if is_db {
+                write_database_subject_alignments_part(
+                    &mut out,
+                    None,
+                    DatabaseHeading::Title(b"a0_r2", &source),
+                    false,
+                    &[],
+                    Some(&[0]),
+                    0,
+                    &hits,
+                    &indices,
+                    part.clone(),
+                    Some(html),
+                    &mut hook,
+                    |writer, _, _| writer.write_all(b"<hsp>\n"),
+                )
+                .unwrap();
+            } else {
+                write_subject_alignments_part(
+                    &mut out,
+                    None,
+                    0,
+                    &[],
+                    b"a0_r2",
+                    false,
+                    &hits,
+                    &indices,
+                    part.clone(),
+                    Some(html),
+                    &mut hook,
+                    |writer, _, _| writer.write_all(b"<hsp>\n"),
+                )
+                .unwrap();
+            }
+        }
+        (out, placed)
+    };
+
+    // Record (-subject) heading across split parts (including -html):
+    let (rec_serial, rec_posts_s) = run_parts(&subj_report, &[0..4], false);
+    let (rec_split, rec_posts_p) = run_parts(&subj_report, &[0..1, 1..2, 2..4], false);
+    assert_eq!(rec_split, rec_serial);
+    assert_eq!(rec_posts_p, rec_posts_s);
+    let rec_str = std::str::from_utf8(&rec_serial).unwrap();
+    assert_eq!(rec_str.matches("alignment skipped").count(), 2);
+    assert_eq!(rec_str.matches("<a name=Subject_1></a>").count(), 1);
+    assert_eq!(rec_str.matches("<hsp>").count(), 2);
+
+    // Database (-db) heading across split parts (including -html):
+    let (db_serial, db_posts_s) = run_parts(&db_report, &[0..4], true);
+    let (db_split, db_posts_p) = run_parts(&db_report, &[0..1, 1..2, 2..4], true);
+    assert_eq!(db_split, db_serial);
+    assert_eq!(db_posts_p, db_posts_s);
+    let db_str = std::str::from_utf8(&db_serial).unwrap();
+    assert_eq!(db_str.matches("BL_ORD_ID:0").count(), 3);
+    assert_eq!(db_str.matches("alignment skipped").count(), 2);
+    assert_eq!(db_str.matches("<a name=BL_ORD_ID:0></a>").count(), 1);
+    assert_eq!(db_str.matches("<hsp>").count(), 2);
+}
+
+#[test]
+fn tblastn_nullb_empty_subject_row_html_preprocess_and_id_texts() {
+    use crate::report::x_pairwise_par::{QueryGroup, QuerySections};
+
+    assert_eq!(std::mem::size_of::<PairwiseEdge>(), 1);
+    assert_eq!(
+        subject_alignment_id_texts(&[], Some(&[7]), 0),
+        [b"BL_ORD_ID:7".to_vec(), b"BL_ORD_ID:7".to_vec()]
+    );
+    assert_eq!(
+        subject_alignment_id_texts(&[], None, 0),
+        [b"Subject_1".to_vec(), b"Subject_1".to_vec()]
+    );
+
+    let check = |view: PairwiseView, left: bool| -> io::Result<()> {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.edge = PairwiseEdge::NullbEmptySubjectRow { left };
+        let queries = [BlastpPairwiseQuery {
+            query_name: Vec::new(),
+            query_length: 30,
+            ungapped_karlin: Default::default(),
+            effective_search_space: 0,
+            valid: true,
+            batch_skipped: false,
+        }];
+        let query_titles = [Arc::<[u8]>::from(&b"q"[..])];
+        let subject_titles = [Arc::<[u8]>::from(&b"s"[..])];
+        let report = BlastpPairwiseReport {
+            version: String::new(),
+            database_name: Vec::new(),
+            database_num_sequences: 1,
+            database_total_letters: 57,
+            matrix_name: None,
+            gap_open: 11,
+            gap_extend: 1,
+            word_threshold: 1.0,
+            window_size: 0,
+            gapped_karlin: Default::default(),
+            gumbel: None,
+            gapped: true,
+            show_linked_set_size: false,
+            num_descriptions: 0,
+            num_alignments: 1,
+        };
+        let config = PairwiseConfig {
+            view,
+            ..Default::default()
+        };
+        let loads = crate::report::db_subject::HitLoads::default();
+        let oids = [0u32];
+        let sections = TblastnSections {
+            config: &config,
+            queries: &queries,
+            query_titles: &query_titles,
+            query_validity: &[true],
+            query_batch_skipped: &[false],
+            parsed_subjects: &[],
+            subject_sources: &[],
+            report: &report,
+            database: None,
+            anchored: None,
+            row_masks: HtmlRowMasks::new(None, 0),
+            loads: &loads,
+            subject_oids: Some(&oids),
+            has_nullb_denseg_edge: true,
+        };
+        let group = QueryGroup::for_sections(&[(0, &hit)], &subject_titles, &sections).unwrap();
+        let mut out = Vec::new();
+        sections.subject_densegs(&mut out, &group, 0)
+    };
+
+    // Outfmt 0 `-html` (`!merges_alignments`): throws alnmap.cpp:753 (left=false) or :732 (left=true).
+    let err_right = check(PairwiseView::Pairwise, false).unwrap_err();
+    let exc_right = crate::ncbi_exception::NcbiException::of_io_error(&err_right).unwrap();
+    assert_eq!(exc_right.site().line, 753);
+    assert!(exc_right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let err_left = check(PairwiseView::Pairwise, true).unwrap_err();
+    let exc_left = crate::ncbi_exception::NcbiException::of_io_error(&err_left).unwrap();
+    assert_eq!(exc_left.site().line, 732);
+    assert!(exc_left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    // Outfmt 1-4 (`merges_alignments`): `CreateDensegFromStdseg` succeeds without reading row 1's start.
+    check(
+        PairwiseView::QueryAnchored {
+            identity: true,
+            anchored: true,
+        },
+        false,
+    )
+    .unwrap();
+    check(
+        PairwiseView::QueryAnchored {
+            identity: true,
+            anchored: true,
+        },
+        true,
+    )
+    .unwrap();
 }

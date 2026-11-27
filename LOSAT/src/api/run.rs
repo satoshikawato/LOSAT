@@ -867,6 +867,7 @@ fn psiblast_args(
             format.outfmt,
             format.side_out(args.out.as_deref()),
             false,
+            false,
         )?;
     }
     args.into_blastp_args()

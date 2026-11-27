@@ -58,6 +58,8 @@ pub(super) fn program_type(pssm: bool) -> Option<crate::report::record::ProgramT
 pub(super) fn read(
     path: &Path,
     matrix_name: &str,
+    gap_open: i32,
+    gap_extend: i32,
     strategy: bool,
     database: bool,
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -70,6 +72,8 @@ pub(super) fn read(
         PssmReader {
             program: "TBLASTN",
             matrix_name,
+            gap_open,
+            gap_extend,
             strategy,
             database,
             archive,

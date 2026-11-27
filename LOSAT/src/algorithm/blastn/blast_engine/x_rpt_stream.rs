@@ -91,10 +91,13 @@
 //!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
 //!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
-//!   query lengths that a later batch could meet keep the reports after the loop: scoring options
-//!   without Karlin-Altschul values, large greedy gap costs or matrix-only scoring with the
-//!   greedy extension (`search_query_batch`, in `context_statistics`) and an ungapped cutoff of a
-//!   query too long (`UngappedCutoff`). The refusals of a split batch's query chunks
+//!   query lengths that a later batch can meet come after the reports of the batches before in
+//!   both paths (`after_batch_reports`, through `context_statistics::setup_failure`): scoring
+//!   options without Karlin-Altschul values and matrix-only scoring with the greedy extension (in
+//!   `context_statistics`, which the first batch with a valid query meets), and the ungapped word
+//!   cutoff of a context of 2^30 letters or more or of an average subject length whose search
+//!   space overflows (`batch_setup::batch_cutoff_set`), so they need no check here (line RG
+//!   series D, after D1c-1c-b PR 2b). The refusals of a split batch's query chunks
 //!   (`search_query_chunks`) and of the fetch under a negative seqid list come after the reports of
 //!   the batches before in both paths (`after_batch_reports`, line RG item X-short-bat-2), so a
 //!   negative `CHUNK_SIZE` streams. With one batch (the first batch takes every query record)
@@ -115,8 +118,7 @@
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`); BLAST XML; and the refusals of the
-//! options and the query lengths above. The command line (`-out` file or standard output) and ABI
+//! them); `-verbose` and the debug output (`x_debug_output`); and BLAST XML. The command line (`-out` file or standard output) and ABI
 //! v1 are streamed (an ABI caller gets the reports of the batches before a refusal, then its
 //! error).
 //!
@@ -153,18 +155,15 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 
-use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
-use crate::config::NuclScoringSpec;
 use crate::report::sam::SamDocument;
-use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 
 use super::{
-    configure_task, record_title, x_debug_output, BlastnArgs, BlastnOutputFormat, QueryBatching,
-    SubjectLetters, SubjectRanges, SubjectSource,
+    record_title, x_debug_output, BlastnArgs, BlastnOutputFormat, QueryBatching, SubjectLetters,
+    SubjectRanges, SubjectSource,
 };
-use crate::algorithm::blastn::scoring::check_greedy_matrix_only;
 
 // No NCBI counterpart: reads the switch once (LOSAT_X_RPTSTREAM is a strict-set switch since
 // 2026-10-17: on unless it is `0`). It chooses when LOSAT writes the same reports.
@@ -186,15 +185,9 @@ pub(super) enum Off {
     Outputs,
     /// `-verbose`, the debug variables, the blastn trace or the thread diagnostics.
     Debug,
-    /// Scoring options without Karlin-Altschul values, or greedy gap costs that LOSAT refuses.
-    Scoring,
     /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
     /// the loop (the module doc has the reason).
     Xml,
-    /// An ungapped (`-ungapped`) or matrix-only search with a query of 2^30 letters or more, which
-    /// LOSAT refuses in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
-    /// later batch's refusal would come after the first batch's reports.
-    UngappedCutoff,
 }
 
 impl Off {
@@ -204,8 +197,6 @@ impl Off {
             Off::Outputs => "outputs",
             Off::Debug => "debug",
             Off::Xml => "xml",
-            Off::Scoring => "scoring",
-            Off::UngappedCutoff => "ungapped_cutoff",
         }
     }
 }
@@ -254,8 +245,8 @@ pub(super) struct Stream {
 }
 
 impl Stream {
-    /// The streaming of a search with these outputs and subjects, `query_input` and `lengths` its
-    /// query input and the searched queries' lengths, `batching` with the first batch's size.
+    /// The streaming of a search with these outputs and subjects, `query_input` its query input,
+    /// `batching` with the first batch's size.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         args: &BlastnArgs,
@@ -264,7 +255,6 @@ impl Stream {
         source: SubjectSource<'_>,
         subject_ranges: SubjectRanges<'_>,
         query_input: &QueryInput,
-        lengths: &[usize],
         batching: QueryBatching,
     ) -> Self {
         let started = std::time::Instant::now();
@@ -276,7 +266,6 @@ impl Stream {
             source,
             subject_ranges,
             query_input,
-            lengths,
             batching,
         );
         let check_seconds = started.elapsed().as_secs_f64();
@@ -421,10 +410,7 @@ pub(super) fn refused_before_reading(
     if outputs.hits.is_some()
         || outputs.observer.is_some()
         || outputs.formats.len() > 1
-        || outputs
-            .formats
-            .iter()
-            .any(|format| matches!(format.sink, OutputSink::File(_)))
+        || outputs.formats.iter().any(|format| format.sink.is_file())
     {
         return Some(Off::Outputs);
     }
@@ -458,7 +444,6 @@ fn check(
     source: SubjectSource<'_>,
     subject_ranges: SubjectRanges<'_>,
     query_input: &QueryInput,
-    lengths: &[usize],
     batching: QueryBatching,
 ) -> std::result::Result<Ready, Off> {
     if let Some(off) = refused_before_reading(on, args, outputs, output_formats) {
@@ -481,33 +466,6 @@ fn check(
             cache: None,
             one_batch: true,
         });
-    }
-    // The scoring of `search_query_batch` (`context_blocks`, called in
-    // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
-    // where `check_gaps` does, for every context) and its matrix-only greedy refusal:
-    // neither depends on the queries.
-    let config = configure_task(args);
-    let spec = NuclScoringSpec {
-        reward: config.score_reward,
-        penalty: config.score_penalty,
-        gap_open: config.gap_open,
-        gap_extend: config.gap_extend,
-    };
-    if NuclValues::new(spec.reward, spec.penalty)
-        .and_then(|values| values.check_gaps(&spec))
-        .is_err()
-        || check_greedy_matrix_only(args, args.ungapped).is_err()
-    {
-        return Err(Off::Scoring);
-    }
-    // The word cutoff of an ungapped search and of matrix-only scoring
-    // (`batch_setup::batch_cutoffs`).
-    if (args.ungapped || config.matrix_only)
-        && !lengths.iter().all(|&length| {
-            crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
-        })
-    {
-        return Err(Off::UngappedCutoff);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
     // The stored data and the report ids of the reported subjects (a database's definition

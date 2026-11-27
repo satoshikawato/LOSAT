@@ -429,28 +429,37 @@ pub(super) fn x_serial_unpacked(
     let mut qs: Vec<u32> = Vec::with_capacity(n_words);
     let qb = qs.as_mut_ptr();
     if ascending {
-        each_word(words, |cell, q_off_1| {
-            // SAFETY: `cell < cells` (the same words as the count pass); `offsets[cell + 1]`
-            // walks the cell's run from its start, one place per word of the cell, so the place
-            // is below `n_words`, in the capacity.
-            unsafe {
-                let cursor = ob.add(cell + 1);
-                *qb.add(*cursor as usize) = q_off_1;
+        // SAFETY: `cell < cells` (the same words as the count pass); `offsets[cell + 1]` walks the
+        // cell's run from its start, one place per word of the cell, so the place is below
+        // `n_words`, in the capacity.
+        x_place_pass(
+            words,
+            ob,
+            qb,
+            |cell| cell + 1,
+            |i| unsafe {
+                let cursor = ob.add(i);
+                let e = *cursor;
                 *cursor += 1;
-            }
-        });
+                e
+            },
+        );
     } else {
         // SAFETY: `cells < cells + 2`; `offsets[cells]` is no cell's end.
         unsafe { *ob.add(cells) = total };
-        each_word(words, |cell, q_off_1| {
-            // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
-            // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.
-            unsafe {
-                let e = *ob.add(cell) - 1;
-                *ob.add(cell) = e;
-                *qb.add(e as usize) = q_off_1;
-            }
-        });
+        // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
+        // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.
+        x_place_pass(
+            words,
+            ob,
+            qb,
+            |cell| cell,
+            |i| unsafe {
+                let e = *ob.add(i) - 1;
+                *ob.add(i) = e;
+                e
+            },
+        );
     }
     // SAFETY: `offsets[..cells + 1]` was written in full; the runs partition `0 .. n_words`, and
     // the place pass wrote each place once.
@@ -540,19 +549,112 @@ pub(super) fn x_serial_packed(
     let qb = qs.as_mut_ptr();
     // SAFETY: `present < present + 1`; `starts[present]` is no cell's end.
     unsafe { *sb.add(present) = total };
-    each_word(words, |cell, q_off_1| {
-        let r = x_rank(&bits, cell, pop).expect("BNCSRPACK: a word of an empty cell");
-        // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so the
-        // place `e < n_words` is in the capacity.
-        unsafe {
+    // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so the
+    // place `e < n_words` is in the capacity.
+    x_place_pass(
+        words,
+        sb,
+        qb,
+        |cell| x_rank(&bits, cell, pop).expect("BNCSRPACK: a word of an empty cell"),
+        |r| unsafe {
             let e = *sb.add(r) - 1;
             *sb.add(r) = e;
-            *qb.add(e as usize) = q_off_1;
-        }
-    });
+            e
+        },
+    );
     // SAFETY: `starts[..present + 1]` was written in full; the runs partition `0 .. n_words`, and
     // the place pass wrote each place once.
     unsafe { x_assemble_packed(starts, bits, qs, present, n_words) }
+}
+
+/// PROTOTYPE (DT1-6, LOSAT_X_BNPLACEAHEAD = 0, 1 or 2; 2 when unset): the place pass's form.
+/// 0: each word placed where it is read; 1: each word's cursor prefetched where it is read and the
+/// word placed `X_PLACE_AHEAD` words later; 2: as 1, and the place's element of `qs` prefetched where
+/// the cursor is moved and written `X_PLACE_AHEAD` words after that.
+fn x_place_ahead() -> u8 {
+    static FORM: OnceLock<u8> = OnceLock::new();
+    *FORM.get_or_init(|| match std::env::var("LOSAT_X_BNPLACEAHEAD").as_deref() {
+        Ok("0") => 0,
+        Ok("1") => 1,
+        _ => 2,
+    })
+}
+
+const X_PLACE_AHEAD: usize = 16;
+
+/// The place pass (module comment): each word, in the loop's order, takes its place `claim(index(cell))`
+/// in its cell's run (`claim` moves the run's cursor at `cursors.add(index(cell))`) and is written
+/// there in `qs` (`qb`). The cursors move in the loop's order in every form (`x_place_ahead`), so
+/// each place is the one the direct form gives.
+#[inline(always)]
+fn x_place_pass(
+    words: &Words<'_>,
+    cursors: *mut u32,
+    qb: *mut u32,
+    mut index: impl FnMut(usize) -> usize,
+    mut claim: impl FnMut(usize) -> u32,
+) {
+    // SAFETY (all forms): `claim` returns a place below `n_words`, in `qb`'s capacity.
+    match x_place_ahead() {
+        0 => each_word(words, |cell, q_off_1| unsafe {
+            *qb.add(claim(index(cell)) as usize) = q_off_1;
+        }),
+        1 => {
+            let mut ring = [(0usize, 0u32); X_PLACE_AHEAD];
+            let mut seen = 0usize;
+            each_word(words, |cell, q_off_1| {
+                let i = index(cell);
+                prefetch(cursors.wrapping_add(i));
+                let slot = seen % X_PLACE_AHEAD;
+                if seen >= X_PLACE_AHEAD {
+                    let (j, q) = ring[slot];
+                    unsafe { *qb.add(claim(j) as usize) = q };
+                }
+                ring[slot] = (i, q_off_1);
+                seen += 1;
+            });
+            for k in seen.saturating_sub(X_PLACE_AHEAD)..seen {
+                let (j, q) = ring[k % X_PLACE_AHEAD];
+                unsafe { *qb.add(claim(j) as usize) = q };
+            }
+        }
+        _ => {
+            let mut ring = [(0usize, 0u32); X_PLACE_AHEAD];
+            let mut held = [(0usize, 0u32); X_PLACE_AHEAD];
+            let mut seen = 0usize;
+            let mut moved = 0usize;
+            let mut step = |j: usize, q: u32, held: &mut [(usize, u32); X_PLACE_AHEAD], moved: &mut usize| {
+                let e = claim(j) as usize;
+                prefetch(qb.wrapping_add(e));
+                let slot = *moved % X_PLACE_AHEAD;
+                if *moved >= X_PLACE_AHEAD {
+                    let (f, p) = held[slot];
+                    unsafe { *qb.add(f) = p };
+                }
+                held[slot] = (e, q);
+                *moved += 1;
+            };
+            each_word(words, |cell, q_off_1| {
+                let i = index(cell);
+                prefetch(cursors.wrapping_add(i));
+                let slot = seen % X_PLACE_AHEAD;
+                if seen >= X_PLACE_AHEAD {
+                    let (j, q) = ring[slot];
+                    step(j, q, &mut held, &mut moved);
+                }
+                ring[slot] = (i, q_off_1);
+                seen += 1;
+            });
+            for k in seen.saturating_sub(X_PLACE_AHEAD)..seen {
+                let (j, q) = ring[k % X_PLACE_AHEAD];
+                step(j, q, &mut held, &mut moved);
+            }
+            for k in moved.saturating_sub(X_PLACE_AHEAD)..moved {
+                let (f, p) = held[k % X_PLACE_AHEAD];
+                unsafe { *qb.add(f) = p };
+            }
+        }
+    }
 }
 
 /// No NCBI counterpart: whether `run` (a cell's run, sorted: increasing in reading order,

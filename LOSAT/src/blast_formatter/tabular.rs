@@ -41,9 +41,9 @@ use crate::report::db_subject::{HitLoad, LoadsBefore, ParsedSubject, ScopeWalk};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::seqalign_read::{read_set, ReadAlign, ReadStop};
 use crate::report::tabular::{
-    check_failed_lookups, failed_database_title, failed_record_title, taxdb_warning_line_of,
-    LookupFailure, SubjectLookup, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularTaxonomy, TabularWriter,
+    failed_database_subject, failed_record_title, row_stop_refusal, taxdb_warning_line_of,
+    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
+    TabularWriter,
 };
 use crate::report::tabular_seqalign::{
     reads_letters, row_hsp, row_plan, row_reads, row_scores, subject_scores, RowBuffers,
@@ -752,16 +752,6 @@ fn subject_entries<'d>(
     Ok(entries)
 }
 
-/// The failure of the lookups of a subject (`check_failed_lookups`), `None` where they do not
-/// fail.
-fn lookup_failure(entry: &SubjectEntry<'_>) -> Option<LookupFailure> {
-    match entry.values.subject(None, entry.nucleotide, -1, -1).lookup {
-        SubjectLookup::Found => None,
-        SubjectLookup::Failed(failed) => Some(failed.failure()),
-        SubjectLookup::Throws(_) => Some(LookupFailure::thrown()),
-    }
-}
-
 /// Whether the queries' Bioseq-set, or a set inside it, has a title: `GetTitle` of a query's
 /// handle (`s_ReplaceLocalId`) reads the titles of the sets around the Bioseq after its own.
 fn set_titles(queries: &Queries) -> bool {
@@ -790,10 +780,12 @@ fn set_titles(queries: &Queries) -> bool {
 
 /// The object's report (`PrintFormattedOutput` of a tabular format after the results are
 /// read): the prolog, the prefetch, each query's report, the epilog. Every refusal of the
-/// archive by LOSAT comes before the object's first byte; NCBI's exceptions come where NCBI meets
-/// them, after the bytes before (the pre-pass finds them first). An error of a read of the
-/// database (NCBI reads it at the row too) or of a write of the output ends the run where it
-/// happens, after the queries written before.
+/// archive by LOSAT comes before the object's first byte but that of a row where NCBI has no
+/// result (`TabularWriter::row`'s stop), which follows NCBI's bytes before the stop as in the
+/// search programs; NCBI's exceptions come where NCBI meets them, after the bytes before (the
+/// pre-pass finds them first). An error of a read of the database (NCBI reads it at the row
+/// too) or of a write of the output ends the run where it happens, after the queries written
+/// before.
 pub(super) fn print_object(
     inputs: &ObjectInputs<'_>,
     request: &Request,
@@ -858,7 +850,14 @@ pub(super) fn print_object(
         super::search_program::formatter_program(options.program).to_ascii_uppercase(),
         crate::wording::report_version!()
     );
-    let writer = TabularWriter::new(&spec, &version, matrix);
+    // The program whose rules decide where a row with an empty Bioseq handle stops
+    // (`TabularWriter::row`): the formatter reads a nucleotide or a protein search's rows.
+    let row_program = if blastn {
+        crate::blastinput::app::Program::Blastn
+    } else {
+        crate::blastinput::app::Program::Blastp
+    };
+    let writer = TabularWriter::new(&spec, row_program, &version, matrix);
     let database_text: &[u8] = match inputs.database {
         Some((name, _)) => name,
         None => b"User specified sequence set (Input: )",
@@ -1040,25 +1039,6 @@ pub(super) fn print_object(
     )?;
     let db = inputs.database.map(|(_, db)| db);
     let entries = subject_entries(db, &spec, &subjects.sources, &records, &printed)?;
-    let lookup_program = if blastn {
-        crate::blastinput::app::Program::Blastn
-    } else {
-        crate::blastinput::app::Program::Blastp
-    };
-    check_failed_lookups(
-        Some(&spec),
-        row_subjects.iter().map(|runs| runs.iter().copied()),
-        |s_idx| lookup_failure(entry_of(&entries, s_idx)),
-        |s_idx, _failure| match &subjects.sources[s_idx] {
-            SubjectSource::Database { oid, .. } => failed_database_title(oid),
-            SubjectSource::Bioseq(at) | SubjectSource::Query(at) => {
-                failed_record_title(*at, records.records[s_idx].shown_id())
-            }
-        },
-        lookup_program,
-        PROGRAM,
-        taxdb_found,
-    )?;
     let taxonomies: Vec<TabularTaxonomy> = entries
         .iter()
         .map(|entry| match entry {
@@ -1161,14 +1141,28 @@ pub(super) fn print_object(
             });
             // The texts of the row's lookups of the taxonomy database follow the rows before it.
             post_row_texts(sink, &mut out, names.as_ref(), &spec, &writer, &subject)?;
-            writer.row(
+            // A row where NCBI has no result ends the run after the bytes before its stop
+            // (`report::tabular::row_stop_end`).
+            if let Some(stop) = writer.row(
                 &mut out,
                 &mut rows,
                 &query.query(),
                 &subject,
                 kept.as_ref(),
                 &hsp,
-            );
+            ) {
+                sink.write(&out)?;
+                sink.flush()?;
+                let describe = match &subjects.sources[stop.subject] {
+                    SubjectSource::Database { oid, .. } => {
+                        failed_database_subject(oid, None, None, stop.lineless)
+                    }
+                    SubjectSource::Bioseq(at) | SubjectSource::Query(at) => {
+                        failed_record_title(*at, records.records[stop.subject].shown_id())
+                    }
+                };
+                return Err(row_stop_refusal(stop, describe, PROGRAM));
+            }
         }
         if q == last {
             if let Some(NcbiStop { error, subject }) = stop.take() {

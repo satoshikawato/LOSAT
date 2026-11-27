@@ -1418,10 +1418,14 @@ describe.skipIf(REACTORS === undefined)('the masking tools through the host', ()
     const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
     const { abi } = await instantiateSerial(module, new RunDirectory(undefined, () => new Uint8Array(0)));
     const argv = ['convert2blastmask', '-in', 'in/lc.fa', '-masking_options', 'o'];
-    const err = readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.err')).toString();
+    // NCBI's record (LOSAT/tests/convert2blastmask/ncbi/noalgo.err) in LOSAT's words (losat::wording, which the command
+    // line's own test applies): the usage of NCBI's text, then the error without NCBI's exception class.
+    const ncbi = readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.err')).toString();
     const verdict = abi.validateTool(argv);
     expect(verdict.ok).toBe(false);
-    expect(!verdict.ok && verdict.message).toContain('Argument "masking_algorithm". Mandatory value is missing');
+    const message = verdict.ok ? '' : verdict.message;
+    expect(message.startsWith(ncbi.slice(0, ncbi.indexOf('Error:')))).toBe(true);
+    expect(message).toContain('Error:  Argument "masking_algorithm". Mandatory value is missing:  `String\'');
     const router = new ToolOutputRouter(undefined, (error) => {
       throw error;
     });
@@ -1431,7 +1435,8 @@ describe.skipIf(REACTORS === undefined)('the masking tools through the host', ()
       file: (parsed) => router.frame(ownedFrame(parsed)),
     });
     const result = await router.finish();
-    expect(status).toBe(1);
-    expect(await result.stderr.text()).toBe(err);
+    expect(status).toBe(Number(readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.rc')).toString().trim()));
+    // The check's text is the run's standard error without its last line end (abi_v2.md §4).
+    expect(await result.stderr.text()).toBe(`${message}\n`);
   }, 120_000);
 });

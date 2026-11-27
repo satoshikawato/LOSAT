@@ -192,6 +192,8 @@ Strategy files:
 
 - `blastn` and `tblastx` refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences. NCBI crashes on them where a query is searched.
 - `blastp`, `blastx`, `tblastn` and `psiblast` refuse the same cases with `-searchsp` or `OLD_FSC`. `blastx` also refuses them with `-ungapped`.
+- `blastp` and `rpsblast` write the results of the query batches before the first batch with a letter to search and then stop with the error.
+- `blastp` and `rpsblast` refuse an effective search space (a database length, an alias file's `LENGTH` or `-dbsize`, times a query's length) that does not fit a 64-bit integer, at the query batch that holds the query, after the results of the query batches before. NCBI's arithmetic overflows there and goes on with a wrong value. A query without a letter to search does not meet this refusal.
 - A run of such a database whose queries have no letters to search is reported as in NCBI by every program.
 - `rpsblast` and `rpstblastn`: an alias file's `LENGTH` and `NSEQ` over one volume also set the length that NCBI's search covers, their sum, which can be shorter or longer than the profiles. Refused: a sum above 2,147,483,647 (NCBI frees the profiles twice and aborts), or one so long that NCBI's diagonal table passes 2^30 entries (its loop never ends).
 - A sum shorter than the profiles is refused where two gapped alignments of a query (of a frame for `rpstblastn`) start past it plus one. NCBI's interval tree then splits without end. With one such alignment the search runs as in NCBI.

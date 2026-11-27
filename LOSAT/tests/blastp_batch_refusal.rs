@@ -541,3 +541,217 @@ fn the_chunk_stops_come_before_the_setup_failures() {
         );
     }
 }
+
+/// Line RG item bp-SF1 (NCBI BLAST+ 2.17.0 probes of the item, remaining-gaps-20261112/D/logs/bp_sf1/PROBES.md):
+/// the part of the near run `near` that NCBI writes before the batch that a refusal of the same input with one more
+/// batch meets: outfmt 7 up to its last line (`# BLAST processed`), outfmt 0 up to its epilog (`  Database:`),
+/// outfmt 6 all of it.
+fn reports_before(near: &Run, outfmt: &str) -> String {
+    assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
+    let end = match outfmt {
+        "7" => near
+            .stdout
+            .rfind("# BLAST processed")
+            .expect("outfmt 7's last line"),
+        "0" => near
+            .stdout
+            .rfind("  Database: ")
+            .expect("outfmt 0's epilog"),
+        _ => near.stdout.len(),
+    };
+    near.stdout[..end].to_string()
+}
+
+/// The block search's settings of the item's runs: its default and the search of all queries.
+const BLOCKS: [&[(&str, &str)]; 2] = [&[], &[("LOSAT_X_BPQBLOCK", "0")]];
+
+// A statistics count of 0 without the Gumbel block (an alias file's `NSEQ 0`, `OLD_FSC`): NCBI
+// writes the reports of the batches before the first batch with a valid query (their queries are
+// X-only), then divides by the count in that batch's setup (SIGFPE). LOSAT writes them (without
+// the epilog) and refuses that batch, with the block search and without it (rows
+// `db.ak.bp.rej.nseq0.oldfsc.blocks*`, `db.ak.bp.rej.nseq0.oldfsc.b1*`).
+#[test]
+fn the_count_of_0_is_refused_after_the_unsearched_batches_before() {
+    let db = ["-db", "tests/db_search/aliaskeys/p_nseq0"];
+    for (query, near_query, batch_size) in [
+        (
+            "tests/fasta/rps/x6q.faa",
+            "tests/fasta/rps/x6only.faa",
+            None,
+        ),
+        (
+            "tests/fasta/rps/allx_q649.faa",
+            "tests/fasta/rps/allx.faa",
+            Some("1"),
+        ),
+    ] {
+        for outfmt in ["7", "0", "6"] {
+            let mut env = vec![("OLD_FSC", "1")];
+            if let Some(size) = batch_size {
+                env.push(("BATCH_SIZE", size));
+            }
+            let near = search_in("blastp", near_query, &db, outfmt, 1, &env);
+            let before = reports_before(&near, outfmt);
+            for blocks in BLOCKS {
+                for threads in [1, 4] {
+                    let mut env = env.clone();
+                    env.extend_from_slice(blocks);
+                    let run = search_in("blastp", query, &db, outfmt, threads, &env);
+                    let case = format!("{query} outfmt {outfmt} n{threads} {blocks:?}");
+                    assert_eq!(run.code, Some(1), "{case}: {}", run.stderr);
+                    assert!(
+                        run.stderr
+                            .contains("the statistics count 0 sequences of the database"),
+                        "{case}: {}",
+                        run.stderr
+                    );
+                    assert_eq!(run.stdout, before, "{case}");
+                }
+            }
+        }
+    }
+}
+
+// A search space that overflows NCBI's `Int8` (an alias file's `LENGTH` of 2^55, or `-dbsize` of
+// it, with a query of 4,970 letters; NCBI wraps it and goes on): LOSAT writes the reports of the
+// batches before, with their hits, and refuses the batch of that query; in one batch the refusal
+// comes before any report (rows `db.ak.bp.rej.l55.*`).
+#[test]
+fn a_search_space_overflow_is_refused_after_the_batches_before() {
+    let alias = ["-db", "tests/db_search/aliaskeys/p_l55"];
+    let dbsize = [
+        "-subject",
+        "tests/db_search/taxfilter/tfp.faa",
+        "-dbsize",
+        "36028797018963968",
+    ];
+    let env = [("BATCH_SIZE", "1")];
+    // A `-subject` search's outfmt 0 has no epilog of a database: its rows show the form there.
+    for (subjects, outfmts) in [
+        (&alias[..], &["7", "0", "6"][..]),
+        (&dbsize[..], &["7", "6"]),
+    ] {
+        for &outfmt in outfmts {
+            let near = search_in(
+                "blastp",
+                "tests/db_search/aliaskeys/q_hba.faa",
+                subjects,
+                outfmt,
+                1,
+                &env,
+            );
+            let before = reports_before(&near, outfmt);
+            let hits = if outfmt == "0" {
+                "Sequences producing significant alignments"
+            } else {
+                "hba\t"
+            };
+            assert!(before.contains(hits), "the near run's hits: {before}");
+            for blocks in BLOCKS {
+                for threads in [1, 4] {
+                    let mut env = env.to_vec();
+                    env.extend_from_slice(blocks);
+                    let run = search_in(
+                        "blastp",
+                        "tests/db_search/aliaskeys/q_hba_long.faa",
+                        subjects,
+                        outfmt,
+                        threads,
+                        &env,
+                    );
+                    let case = format!("{subjects:?} outfmt {outfmt} n{threads} {blocks:?}");
+                    assert_eq!(run.code, Some(1), "{case}: {}", run.stderr);
+                    assert!(
+                        run.stderr.contains(
+                            "with a query of 4970 letters overflows NCBI BLAST+'s 64-bit effective search space"
+                        ),
+                        "{case}: {}",
+                        run.stderr
+                    );
+                    assert_eq!(run.stdout, before, "{case}");
+                }
+            }
+        }
+        let one_batch = search_in(
+            "blastp",
+            "tests/db_search/aliaskeys/q_hba_long.faa",
+            subjects,
+            "7",
+            1,
+            &[],
+        );
+        assert_eq!(
+            one_batch.code,
+            Some(1),
+            "{subjects:?}: {}",
+            one_batch.stderr
+        );
+        assert_eq!(one_batch.stdout, "", "{subjects:?}");
+    }
+}
+
+// NCBI computes no search space for a query that is not valid (an X-only one): such queries over
+// a length whose space for them would overflow `Int8` are reported as NCBI reports them (exit 0;
+// row `db.ak.bp.l55.x6.7`).
+#[test]
+fn invalid_queries_meet_no_search_space_overflow() {
+    let run = search_in(
+        "blastp",
+        "tests/fasta/rps/x6only.faa",
+        &["-db", "tests/db_search/aliaskeys/p_l55"],
+        "7",
+        1,
+        &[],
+    );
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        run.stdout.matches("# 0 hits found").count(),
+        6,
+        "{}",
+        run.stdout
+    );
+}
+
+// An ungapped search over a subject longer than NCBI's part length (5,000,000 residues), which
+// LOSAT refuses at the first batch with a valid query: the reports of the batches before (of
+// X-only queries) come first.
+#[test]
+fn the_long_subject_refusal_of_an_ungapped_search_follows_the_unsearched_batches() {
+    let dir = std::env::temp_dir().join(format!("losat-bp-sf1-long-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temporary directory");
+    let subject = dir.join("long.faa");
+    let mut letters = "ACDEFGHIKLMNPQRSTVWY".repeat(250_001);
+    letters.truncate(5_000_001);
+    std::fs::write(&subject, format!(">long\n{letters}\n")).expect("long subject");
+    let subject = subject.to_str().expect("a UTF-8 path").to_string();
+    let subjects = ["-subject", subject.as_str(), "-ungapped"];
+    let env = [("BATCH_SIZE", "1")];
+    let near = search_in(
+        "blastp",
+        "tests/fasta/rps/allx.faa",
+        &subjects,
+        "7",
+        1,
+        &env,
+    );
+    let before = reports_before(&near, "7");
+    for threads in [1, 4] {
+        let run = search_in(
+            "blastp",
+            "tests/fasta/rps/allx_q649.faa",
+            &subjects,
+            "7",
+            threads,
+            &env,
+        );
+        assert_eq!(run.code, Some(1), "n{threads}: {}", run.stderr);
+        assert!(
+            run.stderr
+                .contains("subject sequence 1 has 5000001 residues"),
+            "n{threads}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, before, "n{threads}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}

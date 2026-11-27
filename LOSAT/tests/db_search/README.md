@@ -2041,6 +2041,14 @@ Rows `db.ak.*.l62*` (D1a-6 review A F2): `aliaskeys/n_nseq0_l62` (`NSEQ 0`, `LEN
 `allx_q649.faa` (TBLASTN, with and without `OLD_FSC=1`) or `alln_q.fna` (BLASTN split `CHUNK_SIZE=200`, TBLASTX):
 LOSAT writes the reports of the two unsearchable batches before batch 3 refuses the 64-bit effective search space overflow
 (`ncbi-near` against the matching `allx.faa` / `alln.fna` runs).
+Rows `db.ak.bp.*x6*`, `db.ak.bp.rej.nseq0.oldfsc.blocks*`, `db.ak.bp.*.b1*`, `db.ak.bp.*l55*`, `db.rps.*.b1*` and
+`db.rps.*ds55*` (line RG series D, item bp-SF1): BLASTP's and RPSBLAST's refusals of a call's setup come after the reports
+of the query batches before the batch that meets them. `aliaskeys/p_l55` (`LENGTH 36028797018963968`, 2^55, over
+`../taxfilter/tfp`) with `aliaskeys/q_hba_long.faa` (`hba`, the 142 letters of `taxfilter/q.faa`, then `long`, `hba` 35
+times, 4,970 letters) and `BATCH_SIZE=1`: the first batch has hits, the second's effective search space overflows `Int8`
+(NCBI wraps it and goes on); `aliaskeys/q_hba.faa` alone is the near run. `../fasta/rps/x6only.faa` (the six X-only
+queries of `x6q.faa`) is the near run of the count-0 refusal after six unsearched batches, and over `p_l55` an input
+whose invalid contexts NCBI computes no space for (exit 0).
 Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
 `../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
 with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`

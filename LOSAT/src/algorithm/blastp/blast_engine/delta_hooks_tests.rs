@@ -31,3 +31,39 @@ fn every_letter_set_gives_a_karlin_block_under_every_matrix_or_none() {
         }
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
+/// deltablast's `-searchsp` sets the process's OLD_FSC, which the domain search reads too (its
+/// options are a new RPS-BLAST options handle, which takes neither `-searchsp`'s value nor
+/// deltablast's other options): the run's `DeltaRun` carries the run's `old_fsc` (row
+/// `db.dl.fsc.6`), and the domain search's arguments keep no search space.
+#[test]
+fn the_domain_search_reads_the_runs_old_fsc() {
+    let parse = |extra: &[&str]| {
+        let mut argv = vec![
+            "losat",
+            "deltablast",
+            "-query",
+            "q.faa",
+            "-subject",
+            "s.faa",
+        ];
+        argv.extend_from_slice(extra);
+        match crate::cli::try_parse_from(argv) {
+            Ok(crate::cli::Cli {
+                command: crate::cli::Commands::Deltablast(args),
+            }) => args,
+            Ok(other) => panic!("not deltablast: {other:?}"),
+            Err(error) => panic!("{error}"),
+        }
+    };
+    let environment = crate::blastinput::app::old_fsc_environment();
+    for (extra, searchsp) in [(&[][..], false), (&["-searchsp", "1000000"][..], true)] {
+        let resolved = parse(extra).into_blastp_args().unwrap().resolve().unwrap();
+        assert_eq!(resolved.old_fsc, searchsp || environment, "{extra:?}");
+        let delta = resolved.delta.as_deref().expect("deltablast's run");
+        assert_eq!(delta.old_fsc, resolved.old_fsc, "{extra:?}");
+        assert_eq!(delta.options.domain.searchsp, None, "{extra:?}");
+    }
+}

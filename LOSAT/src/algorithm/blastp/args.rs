@@ -1002,15 +1002,14 @@ impl BlastpArgs {
             None => options.matrix_name.as_bytes().to_vec(),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
-        // psiblast's programs (`ePSIBlast`, and `ePHIBlastp` with `-phi_pattern`) are not among
-        // those whose threshold away from 11 counts as set (`s_IsDefaultWordThreshold`): theirs is
-        // the matrix's suggestion, also after a word size above 4 (PHI-BLAST, probe `op.ws8.0`;
-        // psiblast's other searches refuse such a word size).
+        // psiblast's programs (`ePSIBlast`, and `ePHIBlastp` with `-phi_pattern`) and deltablast's
+        // (`eDeltaBlast`) are not among those whose threshold away from 11 counts as set
+        // (`s_IsDefaultWordThreshold`): theirs is the matrix's suggestion, also after a word size
+        // above 4 (PHI-BLAST, probe `op.ws8.0`; psiblast's other searches and deltablast refuse
+        // such a word size).
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
-        } else if command_line
-            && (options.threshold as i32 == 11 || self.app == BlastpApp::Psiblast)
-        {
+        } else if command_line && (options.threshold as i32 == 11 || self.app.is_psi()) {
             options.threshold = suggested_threshold(SuggestionProgram::Protein, &matrix_name_bytes);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
@@ -1337,6 +1336,13 @@ impl BlastpArgs {
             }
             None => None,
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+        // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable, and
+        // every search of the run: deltablast's domain search too (`DeltaRun::old_fsc`).
+        let old_fsc = crate::report::archive::read::import::ImportRun::old_fsc(
+            self.import.as_ref(),
+            self.searchsp,
+        );
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
@@ -1355,12 +1361,7 @@ impl BlastpArgs {
             // (blast_prot_options.cpp:150-156, `SetDbLength` of 0).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
-            // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
-            old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
-                self.import.as_ref(),
-                self.searchsp,
-            ),
+            old_fsc,
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -1451,6 +1452,7 @@ impl BlastpArgs {
                 std::sync::Arc::new(super::blast_engine::DeltaRun::new(
                     options,
                     self.lcase_masking,
+                    old_fsc,
                 ))
             }),
             phi,

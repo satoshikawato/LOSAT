@@ -38,6 +38,10 @@ use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 pub(crate) struct DeltaRun {
     options: DeltaOptions,
     lcase_masking: bool,
+    /// The run's `ResolvedBlastpArgs::old_fsc`: `-searchsp` sets the process's OLD_FSC
+    /// (blast_args.cpp:303-307), which the domain search reads too (blast_stat.c:922-923), though
+    /// its options take neither `-searchsp`'s value nor deltablast's other options.
+    old_fsc: bool,
     /// The application's settings (`search_cli`), which the domain database is opened with.
     settings: Mutex<Option<ApplicationSettings>>,
     side: Mutex<Option<Arc<DomainSide>>>,
@@ -48,6 +52,7 @@ impl std::fmt::Debug for DeltaRun {
         f.debug_struct("DeltaRun")
             .field("options", &self.options)
             .field("lcase_masking", &self.lcase_masking)
+            .field("old_fsc", &self.old_fsc)
             .finish_non_exhaustive()
     }
 }
@@ -96,10 +101,11 @@ pub(super) struct CddPssm {
 }
 
 impl DeltaRun {
-    pub(crate) fn new(options: DeltaOptions, lcase_masking: bool) -> Self {
+    pub(crate) fn new(options: DeltaOptions, lcase_masking: bool, old_fsc: bool) -> Self {
         Self {
             options,
             lcase_masking,
+            old_fsc,
             settings: Mutex::new(None),
             side: Mutex::new(None),
         }
@@ -183,6 +189,10 @@ impl DeltaRun {
         let mut args: BlastpArgs = (*self.options.domain).clone();
         args.matrix_search = Some(settings.matrix_search.clone());
         let mut resolved = args.check_options(diagnostics)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
+        // The process's OLD_FSC, which deltablast's `-searchsp` sets (row `db.dl.fsc.6`): the
+        // domain search then has no Gumbel block, as its own resolve gives only for the variable.
+        resolved.old_fsc = self.old_fsc;
         let mut outputs = ReportOutputs {
             formats: Vec::new(),
             diagnostics,

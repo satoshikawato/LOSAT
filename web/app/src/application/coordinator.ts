@@ -239,8 +239,9 @@ export class Coordinator {
   private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
   /**
-   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
-   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   * Ends the active run's wait for the staging of its outputs, for its search or for the commit of its results with an
+   * error: a cancel while it is preparing or its results are organized (cancel), or the end of the Data worker
+   * (dataWorkerEnded).
    */
   private stopActive: ((error: Error) => void) | undefined;
   private toolAbort: AbortController | undefined;

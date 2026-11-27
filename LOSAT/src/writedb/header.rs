@@ -245,7 +245,9 @@ fn encoded_capacity(set: &DeflineSet, write_strings: bool) -> usize {
 /// `pdb.rel.std.season` or `patent.cit.id.number`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-45
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-45,50-72
+/// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65
+/// NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
 const MEMBER_PATH_DEPTH: usize = 8;
 
 /// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through

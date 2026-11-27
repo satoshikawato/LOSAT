@@ -483,57 +483,6 @@ impl RecordsParsed {
 }
 
 impl ShownSubjects<'_> {
-    /// Which lookups of subject `oid`'s tabular ids fail (`report::tabular::LookupFailure`) for a
-    /// report of `spec` (`None`: the default fields): a record's (with parsed ids, no
-    /// `RecordTabularIds::ids`; else `subject_tabular_id`), or a database sequence's (no
-    /// `ReportedSubjects::tabular_ids`; with parsed Seq-ids and a report of `sall*`,
-    /// `ParsedSubject::lookup_failure`).
-    pub(super) fn lookup_failure(
-        &self,
-        spec: Option<&crate::report::tabular::TabularSpec>,
-        subject: &FastaRecord,
-        oid: usize,
-    ) -> Option<crate::report::tabular::LookupFailure> {
-        use crate::report::tabular::LookupFailure;
-        match self {
-            ShownSubjects::Fasta { parsed, .. } => {
-                let failed = match parsed.tabular.get(oid).and_then(Option::as_ref) {
-                    Some(ids) => ids.ids.is_none(),
-                    None => subject.subject_tabular_id().is_none(),
-                };
-                failed.then(|| LookupFailure::of_plain(false))
-            }
-            // A subject whose load throws where the query's batch has its prefetch off
-            // (`report::db_subject::HitLoads::thrown`) fails there, before every other lookup.
-            ShownSubjects::Database { reported, .. } if reported.loads().thrown(oid).is_some() => {
-                Some(LookupFailure::thrown())
-            }
-            ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
-                // The scope's Bioseq handle is empty (`ParsedSubject::scope_finds_none`).
-                Some(parsed) if parsed.scope_finds_none() => Some(LookupFailure::empty_handle()),
-                Some(parsed)
-                    if spec.is_some_and(crate::algorithm::common::tabular::reports_all_ids) =>
-                {
-                    parsed.lookup_failure(true).ok().flatten()
-                }
-                Some(_) => reported
-                    .tabular_ids(oid)
-                    .is_none()
-                    .then_some(LookupFailure {
-                        subject_id: true,
-                        all_ids: false,
-                        bioseq: false,
-                        length: false,
-                        lineless: false,
-                    }),
-                None => reported
-                    .tabular_ids(oid)
-                    .is_none()
-                    .then(|| LookupFailure::of_plain(true)),
-            },
-        }
-    }
-
     /// The `-db` database's `Database:` lines.
     fn pairwise_database(&self) -> Option<&crate::report::pairwise::PairwiseDatabase> {
         match self {
@@ -648,124 +597,28 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
         .sum()
 }
 
-/// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
-/// batches' rows whose subject lookup fails where NCBI has no result
-/// (`report::tabular::check_failed_lookups`; each query of a batch is a result set), with the
-/// query (its index in `queries`, the call's: the batch's `query_ordinal` and the set) whose row
-/// NCBI stops at.
-fn check_failed_lookups(
-    options: &ResolvedOptions,
+/// What LOSAT's refusal at a tabular row where NCBI has no result (`report::tabular::RowStop`)
+/// says of its subject `oid`: a database sequence (`failed_database_subject`) or a `-subject`
+/// record (`failed_record_title`).
+pub(super) fn stopped_subject(
+    shown: &ShownSubjects<'_>,
     subjects: &[FastaRecord],
-    shown: &ShownSubjects<'_>,
-    batches: &[BatchResults],
-) -> std::result::Result<(), (usize, anyhow::Error)> {
-    if !crate::report::tabular::may_stop_at_failed_lookup_for(
-        options.tabular,
-        crate::blastinput::app::Program::Blastx,
-    ) {
-        return Ok(());
-    }
-    for batch in batches {
-        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
-        let row = |qidx: usize, oid: usize| match shown {
-            ShownSubjects::Database { reported, .. }
-                if reported.seen_of(batch.query_ordinal + qidx, oid).is_some() =>
-            {
-                crate::report::query_bioseq::SEEN_ROW
-            }
-            _ => oid,
-        };
-        crate::report::tabular::check_failed_lookups(
-            options.tabular,
-            (0..batch.queries.len()).map(|qidx| {
-                batch
-                    .shown_lists(qidx, options)
-                    .iter()
-                    .filter(|list| {
-                        list.hsps
-                            .iter()
-                            .any(|hsp| has_seqalign(hsp, options.gapped))
-                    })
-                    .map(move |list| row(qidx, list.oid))
-            }),
-            |oid| {
-                if oid == crate::report::query_bioseq::SEEN_ROW {
-                    return None;
-                }
-                shown.lookup_failure(options.tabular, &subjects[oid], oid)
-            },
-            |oid, failure| match shown {
-                ShownSubjects::Database { reported, .. } => {
-                    crate::report::tabular::failed_database_subject(
-                        reported.oid(oid),
-                        reported.loads().thrown(oid),
-                        reported.parsed_subject(oid),
-                        failure,
-                    )
-                }
-                ShownSubjects::Fasta { .. } => {
-                    crate::report::tabular::failed_record_title(oid, subjects[oid].shown_id())
-                }
-            },
-            crate::blastinput::app::Program::Blastx,
-            options.program().upper,
-            options.taxdb_found,
-        )
-        .map_err(|error| {
-            let set = error
-                .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
-                .map_or(0, crate::report::tabular::FailedLookupRefusal::set);
-            (batch.query_ordinal + set, error)
-        })?;
-    }
-    Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-/// What NCBI writes to `stderr` before it stops at the tabular row of the query `stop` (its index
-/// in `queries`) that LOSAT refuses (`error`): the batch's warning of `-subject`'s prefetch, then
-/// for each query up to `stop` what the tabular report writes to the standard error of its report
-/// (`tabular::write_blastx_tabular`: its warnings and fetch texts, its formatter's warning, its
-/// subject reads; `FailedLookupRefusal::posts_before_stop`, whose reads name a subject by its
-/// `oid`). The batch's reader messages and `-db` prefetch texts came before the report.
-#[allow(clippy::too_many_arguments)]
-fn posts_before_lookup_stop(
-    stderr: &mut dyn Write,
-    options: &ResolvedOptions,
-    queries: &[FastaRecord],
-    shown: &ShownSubjects<'_>,
-    batches: &[BatchResults],
-    stop: usize,
-    error: &anyhow::Error,
-) -> Result<()> {
-    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
-        return Ok(());
-    };
-    if !options.gapped
-        && SubjectLoc::of(shown) == SubjectLoc::Interval
-        && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
-    {
-        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
-            options.program().lower,
-        ))?;
-    }
-    let (mut posts, mut reads) = (Vec::new(), Vec::new());
-    for batch in batches {
-        for qidx in 0..batch.queries.len() {
-            let ordinal = batch.query_ordinal + qidx;
-            if ordinal > stop {
-                break;
-            }
-            let mut text = query_warning(options, &queries[ordinal], batch.search_skipped);
-            text.extend_from_slice(shown.query_fetches(ordinal));
-            posts.push(crate::report::diag_log::Posts::of_lines(text));
-            reads.push(shown.query_reads(ordinal).clone());
+    oid: usize,
+    lineless: bool,
+) -> String {
+    match shown {
+        ShownSubjects::Database { reported, .. } => {
+            crate::report::tabular::failed_database_subject(
+                reported.oid(oid),
+                reported.loads().thrown(oid),
+                reported.parsed_subject(oid),
+                lineless,
+            )
+        }
+        ShownSubjects::Fasta { .. } => {
+            crate::report::tabular::failed_record_title(oid, subjects[oid].shown_id())
         }
     }
-    refusal
-        .posts_before_stop(&posts, &reads, |oid| oid as u32)
-        .write(stderr, None)?;
-    Ok(())
 }
 
 /// `render_queries`, with what `run_local` adds (`local`), of `batches` whose lists are in the
@@ -816,32 +669,6 @@ pub(super) fn render_queries_with(
             tabular,
         ))? {
             return Ok(());
-        }
-    }
-    // The rows of subjects whose lookup fails where NCBI has no result
-    // (`report::tabular::check_failed_lookups`), before the batch's tabular report and before
-    // the format writes a warning of the batch (the prefetch's below, the queries'), so that a
-    // format that fails alone leaves them to the next (`local::write_run`); a refusal that fails
-    // the call comes after those warnings up to the row's query (`posts_before_lookup_stop`).
-    if options
-        .tabular_report()
-        .is_some_and(crate::report::tabular::TabularSpec::writes_rows)
-    {
-        let (stop, checked) = match check_failed_lookups(options, subjects, shown, batches) {
-            Ok(()) => (None, Ok(())),
-            Err((stop, error)) => (Some(stop), Err(error)),
-        };
-        match writes(checked) {
-            Ok(true) => {}
-            Ok(false) => return Ok(()),
-            Err(error) => {
-                if let Some(stop) = stop {
-                    posts_before_lookup_stop(
-                        stderr, options, queries, shown, batches, stop, &error,
-                    )?;
-                }
-                return Err(error);
-            }
         }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at

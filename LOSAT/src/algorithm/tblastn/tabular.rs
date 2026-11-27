@@ -169,6 +169,7 @@ pub(super) fn write_tabular_prolog(
     crate::algorithm::common::tabular::write_tabular_prolog(
         spec,
         taxdb_found,
+        crate::blastinput::app::Program::Tblastn,
         "tblastn",
         PROGRAM_VERSION,
         writer,
@@ -300,7 +301,12 @@ pub(super) fn write_tblastn_tabular(
     }
     let code = GeneticCode::try_from_id(tab.genetic_code).map_err(anyhow::Error::msg)?;
     // The positives of the rows: the formatter's `m_ScoringMatrix` (`GetAsciiProteinMatrix`).
-    let table = TabularWriter::new(spec, tab.program_version, Some(tab.matrix));
+    let table = TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Tblastn,
+        tab.program_version,
+        Some(tab.matrix),
+    );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -656,14 +662,28 @@ pub(super) fn write_tblastn_tabular(
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
-                table.row(
+                // A row where NCBI has no result ends the run after the bytes before its stop.
+                if let Some(stop) = table.row(
                     &mut buf,
                     &mut rows,
                     &tabular_query,
                     &subject,
                     kept.as_ref(),
                     &row,
-                );
+                ) {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &buf,
+                        stop,
+                        subjects.stopped_subject(stop.subject, stop.lineless),
+                        PROGRAM,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 writer.write_all(&buf)?;
                 buf.clear();
                 if let Some(probe) = probe.as_deref_mut() {

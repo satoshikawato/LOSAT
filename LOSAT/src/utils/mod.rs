@@ -1,5 +1,7 @@
 // No NCBI counterpart: the searches of a byte string that the ports share (cited in the module).
 pub(crate) mod byte_search;
+// No NCBI counterpart: a call boundary that keeps a closure's code out of its caller.
+pub(crate) mod call_boundary;
 // No NCBI counterpart: decimal digits appended without `core::fmt` (cited in the module).
 pub(crate) mod decimal;
 pub mod dust;

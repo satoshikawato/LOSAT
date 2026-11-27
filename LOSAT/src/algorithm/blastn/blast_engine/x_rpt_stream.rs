@@ -99,16 +99,21 @@
 //!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
 //!   written there either.
 //!   The XML family has refusals of its own (a `-db` name, query title or id, or a title of a
-//!   subject with a hit that cannot be written, `blast_xml.rs`), made by the report call of the
-//!   batch that holds the query or the subject before its first byte, so they come after the
-//!   reports of the batches before, without the footer, the end or the master file (the Owner's
-//!   decision of 2026-11-16 on line RG's Q-X2c, "the results of the query batches before are
-//!   written"; remaining-gaps DECISIONS D-SO-2). The held report of a `-subject` XML2 or JSON run
-//!   belongs to the call that writes it (NCBI makes it while it formats the next batch): a
-//!   refusal of its query or of a subject of its hits is held with it
-//!   (`Xml2Document::hold_refused`) and comes from that call before its first byte, and where an
-//!   error stops the run first the report and its refusal are dropped, as NCBI never makes the
-//!   report (the off path's `write_before_failed_batch` drops them alike). The refusals of the options and the
+//!   subject with a hit that cannot be written, `blast_xml.rs`). Outfmt 5 and the `-db` XML2 and
+//!   JSON documents make a batch's reports in its call, so their refusals come before the call's
+//!   first byte: after the reports of the batches before, without the footer, the end or the
+//!   master file (the Owner's decision of 2026-11-16 on line RG's Q-X2c, "the results of the
+//!   query batches before are written"; remaining-gaps DECISIONS D-SO-2). A `-subject` XML2 or JSON
+//!   document makes a report where NCBI makes it (when the result of another query arrives, in
+//!   the same batch or a later one, or in the epilog: blast_format.cpp:2362-2403), and its refusal
+//!   comes there, after the reports before it and only the bytes NCBI has flushed by then: a
+//!   refused first report leaves nothing, not even the document's start, which waits for the
+//!   output's first write or flush as NCBI's waits in its stream's buffer (`blast_xml::StartFirst`;
+//!   remaining-gaps DECISIONS D-SO-6). One rule for any batch layout: the refused report is held
+//!   with its refusal (`Xml2Document::hold_refused`), carried to the next call where a batch ends
+//!   with it, and where an error stops the run first the report and its refusal are dropped, as NCBI
+//!   never makes the report (the off path's `write_before_failed_batch` drops them alike; the start
+//!   that no call wrote is written there, `Stream::start_xml2_at_stop`). The refusals of the options and the
 //!   query lengths that a later batch can meet come after the reports of the batches before in
 //!   both paths (`after_batch_reports`, through `context_statistics::setup_failure`): scoring
 //!   options without Karlin-Altschul values and matrix-only scoring with the greedy extension (in
@@ -307,9 +312,9 @@ impl Stream {
             .find_map(|format| format.sam_spec())
             .filter(|_| off.is_none())
             .map(|spec| sam_document(args, spec));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2332-2417
         // NCBI's formatter keeps the document's state for the run (`m_XMLFileCount`, the
-        // accumulated results of a `-subject` run, blast_format.cpp:2332-2417): the stream holds it
-        // between the calls.
+        // accumulated results of a `-subject` run): the stream holds it between the calls.
         let xml2 = output_formats
             .iter()
             .any(|format| format.xml2_kind().is_some())
@@ -377,6 +382,40 @@ impl Stream {
             writer.flush()?;
             Ok(())
         })
+    }
+}
+
+impl Stream {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
+    /// Writes the start of the run's `-subject` XML2 or JSON document where an error of NCBI's
+    /// stops the run before any call wrote it (the calls held their reports: `blast_xml::StartFirst`):
+    /// NCBI wrote it before the first batch (`PrintProlog`), and its normal exit flushes it. The
+    /// off path's call writes it the same way (`write_before_failed_batch`).
+    pub(super) fn start_xml2_at_stop(
+        &mut self,
+        outputs: &mut ReportOutputs<'_>,
+        output_formats: &[BlastnOutputFormat],
+    ) -> Result<()> {
+        let (Some(carry), Some(kind)) = (
+            self.xml2.as_ref(),
+            output_formats.first().and_then(|format| format.xml2_kind()),
+        ) else {
+            return Ok(());
+        };
+        let mut start = Vec::new();
+        carry
+            .lock()
+            .expect("the carry")
+            .start_at_stop(kind, &mut start);
+        if start.is_empty() {
+            return Ok(());
+        }
+        // One format: more are never streamed (`Off::Outputs`).
+        let mut writer = outputs.formats[0].sink.open()?;
+        writer.write_all(&start)?;
+        writer.flush()?;
+        Ok(())
     }
 }
 
@@ -475,10 +514,12 @@ fn check(
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // The first batch takes every record (`next_ranged_batch` with the first batch's size, as
-    // the loop reads it): no refusal can come after it (a refusal of that batch finds nothing
-    // written; what ends the reading after the records comes in that batch or in a batch of its
-    // own, NCBI's errors, which both paths write alike), so nothing is checked and the one call
-    // makes the subject values as without the switch.
+    // the loop reads it): no refusal can come after it (a refusal of that batch finds what its one
+    // call writes before it in both paths: nothing, or for a `-subject` XML2 or JSON document the
+    // reports before the refused one, `blast_xml::write_blastn_xml`; what ends the reading after the
+    // records comes in that batch or in a batch of its own, NCBI's errors, which both paths write
+    // alike), so nothing is checked and the one call makes the subject values as without the
+    // switch.
     let (first_end, _) = next_ranged_batch(
         &query_input.input_lengths,
         &query_input.skipped,

@@ -8694,9 +8694,11 @@ impl<'s> PrefetchSubject<'s> {
 
 /// The BLAST XML (outfmt 5) reports of the queries before a batch whose prefetch stops
 /// ([`batch_prefetch`], [`PrefetchQueries::after_xml_reports`]), where outfmt 5 is the first
-/// format of a program that models every batch before it writes a report (BLASTP, BLASTN,
-/// TBLASTN, TBLASTX: the run's ledger of the texts left out, `report::query_warnings::LoadTexts`,
-/// holds none of these reports' yet): by query, the model's reads of its report (`reads`: those
+/// format of a program that models every batch before it writes a report (BLASTP, TBLASTN,
+/// TBLASTX, and BLASTN where its report stream does not act: the run's ledger of the texts left
+/// out, `report::query_warnings::LoadTexts`, holds none of these reports' yet; BLASTN's report
+/// stream, `blastn::blast_engine::x_rpt_stream`, writes each batch's reports before the next
+/// batch's prefetch, as BLASTX does, so the ledger holds them): by query, the model's reads of its report (`reads`: those
 /// of the reports of a batch whose prefetch is off, which load their subjects), whether NCBI's XML
 /// stream throws in its `Iteration` before the first `Hit` (`cut`,
 /// `report::blast_xml::names::iteration_cut_before_hits`), and the posts written before its
@@ -8727,8 +8729,8 @@ pub(crate) struct XmlCuts<'a> {
 
 impl<'a> XmlCuts<'a> {
     /// No report is cut: the first format is not outfmt 5, or the record is of batches whose
-    /// reports no outfmt 5 writes (the report streams of BLASTN and TBLASTX, which never write
-    /// it, `x_rpt_stream`, `report_stream`).
+    /// reports no outfmt 5 writes (TBLASTX's report stream, which never writes it,
+    /// `report_stream`).
     pub(crate) const NONE: XmlCuts<'static> = XmlCuts { cut: None };
 
     /// The cuts where outfmt 5 is the first format (`xml_first`): `cut(query)` by query of the
@@ -8795,7 +8797,8 @@ impl XmlReportsBefore<'_> {
 /// where the prefetch fails. The loads' texts are made where the posts are written
 /// (`diag_log::Posts::loads`): a BLAST XML report of a batch before that the stream cut left the
 /// texts of loads NCBI did not make to them (`report::query_warnings::ReadCursor::cut`), which
-/// a program that models every batch before it writes a report cannot know here.
+/// a program that models every batch before it writes a report (BLASTN without its report stream
+/// among them) cannot know here.
 /// `subjects` are the batch's reported sequences ([`PrefetchSubject`]), in any order. The
 /// prefetch fails at a subject whose lookup throws on its id (`ParsedSubject::prefetch_fails`),
 /// which loads nothing, and at a flipped Seq-align of a subject without a Bioseq
@@ -9916,7 +9919,8 @@ fn prefetch_stop(
     // line RG K4h, review 3 H1 = E2): the loads of the reports and prefetches after it, then those
     // of this prefetch before the stop. BLASTX, which writes each batch's reports before it models
     // the next, has placed them in the run's ledger already (`ReadLoad::place` in
-    // `load_read_texts`). The four programs that model every batch before they write a report
+    // `load_read_texts`), and so has BLASTN where its report stream acts. The four programs that
+    // model every batch before they write a report
     // (`XmlReportsBefore`, [`PrefetchQueries::after_xml_reports`]) place them here by the same
     // model, run over the reports and prefetches of the queries before the batch in the order the
     // writers write them (`LoadTexts::left_before`; review 5 of line DBID loadord, M1). The texts

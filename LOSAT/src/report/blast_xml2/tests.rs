@@ -613,8 +613,10 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
 
 #[test]
 fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_not() {
-    // BLASTN's report stream (`x_rpt_stream`): the held report of a `-subject` run is made by the
-    // call that writes it (the next batch's, or the epilog), so its refusal waits there.
+    // NCBI makes the held report of a `-subject` run where it writes it (the arrival of another
+    // query's result, in the same report call or a later one, or the epilog), so a report that
+    // LOSAT refuses is refused there, after the reports before it (remaining-gaps DECISIONS
+    // D-SO-6, Owner-delegated 2026-11-27).
     let refusal = |text: &'static str| anyhow::anyhow!(text);
     for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
         // `{2}` arrives refused: the report held before it is written as at an arrival.
@@ -636,10 +638,20 @@ fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_no
         next.hold_refused(&mut out, true, refusal("second"))
             .unwrap();
         assert_eq!(out, expected, "{kind:?}");
-        // The next report's arrival returns it before any byte.
-        let error = put(&mut next, b"{3}\n", &mut out).unwrap_err();
-        assert_eq!(error.to_string(), "first", "{kind:?}");
-        assert_eq!(out, expected, "{kind:?}");
+        // The next report's arrival returns it before any byte; so does the arrival of another
+        // refused report (the first refusal comes).
+        for arrival in ["report", "refused"] {
+            let mut doc = Xml2Document::new(kind, true);
+            doc.resume(next_carry(kind, &refusal));
+            let mut out = expected.clone();
+            let error = match arrival {
+                "report" => put(&mut doc, b"{3}\n", &mut out),
+                _ => doc.hold_refused(&mut out, false, refusal("second")),
+            }
+            .unwrap_err();
+            assert_eq!(error.to_string(), "first", "{kind:?} {arrival}");
+            assert_eq!(out, expected, "{kind:?} {arrival}");
+        }
         // So does the epilog, and so does a stop that writes the held report.
         for ends in ["epilog", "unwritten"] {
             let mut doc = Xml2Document::new(kind, true);
@@ -655,27 +667,79 @@ fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_no
             assert_eq!(error.to_string(), "first", "{kind:?} {ends}");
             assert_eq!(out, written, "{kind:?} {ends}");
         }
-        // The call that writes it takes the refusal first (`take_held_refusal`), once.
-        let mut doc = Xml2Document::new(kind, true);
-        let mut out = Vec::new();
-        doc.hold_refused(&mut out, false, refusal("first")).unwrap();
-        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
-        assert_eq!(
-            doc.take_held_refusal().map(|error| error.to_string()),
-            Some("first".to_string())
-        );
-        assert!(doc.take_held_refusal().is_none() && !doc.held_refused());
+        // A refused first report writes nothing, not even the document's start (NCBI's start
+        // waits in its stream's buffer, which the crash loses), wherever it is refused.
+        for ends in ["report", "epilog", "unwritten"] {
+            let mut doc = Xml2Document::new(kind, true);
+            let mut out = Vec::new();
+            doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+            assert!(out.is_empty(), "{kind:?}");
+            let error = match ends {
+                "report" => put(&mut doc, b"{2}\n", &mut out),
+                "epilog" => doc.epilog(&mut out),
+                _ => doc.unwritten(&mut out, false),
+            }
+            .unwrap_err();
+            assert_eq!(error.to_string(), "first", "{kind:?} {ends}");
+            assert!(out.is_empty(), "{kind:?} {ends}: {} bytes", out.len());
+        }
         // Where the held report is never written (a last result that joins it, at a stop), its
-        // refusal is dropped with it, and a later report is written.
+        // refusal is dropped with it.
         let mut doc = Xml2Document::new(kind, true);
         let mut out = Vec::new();
         put(&mut doc, b"{1}\n", &mut out).unwrap();
         doc.hold_refused(&mut out, false, refusal("first")).unwrap();
         doc.unwritten(&mut out, true).unwrap();
-        assert!(!doc.held_refused() && doc.take_held_refusal().is_none());
+        assert!(!doc.held_refused(), "{kind:?}");
         assert_eq!(out, expected, "{kind:?}");
-        // A document without a held report has no refusal to take.
-        assert!(Xml2Document::new(kind, true).take_held_refusal().is_none());
+    }
+}
+
+/// The state of a run whose second report, refused ("first"), is held after the first.
+fn next_carry(kind: Xml2Kind, refusal: &dyn Fn(&'static str) -> anyhow::Error) -> Xml2Carry {
+    let mut doc = Xml2Document::new(kind, true);
+    let mut out = Vec::new();
+    put(&mut doc, b"{1}\n", &mut out).unwrap();
+    doc.hold_refused(&mut out, false, refusal("first")).unwrap();
+    doc.take_carry()
+}
+
+#[test]
+fn a_start_not_written_comes_with_the_next_write_or_the_stop() {
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        let prolog = framing::prolog_bytes(kind);
+        // A call that holds its report gave its start back (`start_not_written`): the next call's
+        // first report writes it, once.
+        let mut doc = Xml2Document::new(kind, true);
+        let mut held = Vec::new();
+        doc.start(&mut held);
+        assert_eq!(held, prolog, "{kind:?}");
+        put(&mut doc, b"{1}\n", &mut held).unwrap();
+        assert_eq!(held, prolog, "{kind:?}");
+        doc.start_not_written();
+        let mut next = Xml2Document::new(kind, true);
+        next.resume(doc.take_carry());
+        let mut out = Vec::new();
+        put(&mut next, b"{2}\n", &mut out).unwrap();
+        let mut plain = Xml2Document::new(kind, true);
+        let mut expected = Vec::new();
+        put(&mut plain, b"{1}\n", &mut expected).unwrap();
+        put(&mut plain, b"{2}\n", &mut expected).unwrap();
+        assert_eq!(out, expected, "{kind:?}");
+        // A run that an error stops before any call wrote the start (`Xml2Carry::start_at_stop`):
+        // NCBI's exit flushes it; nothing where it was written.
+        let mut carry = Xml2Carry::default();
+        let mut stopped = Vec::new();
+        carry.start_at_stop(kind, &mut stopped);
+        assert_eq!(stopped, prolog, "{kind:?}");
+        carry.start_at_stop(kind, &mut stopped);
+        assert_eq!(stopped, prolog, "{kind:?}");
+        let mut written = Xml2Document::new(kind, true);
+        written.start(&mut Vec::new());
+        let mut carry = written.take_carry();
+        let mut none = Vec::new();
+        carry.start_at_stop(kind, &mut none);
+        assert!(none.is_empty(), "{kind:?}");
     }
 }
 

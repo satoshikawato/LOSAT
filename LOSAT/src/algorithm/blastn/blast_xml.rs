@@ -27,6 +27,9 @@ use crate::report::blast_xml::{
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 
+/// The program that BLASTN's documents and refusals name.
+const PROGRAM: &str = "BLASTN";
+
 /// What the BLASTN document needs besides the final hit lists.
 pub(crate) struct BlastnXml<'a> {
     pub run: XmlRun<'a>,
@@ -78,85 +81,85 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
-    const PROGRAM: &str = "BLASTN";
-    // A title NCBI crashes on (`names::Refusal`) is refused before the first byte of the call, for
-    // the reports that the call writes: a run that stops (this call without the epilog, `stops`)
-    // never writes the `-subject` report of its last query, which NCBI holds back, unless another
-    // format of the call (outfmt 5) writes it (`written_queries`), and a call that a later call of
-    // the run follows (`!xml.epilog` without `stops`) makes that held report but defers its
-    // refusals to the call that writes it (`StructuredXml::hold_refused`).
+    // A title NCBI crashes on (`names::Refusal`) is refused where NCBI makes the report that
+    // shows it, after only the bytes that NCBI has flushed by then (remaining-gaps DECISIONS D-SO-6,
+    // Owner-delegated 2026-11-27, under the Owner's Q-X2c of 2026-11-16). A document that writes
+    // each report at once (outfmt 5; XML2 and JSON with `-db`) makes the call's reports in one
+    // step, so their refusals come before the call's first byte, after the reports of the calls
+    // before. A `-subject` XML2 or JSON document (`holds_back`) makes a report only when the
+    // result of another query arrives or in the epilog, and writes it at once: the refusal of a
+    // report comes there, after the reports before it (`StructuredXml::hold_refused`), in one call
+    // or across the calls of BLASTN's report stream alike; the report of the last query of a run
+    // that stops is never made, nor refused (`written_queries`).
     let queries = xml.queries.len();
     let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
     let holds_back = xml.only_xml2 && document.holds_back();
-    let held_start = crate::blastinput::query_batch::held_start_of(xml.query_scopes, queries);
-    let reports = written_queries(queries, xml.stops, holds_back, held_start);
-    // The reports whose texts are refused now: those, but in a call that a later call follows, the
-    // held report's, which NCBI makes where it writes it (the next batch's first result that does
-    // not join it, or the epilog).
-    let refused_now = written_queries(queries, !xml.epilog, holds_back, held_start);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
-    // The held report of the calls before, which this call writes where its first result that
-    // does not join it arrives, or in the epilog: its refusal comes first, before the first byte.
-    if xml.epilog || (0..queries).any(|q_idx| !shows(q_idx).joins_held) {
-        if let Some(refusal) = document.take_held_refusal() {
-            return Err(refusal);
-        }
-    }
+    let reports = written_queries(
+        queries,
+        xml.stops,
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(xml.query_scopes, queries),
+    );
     let has_hits = |q_idx: usize| {
         hit_lists
             .get(q_idx)
             .and_then(Option::as_ref)
             .is_some_and(|list| list.hsplist_array.iter().any(|list| !list.hsps.is_empty()))
     };
-    let texts_of = |range: std::ops::Range<usize>| {
-        let first = range.start;
-        names::query_texts(
-            PROGRAM,
-            &xml.queries[range.clone()],
-            false,
-            &xml.messages[range],
-            |q_idx| has_hits(first + q_idx),
-            |q_idx| {
-                crate::blastinput::query_batch::names_unshown_in(
-                    xml.query_scopes,
-                    reports,
-                    holds_back,
-                    first + q_idx,
-                )
-            },
+    let unshown = |q_idx: usize| {
+        crate::blastinput::query_batch::names_unshown_in(
+            xml.query_scopes,
+            reports,
+            holds_back,
+            q_idx,
         )
     };
-    let mut texts = texts_of(0..refused_now)?;
-    // The names of the subjects with hits in the written reports, made once each; a title NCBI
-    // crashes on is refused here, before the first byte.
+    // The texts of query `q_idx` (its refusal: `names::Refusal`).
+    let text_of = |q_idx: usize| {
+        names::query_texts(
+            PROGRAM,
+            &xml.queries[q_idx..=q_idx],
+            false,
+            &xml.messages[q_idx..=q_idx],
+            |_| has_hits(q_idx),
+            |_| unshown(q_idx),
+        )
+        .map(|mut text| text.pop().expect("the text of one query"))
+    };
     let mut subjects = SubjectNameCache::new(&xml.subjects);
-    name_subjects(
-        &mut subjects,
-        &hit_lists[..refused_now.min(hit_lists.len())],
-    )?;
-    // The held report that a later call writes: a refusal of its texts or of its subjects' names
-    // is held with it (`StructuredXml::hold_refused`, in the loop below).
-    let mut held_refusal = None;
-    if refused_now < reports {
-        match texts_of(refused_now..reports) {
-            Ok(held) => texts.extend(held),
-            Err(refusal) => held_refusal = Some(refusal),
-        }
-        if held_refusal.is_none() {
-            let held_lists =
-                &hit_lists[refused_now.min(hit_lists.len())..reports.min(hit_lists.len())];
-            held_refusal = name_subjects(&mut subjects, held_lists).err();
-        }
-    }
-    let held_refused = held_refusal.is_some();
+    let texts: Vec<Result<names::QueryText>> = if holds_back {
+        // Each report's refusal waits for the place where NCBI makes the report (the loop below).
+        (0..reports).map(text_of).collect()
+    } else {
+        // The names of the subjects with hits in the written reports are made once each; a title
+        // NCBI crashes on is refused here, before the first byte.
+        let texts = names::query_texts(
+            PROGRAM,
+            &xml.queries[..reports],
+            false,
+            &xml.messages[..reports],
+            has_hits,
+            unshown,
+        )?;
+        name_subjects(&mut subjects, &hit_lists[..reports.min(hit_lists.len())])?;
+        texts.into_iter().map(Ok).collect()
+    };
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut buf: Vec<u8> = Vec::new();
     // The document's start (`StructuredXml::start`), before the first query's warnings, after the
-    // refusal of the database counts that the written reports would print.
+    // refusal of the database counts that the written reports would print. A `-subject` XML2 or
+    // JSON document's start waits for the output's first write or flush (`StartFirst`), as NCBI's
+    // start waits in its stream's buffer, so that a refused first report leaves nothing.
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
-    writer.write_all(&buf)?;
-    buf.clear();
+    let mut writer = StartFirst {
+        inner: writer,
+        start: std::mem::take(&mut buf),
+    };
+    if !holds_back {
+        writer.emit()?;
+    }
+    let writer = &mut writer;
     for q_idx in 0..xml.queries.len() {
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
@@ -164,11 +167,15 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         }
         let show = shows(q_idx);
         if q_idx == reports {
-            // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf, show.joins_held)?;
-            crate::report::query_warnings::write_document_posts(
+            // The held report that is never written (`written_queries`); the one held before it is
+            // written, or fails (`CaughtException`: its post follows), unless this result joins
+            // it (`XmlShow::joins_held`).
+            let written = document.unwritten(&mut buf, show.joins_held);
+            crate::report::query_warnings::write_document_end(
+                written,
                 &buf,
-                document.take_posts(),
+                &mut *document,
+                xml.run.app,
                 writer,
                 warnings.as_deref_mut(),
             )?;
@@ -183,27 +190,40 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             }
             break;
         }
-        if held_refused && q_idx >= refused_now {
-            // The held report that LOSAT refuses: its result is not made, and what the document
-            // writes at its arrival (the report held before it) is written.
-            if let Some(refusal) = held_refusal.take() {
-                document.hold_refused(&mut buf, show.joins_held, refusal)?;
-                crate::report::query_warnings::write_document_posts(
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
+        if holds_back {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
+            // A report that LOSAT refuses (the title it shows, or that of a subject of its hits):
+            // the result is not made, and what the document writes at its arrival (the report
+            // held before it) is written; the refusal comes where the report would be written.
+            let refusal = match (&texts[label], &texts[q_idx]) {
+                (Err(_), _) => text_of(label).err(),
+                (_, Err(_)) => text_of(q_idx).err(),
+                _ => {
+                    name_subjects(&mut subjects, hit_lists.get(q_idx..=q_idx).unwrap_or(&[])).err()
+                }
+            };
+            if let Some(refusal) = refusal {
+                let written = document.hold_refused(&mut buf, show.joins_held, refusal);
+                crate::report::query_warnings::write_document_end(
+                    written,
                     &buf,
-                    document.take_posts(),
+                    &mut *document,
+                    xml.run.app,
                     writer,
                     warnings.as_deref_mut(),
                 )?;
                 buf.clear();
+                continue;
             }
-            continue;
         }
-        let text = &texts[q_idx];
-        // The query whose id, title and length the result shows (`XmlShow::label`).
-        let label = show.label.unwrap_or(q_idx);
+        let (Ok(text), Ok(shown)) = (&texts[q_idx], &texts[label]) else {
+            anyhow::bail!("LOSAT internal error: a refused query text of BLAST XML was written");
+        };
         let query = XmlQuery {
-            id: texts[label].query_id(xml.queries[label].local_id.as_bytes()),
-            title: &texts[label].title,
+            id: shown.query_id(xml.queries[label].local_id.as_bytes()),
+            title: &shown.title,
             len: xml.searched_lengths[label] as i32,
             stats: xml.stats[q_idx],
             message: text.message.as_deref(),
@@ -330,15 +350,125 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         buf.clear();
     }
     if xml.epilog {
-        document.finish(&mut buf)?;
-        crate::report::query_warnings::write_document_posts(
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+        // The held report of a `-subject` run is written here, or fails (`CaughtException`: its
+        // post comes before the document's end).
+        let written = document.finish(&mut buf);
+        crate::report::query_warnings::write_document_end(
+            written,
             &buf,
-            document.take_posts(),
+            &mut *document,
+            xml.run.app,
             writer,
             warnings,
         )?;
     }
+    if xml.epilog || xml.stops {
+        // The run ends here, normally or with NCBI's error, and NCBI's exit flushes its stream.
+        writer.emit()?;
+    } else if !writer.start.is_empty() {
+        // The call wrote nothing (it holds its report): a later call writes the start.
+        document.start_not_written();
+    }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
+/// The output of a report call whose document's start (`start`) is not written yet: NCBI writes the
+/// start of the XML2 and JSON documents into its stream's buffer before the search
+/// (`PrintProlog`), and the start reaches the output with the stream's first flush (a report's, or
+/// the one before a post on the diagnostics, `query_warnings::write_after`), so a crash before
+/// that (LOSAT's refusal of the first report) leaves nothing. The start is written before the
+/// call's first write, flush or region of the output (`emit`), and the call's other writes pass
+/// through unchanged.
+struct StartFirst<'w> {
+    inner: &'w mut dyn crate::report::ostream::ReportWrite,
+    start: Vec<u8>,
+}
+
+impl StartFirst<'_> {
+    /// Writes the start, if it is not written yet.
+    fn emit(&mut self) -> std::io::Result<()> {
+        if !self.start.is_empty() {
+            let start = std::mem::take(&mut self.start);
+            self.inner.write_all(&start)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::io::Write for StartFirst<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        self.emit()?;
+        self.inner.write(bytes)
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        self.emit()?;
+        self.inner.write_all(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.flush()
+    }
+}
+
+impl crate::report::ostream::ReportWrite for StartFirst<'_> {
+    fn site(&mut self, site: crate::report::ostream::Site) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.site(site)
+    }
+
+    fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.ncbi_flush()
+    }
+
+    fn resolve_object(&mut self, pieces: &[usize]) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.resolve_object(pieces)
+    }
+
+    fn badbit(&mut self) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.badbit()
+    }
+
+    fn write_fault(&mut self, position: usize) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.write_fault(position)
+    }
+
+    /// The room of the stream with the start in its buffer, where it waits.
+    fn ncbi_room(&self) -> usize {
+        self.inner.ncbi_room().saturating_sub(self.start.len())
+    }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut crate::report::ostream::StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        self.emit()?;
+        self.inner.try_with_inserter(f)
+    }
+
+    fn insert_cut_run(
+        &mut self,
+        report: &[u8],
+        from: usize,
+        cuts: &[(usize, crate::report::ostream::Cut)],
+        to: usize,
+    ) -> std::io::Result<()> {
+        self.emit()?;
+        self.inner.insert_cut_run(report, from, cuts, to)
+    }
 }
 
 /// Makes the names of the subjects with hits in `hit_lists` (`SubjectNameCache::get`): a title that
@@ -350,9 +480,13 @@ fn name_subjects(
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in &hit_list.hsplist_array {
             if let Some(hsp) = hsp_list.hsps.first() {
-                subjects.get(hsp.s_idx as usize, "BLASTN")?;
+                subjects.get(hsp.s_idx as usize, PROGRAM)?;
             }
         }
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "blast_xml_tests.rs"]
+mod tests;

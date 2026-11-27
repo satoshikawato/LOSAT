@@ -960,7 +960,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         self.document.hold_refused(out, joins_held, refusal)
     }
 
-    fn take_held_refusal(&mut self) -> Option<anyhow::Error> {
-        self.document.take_held_refusal()
+    fn start_not_written(&mut self) {
+        self.document.start_not_written();
     }
 }

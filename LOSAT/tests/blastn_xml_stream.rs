@@ -11,13 +11,16 @@
 //! or the `-out` file, the side files and standard error, for megablast and blastn, `-subject` and
 //! `-db`, at 1 and 4 threads, with small batches (`BATCH_SIZE`), also where NCBI's reader error
 //! stops a later batch; the `[X_STATS] RPTSTREAM` line shows that the loop wrote the batches. A
-//! title that LOSAT refuses (one NCBI crashes on, PD-LOSAT-NCBI-DEFECTS) in a later batch comes
-//! after the output of the batches before (the Owner's decision of 2026-11-16 on line RG's Q-X2c,
-//! "the results of the query batches before are written"): the start of the document of the same
-//! search without the refused title, without its end. The held report of a `-subject` XML2 or JSON
-//! search is refused by the call that writes it (the next batch's, or the epilog), and is dropped
-//! with its refusal where an error of NCBI's stops the run first, as NCBI never makes it. That the
-//! bytes equal NCBI's is the business of the blastn fixtures.
+//! title that LOSAT refuses (one NCBI crashes on, PD-LOSAT-NCBI-DEFECTS) comes after the output
+//! that NCBI has written by then (the Owner's decision of 2026-11-16 on line RG's Q-X2c, "the
+//! results of the query batches before are written"; remaining-gaps DECISIONS D-SO-6): the start of
+//! the document of the same search without the refused title, without its end. BLAST XML refuses
+//! the refused title's batch before its first byte, after the batches before; the held report of a
+//! `-subject` XML2 or JSON search is refused where NCBI makes it (the arrival of the next query's
+//! result, or the epilog), after the reports before it, in any layout of the batches and with the
+//! switch or without it alike, and is dropped with its refusal where an error of NCBI's stops the
+//! run first, as NCBI never makes it. A refused first report writes nothing. That the bytes equal
+//! NCBI's is the business of the blastn fixtures (`tests/db_search_manifest/blastn.dxs.tsv`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -364,7 +367,7 @@ fn every_xml_format_gives_the_off_bytes() {
 }
 
 #[test]
-fn a_refused_title_in_a_later_batch_comes_after_the_batches_before() {
+fn a_refused_title_comes_after_what_ncbi_wrote_before_it_in_any_layout() {
     let dir = TempDir::new("refused");
     let subject = fasta("LC738868.fasta");
     for outfmt in ["5", "16", "15"] {
@@ -388,40 +391,169 @@ fn a_refused_title_in_a_later_batch_comes_after_the_batches_before() {
         let whole = blastn(&whole_args, 1, "400", &[], None);
         assert_eq!(whole.status, Some(0), "outfmt {outfmt}: {whole:?}");
         assert_eq!(reports_in(outfmt, &whole.report), 6, "outfmt {outfmt}");
-        // The title in the third batch and in the last (the held report of 16 and 15 is then
-        // refused by the epilog call): the reports of the batches before, without the end.
-        for (refused, threads) in [(2usize, 1), (5, 4)] {
+        // The title on the first query, in the third, the fourth (the second of a batch of two)
+        // and the last (the held report of 16 and 15 is then refused by the epilog): a batch of
+        // each query (400 letters), of two (800) and one batch.
+        for (refused, threads) in [(0usize, 1), (2, 1), (3, 4), (5, 4)] {
             let query = pieces(&dir, "refused.fa", Some(refused), b"");
             let args = args_of(&query);
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let what = format!("outfmt {outfmt}, refused query {refused}");
-            for counted in [false, true] {
-                let switches: &[(&str, &str)] = if counted { &[STATS] } else { &[] };
-                let mut on = blastn(&args, threads, "400", switches, None);
-                if counted {
-                    let (batches, reason) = take_stats_lines(&mut on);
-                    assert_eq!(reason, "none", "{what}");
-                    assert!(batches >= refused as u64, "{what}: {batches}");
+            for (batch, per_batch) in [("400", 1), ("800", 2), ("100000", 6)] {
+                let what = format!("outfmt {outfmt}, refused query {refused}, batch {batch}");
+                // BLAST XML: the batches before the refused title's; XML2 and JSON: the reports
+                // of the queries before it, each made at the next query's arrival.
+                let written = match outfmt {
+                    "5" => refused / per_batch * per_batch,
+                    _ => refused,
+                };
+                for switches in [&[][..], &[STATS], &[OFF]] {
+                    let mut run = blastn(&args, threads, batch, switches, None);
+                    if switches == [STATS] {
+                        let (batches, reason) = take_stats_lines(&mut run);
+                        assert_eq!(reason, "none", "{what}");
+                        assert!(batches >= (refused / per_batch) as u64, "{what}: {batches}");
+                    }
+                    let stderr = String::from_utf8_lossy(&run.stderr);
+                    assert_eq!(run.status, Some(1), "{what} {switches:?}: {stderr}");
+                    assert!(
+                        stderr.contains(&format!("a query title {REFUSAL}")),
+                        "{what}: {stderr}"
+                    );
+                    // The reports after the loop (`OFF`): BLAST XML refuses before its first byte.
+                    let written = if switches == [OFF] && outfmt == "5" {
+                        0
+                    } else {
+                        written
+                    };
+                    assert!(
+                        whole.report.starts_with(&run.report)
+                            && run.report.len() < whole.report.len()
+                            && reports_in(outfmt, &run.report) == written,
+                        "{what} {switches:?}: {} reports, not {written}, of\n{}",
+                        reports_in(outfmt, &run.report),
+                        String::from_utf8_lossy(&run.report)
+                    );
+                    if written == 0 {
+                        assert!(run.report.is_empty(), "{what} {switches:?}: nothing");
+                    } else if outfmt != "5" {
+                        // Where the next report would start (outfmt 15's separator is that
+                        // report's).
+                        let rest = &whole.report[run.report.len()..];
+                        let next: &[&[u8]] = if outfmt == "16" {
+                            &[b"<BlastOutput2>", b"\n<BlastOutput2>"]
+                        } else {
+                            &[b",\n{\n"]
+                        };
+                        assert!(
+                            next.iter().any(|next| rest.starts_with(next)),
+                            "{what} {switches:?}: ends inside a report"
+                        );
+                    }
                 }
-                let stderr = String::from_utf8_lossy(&on.stderr);
-                assert_eq!(on.status, Some(1), "{what}: {stderr}");
-                assert!(
-                    stderr.contains(&format!("a query title {REFUSAL}")),
-                    "{what}: {stderr}"
-                );
-                assert!(
-                    whole.report.starts_with(&on.report)
-                        && on.report.len() < whole.report.len()
-                        && reports_in(outfmt, &on.report) == refused,
-                    "{what}: {} reports of\n{}",
-                    reports_in(outfmt, &on.report),
-                    String::from_utf8_lossy(&on.report)
-                );
             }
-            // The reports after the loop: the refusal before the first byte.
-            let off = blastn(&args, threads, "400", &[OFF], None);
-            assert_eq!(off.status, Some(1), "{what}: {off:?}");
-            assert!(off.report.is_empty(), "{what}: {off:?}");
+        }
+    }
+}
+
+/// Six records of 400 letters of LC738868 with the given deflines (`-parse_deflines` reads the
+/// ids), one per batch of 400 letters.
+fn records_titled(dir: &TempDir, name: &str, deflines: [&[u8]; 6]) -> PathBuf {
+    let genome = letters("LC738868.fasta");
+    let mut text = Vec::new();
+    for (i, defline) in deflines.iter().enumerate() {
+        let start = 3_000 + i * 17_000;
+        record(&mut text, defline, &genome[start..start + 400]);
+    }
+    let path = dir.path(name);
+    std::fs::write(&path, text).expect("write the records");
+    path
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
+/// Under `-parse_deflines`, the results of consecutive queries of one Seq-id join one held
+/// `-subject` report of 16 and 15, across batches too (`XmlShow::joins_held`), and the report shows
+/// its first query's id, title and length: a title that LOSAT refuses on a joined query is never
+/// shown, so never refused (the bytes of the run without it), and one on the first query of a join
+/// is refused where NCBI makes the joined report, after the reports before it, with the switch
+/// and without it, a batch of each query or one batch.
+#[test]
+fn joined_results_of_one_seq_id_are_refused_where_ncbi_makes_their_report() {
+    let dir = TempDir::new("joined");
+    let subject = fasta("LC738868.fasta");
+    let plain = records_titled(
+        &dir,
+        "plain.fa",
+        [
+            b"lcl|qa first a",
+            b"lcl|qa second a",
+            b"lcl|qb first b",
+            b"lcl|qb second b",
+            b"lcl|qc first c",
+            b"lcl|qc second c",
+        ],
+    );
+    let joined_refused = records_titled(
+        &dir,
+        "joined.fa",
+        [
+            b"lcl|qa first a",
+            b"lcl|qa second a",
+            b"lcl|qb first b",
+            b"lcl|qb , ,",
+            b"lcl|qc first c",
+            b"lcl|qc second c",
+        ],
+    );
+    let lead_refused = records_titled(
+        &dir,
+        "lead.fa",
+        [
+            b"lcl|qa first a",
+            b"lcl|qa second a",
+            b"lcl|qb , ,",
+            b"lcl|qb second b",
+            b"lcl|qc first c",
+            b"lcl|qc second c",
+        ],
+    );
+    for (outfmt, threads) in [("16", 1), ("15", 4)] {
+        for batch in ["400", "100000"] {
+            let args_of = |query: &Path| -> Vec<String> {
+                [
+                    "-task",
+                    "megablast",
+                    "-parse_deflines",
+                    "-query",
+                    query.to_str().unwrap(),
+                    "-subject",
+                    subject.to_str().unwrap(),
+                    "-outfmt",
+                    outfmt,
+                ]
+                .map(String::from)
+                .to_vec()
+            };
+            let what = format!("outfmt {outfmt} batch {batch}");
+            let args = args_of(&plain);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (whole, _) = same_two(&what, &args, threads, batch, None);
+            assert_eq!(whole.status, Some(0), "{what}: {whole:?}");
+            assert_eq!(reports_in(outfmt, &whole.report), 3, "{what}: one each id");
+            let args = args_of(&joined_refused);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (joined, _) = same_two(&what, &args, threads, batch, None);
+            assert!(joined == whole, "{what}: the joined title is not shown\n{joined:?}");
+            let args = args_of(&lead_refused);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (lead, _) = same_two(&what, &args, threads, batch, None);
+            let stderr = String::from_utf8_lossy(&lead.stderr);
+            assert_eq!(lead.status, Some(1), "{what}: {stderr}");
+            assert!(stderr.contains(REFUSAL), "{what}: {stderr}");
+            assert!(
+                whole.report.starts_with(&lead.report) && reports_in(outfmt, &lead.report) == 1,
+                "{what}: qa's report alone\n{}",
+                String::from_utf8_lossy(&lead.report)
+            );
         }
     }
 }

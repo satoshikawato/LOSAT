@@ -318,9 +318,19 @@ const OTHER_DNA: &[u8] = b"TCATGCTATCTATGGCACAAATGGACATTATTTTTGGAAGGTCGTTAGTGTCC
 const PUNCTUATION: &[u8] = b", ,";
 
 fn refused(output: &Output, what: &str) {
+    refused_after(output, what, b"");
+}
+
+/// The refusal of `what`, after `written`: the bytes that NCBI flushed before it made the report.
+fn refused_after(output: &Output, what: &str, written: &[u8]) {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
-    assert!(output.stdout.is_empty(), "{what}: nothing is written");
+    assert!(
+        output.stdout == written,
+        "{what}: wrote {} bytes, not the {} before the report",
+        output.stdout.len(),
+        written.len()
+    );
     assert!(
         stderr.contains(&format!(
             "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTN"
@@ -330,35 +340,52 @@ fn refused(output: &Output, what: &str) {
 }
 
 /// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone: `x_CleanAndCompress` reads past
-/// the end of it and NCBI crashes) is refused for 15 and 16 as for 5, before the first byte, at one,
-/// four, eight and sixteen threads, as a query's title (first or second) or the title of a subject
-/// that has a hit. (The titles NCBI does write are the rows `db.xb.*`, and the `-db` name
-/// `tests/xml_dbname.rs`.)
+/// the end of it and NCBI crashes) is refused for 15 and 16 where NCBI makes the report that shows
+/// it, after the reports before it, which NCBI wrote and flushed when it made them (remaining-gaps
+/// DECISIONS D-SO-6, Owner-delegated 2026-11-27), as a query's title (first or second) or the
+/// title of a subject that has a hit. A `-subject` report is made when the next query's result
+/// arrives, or in the epilog: a refused first report writes nothing, not even the document's
+/// start, which NCBI's stream holds until its first flush. (Outfmt 5 refuses before the first
+/// byte, `tests/outfmt5_refusals.rs`; the titles NCBI does write are the rows `db.xb.*`, and the
+/// `-db` name `tests/xml_dbname.rs`.)
 #[test]
 fn a_title_of_punctuation_is_refused_in_15_and_16() {
     let dir = temp_dir("q2");
     let (query, subject) = (dir.join("q.fna"), dir.join("s.fna"));
+    let search = |format: &str| {
+        run_in(
+            &dir,
+            &[
+                "blastn",
+                "-query",
+                query.to_str().unwrap(),
+                "-subject",
+                subject.to_str().unwrap(),
+                "-outfmt",
+                format,
+            ],
+            &[],
+        )
+    };
     for format in ["15", "16"] {
+        let tail: &[u8] = if format == "15" {
+            b"]\n}\n"
+        } else {
+            b"</BlastXML2>\n"
+        };
+        // q1's document without its end: what NCBI has written when it makes q2's report.
+        fasta(&query, &[(b"q1 ok", DNA)]);
+        fasta(&subject, &[(b"s1 subject", DNA)]);
+        let alone = search(format);
+        assert!(alone.status.success() && alone.stdout.ends_with(tail));
+        let before_q2 = &alone.stdout[..alone.stdout.len() - tail.len()];
         for title in [PUNCTUATION] {
             for position in 0..2 {
                 let mut records: Vec<(&[u8], &[u8])> = vec![(b"q1 ok", DNA), (b"q2 ok", DNA)];
                 records[position] = (title, DNA);
                 fasta(&query, &records);
-                fasta(&subject, &[(b"s1 subject", DNA)]);
-                let output = run_in(
-                    &dir,
-                    &[
-                        "blastn",
-                        "-query",
-                        query.to_str().unwrap(),
-                        "-subject",
-                        subject.to_str().unwrap(),
-                        "-outfmt",
-                        format,
-                    ],
-                    &[],
-                );
-                refused(&output, "a query title");
+                let written = if position == 0 { &b""[..] } else { before_q2 };
+                refused_after(&search(format), "a query title", written);
             }
         }
         // a subject title with a hit

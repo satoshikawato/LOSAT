@@ -221,6 +221,36 @@ fn refused(what: &str, run: &Run) {
     );
 }
 
+/// A title in a report that NCBI makes after `written` reports, each written (and flushed) when
+/// it was made: BLASTN, whose `-subject` XML2 and JSON documents LOSAT writes as NCBI does, refuses
+/// it there, after those reports (remaining-gaps DECISIONS D-SO-6, Owner-delegated 2026-11-27); the
+/// other programs refuse it before the first byte (`refused`). Nothing is written where it is the
+/// first report, and never the document's end.
+fn refused_where_made(program: &str, what: &str, run: &Run, outfmt: &str, written: usize) {
+    if program != "blastn" || written == 0 {
+        return refused(what, run);
+    }
+    assert_eq!(run.status, Some(1), "{what}: status, stderr {}", run.stderr);
+    assert!(
+        run.stderr.contains(REFUSAL),
+        "{what}: stderr {}",
+        run.stderr
+    );
+    assert_eq!(reports(run, outfmt), written, "{what}: reports");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    match outfmt {
+        "16" => assert!(
+            stdout.starts_with("<?xml") && !stdout.contains("</BlastXML2>"),
+            "{what}: {stdout}"
+        ),
+        "15" => assert!(
+            stdout.starts_with("{\n\"BlastOutput2\": [\n") && !stdout.ends_with("]\n}\n"),
+            "{what}: {stdout}"
+        ),
+        _ => assert!(stdout.is_empty(), "{what}: {stdout}"),
+    }
+}
+
 const READER_ERROR: &str = "LOSAT query error: CFastaReader: Near line";
 
 #[test]
@@ -278,13 +308,25 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
                     outfmt,
                     &dir.0,
                 );
-                refused(&what("a later record, no error"), &result);
+                refused_where_made(
+                    program,
+                    &what("a later record, no error"),
+                    &result,
+                    outfmt,
+                    1,
+                );
                 let result = run(
                     search(program, &last, &subject, &[("BATCH_SIZE", each)], threads),
                     outfmt,
                     &dir.0,
                 );
-                refused(&what("the last record, no error"), &result);
+                refused_where_made(
+                    program,
+                    &what("the last record, no error"),
+                    &result,
+                    outfmt,
+                    1,
+                );
             }
         }
     }
@@ -515,8 +557,9 @@ fn the_title_before_a_last_batch_without_letters_is_not_refused() {
 /// The library API (`examples/library_command_line`, the command line's arguments through
 /// `losat::api::run`; a failure ends with status 1) reads the whole query before it searches, so
 /// its batches meet no reader error; a last batch without letters stops it as it stops the
-/// command line. Its refusals look at the same reports and come before the first byte (BLASTX's
-/// library wrote the start of the document, or the reports of the batches before, first).
+/// command line. Its refusals look at the same reports and come where the command line's do
+/// (`refused_where_made`; BLASTX's library wrote the start of the document, or the reports of the
+/// batches before, first).
 #[test]
 fn the_library_refuses_only_the_titles_that_ncbi_would_write_before_the_first_byte() {
     let example = example_binary("library_command_line");
@@ -579,9 +622,21 @@ fn the_library_refuses_only_the_titles_that_ncbi_would_write_before_the_first_by
                 &file("batch_title.s", query_kind),
                 1,
             );
-            refused(&what("second batch"), &library(&later, &base, outfmt));
+            refused_where_made(
+                program,
+                &what("second batch"),
+                &library(&later, &base, outfmt),
+                outfmt,
+                1,
+            );
             // A subject's title, shown by query b's report.
-            refused(&what("subject"), &library(&clean, &bad_subject, outfmt));
+            refused_where_made(
+                program,
+                &what("subject"),
+                &library(&clean, &bad_subject, outfmt),
+                outfmt,
+                1,
+            );
         }
     }
 }

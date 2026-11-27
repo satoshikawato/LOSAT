@@ -720,8 +720,10 @@ impl BlastnDatabase {
     /// batch whose final hit lists are `hit_lists` (`shared::TaxdbRun::note_loaded`;
     /// `loaded_subjects` of the batch alone, `rows`: the first format's), for a later batch's
     /// stop: where the loop writes each batch's reports and drops its lists (LOSAT_X_RPTSTREAM),
-    /// so that `batch_prefetch`'s `before` no longer holds them. The stream never writes outfmt 5
-    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`). `start`: the
+    /// so that `batch_prefetch`'s `before` no longer holds them. `cuts`: the batch's outfmt 5
+    /// reports that NCBI's XML stream cuts before their hits, which load nothing
+    /// (`shared::XmlCuts`, by query of the batch; none for another first format), as BLASTX's
+    /// batches are recorded (`blastx::database::ReportedSubjects::note_loaded`). `start`: the
     /// batch's first query in the call, its number in the record (`shared::TaxdbRun::note_loaded`,
     /// as `reported_subjects` and `QueryFetches::batch` number the batches).
     pub(super) fn note_loaded(
@@ -731,6 +733,7 @@ impl BlastnDatabase {
         start: usize,
         gapped: bool,
         (format, rows): (shared::PrefetchFormat, SubjectFetch),
+        cuts: shared::XmlCuts<'_>,
     ) {
         if self.parsed_seqids() {
             *self
@@ -746,7 +749,7 @@ impl BlastnDatabase {
                         spans: &batch,
                         format,
                         rows,
-                        cuts: shared::XmlCuts::NONE,
+                        cuts,
                     },
                     gapped,
                 )

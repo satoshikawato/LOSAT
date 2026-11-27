@@ -8592,9 +8592,12 @@ fn run_in_pool(
                     )
                 };
                 // In the first batch nothing was streamed: the call of the off path writes the
-                // prologs that come with the reports (outfmt 20's line of the field names).
+                // prologs that come with the reports (outfmt 20's line of the field names). Later,
+                // the start of a `-subject` XML2 or JSON document that no call has written yet
+                // (`blast_xml::StartFirst`), as the off path's call writes it.
                 if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
+                    stream.start_xml2_at_stop(outputs, &output_formats)?;
                 } else {
                     before(outputs)?;
                 }
@@ -9300,7 +9303,12 @@ fn run_in_pool(
                         // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
                         // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
                         // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
-                        // the texts that the cut reports left (`shared::XmlReportsBefore`).
+                        // the texts that the cut reports left (`shared::XmlReportsBefore`), where the
+                        // loop holds the batches before. Where the report stream acts
+                        // (`x_rpt_stream`) it holds none of them: their reports were written, which
+                        // left their texts in the run's ledger (`ReadLoad::left_out` at a cut, as
+                        // BLASTX's batches), and their loads are in the run's record, without those
+                        // of a cut report (`BlastnDatabase::note_loaded`), so nothing is modelled.
                         // The record that the report shows (`query_batch::xml_shown_of`).
                         let shown_scopes = query_scopes.as_ref().map(|s| s.numbered_from(0));
                         let xml_cut = |query: usize| {
@@ -9324,7 +9332,8 @@ fn run_in_pool(
                         // batch it begins (`warnings`, the batches before this one).
                         let prefetched = |query: usize| warnings.get(query);
                         let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
-                            matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
+                            matches!(output_formats.first(), Some(BlastnOutputFormat::Xml))
+                                && !stream.acting(),
                             &xml_cut,
                         );
                         let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
@@ -9391,12 +9400,34 @@ fn run_in_pool(
             // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
             // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
             if stream.acting() {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:372-375
+                // (cited at `report::query_warnings::ReadCursor::cut`: an `Iteration` that NCBI's
+                // XML stream cuts before its first `Hit` makes none of its loads) Outfmt 5 first:
+                // the batch's reports that the stream cuts, by the record that each shows
+                // (`query_batch::xml_shown_of`, the labels of the batch's own queries).
+                let shown_scopes = query_scopes.as_ref().map(|s| s.numbered_from(start));
+                let batch_cut = |query: usize| {
+                    let shown = crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+                    batch_records.searched().get(shown).is_some_and(|record| {
+                        crate::report::blast_xml::names::iteration_cut_before_hits(
+                            record.local_id.as_bytes(),
+                            record.warning_id(),
+                            record.believed(),
+                            &record.title,
+                            false,
+                        )
+                    })
+                };
                 database.note_loaded(
                     &titles,
                     &batch_hit_lists,
                     start,
                     !args.ungapped,
                     (database::prefetch_format(&output_formats), first_rows),
+                    crate::algorithm::common::database::XmlCuts::of(
+                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
+                        &batch_cut,
+                    ),
                 );
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277

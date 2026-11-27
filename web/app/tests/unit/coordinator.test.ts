@@ -441,14 +441,15 @@ describe('Coordinator', () => {
       const released = new Promise<void>((resolve) => (release = resolve));
       let dropped!: () => void;
       const discarded = new Promise<void>((resolve) => (dropped = resolve));
-      let first: string | undefined;
-      let opened = 0;
+      /** The first run, whose outputs come late. */
+      let slow: string | undefined;
       const { coordinator, data, store } = setup(engine, (inner) => {
         const gateway = Object.create(inner) as DataGateway;
         // The first run's outputs: staged only when the test lets it (the Data worker is busy), or staged at once and
         // answered only then. The Data side can drop a run only once it has staged it.
         gateway.openRun = async (runId, outputs) => {
-          if (++opened > 1) return inner.openRun(runId, outputs);
+          if (slow !== undefined) return inner.openRun(runId, outputs);
+          slow = runId;
           if (late === 'staging') await released;
           const port = await inner.openRun(runId, outputs);
           if (late === 'answer') await released;
@@ -456,12 +457,13 @@ describe('Coordinator', () => {
         };
         gateway.discardRun = async (runId) => {
           await inner.discardRun(runId);
-          if (runId === first) dropped();
+          if (runId === slow) dropped();
         };
         return gateway;
       });
-      first = (await coordinator.enqueue(request)).runId!;
+      const first = (await coordinator.enqueue(request)).runId!;
       await waitFor(coordinator, first, 'preparing');
+      expect(slow).toBe(first);
       coordinator.cancel(first);
       await tick();
       expect(statusOf(coordinator, first)).toBe('cancelled');
@@ -492,24 +494,28 @@ describe('Coordinator', () => {
     const released = new Promise<void>((resolve) => (release = resolve));
     let dropped!: () => void;
     const deleted = new Promise<void>((resolve) => (dropped = resolve));
-    let first: string | undefined;
-    let opened = 0;
+    /** The first tool run, whose outputs come late. */
+    let slow: string | undefined;
     const { coordinator, data, store } = setup(new FakeEngine(), (inner) => {
       const gateway = Object.create(inner) as DataGateway;
       // The first tool run's outputs are staged at once; the Data worker's answer comes only when the test lets it.
       gateway.openToolRun = async (runId) => {
         const port = await inner.openToolRun(runId);
-        if (++opened === 1) await released;
+        if (slow === undefined) {
+          slow = runId;
+          await released;
+        }
         return port;
       };
       gateway.deleteRun = async (runId) => {
         await inner.deleteRun(runId);
-        if (runId === first) dropped();
+        if (runId === slow) dropped();
       };
       return gateway;
     });
-    first = (await coordinator.enqueueTool(toolRequest)).runId!;
+    const first = (await coordinator.enqueueTool(toolRequest)).runId!;
     await waitFor(coordinator, first, 'preparing');
+    expect(slow).toBe(first);
     coordinator.cancel(first);
     await tick();
     expect(statusOf(coordinator, first)).toBe('cancelled');

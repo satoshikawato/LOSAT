@@ -218,24 +218,42 @@ abi.release(subject.handle);
 The package's tests run this example on one of the repository's fixtures (`tests/package.test.ts`):
 its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search.
 
-## Running windowmasker
+## Running CLI tools (`windowmasker` and `blast_formatter`)
 
-`engine.runTool(argv, options)` runs the command line's `windowmasker` (`losat windowmasker`: `-mk_counts` in each
-`-sformat`, `-convert`, and the masking of `-ustat` in each `-outfmt`, with their options, help and version) on the
-user's files, as the command line runs it in a folder that holds them. `argv[0]` is `windowmasker`, then the command
-line's words. `options.directory` holds the files that the words name (`-in`, `-ustat`, `-fa_list` and the files it
-lists, `-ids`, `-exclude_ids`, a BLAST database of `-infmt blastdb`, `-conffile`), each a `DirectoryFile` that the engine
-reads in place, as for a search of `-db` (above). A folder of the directory opens as it does on Linux, and a read of it
-fails: `-in <folder>` ends as the command line does, with "Is a directory". The promise resolves with the command line's
+`engine.runTool(argv, options)` runs the command line's browser-supported tools (`windowmasker` and `blast_formatter`)
+on the user's files, as the command line runs them in a folder that holds them:
+
+- `windowmasker` (`losat windowmasker`: `-mk_counts` in each `-sformat`, `-convert`, and the masking of `-ustat` in each
+  `-outfmt`, with their options, help and version), reading `-in`, `-ustat`, `-fa_list` and the files it lists, `-ids`,
+  `-exclude_ids`, a BLAST database of `-infmt blastdb`, and `-conffile` from `options.directory`.
+- `blast_formatter` (`losat blast_formatter`: re-formatting `-outfmt 11` BLAST archives via `-archive` into every output
+  format that LOSAT's `blast_formatter` writes, with `-out`, `-max_target_seqs`, `-num_alignments`, `-parse_deflines`,
+  help and version; `-rid` is refused), reading `-archive`, any local BLAST database referenced by a `-db` archive, and
+  `-conffile` from `options.directory`.
+
+`argv[0]` is the tool name (`windowmasker` or `blast_formatter`), then the command line's words. `options.directory` holds
+the files that the words name, each a `DirectoryFile` that the engine reads in place, as for a search of `-db` (above). A
+folder of the directory opens as it does on Linux, and a read of it fails: `-in <folder>` ends as the command line does,
+with "Is a directory". The promise resolves with the command line's
 exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
 in the order the run opened them, under the command line's file name: `x.counts` for `./x.counts`, `logs` for `-logfile logs/`,
 `sub/x` when `sub` is a folder of the directory; `-logfile /dev/stdout` writes diagnostic messages into `stdout` in the command
-line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `-fa_list true` entries and `-infmt blastdb` database lookup files), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `windowmasker`'s `-fa_list true` entries and `-infmt blastdb` database lookup files, or `blast_formatter`'s `-archive`), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
 (a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
-malformed (a `-conffile`, or a `windowmasker.ini` in the directory, with a bad section or entry line) is status 2; their text
+malformed (a `-conffile`, or a `windowmasker.ini` / `blast_formatter.ini` in the directory, with a bad section or entry line) is status 2; their text
 is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as
 the tool writes it, not when the run ends, so `onStderr` can show a warning while the run goes on. A name that is not a tool
 rejects. The run is one at a time with the searches; `options.signal` cancels it.
+
+```ts
+// Re-formatting a BLAST archive (-outfmt 11) with blast_formatter:
+const formatted = await engine.runTool(
+  ['blast_formatter', '-archive', 'results.asn', '-outfmt', '12'],
+  { directory: [{ name: 'results.asn', file: archiveFile }] },
+);
+if (formatted.status !== 0) throw new Error(await formatted.stderr.text());
+const jsonText = await formatted.stdout.text();
+```
 
 ```ts
 import { WasmEngine } from 'losat';

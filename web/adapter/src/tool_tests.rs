@@ -1310,3 +1310,235 @@ fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
     assert!(emitted().is_empty());
     std::fs::remove_dir_all(&folder).unwrap();
 }
+
+#[test]
+fn blast_formatter_matches_library_for_subject_and_db_archives() {
+    fn run_bf_oracle(words: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = losat::web_adapter::run_blast_formatter(
+            words,
+            &RunFiles::Disk,
+            &mut io::empty(),
+            &mut out,
+            &mut err,
+        );
+        (status, out, err)
+    }
+
+    let dir = folder("bf_basic");
+    let bf_dir = format!(
+        "{}/../../LOSAT/tests/blast_formatter",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let bn = format!("{bf_dir}/in/bn.asn");
+    let batch = format!("{bf_dir}/in/batch.asn");
+
+    for (label, words) in [
+        (
+            "subject outfmt 8 stdout",
+            vec!["-archive", &bn, "-outfmt", "8"],
+        ),
+        (
+            "subject outfmt 9 stdout",
+            vec!["-archive", &bn, "-outfmt", "9"],
+        ),
+        (
+            "subject outfmt 12 stdout",
+            vec!["-archive", &bn, "-outfmt", "12"],
+        ),
+        (
+            "batch outfmt 8 stdout",
+            vec!["-archive", &batch, "-outfmt", "8"],
+        ),
+        (
+            "max_target_seqs",
+            vec!["-archive", &bn, "-outfmt", "8", "-max_target_seqs", "1"],
+        ),
+        ("help", vec!["-h"]),
+        ("xmlhelp", vec!["-xmlhelp"]),
+        ("version", vec!["-version"]),
+        ("rid refusal", vec!["-rid", "ABCDEFGH01R"]),
+        (
+            "unsupported outfmt 6",
+            vec!["-archive", &bn, "-outfmt", "6"],
+        ),
+        (
+            "missing archive",
+            vec!["-archive", "/no/such/archive.asn", "-outfmt", "8"],
+        ),
+    ] {
+        let (expected_status, expected_out, expected_err) = run_bf_oracle(&words);
+        let full: Vec<&str> = std::iter::once("blast_formatter")
+            .chain(words.iter().copied())
+            .collect();
+        run(&full).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(
+                STREAM_RESPONSE,
+                format!("{{\"status\":{expected_status}}}").into_bytes()
+            ),
+            "{label}: status"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_PRINTED),
+            expected_out,
+            "{label}: stdout"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            expected_err,
+            "{label}: stderr"
+        );
+        assert!(frames(&calls).is_empty(), "{label}: no files");
+    }
+
+    fn assert_status_zero(calls: &[(u32, Vec<u8>)]) {
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+        );
+    }
+
+    // Output file (-out) and -logfile (including shared -out/-logfile).
+    for outfmt in ["8", "9", "12"] {
+        let out_path = dir.join(format!("out_{outfmt}.dat"));
+        let log_path = dir.join(format!("log_{outfmt}.txt"));
+        let (expected_status, expected_out, expected_err) = run_bf_oracle(&[
+            "-archive",
+            &bn,
+            "-outfmt",
+            outfmt,
+            "-out",
+            out_path.to_str().unwrap(),
+            "-logfile",
+            log_path.to_str().unwrap(),
+        ]);
+        assert_eq!(expected_status, 0);
+        let expected_file = std::fs::read(&out_path).unwrap();
+        let expected_log = std::fs::read(&log_path).unwrap();
+
+        run(&[
+            "blast_formatter",
+            "-archive",
+            &bn,
+            "-outfmt",
+            outfmt,
+            "-out",
+            "report.dat",
+            "-logfile",
+            "run.log",
+        ])
+        .unwrap();
+        let calls = emitted();
+        assert_status_zero(&calls);
+        assert_eq!(joined(&calls, STREAM_PRINTED), expected_out);
+        assert_eq!(joined(&calls, STREAM_DIAGNOSTICS), expected_err);
+        let got_files = files(&frames(&calls));
+        assert_eq!(
+            got_files,
+            vec![
+                (b"run.log".to_vec(), expected_log),
+                (b"report.dat".to_vec(), expected_file),
+            ]
+        );
+    }
+
+    // Shared -out and -logfile: one file stream, matching disk.
+    let shared_path = dir.join("shared.out");
+    let (shared_status, _, _) = run_bf_oracle(&[
+        "-archive",
+        &bn,
+        "-outfmt",
+        "8",
+        "-out",
+        shared_path.to_str().unwrap(),
+        "-logfile",
+        shared_path.to_str().unwrap(),
+    ]);
+    assert_eq!(shared_status, 0);
+    let expected_shared = std::fs::read(&shared_path).unwrap();
+    run(&[
+        "blast_formatter",
+        "-archive",
+        &bn,
+        "-outfmt",
+        "8",
+        "-out",
+        "shared.out",
+        "-logfile",
+        "shared.out",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_status_zero(&calls);
+    assert_eq!(
+        files(&frames(&calls)),
+        vec![(b"shared.out".to_vec(), expected_shared)]
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn blast_formatter_validate_and_self_ref_refusals() {
+    assert_eq!(
+        validate(&["blast_formatter", "-archive", "missing.asn", "-outfmt", "8"]),
+        Ok(())
+    );
+    assert_eq!(validate(&["blast_formatter", "-xmlhelp"]), Ok(()));
+    assert_eq!(validate(&["blast_formatter", "-version"]), Ok(()));
+
+    // No -archive and no -rid -> NCBI argument error; -rid -> LOSAT refusal.
+    assert!(validate(&["blast_formatter"])
+        .unwrap_err()
+        .contains("Argument \"rid\". The argument has no value"));
+    assert!(validate(&["blast_formatter", "-rid", ""])
+        .unwrap_err()
+        .contains("Empty RID string specified"));
+    assert!(validate(&["blast_formatter", "-rid", "ABCDEFGH01R"])
+        .unwrap_err()
+        .contains("not supported by LOSAT's BLAST_FORMATTER"));
+    assert!(
+        validate(&["blast_formatter", "-archive", "a.asn", "-rid", "X"])
+            .unwrap_err()
+            .contains("Incompatible with argument")
+    );
+    assert!(
+        validate(&["blast_formatter", "-archive", "a.asn", "-nosuchopt"])
+            .unwrap_err()
+            .contains("Unknown argument")
+    );
+
+    // -logfile naming a missing -archive is refused before opening -logfile.
+    let log_err = validate(&[
+        "blast_formatter",
+        "-archive",
+        "missing_bf.asn",
+        "-logfile",
+        "missing_bf.asn",
+    ])
+    .unwrap_err();
+    assert!(
+        log_err.contains("a -logfile file 'missing_bf.asn'") && log_err.contains("BLAST_FORMATTER"),
+        "{log_err}"
+    );
+    run(&[
+        "blast_formatter",
+        "-archive",
+        "missing_bf.asn",
+        "-logfile",
+        "missing_bf.asn",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_eq!(
+        calls.last().unwrap(),
+        &(STREAM_RESPONSE, b"{\"status\":1}".to_vec())
+    );
+    let err_out = joined(&calls, STREAM_DIAGNOSTICS);
+    assert_eq!(err_out, format!("{log_err}\n").as_bytes());
+    assert!(frames(&calls).is_empty());
+}

@@ -228,3 +228,61 @@ fn the_run_s_errors_go_to_the_logfile() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn read_files_collects_archive_only_for_logfile() {
+    let words = |items: &[&str]| items.iter().map(OsString::from).collect::<Vec<_>>();
+    assert_eq!(
+        read_files(&words(&["-archive", "in/bn.asn", "-outfmt", "8"])),
+        (vec![b"in/bn.asn".to_vec()], vec![])
+    );
+    assert_eq!(
+        read_files(&words(&["-archive", "-", "-outfmt", "8"])),
+        (vec![], vec![])
+    );
+    assert_eq!(
+        read_files(&words(&["-archive", "", "-outfmt", "8"])),
+        (vec![], vec![])
+    );
+    assert_eq!(read_files(&words(&["-rid", "ABC"])), (vec![], vec![]));
+}
+
+#[test]
+fn check_in_mirrors_run_before_opening_archive() {
+    use crate::report::run_files::RunFiles;
+    let check = |line: &[&str]| {
+        let words: Vec<OsString> = line.iter().map(OsString::from).collect();
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = check_in(&words, &RunFiles::Disk, &mut out, &mut err);
+        (status, String::from_utf8(err).unwrap())
+    };
+    assert_eq!(
+        check(&["-archive", "/no/such/archive.asn", "-outfmt", "8"]),
+        (0, String::new())
+    );
+    assert_eq!(check(&["-h"]), (0, String::new()));
+    assert_eq!(check(&["-xmlhelp"]), (0, String::new()));
+    assert_eq!(
+        check(&[]),
+        (
+            1,
+            "Command line argument error: Argument \"rid\". The argument has no value\n"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        check(&["-rid", ""]),
+        (
+            3,
+            "LOSAT engine error: Empty RID string specified\n".to_string()
+        )
+    );
+    assert_eq!(
+        check(&["-rid", "ABCDEFGH01R"]),
+        (
+            1,
+            format!("Error: {}\n", super::refusals::Refusal::Rid.reason())
+        )
+    );
+}

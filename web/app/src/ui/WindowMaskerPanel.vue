@@ -17,13 +17,13 @@ import {
   windowMaskerStageSummary,
 } from '../domain/tools';
 import { announce } from './announcer';
-import { formatBytes } from './format';
 import { windowMaskerFormModel, WM_REFUSAL_ID } from './form-model';
 import OptionName from './OptionName.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 import ToolInputs from './ToolInputs.vue';
 import ToolRunBar from './ToolRunBar.vue';
+import ToolRunFiles from './ToolRunFiles.vue';
 import { useStore } from './useStore';
 
 const props = defineProps<{
@@ -38,8 +38,6 @@ const state = useStore(props.draft.state);
 const appState = useStore(props.coordinator.state);
 const countsState = useStore(props.counts.state);
 const formModel = computed(() => windowMaskerFormModel(props.draft, state.value));
-const runFilesInput = ref<HTMLInputElement | null>(null);
-const runFolderInput = ref<HTMLInputElement | null>(null);
 
 const describeState = computed(() => {
   if (state.value.description !== undefined) return 'ready';
@@ -108,11 +106,6 @@ watch(
   },
 );
 
-function onRunFiles(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  if (input.files !== null && input.files.length > 0) props.draft.addRunFiles([...input.files]);
-  input.value = '';
-}
 </script>
 
 <template>
@@ -217,54 +210,9 @@ function onRunFiles(event: Event): void {
           <template #before-extra>
             <div class="search-block parameter-section" data-testid="wm-run-files">
               <div class="section-legend">Files of the run</div>
-              <div class="param-row">
-                <span class="param-label">Run directory</span>
-                <div class="param-control wm-run-files-controls">
-                  <button type="button" data-testid="wm-open-run-files" @click="runFilesInput?.click()">Open files…</button>
-                  <button type="button" data-testid="wm-open-run-folder" @click="runFolderInput?.click()">Open folder…</button>
-                  <input
-                    ref="runFilesInput"
-                    class="visually-hidden"
-                    type="file"
-                    multiple
-                    tabindex="-1"
-                    aria-hidden="true"
-                    aria-label="Open files for the run directory"
-                    data-testid="wm-run-files-input"
-                    @change="onRunFiles"
-                  />
-                  <input
-                    ref="runFolderInput"
-                    class="visually-hidden"
-                    type="file"
-                    multiple
-                    webkitdirectory
-                    tabindex="-1"
-                    aria-hidden="true"
-                    aria-label="Open folder for the run directory"
-                    data-testid="wm-run-folder-input"
-                    @change="onRunFiles"
-                  />
-                  <span class="param-hint">Files opened by name (<OptionName name="-ids" />, <OptionName name="-exclude_ids" />, <OptionName name="-conffile" />, <OptionName name="-fa_list" />, BLAST database files)</span>
-                </div>
-              </div>
-              <p v-if="state.runFilesError" class="error small wm-run-files-error" role="alert" data-testid="wm-run-files-error">
-                {{ state.runFilesError }}
-              </p>
-              <ul v-if="state.runFiles.length > 0" class="wm-file-list" data-testid="wm-run-files-list">
-                <li v-for="(entry, index) in state.runFiles" :key="entry.key" class="wm-file-item">
-                  <span class="source-name" :data-testid="`wm-run-file-name-${index}`">{{ entry.name }}</span>
-                  <span class="muted">{{ formatBytes(entry.size) }}</span>
-                  <button
-                    type="button"
-                    class="link"
-                    :data-testid="`wm-run-file-remove-${index}`"
-                    @click="draft.removeRunFile(entry.key)"
-                  >
-                    Remove
-                  </button>
-                </li>
-              </ul>
+              <ToolRunFiles :draft="draft" :files="state.runFiles" :error="state.runFilesError" prefix="wm"
+                >Files opened by name (<OptionName name="-ids" />, <OptionName name="-exclude_ids" />, <OptionName name="-conffile" />, <OptionName name="-fa_list" />, BLAST database files)</ToolRunFiles
+              >
             </div>
           </template>
         </ParameterForm>

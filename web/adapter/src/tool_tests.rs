@@ -962,6 +962,19 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
 
 #[test]
 fn blast_formatter_matches_library_for_subject_and_db_archives() {
+    fn run_bf_oracle(words: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = losat::web_adapter::run_blast_formatter(
+            words,
+            &RunFiles::Disk,
+            &mut io::empty(),
+            &mut out,
+            &mut err,
+        );
+        (status, out, err)
+    }
+
     let dir = folder("bf_basic");
     let bf_dir = format!(
         "{}/../../LOSAT/tests/blast_formatter",
@@ -1004,15 +1017,7 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
             vec!["-archive", "/no/such/archive.asn", "-outfmt", "8"],
         ),
     ] {
-        let mut expected_out = Vec::new();
-        let mut expected_err = Vec::new();
-        let expected_status = losat::web_adapter::run_blast_formatter(
-            &words,
-            &RunFiles::Disk,
-            &mut io::empty(),
-            &mut expected_out,
-            &mut expected_err,
-        );
+        let (expected_status, expected_out, expected_err) = run_bf_oracle(&words);
         let full: Vec<&str> = std::iter::once("blast_formatter")
             .chain(words.iter().copied())
             .collect();
@@ -1043,24 +1048,16 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
     for outfmt in ["8", "9", "12"] {
         let out_path = dir.join(format!("out_{outfmt}.dat"));
         let log_path = dir.join(format!("log_{outfmt}.txt"));
-        let mut expected_out = Vec::new();
-        let mut expected_err = Vec::new();
-        let expected_status = losat::web_adapter::run_blast_formatter(
-            &[
-                "-archive",
-                &bn,
-                "-outfmt",
-                outfmt,
-                "-out",
-                out_path.to_str().unwrap(),
-                "-logfile",
-                log_path.to_str().unwrap(),
-            ],
-            &RunFiles::Disk,
-            &mut io::empty(),
-            &mut expected_out,
-            &mut expected_err,
-        );
+        let (expected_status, expected_out, expected_err) = run_bf_oracle(&[
+            "-archive",
+            &bn,
+            "-outfmt",
+            outfmt,
+            "-out",
+            out_path.to_str().unwrap(),
+            "-logfile",
+            log_path.to_str().unwrap(),
+        ]);
         assert_eq!(expected_status, 0);
         let expected_file = std::fs::read(&out_path).unwrap();
         let expected_log = std::fs::read(&log_path).unwrap();
@@ -1096,25 +1093,17 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
 
     // Shared -out and -logfile: one file stream, matching disk.
     let shared_path = dir.join("shared.out");
-    let mut expected_out = Vec::new();
-    let mut expected_err = Vec::new();
-    let expected_status = losat::web_adapter::run_blast_formatter(
-        &[
-            "-archive",
-            &bn,
-            "-outfmt",
-            "8",
-            "-out",
-            shared_path.to_str().unwrap(),
-            "-logfile",
-            shared_path.to_str().unwrap(),
-        ],
-        &RunFiles::Disk,
-        &mut io::empty(),
-        &mut expected_out,
-        &mut expected_err,
-    );
-    assert_eq!(expected_status, 0);
+    let (shared_status, _, _) = run_bf_oracle(&[
+        "-archive",
+        &bn,
+        "-outfmt",
+        "8",
+        "-out",
+        shared_path.to_str().unwrap(),
+        "-logfile",
+        shared_path.to_str().unwrap(),
+    ]);
+    assert_eq!(shared_status, 0);
     let expected_shared = std::fs::read(&shared_path).unwrap();
     run(&[
         "blast_formatter",

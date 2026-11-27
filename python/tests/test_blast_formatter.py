@@ -11,6 +11,7 @@ import pytest
 from conftest import FASTA
 
 BF_DIR = FASTA.parent / "blast_formatter"
+OUTFMTS = ("8", "9", "12")
 
 
 @pytest.fixture(scope="session")
@@ -31,35 +32,34 @@ def run_cli_in(binary: str, cwd: Path, *words: str, stdin: bytes = b"") -> subpr
     )
 
 
-@pytest.mark.parametrize("outfmt", ["8", "9", "12"])
-def test_subject_archive_file_and_stdin_match_cli(outfmt, losat_bin):
-    archive = BF_DIR / "in/bn.asn"
-    cli = run_cli_in(losat_bin, BF_DIR, "-archive", str(archive), "-outfmt", outfmt)
-    assert cli.returncode == 0
-
-    from_file = pylosat.blast_formatter("-archive", str(archive), "-outfmt", outfmt)
-    assert from_file.bytes == cli.stdout
-    assert from_file.diagnostics_bytes == cli.stderr
-
-    raw = archive.read_bytes()
-    from_stdin_bytes = pylosat.blast_formatter("-archive", "-", "-outfmt", outfmt, input=raw)
-    assert from_stdin_bytes.bytes == cli.stdout
-    assert from_stdin_bytes.diagnostics_bytes == cli.stderr
-
-    from_stdin_str = pylosat.blast_formatter("-archive", "-", "-outfmt", outfmt, input=raw.decode("utf-8"))
-    assert from_stdin_str.bytes == cli.stdout
-    assert from_stdin_str.diagnostics_bytes == cli.stderr
-
-
-@pytest.mark.parametrize("outfmt", ["8", "9", "12"])
-def test_database_archive_matches_cli(outfmt, losat_bin, monkeypatch):
-    monkeypatch.chdir(BF_DIR)
-    cli = run_cli_in(losat_bin, BF_DIR, "-archive", "in/db.asn", "-outfmt", outfmt)
-    assert cli.returncode == 0
-
-    output = pylosat.blast_formatter("-archive", "in/db.asn", "-outfmt", outfmt)
+def assert_tool_matches_cli(
+    binary: str,
+    words: tuple[str, ...],
+    *,
+    stdin: bytes = b"",
+    input_data: bytes | str | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    cli = run_cli_in(binary, BF_DIR, *words, stdin=stdin)
+    assert cli.returncode == 0, cli.stderr
+    output = pylosat.blast_formatter(*words, input=input_data) if input_data is not None else pylosat.blast_formatter(*words)
     assert output.bytes == cli.stdout
     assert output.diagnostics_bytes == cli.stderr
+    return cli
+
+
+@pytest.mark.parametrize("outfmt", OUTFMTS)
+def test_subject_and_database_archives_match_cli(outfmt, losat_bin, monkeypatch):
+    monkeypatch.chdir(BF_DIR)
+    archive = BF_DIR / "in/bn.asn"
+    cli = assert_tool_matches_cli(losat_bin, ("-archive", str(archive), "-outfmt", outfmt))
+
+    raw = archive.read_bytes()
+    for payload in (raw, raw.decode("utf-8")):
+        streamed = pylosat.blast_formatter("-archive", "-", "-outfmt", outfmt, input=payload)
+        assert streamed.bytes == cli.stdout
+        assert streamed.diagnostics_bytes == cli.stderr
+
+    assert_tool_matches_cli(losat_bin, ("-archive", "in/db.asn", "-outfmt", outfmt))
 
 
 def test_batch_options_and_out_file_match_cli(tmp_path, losat_bin, monkeypatch):
@@ -71,19 +71,15 @@ def test_batch_options_and_out_file_match_cli(tmp_path, losat_bin, monkeypatch):
         ("-archive", "in/db.asn", "-outfmt", "8", "-parse_deflines"),
         ("-archive", "in/warn.asn", "-outfmt", "8", "-max_target_seqs", "2"),
     ):
-        cli = run_cli_in(losat_bin, BF_DIR, *words)
-        assert cli.returncode == 0, cli.stderr
-        output = pylosat.blast_formatter(*words)
-        assert output.bytes == cli.stdout
-        assert output.diagnostics_bytes == cli.stderr
+        assert_tool_matches_cli(losat_bin, words)
 
     cli_out = tmp_path / "cli.out"
     py_out = tmp_path / "py.out"
     cli = run_cli_in(losat_bin, BF_DIR, "-archive", "in/bn.asn", "-outfmt", "12", "-out", str(cli_out))
     assert cli.returncode == 0
-    output = pylosat.blast_formatter("-archive", "in/bn.asn", "-outfmt", "12", "-out", str(py_out))
-    assert output.bytes == b""
-    assert output.diagnostics_bytes == cli.stderr
+    written = pylosat.blast_formatter("-archive", "in/bn.asn", "-outfmt", "12", "-out", str(py_out))
+    assert written.bytes == b""
+    assert written.diagnostics_bytes == cli.stderr
     assert py_out.read_bytes() == cli_out.read_bytes()
 
 
@@ -92,12 +88,8 @@ def test_roundtrip_from_pylosat_search_outfmt_11(losat_bin):
     subject = pylosat.Sequences.from_text(">s1\nACGTTGCAAGGCTTAACCGGTTAACCGGATCGATCGATCG\n")
     archive = pylosat.Search("blastn").run(query, subject, outfmt="11").reports[0].bytes
 
-    for outfmt in ("8", "9", "12"):
-        cli = run_cli_in(losat_bin, BF_DIR, "-archive", "-", "-outfmt", outfmt, stdin=archive)
-        assert cli.returncode == 0, cli.stderr
-        output = pylosat.blast_formatter("-archive", "-", "-outfmt", outfmt, input=archive)
-        assert output.bytes == cli.stdout
-        assert output.diagnostics_bytes == cli.stderr
+    for outfmt in OUTFMTS:
+        assert_tool_matches_cli(losat_bin, ("-archive", "-", "-outfmt", outfmt), stdin=archive, input_data=archive)
 
 
 @pytest.mark.parametrize(

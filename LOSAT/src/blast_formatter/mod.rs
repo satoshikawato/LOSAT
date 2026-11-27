@@ -18,6 +18,7 @@ use crate::cli::NativeError;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin};
 use crate::ncbi_app::{Diag, Tool};
+use crate::report::run_files::RunFiles;
 
 use refusals::Refusal;
 
@@ -89,7 +90,7 @@ pub(crate) fn run_with(
 /// `-logfile FILE`) go to `files`, and `-xmlhelp` prints NCBI's XML, as on the command line.
 pub(crate) fn run_in(
     words: &[OsString],
-    files: &crate::report::run_files::RunFiles,
+    files: &RunFiles,
     input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -103,14 +104,14 @@ pub(crate) fn run_in(
 /// (including help/version words), with errors on `err` and the `-logfile` target in `files`.
 pub(crate) fn check_in(
     words: &[OsString],
-    files: &crate::report::run_files::RunFiles,
+    run_files: &RunFiles,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     crate::ncbi_app::run_in(
         &TOOL,
         words,
-        files,
+        run_files,
         (&mut std::io::empty(), out, err),
         check_body,
     )

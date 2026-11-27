@@ -797,7 +797,6 @@ struct NoFiles(SearchRunFiles);
 /// that the search reads each name of a file (`-export_search_strategy`, psiblast's `-out_pssm`)
 /// against the same run's files as the argv's own search (line RG item F1w-r2).
 fn kept_by_no_one(run_files: &RunFiles) -> RunFiles {
-    use losat::web_adapter::FileReceiver as _;
     let names = match run_files {
         RunFiles::Receiver(receiver) => SearchRunFiles {
             registered: receiver.registered_files().to_vec(),

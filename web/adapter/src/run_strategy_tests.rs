@@ -518,25 +518,32 @@ fn a_two_search_run_refuses_a_name_as_the_command_line() {
 }
 
 /// The other search of a run of two searches reads the names of the run's files against the same
-/// run's files as the argv's own search (line RG item F1w-r2, `kept_by_no_one`): a name in the
-/// folder of the query (`outfmt11/`, a folder of the run's files through the registered query) is
-/// a file for both, so the run writes BLASTP's strategy file (`ROWS[1]`, the first test) and
-/// psiblast's `-out_pssm` file, as the command line does; before, the other search read the name
-/// against no registered names, and NCBI's error or a failed write ended the run.
+/// run's files as the argv's own search (line RG item F1w-r2, `kept_by_no_one`). For the strategy
+/// file, `ROWS[1]` of the first test (`blastp.sub.nd`, `outfmt11/s.asn`) fails without it: the other
+/// search read the name against no registered names, where the query's folder is missing, and gave
+/// NCBI's error. psiblast's `-out_pssm` takes the same names in the other search: a name in the
+/// query's folder is the run's file and the query's own file is LOSAT Web's refusal before any
+/// output, as in a run of one search (these hold before the change too: the other search's PSSM
+/// writes are not checked, and the refusal comes from the argv's search).
 #[test]
 fn the_other_search_reads_names_against_the_runs_files() {
+    // NCBI writes the PSSM of the last round with `-save_pssm_after_last_round` (V-ABI row
+    // psiblast.subject.it2.pssm, web/adapter/tests/v_abi.js).
     let words = [
         "psiblast",
         "-query",
-        "outfmt11/arch_bp_q.faa",
+        "psiblast/q1b_gi.faa",
         "-subject",
-        "outfmt11/arch_bp_s.faa",
+        "psiblast/q1_subj_ids.faa",
+        "-num_iterations",
+        "2",
+        "-save_pssm_after_last_round",
         "-num_descriptions",
         "3",
         "-num_alignments",
         "2",
         "-out_pssm",
-        "outfmt11/p.asn",
+        "psiblast/p.asn",
     ];
     let groups = {
         let (program, command, requested) = parse_run(&words).unwrap();
@@ -547,7 +554,21 @@ fn the_other_search_reads_names_against_the_runs_files() {
     let (result, streams) = run_files_of(&words, words[2], words[4]);
     result.unwrap();
     let named: Vec<String> = files(&streams).into_iter().map(|(name, _)| name).collect();
-    assert_eq!(named, ["outfmt11/p.asn"]);
+    assert_eq!(named, ["psiblast/p.asn"]);
+    // The query's own file is a file of the run (registered) for both searches: LOSAT Web's
+    // refusal before either search writes an output.
+    let mut refused = words;
+    refused[13] = "psiblast/q1b_gi.faa";
+    let (result, streams) = run_files_of(&refused, words[2], words[4]);
+    assert_eq!(
+        result.unwrap_err(),
+        "an -out_pssm file 'psiblast/q1b_gi.faa' that is a file of the run's directory (the command \
+         line replaces it; LOSAT Web reads the run's files and writes none of them)"
+    );
+    assert!(files(&streams).is_empty());
+    for stream in [0, 6, 7] {
+        assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
+    }
 }
 
 /// LOSAT's refusal of `-export_search_strategy -` in BLASTP.

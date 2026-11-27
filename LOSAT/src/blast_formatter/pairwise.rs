@@ -1522,9 +1522,11 @@ impl SinkCell<'_> {
     }
 
     /// `keep` of an insertion or (`flushing`) a flush, which in the alignments ends as there.
+    /// Only the run's first failure is NCBI's (its exception ends the run there); a writer that
+    /// writes on after it posts nothing more.
     fn keep_written(&self, result: Result<()>, flushing: bool) -> io::Result<()> {
         match result {
-            Err(error) if self.alignments.get() => {
+            Err(error) if self.alignments.get() && self.failed.borrow().is_none() => {
                 let error = self.sink.borrow_mut().alignments_failed(error, flushing);
                 self.keep(Err(error))
             }

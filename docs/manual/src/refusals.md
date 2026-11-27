@@ -452,16 +452,15 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blast_formatter
 
-`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `6`, `7`, `8`, `9`, `10`, `12` and `20` from archives in ASN.1 text, the tabular formats (`6`, `7`, `10` and `20`, with any field list) for archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`.
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `6`, `7`, `8`, `9`, `10`, `12` and `20` from archives in ASN.1 text, ASN.1 binary or XML, the tabular formats (`6`, `7`, `10` and `20`, with any field list) for archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`.
 
 | Input | What happens |
 | :--- | :--- |
 | `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `11`, `13`, `14`, `15`, `16`, `17` and `18` | Refused, with LOSAT's own error message. |
 | The tabular output formats (`6`, `7`, `10` and `20`) of an archive of a translated search (`blastx`, `tblastn`, `tblastn -in_pssm`, `tblastx`, `rpstblastn`), of queries given as locations, of `-subject` sequences with `BL2SEQ_LEGACY` set in `-outfmt 7`, whose Seq-aligns name a sequence that NCBI BLAST+'s scope may find otherwise (a subject that the database holds under a header with a UTF8String), or whose Seq-aligns or Bioseqs take a form that BLAST+ does not write and whose result NCBI BLAST+ does not decide (each named in the message, such as a subject Bioseq with a BioSource while taxonomy fields are asked for) | Refused, with the case named. |
-| An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
 | A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
 | An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, an element stated as `NULL` in a list, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
-| An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
+| An archive in a form that LOSAT does not read | Refused, with the form named. |
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
 | `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of the mapper | Refused. NCBI's programs write none. |
@@ -540,7 +539,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
   the library and pylosat.
 - The `psiblast` output formats `13` to `16`.
-- `blast_formatter`: the output formats other than `6` to `10`, `12` and `20`, the tabular formats of the translated programs' archives, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
+- `blast_formatter`: the output formats other than `6` to `10`, `12` and `20`, the tabular formats of the translated programs' archives, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers

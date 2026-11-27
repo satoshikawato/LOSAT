@@ -5,6 +5,7 @@
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
+# Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
 noargs	
 h	-h
 help	-help
@@ -223,3 +224,33 @@ of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver q
 of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
 of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
 of7_two_ids	-archive in/two_ids.asn -outfmt 7
+of8_db_bin	-archive in/db.asnb -outfmt 8
+of9_db_bin	-archive in/db.asnb -outfmt 9
+of12_db_bin	-archive in/db.asnb -outfmt 12
+of8_db_xml	-archive in/db.xml -outfmt 8
+of9_db_xml	-archive in/db.xml -outfmt 9
+of12_db_xml	-archive in/db.xml -outfmt 12
+of8_subject_bin	-archive in/bn.asnb -outfmt 8
+of9_subject_bin	-archive in/bn.asnb -outfmt 9
+of12_subject_bin	-archive in/bn.asnb -outfmt 12
+of8_subject_xml	-archive in/bn.xml -outfmt 8
+of9_subject_xml	-archive in/bn.xml -outfmt 9
+of12_subject_xml	-archive in/bn.xml -outfmt 12
+of8_batch_bin	-archive in/batch.asnb -outfmt 8
+of8_batch_xml	-archive in/batch.xml -outfmt 8
+of8_rpsblast_bin	-archive in/rps.asnb -outfmt 8
+of8_rpsblast_xml	-archive in/rps.xml -outfmt 8
+of8_error_object_bin	-archive in/err.asnb -outfmt 8
+of8_error_object_xml	-archive in/err.xml -outfmt 8
+of8_bin_cut1	-archive in/bin_cut1.asnb -outfmt 8
+of8_bin_cut2	-archive in/bin_cut2.asnb -outfmt 8
+of8_bin_plus30	-archive in/bin_plus30.asnb -outfmt 8
+of8_bin_plus00	-archive in/bin_plus00.asnb -outfmt 8
+of8_batch_bin_cut1	-archive in/batch_bin_cut1.asnb -outfmt 8
+of8_xml_cut1	-archive in/xml_cut1.xml -outfmt 8
+of8_xml_cut2	-archive in/xml_cut2.xml -outfmt 8
+of8_xml_cut20	-archive in/xml_cut20.xml -outfmt 8
+of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
+bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
+bad_title_2_xml	-archive in/bad2.xml -outfmt 8
+of8_bom	-archive in/bom.asn -outfmt 8

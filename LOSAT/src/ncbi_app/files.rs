@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 
 use super::args::{arg_message, ArgException};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+pub(crate) use crate::report::ostream::ends_like_sigpipe;
+use crate::report::ostream::{ReportStream, ReportWrite, StreamInserter};
 use crate::report::run_files::{Created, OpenFiles, OpenedFile, Unopened};
 
 /// The exception of a file argument whose stream does not open.
@@ -297,84 +299,99 @@ pub(crate) fn input_lines(bytes: &[u8], platform: LineEnds) -> Vec<&[u8]> {
     }
 }
 
-/// The stream of an `eOutputFile` argument (`AsOutputFile()`): the standard output, or the file,
-/// made or emptied (`OpenFiles::create`: on the file system, or LOSAT Web's file). On
-/// Windows NCBI's stream of a text output (opened without `fBinary`) writes each `\n` as `\r\n`;
-/// LOSAT's programs write their bytes as they are on every platform.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
+// `CNcbiOfstream`, or takes `cout`, without exceptions enabled on it: a failed write sets
+// `badbit` and later writes do nothing)
+/// The stream of an `eOutputFile` argument (`AsOutputFile()`) as NCBI's `ostream` writes to it:
+/// the command line's standard output (`cout`) or the file, made or emptied (`OpenFiles::create`:
+/// on the file system, or LOSAT Web's file), through NCBI's stream (`ReportStream::tool_file`,
+/// the searches' report stream in its mode without an exception mask). Each `write_all` is one
+/// insertion of NCBI's; a writer marks NCBI's flushes and its other insertions through
+/// `ReportWrite` (`CutBuffer`). After a failed write the later writes do nothing and nothing
+/// reports the failure, so the run goes on to its end (NCBI 2.17.0 with `-out /dev/full`:
+/// dustmasker's `interval`, `acclist` and `fasta` writers, blastdbcmd's retrieval, which still
+/// posts the errors of later entries); [`OutputFile::bad`] tells a writer that NCBI's serial
+/// stream would report the failure (`CObjectOStream`), which LOSAT refuses.
+///
+/// A write to a pipe whose reader has closed ends NCBI's process by SIGPIPE outside Windows
+/// (exit status 141, no message; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). The stream
+/// returns that error from NCBI's write that meets it (an insertion, a flush, the tie of a text
+/// on standard error, `ncbi_app::Diag`), and every later write returns it too: the program ends at
+/// once, with exit status 0 and no message ([`ends_like_sigpipe`]). The texts that NCBI wrote
+/// before that write are written. On Windows NCBI's write fails without a signal and is a failed
+/// write like the others.
+///
+/// On Windows NCBI's stream of a text output (opened without `fBinary`) writes each `\n` as
+/// `\r\n`; LOSAT's programs write their bytes as they are on every platform.
 pub(crate) enum OutputFile<'a> {
-    Stdout(&'a mut dyn Write),
-    File(OpenedFile),
+    /// NCBI's stream: the command line's standard output, or a file.
+    Stream(ReportStream),
+    /// The caller's writer of a library run's standard output (`api::run_dustmasker` and the
+    /// others) or LOSAT Web's: each insertion written at once, with NCBI's stream state.
+    Caller(CallerOutput<'a>),
     /// LOSAT's refusal of a name that LOSAT Web does not write (`Created::Refused`), which the
     /// program reports before it writes (`refusal`); every write fails.
     Refused(String),
 }
 
-impl OutputFile<'_> {
-    /// LOSAT's refusal of the file's name, which the program reports in place of its run.
-    pub(crate) fn refusal(&self) -> Option<&str> {
-        match self {
-            OutputFile::Refused(reason) => Some(reason),
-            _ => None,
-        }
-    }
+/// The caller's writer of a library run's standard output (`OutputFile::Caller`) with NCBI's
+/// stream state: after a failed write the later ones do nothing; a closed pipe returns its error
+/// from that write and every later one. When `cut_aware` is set (`ToolLog::Stdout` in a
+/// `Receiver` run, where `-logfile /dev/stdout` shares `out`), NCBI's insertion cuts and flushes
+/// are forwarded to the shared `NcbiBuffer`-backed stdout stream rather than coalesced.
+pub(crate) struct CallerOutput<'a> {
+    out: &'a mut dyn Write,
+    bad: bool,
+    closed: bool,
+    cut_aware: bool,
 }
 
-impl Write for OutputFile<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            OutputFile::Stdout(out) => out.write(buf),
-            OutputFile::File(file) => file.write(buf),
-            OutputFile::Refused(reason) => Err(refused_write(reason)),
+impl CallerOutput<'_> {
+    /// The outcome of a write or a flush of the caller's writer.
+    fn result(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
+        if let Err(error) = outcome {
+            self.bad = true;
+            if ends_like_sigpipe(&error) {
+                self.closed = true;
+                return Err(error);
+            }
         }
+        Ok(())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        match self {
-            OutputFile::Stdout(out) => out.write_all(buf),
-            OutputFile::File(file) => file.write_all(buf),
-            OutputFile::Refused(reason) => Err(refused_write(reason)),
+        if self.closed {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
         }
+        if self.bad {
+            return Ok(());
+        }
+        let outcome = self.out.write_all(buf);
+        self.result(outcome)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            OutputFile::Stdout(out) => out.flush(),
-            OutputFile::File(file) => file.flush(),
-            OutputFile::Refused(_) => Ok(()),
+        if self.closed {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
         }
+        if self.bad {
+            return Ok(());
+        }
+        let outcome = self.out.flush();
+        self.result(outcome)
     }
-}
-
-/// The error of a write to a refused output (`OutputFile::Refused`).
-fn refused_write(reason: &str) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Unsupported, reason.to_string())
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
 // `CNcbiOfstream`, or takes `cout`, without exceptions enabled on it: a failed write sets
 // `badbit` and later writes do nothing)
-/// An output as NCBI's `ostream` writes to it: after a write fails (`badbit`), the later writes
-/// do nothing and nothing reports the failure, so the run goes on to its end (NCBI 2.17.0 with
-/// `-out /dev/full`: dustmasker's `interval`, `acclist` and `fasta` writers, blastdbcmd's
-/// retrieval, which still posts the errors of later entries). [`Ostream::bad`] tells a writer
-/// that NCBI's serial stream would report the failure (`CObjectOStream`), which LOSAT refuses.
-///
-/// A write to a pipe whose reader has closed ends NCBI's process by SIGPIPE outside Windows
-/// (exit status 141, no message; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). LOSAT's
-/// runtime ignores the signal, so [`Ostream::closed`] is set there instead and every later write
-/// returns that error: the program ends at once, with exit status 0 and no message
-/// ([`ends_like_sigpipe`]). On Windows NCBI's write fails without a signal and is a failed
-/// write like the others.
+/// An output as NCBI's `ostream` writes to it (`makembindex` and `dbindex`): after a write fails
+/// (`badbit`), the later writes do nothing and nothing reports the failure; a write to a closed
+/// pipe outside Windows sets [`Ostream::closed`] and returns that error (`ends_like_sigpipe`).
 pub(crate) struct Ostream<'a> {
     inner: &'a mut dyn Write,
     bad: bool,
     closed: bool,
-}
-
-/// Whether the failed write `error` is one that ends NCBI's process by SIGPIPE: a closed pipe,
-/// outside Windows.
-pub(crate) fn ends_like_sigpipe(error: &std::io::Error) -> bool {
-    cfg!(not(windows)) && error.kind() == std::io::ErrorKind::BrokenPipe
 }
 
 impl<'a> Ostream<'a> {
@@ -396,7 +413,6 @@ impl<'a> Ostream<'a> {
         self.closed
     }
 
-    /// The outcome of a write or a flush of the inner stream.
     fn result(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
         if let Err(error) = outcome {
             self.bad = true;
@@ -411,15 +427,6 @@ impl<'a> Ostream<'a> {
     fn closed_pipe() -> std::io::Error {
         std::io::Error::from(std::io::ErrorKind::BrokenPipe)
     }
-}
-
-/// `cerr`'s tie to `cout` for an output buffered over an `Ostream`: before a diagnostic line
-/// NCBI's stream flushes the output (to the file or the pipe), so the two come out in the order
-/// they were written. Flushes `sink`; whether the pipe is closed, which ends the program
-/// before the line (SIGPIPE ends NCBI's process there).
-pub(crate) fn flush_before_diagnostic(sink: &mut std::io::BufWriter<&mut Ostream<'_>>) -> bool {
-    let _ = sink.flush();
-    sink.get_ref().closed()
 }
 
 impl Write for Ostream<'_> {
@@ -443,6 +450,160 @@ impl Write for Ostream<'_> {
             self.result(outcome)?;
         }
         Ok(())
+    }
+}
+
+impl OutputFile<'_> {
+    /// LOSAT's refusal of the file's name, which the program reports in place of its run.
+    pub(crate) fn refusal(&self) -> Option<&str> {
+        match self {
+            OutputFile::Refused(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// Whether a write or a flush has failed (`badbit`), NCBI's writes so far made first; `Err`
+    /// where a write met a closed pipe ([`ends_like_sigpipe`]).
+    pub(crate) fn bad(&self) -> std::io::Result<bool> {
+        match self {
+            OutputFile::Stream(stream) => stream.bad(),
+            OutputFile::Caller(caller) if caller.closed => {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            OutputFile::Caller(caller) => Ok(caller.bad),
+            OutputFile::Refused(_) => Ok(true),
+        }
+    }
+
+    /// Whether a write found the pipe closed where that ends NCBI's process (SIGPIPE).
+    pub(crate) fn closed(&self) -> bool {
+        match self {
+            OutputFile::Stream(stream) => stream.closed(),
+            OutputFile::Caller(caller) => caller.closed,
+            OutputFile::Refused(_) => false,
+        }
+    }
+}
+
+impl Write for OutputFile<'_> {
+    /// One insertion of NCBI's.
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_all(buf)?;
+        Ok(buf.len())
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        match self {
+            OutputFile::Stream(stream) => stream.write_all(buf),
+            OutputFile::Caller(caller) => caller.write_all(buf),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
+        }
+    }
+
+    /// LOSAT's flushes hold on NCBI's stream and on a cut-aware shared stdout (`ToolLog::Stdout`):
+    /// NCBI's are `ReportWrite::ncbi_flush`, and NCBI's writes come before a text on standard
+    /// error (`ncbi_app::Diag`) and at the run's end (`OpenFiles::finish_streams`).
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            OutputFile::Stream(_) | OutputFile::Refused(_) => Ok(()),
+            OutputFile::Caller(caller) if caller.cut_aware => Ok(()),
+            OutputFile::Caller(caller) => caller.flush(),
+        }
+    }
+}
+
+impl ReportWrite for OutputFile<'_> {
+    fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        match self {
+            OutputFile::Stream(stream) => ReportWrite::ncbi_flush(stream),
+            OutputFile::Caller(caller) => caller.flush(),
+            OutputFile::Refused(_) => Ok(()),
+        }
+    }
+
+    fn insert_cut_run(
+        &mut self,
+        report: &[u8],
+        from: usize,
+        cuts: &[(usize, crate::report::ostream::Cut)],
+        to: usize,
+    ) -> std::io::Result<()> {
+        match self {
+            OutputFile::Stream(stream) => stream.insert_cut_run(report, from, cuts, to),
+            OutputFile::Caller(caller) if caller.cut_aware => {
+                let mut at = from;
+                for end in cuts.iter().map(|&(end, _)| end).chain([to]) {
+                    let end = end.max(at);
+                    if end > at {
+                        caller.write_all(&report[at..end])?;
+                    }
+                    at = end;
+                }
+                Ok(())
+            }
+            // The caller's writer takes the run's bytes at once.
+            OutputFile::Caller(caller) => caller.write_all(&report[from..to.max(from)]),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
+        }
+    }
+
+    fn ncbi_room(&self) -> usize {
+        match self {
+            OutputFile::Stream(stream) => stream.ncbi_room(),
+            OutputFile::Caller(caller) if caller.cut_aware => 0,
+            OutputFile::Caller(_) => usize::MAX,
+            OutputFile::Refused(_) => 0,
+        }
+    }
+
+    fn try_with_inserter(
+        &mut self,
+        f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> std::io::Result<bool> {
+        match self {
+            OutputFile::Stream(stream) => stream.try_with_inserter(f),
+            OutputFile::Caller(_) => Ok(false),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
+        }
+    }
+}
+
+/// The error of a write to a refused output (`OutputFile::Refused`).
+fn refused_write(reason: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, reason.to_string())
+}
+
+/// A tool's stream of `opened` (`OpenFiles::create`), or of the command line's standard output
+/// (`None`), kept by the run's files `files` to end it after the run (`OpenFiles::keep_stream`):
+/// on the command line the stream that a text on standard error makes NCBI's writes of first
+/// (`ReportStream::tie_to_process`).
+pub(crate) fn tool_stream(opened: Option<OpenedFile>, files: &OpenFiles) -> ReportStream {
+    let stream = match opened {
+        Some(file) => ReportStream::tool_file(Box::new(file), ""),
+        None => ReportStream::tool_standard_output(""),
+    };
+    if files.command_line() {
+        stream.tie_to_process();
+    }
+    files.keep_stream(stream.share());
+    stream
+}
+
+/// The standard output of a tool's run as NCBI's `cout`: on the command line NCBI's stream
+/// (`tool_stream`), in a library run or LOSAT Web the caller's writer `stdout`.
+pub(crate) fn standard_output_file<'a>(
+    stdout: &'a mut dyn Write,
+    files: &OpenFiles,
+) -> OutputFile<'a> {
+    if files.command_line() {
+        OutputFile::Stream(tool_stream(None, files))
+    } else {
+        OutputFile::Caller(CallerOutput {
+            out: stdout,
+            bad: false,
+            closed: false,
+            cut_aware: files.tool_log_stdout(),
+        })
     }
 }
 
@@ -471,31 +632,59 @@ pub(crate) fn pre_open_output(
         .map_err(|Unopened| not_accessible(name, bytes))
 }
 
+/// The device of an `eOutputFile` argument before NCBI's stream (`open_output_device`): for a
+/// writer that models NCBI's stream itself (blastdbcmd's `-metadata`, whose serializer checks
+/// each write: `writedb::metadata::write_metadata`).
+pub(crate) enum OutputDevice<'a> {
+    /// The standard output: the command line's (`cli::standard_output`), or the caller's writer.
+    Stdout(&'a mut dyn Write),
+    /// The file, made or emptied.
+    File(OpenedFile),
+    /// LOSAT's refusal of a name that LOSAT Web does not write (`Created::Refused`).
+    Refused(String),
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
-/// `AsOutputFile()` of the argument `name` whose value is `value`, the name's bytes: `-` is
-/// `stdout`, the empty name opens nothing, and another name makes or empties the file
-/// (`IOS_BASE::out`, without `fCreatePath`) of the run's files `files` (`OpenFiles::create`: the
-/// file system on the command line and in the library, LOSAT Web's files; a name of the standard
-/// output is `stdout` there). `Err` is NCBI's `eNoFile`, which quotes the bytes.
-pub(crate) fn open_output_file<'a>(
+/// The device of `AsOutputFile()` of the argument `name` whose value is `value`, the name's
+/// bytes: `-` is `stdout`, the empty name opens nothing, and another name makes or empties the
+/// file (`IOS_BASE::out`, without `fCreatePath`) of the run's files `files`
+/// (`OpenFiles::create`: the file system on the command line and in the library, LOSAT Web's
+/// files; a name of the standard output is `stdout` there). `Err` is NCBI's `eNoFile`, which
+/// quotes the bytes.
+pub(crate) fn open_output_device<'a>(
     name: &str,
     value: &OsStr,
     stdout: &'a mut dyn Write,
     files: &OpenFiles,
-) -> Result<OutputFile<'a>, ArgException> {
+) -> Result<OutputDevice<'a>, ArgException> {
     if value == "-" {
-        return Ok(OutputFile::Stdout(stdout));
+        return Ok(OutputDevice::Stdout(stdout));
     }
     let bytes: &[u8] = &crate::utils::os_bytes::os_str_bytes(value);
     if value.is_empty() {
         return Err(not_accessible(name, bytes));
     }
     match files.create(value) {
-        Ok(Created::File(file)) => Ok(OutputFile::File(file)),
-        Ok(Created::Stdout) => Ok(OutputFile::Stdout(stdout)),
-        Ok(Created::Refused(reason)) => Ok(OutputFile::Refused(reason)),
+        Ok(Created::File(file)) => Ok(OutputDevice::File(file)),
+        Ok(Created::Stdout) => Ok(OutputDevice::Stdout(stdout)),
+        Ok(Created::Refused(reason)) => Ok(OutputDevice::Refused(reason)),
         Err(Unopened) => Err(not_accessible(name, bytes)),
     }
+}
+
+/// `AsOutputFile()` of the argument `name` whose value is `value` (`open_output_device`), as
+/// NCBI's stream of it (`OutputFile`).
+pub(crate) fn open_output_file<'a>(
+    name: &str,
+    value: &OsStr,
+    stdout: &'a mut dyn Write,
+    files: &OpenFiles,
+) -> Result<OutputFile<'a>, ArgException> {
+    Ok(match open_output_device(name, value, stdout, files)? {
+        OutputDevice::Stdout(stdout) => standard_output_file(stdout, files),
+        OutputDevice::File(file) => OutputFile::Stream(tool_stream(Some(file), files)),
+        OutputDevice::Refused(reason) => OutputFile::Refused(reason),
+    })
 }
 
 #[cfg(test)]

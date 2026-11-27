@@ -617,6 +617,69 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
         want.extend_from_slice(&plain_out);
         assert_eq!(joined(&calls, STREAM_PRINTED), want, "{extra:?}");
     }
+    // Case 3b: binary `-out - -logfile /dev/stdout` (`d19.t3_stdout_binary`): NCBI's `cout`
+    // buffer holds the 4-byte binary stream prefix while `-logfile /dev/stdout` writes `pass 1`
+    // and `pass 2`, so the log lines precede the binary prefix just as on the CLI.
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-sformat",
+        "binary",
+        "-out",
+        "-",
+    ])
+    .unwrap();
+    let plain_bin = joined(&emitted(), STREAM_PRINTED);
+    assert!(plain_bin.starts_with(&[0, 0, 0, 0]));
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-sformat",
+        "binary",
+        "-out",
+        "-",
+        "-logfile",
+        "/dev/stdout",
+    ])
+    .unwrap();
+    let bin_calls = emitted();
+    assert_eq!(
+        bin_calls.last().unwrap(),
+        &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+    );
+    assert!(joined(&bin_calls, STREAM_DIAGNOSTICS).is_empty());
+    let mut want_bin = b"pass 1\npass 2\n".to_vec();
+    want_bin.extend_from_slice(&plain_bin);
+    assert_eq!(joined(&bin_calls, STREAM_PRINTED), want_bin);
+    // On a missing-input error with `-sformat binary -out - -logfile /dev/stdout`, the buffered
+    // 4-byte prefix flushes at exit after the error posts, matching CLI/NCBI.
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        "no-such-input-d19-bin.fa",
+        "-unit",
+        "5",
+        "-sformat",
+        "binary",
+        "-out",
+        "-",
+        "-logfile",
+        "/dev/stdout",
+    ])
+    .unwrap();
+    let err_bin_calls = emitted();
+    let err_bin_out = joined(&err_bin_calls, STREAM_PRINTED);
+    assert!(err_bin_out.starts_with(b"pass 1\nError:"));
+    assert!(err_bin_out.ends_with(&[0, 0, 0, 0]));
     // Case 4: normalized file names on stream 12 (` run.log` -> `run.log`, `./x.counts` -> `x.counts`,
     // `d19-slash/` -> `d19-slash`).
     let file_names = |calls: &[(u32, Vec<u8>)]| {

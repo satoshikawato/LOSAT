@@ -40,7 +40,11 @@
 // press (a scroll does not change where the element is in the page), nor for an element fixed to the window or to a
 // box that scrolls (position fixed or sticky), which the page's scroll does not move, nor for one that the press may
 // resize (a text box's corner). A scroll of the page's own (AlignmentsView keeping the Range being read in place) waits
-// while a press keeps an element (`pressHeld`), and only then.
+// while a press keeps a control that is in the page (`pressHeld`), and only then. A press on something that is no control (the
+// space between things, a heading's text, a list's scroll bar; a drag that selects text) keeps its element in its place too, and
+// the page's other scrolls go on: when a section comes in above, the element's place moves, the keeping scrolls back by as much
+// first (its observer looks as the document changes), and AlignmentsView's keeping then finds the Range at its place and has
+// nothing to do; when the element does not move (the section comes in below it), AlignmentsView keeps the Range as without a press.
 
 /** The height that `element` has now, without its padding and border unless its box includes them (what min-height sets). */
 function contentHeight(element: HTMLElement): number {
@@ -55,12 +59,20 @@ function contentHeight(element: HTMLElement): number {
 /** How long after its release a press whose click has not come still holds. */
 const UNCLICKED_MS = 1000;
 
+/**
+ * What a press can click: the elements that take the focus by their kind, and those that say by their role that a press on
+ * them acts (a row, a canvas of the plots). Not `[tabindex]`: that also marks boxes that only take the focus from the page's
+ * code (a heading, a list's viewport with its scroll bar, a scrolling text), on which no click is at stake.
+ */
+export const CONTROLS =
+  'a[href], button, input, select, textarea, summary, label, canvas[role="application"], [role="button"], [role="tab"], [role="row"], [role="option"], [role="menuitem"], [role="link"]';
+
 /** The pages in which a press keeps the pressed element in its place now. */
 const keeping = new WeakSet<Document>();
 
 /**
- * Whether a press keeps the pressed element in its place in `page` now: from the press until its click, while the
- * pointer is over the element.
+ * Whether a press keeps a pressed control in its place in `page` now: from the press until its click, while the pointer
+ * is over the control and the control is in the page.
  */
 export function pressHeld(page: Document = document): boolean {
   return keeping.has(page);
@@ -175,13 +187,19 @@ export function holdWhilePressed(
    * for a scroll up past the page's top, space above what it shows, which takes the element down (one inside it). What
    * comes back above the element takes that space back first.
    */
-  const keep = (): void => {
-    if (kept === undefined || view === null) return;
+  const keep = (): boolean => {
+    if (kept === undefined || view === null) return false;
+    // An element that left the page (a placeholder that its content took the place of) is no longer pressed: its place is
+    // gone, and nothing is left to keep.
+    if (!kept.element.isConnected) {
+      unkeep();
+      return false;
+    }
     const now = placeOf(kept.element);
-    if (now === undefined) return;
+    if (now === undefined) return true;
     let moved = now - kept.place;
     // Less than the layout's unit (1/64 px) is no move of the layout, only the arithmetic of a scale.
-    if (Math.abs(moved) < 1 / 64) return;
+    if (Math.abs(moved) < 1 / 64) return true;
     const page = target.scrollingElement ?? target.documentElement;
     // The held element when space above what it shows takes the pressed element down: the pressed element is in it.
     const around = held !== undefined && held !== kept.element && held.contains(kept.element) ? held : undefined;
@@ -213,11 +231,12 @@ export function holdWhilePressed(
     }
     // The styles set here changed the document: that is no change to look at again.
     observer?.takeRecords();
+    return true;
   };
   const observer = view?.MutationObserver === undefined ? undefined : new view.MutationObserver(keep);
   const eachFrame = (): void => {
-    keep();
-    frame = view?.requestAnimationFrame(eachFrame);
+    frame = undefined;
+    if (keep()) frame = view?.requestAnimationFrame(eachFrame);
   };
   /** Stops keeping the pressed element in its place: its size and the browsers' scroll anchoring are as before. */
   const unkeep = (): void => {
@@ -234,8 +253,7 @@ export function holdWhilePressed(
   const follow = (at?: Point): void => {
     if (kept === undefined) return;
     if (at !== undefined) kept.at = at;
-    keep();
-    if (!under(kept.element, kept.at)) unkeep();
+    if (keep() && !under(kept.element, kept.at)) unkeep();
   };
   const release = (): void => {
     clearTimeout(unclicked);
@@ -276,7 +294,9 @@ export function holdWhilePressed(
     const place = on === undefined || !under(on, at) ? undefined : placeOf(on);
     if (on === undefined || place === undefined || observer === undefined) return;
     kept = { element: on, place, pointer: event.pointerId, at };
-    keeping.add(target);
+    // Only a press on a control can be a click that the page's moving loses: a press on the space between things
+    // (a drag that selects text) keeps its element in its place, and the page's other scrolls go on.
+    if (on.closest?.(CONTROLS) != null) keeping.add(target);
     if (on !== held) {
       const size = getComputedStyle(on);
       if (size.width.endsWith('px')) set(on.style, 'min-width', size.width);

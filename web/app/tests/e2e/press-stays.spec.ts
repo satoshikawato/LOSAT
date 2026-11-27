@@ -8,6 +8,7 @@
 // comes, or goes, above the control between the press and the release.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { CONTROLS } from '../../src/ui/press-hold';
 import { chooseRun, openSearch, paste, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(120_000);
@@ -215,3 +216,42 @@ for (const width of WIDTHS) {
     });
   });
 }
+
+// Review r3 of D27, M1 and L1: which presses the page holds for is decided by the selector CONTROLS (press-hold.ts), read
+// in the real page. A press on a heading's text or on a list's scroll bar keeps its element in its place, but is no click
+// at stake: AlignmentsView's own keeping of the Range being read must go on. A press on what a click acts on (buttons,
+// the rows of the tables, the canvases of the plots, the tabs) is held for.
+test('the page holds for a press on a control of the results, and not on a heading or a list’s scroll bar', async ({ page }) => {
+  await form(page, 1280);
+  await submit(page);
+  await started(page);
+  await waitStatus(page, 1, 'completed');
+  /** Whether each element of `selector` (the first one shown) is, or is inside, what CONTROLS names. */
+  const isControl = (selector: string): Promise<boolean> =>
+    page.evaluate(
+      ([selector, controls]) => {
+        const element = [...document.querySelectorAll<HTMLElement>(selector!)].find((each) => each.getClientRects().length > 0);
+        if (element === undefined) throw new Error(`no ${selector} is shown`);
+        return element.closest(controls!) !== null;
+      },
+      [selector, CONTROLS] as const,
+    );
+  const tabs = {
+    hits: page.getByTestId('results-view-hits'),
+    dotplot: page.getByTestId('pane-dotplot'),
+  };
+  await tabs.hits.click();
+  expect(await isControl('[data-testid="graphic-canvas"]'), 'the Graphic Summary’s canvas').toBe(true);
+  expect(await isControl('[data-testid="hsp-list"] [data-testid^="hsp-row-"]'), 'a row of the HSP table').toBe(true);
+  expect(await isControl('[data-testid="hsp-list"]'), 'the HSP table’s viewport, with its scroll bar').toBe(false);
+  await tabs.dotplot.click();
+  expect(await isControl('[data-testid="dotplot-canvas"]'), 'the dot plot’s canvas').toBe(true);
+  // The Alignments are in the Hits view, under its tables.
+  await tabs.hits.click();
+  await expect(page.getByTestId('alignments')).toBeVisible();
+  expect(await isControl('[data-testid="range-label"]'), 'the text of a Range’s heading').toBe(false);
+  expect(await isControl('[data-testid="hsp-list"]'), 'the HSP table’s viewport in the Alignments').toBe(false);
+  expect(await isControl('[data-testid="range-next"]'), 'Next Match').toBe(true);
+  expect(await isControl('[data-testid="alignments-next-subject"]'), 'Next').toBe(true);
+  expect(await isControl('[data-testid="tab-search"]'), 'a tab').toBe(true);
+});

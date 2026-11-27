@@ -4,20 +4,19 @@
 
 use crate::wording::QUERY_OPTIONS_ERROR;
 use std::collections::BTreeSet;
-use std::io::{BufWriter, Write};
 
 use crate::algorithm::common::database::TaxdbRun;
 use crate::blastinput::db_filter::{NO_TAXONOMY_WARNING, TAXONOMY_FILE};
 use crate::ncbi_app::args::{arg_message, Args};
-use crate::ncbi_app::files::{
-    flush_before_diagnostic, input_lines, read_input_file, Cin, LineEnds, Ostream,
-};
+use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, OutputFile};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
+use crate::report::ostream::CutBuffer;
 use crate::seqdb::file::DbFile;
 use crate::seqdb::lmdb_read::ReadError;
 use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
 use crate::seqdb::taxdb::{TaxLookup, TaxNames};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+use crate::utils::decimal::push_decimal;
 
 use super::{database_error, refusal, Diag};
 
@@ -241,8 +240,10 @@ impl TaxFields {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:657-697
-    /// `PrintEntry`: the line of `taxid` with its `names` and its number of sequences.
-    fn line(&self, taxid: i32, names: &LineNames, num_seqs: usize, out: &mut Vec<u8>) {
+    /// `PrintEntry`: the line of `taxid` with its `names` and its number of sequences, NCBI's
+    /// insertions: each separator, each field, the last separator, then a line feed (a string of
+    /// one byte, no flush).
+    fn line(&self, taxid: i32, names: &LineNames, num_seqs: usize, out: &mut CutBuffer) {
         let name = |pick: fn(&TaxNames) -> &[u8]| -> &[u8] {
             match names {
                 LineNames::Named(names) => pick(names),
@@ -250,22 +251,31 @@ impl TaxFields {
                 LineNames::NotAvailable => b"N/A",
             }
         };
+        let mut number = Vec::with_capacity(20);
         for (i, field) in self.fields.iter().enumerate() {
-            out.extend_from_slice(&self.separators[i]);
+            out.insertion(&self.separators[i]);
             match field {
-                Field::TaxId => out.extend_from_slice(taxid.to_string().as_bytes()),
-                Field::SciName => out.extend_from_slice(name(|n| &n.scientific_name)),
-                Field::CommonName => out.extend_from_slice(name(|n| &n.common_name)),
+                Field::TaxId => {
+                    number.clear();
+                    push_decimal(&mut number, i64::from(taxid));
+                    out.insertion(&number);
+                }
+                Field::SciName => out.insertion(name(|n| &n.scientific_name)),
+                Field::CommonName => out.insertion(name(|n| &n.common_name)),
                 // `tax_info` refuses a kingdom past NCBI's mapping of taxdb.btd.
                 Field::SuperKingdom => {
-                    out.extend_from_slice(name(|n| n.super_kingdom.as_deref().unwrap_or_default()))
+                    out.insertion(name(|n| n.super_kingdom.as_deref().unwrap_or_default()))
                 }
-                Field::BlastName => out.extend_from_slice(name(|n| &n.blast_name)),
-                Field::NumSeqs => out.extend_from_slice(num_seqs.to_string().as_bytes()),
+                Field::BlastName => out.insertion(name(|n| &n.blast_name)),
+                Field::NumSeqs => {
+                    number.clear();
+                    push_decimal(&mut number, num_seqs as i64);
+                    out.insertion(&number);
+                }
             }
         }
-        out.extend_from_slice(self.separators.last().map_or(&[][..], Vec::as_slice));
-        out.push(b'\n');
+        out.insertion(self.separators.last().map_or(&[][..], Vec::as_slice));
+        out.insertion(b"\n");
     }
 }
 
@@ -291,7 +301,7 @@ enum LineNames {
 // `endl` of the count, `cerr`'s tie).
 /// `-tax_info` of `db`: the number of its taxids, then a line for each, ascending, to `out`;
 /// the exit status.
-pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
+pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut OutputFile<'_>) -> i32 {
     let fmt = args
         .bytes("outfmt")
         .unwrap_or(std::borrow::Cow::Borrowed(b"%f"));
@@ -314,18 +324,28 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
     };
     let taxdb = TaxdbRun::sequential();
     let need_kingdom = fields.fields.contains(&Field::SuperKingdom);
-    let mut sink = BufWriter::new(out);
-    let _ = writeln!(sink, "# of Tax IDs in Database: {}", tax_ids.len());
-    let mut line = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:706
+    // The text, the number, `endl`; the lines then go out a block at a time (`CutBuffer`), and
+    // each text on standard error comes after NCBI's writes of them (`Diag`): a closed pipe ends
+    // the program there.
+    let mut text = CutBuffer::default();
+    text.insertion(b"# of Tax IDs in Database: ");
+    let mut count = Vec::new();
+    push_decimal(&mut count, tax_ids.len() as i64);
+    text.insertion(&count);
+    text.endl();
     for &taxid in &tax_ids {
         let names = if fields.need_names {
             let mut messages = Vec::new();
             let lookup = taxdb.lookup(db, taxid, &mut messages);
+            if !messages.is_empty() && text.write_to(out).is_err() {
+                return 0;
+            }
             for message in &messages {
-                if flush_before_diagnostic(&mut sink) {
+                diag.err_post(message);
+                if diag.closed() {
                     return 0;
                 }
-                diag.err_post(message);
             }
             // A lookup whose result NCBI reads past its mapping of taxdb.btd is refused where
             // the line writes it: names of no defined result, a kingdom past the mapping. Taxid
@@ -345,7 +365,7 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
                 Ok(TaxLookup::Unnamed) => LineNames::Empty,
                 Ok(TaxLookup::NotInIndex | TaxLookup::PastMapping(_)) => LineNames::NotAvailable,
                 Err(error) => {
-                    if flush_before_diagnostic(&mut sink) {
+                    if text.write_to(out).is_err() {
                         return 0;
                     }
                     return database_error(diag, error);
@@ -358,7 +378,7 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
             match lookup.tax_ids_to_oids(&BTreeSet::from([taxid])) {
                 Ok(oids) => oids.len(),
                 Err(error) => {
-                    if flush_before_diagnostic(&mut sink) {
+                    if text.write_to(out).is_err() {
                         return 0;
                     }
                     return database_error(diag, error);
@@ -367,16 +387,15 @@ pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostre
         } else {
             0
         };
-        line.clear();
-        fields.line(taxid, &names, num_seqs, &mut line);
-        // `out` is the run's `ncbi_app::files::Ostream`: a failed write does nothing, as in
-        // NCBI's stream (no exception is enabled on it); a closed pipe ends the program, where
-        // SIGPIPE ends NCBI's.
-        if sink.write_all(&line).is_err() {
+        fields.line(taxid, &names, num_seqs, &mut text);
+        // `out` is the run's `files::OutputFile`: a failed write does nothing, as in NCBI's
+        // stream (no exception is enabled on it); a closed pipe ends the program, where SIGPIPE
+        // ends NCBI's.
+        if text.bytes.len() >= 1 << 16 && text.write_to(out).is_err() {
             return 0;
         }
     }
-    let _ = sink.flush();
+    let _ = text.write_to(out);
     0
 }
 

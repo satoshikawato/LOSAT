@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_get-request-info>
+            <Blast4-get-request-info-request>
+              <Blast4-get-request-info-request_request-id>Error</Blast4-get-request-info-request_request-id>
+            </Blast4-get-request-info-request>
+          </Blast4-request-body_get-request-info>
+        </Blast4-request-body>
+      </Blast4-request_body>
+    </Blast4-request>
+  </Blast4-archive_request>
+  <Blast4-archive_results>
+    <Blast4-get-search-results-reply></Blast4-get-search-results-reply>
+  </Blast4-archive_results>
+  <Blast4-archive_messages>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero</Blast4-error_message>
+    </Blast4-error>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>Please refer to the BLAST+ user manual.</Blast4-error_message>
+    </Blast4-error>
+  </Blast4-archive_messages>
+</Blast4-archive>

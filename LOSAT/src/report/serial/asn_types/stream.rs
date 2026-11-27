@@ -137,6 +137,7 @@ pub(crate) type XmlStream<R> = ObjectStream<XmlInput<StreamSource<R>>>;
 
 /// The objects of `input`, whose first bytes `first` were already taken from it, which LOSAT's
 /// refusals call by `names`.
+#[cfg(test)]
 pub(crate) fn text_stream<R: IoRead>(input: R, first: &[u8], names: Names) -> TextStream<R> {
     ObjectStream::text(StreamSource::new(input, first), names)
 }

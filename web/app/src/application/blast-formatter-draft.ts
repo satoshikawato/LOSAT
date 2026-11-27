@@ -168,7 +168,7 @@ export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState>
   protected validationArgv(state: BlastFormatterDraftState, extra: readonly string[]): readonly string[] | undefined {
     const argv = this.argvOf(state, extra);
     if (this.archiveInput(state) !== undefined || toolPrintsKind(argv) !== null) return argv;
-    return argv.some((word) => /^-(?:archive|rid)(?:=|$)/.test(word)) ? argv : undefined;
+    return namesArchive(argv) ? argv : undefined;
   }
 
   protected override validationInputs(state: BlastFormatterDraftState): readonly DirectoryFile[] {
@@ -184,6 +184,11 @@ export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState>
       return [{ tool: 'blast_formatter', stage: 'format', argv, directory: this.runDirectoryOf(state, []), prints }];
     }
     const archive = this.archiveInput(state);
+    // Words that name `-archive` (or `-rid`) themselves run as the CLI runs them, by the same rule as the check:
+    // the engine opens the archive from the run directory, or refuses as the CLI does.
+    if (archive === undefined && namesArchive(argv)) {
+      return [{ tool: 'blast_formatter', stage: 'format', argv, directory: this.runDirectoryOf(state, []) }];
+    }
     if (archive === undefined) throw new Error(MISSING_ARCHIVE[state.archiveSource]);
     const file = 'file' in archive ? archive.file : await this.deps.getSessionArchiveFile(archive.runId, archive.name);
     const directory = this.runDirectoryOf(state, [{ name: archive.name, file, origin: archive.origin }]);
@@ -226,6 +231,11 @@ export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState>
             };
     }
   }
+}
+
+/** Whether the words name the archive themselves (`-archive` or `-rid`). */
+function namesArchive(argv: readonly string[]): boolean {
+  return argv.some((word) => /^-(?:archive|rid)(?:=|$)/.test(word));
 }
 
 /** What Run LOSAT says when the chosen source has no archive yet. */

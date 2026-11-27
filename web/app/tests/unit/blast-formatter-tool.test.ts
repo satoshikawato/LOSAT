@@ -193,6 +193,23 @@ describe('BlastFormatterDraft', () => {
     expect(last[1]?.directory?.map((entry) => entry.name)).toEqual(['bn.asn']);
   });
 
+  it('runs words that name -archive themselves from the run directory, as the CLI does', async () => {
+    const { draft, queued, validateTool } = setup();
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    draft.addRunFiles([new File(['Blast4-archive ::= {}'], 'res.asn')]);
+    draft.setExtra('-archive res.asn');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-outfmt', '8', '-archive', 'res.asn']);
+
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.argv).toEqual(['blast_formatter', '-outfmt', '8', '-archive', 'res.asn']);
+    // No archive of the source: the run directory is the files of the run, and the engine opens -archive there.
+    expect(queued[0]!.directory.map((entry) => entry.name)).toEqual(['res.asn']);
+  });
+
   it('checks the argv while the engine is busy, as WindowMasker does', async () => {
     const { draft, validateTool } = setup({ busy: true });
     draft.ensureLoaded();

@@ -103,8 +103,14 @@ pub const TERMINATE_TEXT: &str = "terminate called after throwing an instance of
 /// The post of `~CObjectOStream` whose `Close` flushed the failed report stream of `program`
 /// (`[program]` is the application's name in NCBI's posts).
 pub fn cannot_close_post(program: &str) -> String {
+    cannot_close_post_tagged(&format!("[{program}] "))
+}
+
+/// `cannot_close_post` with the posts' prefix `tag` (empty in blast_formatter's posts, which
+/// name no application).
+pub fn cannot_close_post_tagged(tag: &str) -> String {
     format!(
-        "Error: (802.4) [{program}] [Cannot close serializing output stream] Exception: \
+        "Error: (802.4) {tag}[Cannot close serializing output stream] Exception: \
          basic_ios::clear: iostream error\n"
     )
 }

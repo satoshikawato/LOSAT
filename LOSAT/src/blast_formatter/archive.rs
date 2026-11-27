@@ -730,6 +730,31 @@ impl super::tabular::ReportSink for TabularSink<'_, '_, '_> {
         let _ = stream.take_thrown();
         NativeError::write_failure().into()
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1931
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+    /// The search programs' end of a failed write in the alignments (`ReportStream`'s
+    /// `Site::Alignments`): the vestigial `out2`, an object stream on the report's stream, flushes
+    /// it again in its destructor (while the insertion's exception unwinds, or as its own flush at
+    /// the alignments' end) and posts 802.4 where that flush fails. A file keeps the bytes it could
+    /// not write, so the flush fails again; standard output keeps none (`CoutBuf`), so only the
+    /// alignments' own flush posts there, and where the posts go to `cerr` the post's flush of
+    /// `cout` (the tie) throws inside the post: `std::terminate`. blast_formatter's posts carry
+    /// no application name.
+    fn alignments_failed(&mut self, error: anyhow::Error, flushing: bool) -> anyhow::Error {
+        let tied = self.diag.is_cerr();
+        let (_, is_stdout) = self.output.opened();
+        if is_stdout && !flushing {
+            return error;
+        }
+        if is_stdout && tied {
+            return NativeError::ios_failure_abort().into();
+        }
+        self.diag
+            .write_text(crate::report::ostream::cannot_close_post_tagged("").as_bytes());
+        error
+    }
 }
 
 /// Posts `text` (whole diagnostic lines, none when empty) after the standard output written

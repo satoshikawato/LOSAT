@@ -66,6 +66,9 @@ pub(super) trait ReportSink {
     /// Sets the stream's `badbit` (an insertion of a null `const char*`, the pairwise epilog's
     /// matrix name, `report::ostream::ReportWrite::badbit`), which throws: the run's error.
     fn badbit(&mut self) -> anyhow::Error;
+    /// The run's error of a write that failed in the alignments of outfmt 0-4
+    /// (`report::ostream::Site::Alignments`; `flushing`: at a flush), after NCBI's posts there.
+    fn alignments_failed(&mut self, error: anyhow::Error, flushing: bool) -> anyhow::Error;
 }
 
 /// What the object's report reads besides the archive's search.
@@ -94,8 +97,14 @@ pub(super) struct ObjectInputs<'a> {
 
 /// The refusal of a form that the tabular formats do not write yet.
 fn refused(what: &str) -> anyhow::Error {
+    refused_in(super::refusals::TABULAR_FORMATS, what)
+}
+
+/// The refusal of a form that the formats `format` (`refusals::TABULAR_FORMATS`,
+/// `refusals::PAIRWISE_FORMATS`) do not write yet.
+pub(super) fn refused_in(format: &'static str, what: &str) -> anyhow::Error {
     Refusal::NotCovered {
-        format: super::refusals::TABULAR_FORMATS,
+        format,
         what: what.to_string(),
     }
     .into()
@@ -986,7 +995,8 @@ pub(super) fn print_object(
         Some(0) => false,
         Some(limit) => i64::try_from(seq_aligns).unwrap_or(i64::MAX) <= i64::from(limit),
     };
-    let prefetched = prefetches && prefetch_reads(sets, alignments)?;
+    let prefetched =
+        prefetches && prefetch_reads(sets, alignments, super::refusals::TABULAR_FORMATS)?;
     if prefetched {
         for set in sets {
             for &align in &alignments[set.clone()] {
@@ -1294,6 +1304,7 @@ fn post_row_texts(
 pub(super) fn prefetch_reads(
     sets: &[std::ops::Range<usize>],
     alignments: &[V<'_>],
+    format: &'static str,
 ) -> Result<bool> {
     for set in sets {
         for align in read_set(&alignments[set.clone()], false) {
@@ -1308,7 +1319,12 @@ pub(super) fn prefetch_reads(
                         "segments other than a Dense-seg or Dense-diags",
                     )),
                 });
-            match read.map_err(end_of) {
+            // A form LOSAT does not read is refused in the formats of the run (`format`).
+            let read = read.map_err(|stop| match stop {
+                ReadStop::Unsupported(what) => End::Refusal(refused_in(format, what)),
+                stop => end_of(stop),
+            });
+            match read {
                 Ok(()) => {}
                 Err(End::Ncbi(_)) => return Ok(false),
                 Err(End::Refusal(error)) => return Err(error),

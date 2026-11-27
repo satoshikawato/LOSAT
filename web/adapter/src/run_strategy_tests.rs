@@ -517,6 +517,39 @@ fn a_two_search_run_refuses_a_name_as_the_command_line() {
     }
 }
 
+/// The other search of a run of two searches reads the names of the run's files against the same
+/// run's files as the argv's own search (line RG item F1w-r2, `kept_by_no_one`): a name in the
+/// folder of the query (`outfmt11/`, a folder of the run's files through the registered query) is
+/// a file for both, so the run writes BLASTP's strategy file (`ROWS[1]`, the first test) and
+/// psiblast's `-out_pssm` file, as the command line does; before, the other search read the name
+/// against no registered names, and NCBI's error or a failed write ended the run.
+#[test]
+fn the_other_search_reads_names_against_the_runs_files() {
+    let words = [
+        "psiblast",
+        "-query",
+        "outfmt11/arch_bp_q.faa",
+        "-subject",
+        "outfmt11/arch_bp_s.faa",
+        "-num_descriptions",
+        "3",
+        "-num_alignments",
+        "2",
+        "-out_pssm",
+        "outfmt11/p.asn",
+    ];
+    let groups = {
+        let (program, command, requested) = parse_run(&words).unwrap();
+        search_groups(&outputs(program, &requested), &command)
+    };
+    assert_eq!(groups.len(), 2, "two searches");
+    validate(&words).unwrap();
+    let (result, streams) = run_files_of(&words, words[2], words[4]);
+    result.unwrap();
+    let named: Vec<String> = files(&streams).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(named, ["outfmt11/p.asn"]);
+}
+
 /// LOSAT's refusal of `-export_search_strategy -` in BLASTP.
 const BLASTP_STANDARD_OUTPUT: &str = "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name";
 

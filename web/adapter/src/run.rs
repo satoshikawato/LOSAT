@@ -787,9 +787,26 @@ fn started_command(
         .map(|parsed| Next::Search(Box::new(parsed), strategy))
 }
 
-/// A receiver of the files of a run that keeps none (`validate`, which emits nothing), carrying
-/// the search's registered and read file names so `-logfile` is checked against the run's files.
+/// A receiver of the files of a run that keeps none (`validate`, which emits nothing, and the other
+/// searches of a run, `kept_by_no_one`), carrying the search's registered and read file names so
+/// that `-logfile` and the names of the run's files are read against the run's files.
 struct NoFiles(SearchRunFiles);
+
+/// The files of a search of the run whose files are `run_files` that no one keeps (`search_all`:
+/// a search other than the argv's own), with the run's registered and read names (`NoFiles`), so
+/// that the search reads each name of a file (`-export_search_strategy`, psiblast's `-out_pssm`)
+/// against the same run's files as the argv's own search (line RG item F1w-r2).
+fn kept_by_no_one(run_files: &RunFiles) -> RunFiles {
+    use losat::web_adapter::FileReceiver as _;
+    let names = match run_files {
+        RunFiles::Receiver(receiver) => SearchRunFiles {
+            registered: receiver.registered_files().to_vec(),
+            read: receiver.read_files().to_vec(),
+        },
+        RunFiles::Disk => SearchRunFiles::default(),
+    };
+    RunFiles::Receiver(Arc::new(NoFiles(names)))
+}
 
 impl losat::web_adapter::FileReceiver for NoFiles {
     fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
@@ -2321,7 +2338,8 @@ struct Done {
 /// search writes one of the same name whose bytes no one keeps, so that it reads its records and
 /// refuses the file as the argv's search does. For `psiblast`, PSSM outputs (`-out_pssm`,
 /// `-out_ascii_pssm`) follow the same rule: the argv's own search receives `context.run_files`
-/// (`losat::web_adapter::give_pssm_run_files`), while any other search writes to `NoFiles`. The
+/// (`losat::web_adapter::give_pssm_run_files`), while any other search writes to `NoFiles` with
+/// the run's names (`kept_by_no_one`). The
 /// messages that the command line writes to its standard error for the argv go to `diagnostics`,
 /// and what the other formats' standard error adds to them goes to stream 3 after them
 /// (`CallerSink::add`); for an error that ends the run, `posted` gets the NCBI message that the
@@ -2388,7 +2406,7 @@ fn search_all(
                 let pssm_files = if position == own {
                     run_files.clone()
                 } else {
-                    RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default())))
+                    kept_by_no_one(run_files)
                 };
                 losat::web_adapter::give_pssm_run_files(&mut blastp, pssm_files);
                 command = Commands::Blastp(blastp);
@@ -2399,7 +2417,7 @@ fn search_all(
                 false => losat::web_adapter::open_strategy_file(
                     &command,
                     &words[1..],
-                    &RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default()))),
+                    &kept_by_no_one(run_files),
                 )
                 .map_err(|error| format!("{error:#}"))?,
             };

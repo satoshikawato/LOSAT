@@ -99,9 +99,9 @@ test('-parse_deflines runs: the outputs are the CLI\'s and the results name the 
 
 // -parse_deflines typed in Additional options has the engine read the inputs again, with the other reader (line RG-XT
 // X7-5): until they are read, their blocks and cards keep their place (line WQA's D25, 2026-11-27). Their lines went and
-// came back, so "Run LOSAT" below them moved up some 175 px and back, and a press whose release came while they were
-// read was released beside the button: no run started, and the page said nothing. Here the press starts before the
-// option is typed and is released once the query is read again.
+// came back, so "Run LOSAT" below them moved up (143 px with these inputs) and back, and a press whose release came
+// while they were read was released beside the button: no run started, and the page said nothing. Here the press
+// starts, the option comes in the field, and the press is released once the query is read again.
 test('Run LOSAT stays under a press while -parse_deflines has the inputs read again, and the press starts the run', async ({ page }) => {
   const { program: id, query, subject } = CASES[1];
   await program(page, id);
@@ -111,32 +111,50 @@ test('Run LOSAT stays under a press while -parse_deflines has the inputs read ag
   const button = page.getByTestId('run-losat');
   await button.scrollIntoViewIfNeeded();
   const box = (await button.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(point.x, point.y);
   await page.mouse.down();
-  // The button's top when the press holds, and at each change of an input's state until its click.
-  await page.evaluate(() => {
-    const top = () => document.querySelector('[data-testid="run-losat"]')!.getBoundingClientRect().top;
-    const tops = [top()];
+  // The button's place in the page's layout when the press holds, and at each change of an input's state until its
+  // click: its row's place and its own box in the row. (Its pressed look, scale(0.97), is not in its layout and is not
+  // measured.) And whether the press's point is still on the button.
+  await page.evaluate((at) => {
+    const place = () => {
+      const target = document.querySelector<HTMLElement>('[data-testid="run-losat"]')!;
+      const row = target.parentElement!.getBoundingClientRect();
+      return `row ${row.left},${row.top} button ${target.offsetLeft},${target.offsetTop} ${target.offsetWidth}x${target.offsetHeight}`;
+    };
+    const on = () => document.elementFromPoint(at.x, at.y)?.closest('[data-testid="run-losat"]') !== null;
+    const places = [place()];
+    const hits = [on()];
     const reading = () => document.querySelector('[data-testid="query-source-0"]')?.getAttribute('data-status') === 'indexing';
     let readAgain: () => void = () => undefined;
     const queryReadAgain = new Promise<void>((resolve) => (readAgain = resolve));
     const observer = new MutationObserver(() => {
-      tops.push(top());
+      places.push(place());
+      hits.push(on());
       if (reading()) readAgain();
     });
     observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-status', 'data-check'] });
     window.addEventListener('click', () => observer.disconnect(), { capture: true, once: true });
-    Object.assign(window, { readAgainTest: { tops, queryReadAgain } });
+    Object.assign(window, { readAgainTest: { places, hits, queryReadAgain } });
+  }, point);
+  // The option comes in the field as typed just before the press: not by a focus of the field, which (in Chromium and
+  // Firefox) scrolls the field, far below the button, into view, so that the test itself would move the button.
+  await page.getByTestId('param-extra').evaluate((field: HTMLInputElement) => {
+    field.value = '-parse_deflines';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await page.getByTestId('param-extra').fill('-parse_deflines');
   await page.evaluate(() => (window as unknown as { readAgainTest: { queryReadAgain: Promise<void> } }).readAgainTest.queryReadAgain);
   await page.mouse.up();
-  const tops = await page.evaluate(() => (window as unknown as { readAgainTest: { tops: number[] } }).readAgainTest.tops);
-  expect(tops.length, 'the button\'s top at the press and at the changes of the inputs').toBeGreaterThan(1);
-  expect(new Set(tops), `the button's tops: ${tops.join(', ')}`).toEqual(new Set([tops[0]]));
+  const { places, hits } = await page.evaluate(
+    () => (window as unknown as { readAgainTest: { places: string[]; hits: boolean[] } }).readAgainTest,
+  );
+  expect(places.length, 'the button\'s place at the press and at the changes of the inputs').toBeGreaterThan(1);
+  expect(new Set(places), `the button's places: ${places.join('; ')}`).toEqual(new Set([places[0]]));
+  expect(new Set(hits), 'the press\'s point on the button').toEqual(new Set([true]));
   await waitStatus(page, 1, 'completed');
   await chooseRun(page, 1);
-  await expect(page.getByTestId('run-argv')).toContainText('-parse_deflines');
+  await expect(page.getByTestId('results-run-options')).toContainText('-parse_deflines');
 });
 
 // The CLI reads the subjects first, and two subject records of one id stop it under -parse_deflines

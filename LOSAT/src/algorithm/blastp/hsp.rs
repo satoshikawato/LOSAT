@@ -1109,6 +1109,23 @@ impl<H: HitListHsp> BlastpHitList<H> {
         self.purge();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:196-203
+    /// Ascending subject OID order (empty lists purged): the order in which `BlastHSPStreamRead`
+    /// pops lists closed without `sort_by_score` (`-comp_based_stats 0 -use_sw_tback`).
+    pub(crate) fn sort_by_oid(&mut self) {
+        if self.hsplist_count > 1 {
+            self.hsplist_array[..self.hsplist_count].sort_unstable_by(|a, b| {
+                match (a.hsps.is_empty(), b.hsps.is_empty()) {
+                    (true, true) => Ordering::Equal,
+                    (true, false) => Ordering::Greater,
+                    (false, true) => Ordering::Less,
+                    (false, false) => a.oid.cmp(&b.oid),
+                }
+            });
+        }
+        self.purge();
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857
     // (`core::blast_hspstream`)
     /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`;

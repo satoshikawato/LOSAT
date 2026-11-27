@@ -773,15 +773,30 @@ pub(super) fn sort_preliminary_lists(
     let merge_sort_start = blastp_timing_start(timing.is_some());
     // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
     // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:144-205,678-686
+    // Without composition-based statistics (no score sort callback), `BlastHSPStreamClose` sorts
+    // by descending subject OID and `BlastHSPStreamRead` pops in ascending OID order. For PSSM
+    // `-use_sw_tback` (one query per batch), sorting here puts lists and excluded fetch marks in
+    // that order; round-1 / blastp CBS 0 SW builds its own batch OID stream in `sw_c0`.
     if args.rps_search.is_none() {
+        let by_oid =
+            args.psi_search.is_some() && args.use_sw_tback && !args.comp_based_stats.is_enabled();
         for hit_list_opt in preliminary_hit_lists.iter_mut() {
             if let Some(hit_list) = hit_list_opt.as_mut() {
-                hit_list.sort_by_evalue();
+                if by_oid {
+                    hit_list.sort_by_oid();
+                } else {
+                    hit_list.sort_by_evalue();
+                }
             }
         }
         // The same sort of the compact lists.
         for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-            hit_list.sort_by_evalue();
+            if by_oid {
+                hit_list.sort_by_oid();
+            } else {
+                hit_list.sort_by_evalue();
+            }
         }
     }
     if let Some(timing) = timing {

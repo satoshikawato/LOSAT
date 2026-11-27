@@ -154,13 +154,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("psiblast", "entrez_query", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
-    // blastp's check, `validate_requested_blastp_support`)
-    (
-        "psiblast",
-        "use_sw_tback",
-        Refused::Run("the Smith-Waterman traceback"),
-    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
     // The remote options and `-import_search_strategy` (which the five search programs run, line

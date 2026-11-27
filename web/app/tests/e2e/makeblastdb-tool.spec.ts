@@ -13,20 +13,18 @@
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the screens (empty tab, filled form, finished run, Search after "Use as Database
 // (-db)") at 1280 and 390 px, in the light and the dark colour scheme.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
+import { downloadAll, folderOf, masked, nativeMakeblastdb, ZONE } from './support/native-run';
 import { openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
-// The engine writes the dates of a database in the browser's zone; the native run below uses the same.
-const ZONE = 'Asia/Tokyo';
+// The engine writes the dates of a database in the browser's zone; the native runs use the same (support/native-run.ts).
 test.use({ timezoneId: ZONE });
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
@@ -132,36 +130,6 @@ async function expectLayout(page: Page, panel: string, viewport: { readonly widt
   expect(report.overflow, `horizontal scroll at ${viewport.width}px`).toBeLessThanOrEqual(1);
   expect(report.alone, `"?" alone on a line at ${viewport.width}px`).toEqual([]);
   expect(report.cut, `cut-off labels at ${viewport.width}px`).toEqual([]);
-}
-
-/** The names and bytes of the files in a tar archive (ustar, with pax `path` records). */
-function untar(bytes: Buffer): Map<string, Buffer> {
-  const files = new Map<string, Buffer>();
-  let at = 0;
-  let paxPath: string | undefined;
-  while (at + 512 <= bytes.length) {
-    const header = bytes.subarray(at, at + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const field = (from: number, length: number) => header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
-    const size = Number.parseInt(field(124, 12).trim(), 8);
-    const type = String.fromCharCode(header[156]!);
-    const body = bytes.subarray(at + 512, at + 512 + size);
-    if (type === 'x') {
-      paxPath = /\d+ path=(.*)\n/.exec(body.toString('utf8'))?.[1];
-    } else {
-      const prefix = field(345, 155);
-      const name = paxPath ?? (prefix === '' ? field(0, 100) : `${prefix}/${field(0, 100)}`);
-      files.set(name, Buffer.from(body));
-      paxPath = undefined;
-    }
-    at += 512 + Math.ceil(size / 512) * 512;
-  }
-  return files;
-}
-
-async function downloadAll(page: Page): Promise<{ readonly name: string; readonly files: Map<string, Buffer> }> {
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('tool-made-files-download-all').click()]);
-  return { name: download.suggestedFilename(), files: untar(readFileSync((await download.path())!)) };
 }
 
 /** Runs the makeblastdb form as run `run` and waits until the run's view shows it finished. */
@@ -286,53 +254,6 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
 });
 
 // --- the real engine, against the native command line ----------------------------------------------------------------
-
-/** The files under `folder`, by their paths in it. */
-function treeOf(folder: string, prefix = ''): Map<string, Buffer> {
-  const files = new Map<string, Buffer>();
-  for (const name of readdirSync(join(folder, prefix)).sort()) {
-    const path = prefix === '' ? name : `${prefix}/${name}`;
-    if (statSync(join(folder, path)).isDirectory()) for (const [inner, bytes] of treeOf(folder, path)) files.set(inner, bytes);
-    else files.set(path, readFileSync(join(folder, path)));
-  }
-  return files;
-}
-
-function folderOf(files: ReadonlyMap<string, Buffer>): string {
-  const folder = mkdtempSync(join(process.env['TMPDIR'] ?? tmpdir(), 'losat-mk-tab-'));
-  for (const [name, bytes] of files) {
-    mkdirSync(dirname(join(folder, name)), { recursive: true });
-    writeFileSync(join(folder, name), bytes);
-  }
-  return folder;
-}
-
-/** The bytes with the seconds of makeblastdb's times (MM/DD/YYYY HH:MM:SS) and its elapsed time masked. */
-function withoutSeconds(bytes: Buffer): string {
-  return bytes
-    .toString('latin1')
-    .replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/g, '$1:##')
-    .replace(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):\d{2}/g, '$1:##')
-    .replace(/( sequences? in )[0-9.e+-]+( seconds)/g, '$1#$2');
-}
-
-const masked = (files: ReadonlyMap<string, Buffer>) =>
-  [...files].map(([name, bytes]) => `${name} ${createHash('sha256').update(withoutSeconds(bytes), 'latin1').digest('hex')}`).sort();
-
-/** The files that the native makeblastdb made from `inputs` (in a folder of them, in the browser's zone), by name. */
-function nativeMakeblastdb(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>): Map<string, Buffer> {
-  const folder = folderOf(inputs);
-  try {
-    const run = spawnSync(NATIVE!, argv, { cwd: folder, env: { ...process.env, TZ: ZONE }, maxBuffer: 1 << 28 });
-    if (run.status !== 0) throw new Error(`native ${argv.join(' ')} exited ${run.status}: ${run.stderr.toString()}`);
-    const place = (bytes: Buffer) => Buffer.from(bytes.toString('latin1').split(folder).join('/work'), 'latin1');
-    const made = new Map<string, Buffer>();
-    for (const [name, bytes] of treeOf(folder)) if (!inputs.has(name)) made.set(name, place(bytes));
-    return made;
-  } finally {
-    rmSync(folder, { recursive: true, force: true });
-  }
-}
 
 /** The native search's outfmt `format` in a folder of `files` (the database that the browser made, and the query). */
 function nativeSearch(argv: readonly string[], files: ReadonlyMap<string, Buffer>, format: 0 | 6): string {

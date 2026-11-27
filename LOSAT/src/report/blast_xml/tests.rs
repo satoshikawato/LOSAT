@@ -789,6 +789,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
                 query_gencode: None,
                 db_gencode: None,
                 program_type: None,
+                query_dropped: false,
             },
         );
         let error = document

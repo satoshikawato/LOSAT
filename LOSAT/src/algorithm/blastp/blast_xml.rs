@@ -63,6 +63,11 @@ pub(crate) struct BlastpXml<'a> {
     /// Under `-parse_deflines`, the run's scopes of the call's queries: how NCBI shows each
     /// query's result (`query_batch::QueryScopesFrom::xml_show`).
     pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
+    /// psiblast's round after the query's first (`psi_round`): its result joins the held report
+    /// of the query's rounds before (`XmlQuery::joins_held`), as NCBI's accumulated results of
+    /// one Seq-id (blast_format.cpp:2362-2389; the XML2 and JSON documents of an iterative
+    /// search hold each query's report, `Xml2Run::holds_back`).
+    pub later_round: bool,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -99,21 +104,33 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 .any(|hsp_list| !hsp_list.hsps.is_empty())
         })
     };
-    let texts = names::query_texts(
-        program,
-        &xml.queries.records[..reports],
-        true,
-        &xml.messages,
-        has_hits,
-        |q_idx| {
-            crate::blastinput::query_batch::names_unshown_in(
-                xml.query_scopes,
-                reports,
-                holds_back,
-                q_idx,
-            )
-        },
-    )?;
+    // A query that NCBI's formatter dropped from its scope is named by its Seq-loc's id, with no
+    // title generated (`StructuredXml::drops_queries`).
+    let texts = if document.drops_queries() {
+        xml.queries.records[..reports]
+            .iter()
+            .enumerate()
+            .map(|(q_idx, record)| {
+                names::dropped_query_text(record, &xml.messages[q_idx], has_hits(q_idx))
+            })
+            .collect()
+    } else {
+        names::query_texts(
+            program,
+            &xml.queries.records[..reports],
+            true,
+            &xml.messages,
+            has_hits,
+            |q_idx| {
+                crate::blastinput::query_batch::names_unshown_in(
+                    xml.query_scopes,
+                    reports,
+                    holds_back,
+                    q_idx,
+                )
+            },
+        )?
+    };
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);
@@ -168,7 +185,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             message: texts[q_idx].message.as_deref(),
             searched: xml.searched[q_idx],
             masks: &xml.masks[q_idx],
-            joins_held: show.joins_held,
+            joins_held: show.joins_held || xml.later_round,
         };
         let hit_rows: &[PairwiseHit] = match hit_list {
             Some(_) => rows.query(q_idx)?,
@@ -285,10 +302,14 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         buf.clear();
     }
     if xml.epilog {
-        document.finish(&mut buf)?;
-        crate::report::query_warnings::write_document_posts(
+        // A held report that fails at the epilog (`CaughtException`) is posted before the
+        // document's end (`write_document_end`).
+        let written = document.finish(&mut buf);
+        crate::report::query_warnings::write_document_end(
+            written,
             &buf,
-            document.take_posts(),
+            document,
+            xml.run.app,
             writer,
             warnings,
         )?;

@@ -378,7 +378,7 @@ fn psi_archive(
 /// The BLAST XML, XML2 and JSON branches of `CBlastFormat::x_PrintStructuredReport`.
 pub(super) fn write_xml(
     view: &ReportView<'_>,
-    outfmt: BlastpReport,
+    (outfmt, format_index): (BlastpReport, usize),
     format: &mut FormatOutput<'_>,
     warnings: &mut Option<QueryWarnings<'_>>,
     side_sink: &Option<SideFileSink>,
@@ -645,6 +645,7 @@ pub(super) fn write_xml(
             .as_ref()
             .and_then(|search| search.query_other_coding),
         query_scopes: reports.query_scopes,
+        later_round: reports.psi_round.is_some_and(|io| io.state.number() > 1),
     };
     // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
     // reads their letters query by query and formats them serially, so a window of
@@ -665,46 +666,21 @@ pub(super) fn write_xml(
             warnings.as_mut(),
         )?,
         Some(kind) => {
-            // gap costs only for a gapped search, `cbs` when the composition-based
-            // statistics are on (blastxml2_format.cpp:531-546).
-            let params = crate::report::blast_xml2::Xml2Run {
-                target: if database.is_some() {
-                    crate::report::blast_xml2::Xml2Target::Database
-                } else {
-                    crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
-                },
-                subject_names: if database.is_some() {
-                    None
-                } else {
-                    crate::report::blast_xml2::subject_names(
-                        subject_records.iter().map(FastaRecord::believed),
-                    )
-                },
-                gapped: !args.ungapped,
-                cbs: match args.comp_based_stats.mode {
-                    BlastpCompositionMode::NoCompositionBasedStats => 0,
-                    BlastpCompositionMode::CompositionBasedStats => 1,
-                    BlastpCompositionMode::CompositionMatrixAdjust => 2,
-                    BlastpCompositionMode::ForceFullMatrixAdjust => 3,
-                },
-                query_gencode: None,
-                db_gencode: None,
-                // psiblast is an iterative search (`ProgramType::is_iterative`; its XML2 and
-                // JSON documents are refused, `psiblast::args::writes_outfmt`).
-                program_type: args.app.program_type(),
-            };
+            // A psiblast round's query is its run's: a FASTA query, or the PSSM's of `-in_pssm`
+            // and `-in_msa` (a later round searches a PSSM of either, `PsiRoundIo::fasta_query`).
+            let fasta_queries = reports
+                .psi_round
+                .map_or(args.psi_search.is_none(), |io| io.fasta_query);
             let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
                 kind,
-                params,
+                blastp_xml2_run(args, database.is_some(), subject_records, fasta_queries),
                 args.out.as_deref(),
                 side_sink.as_ref(),
             );
-            // EXPERIMENT (LOSAT_X_BPQBLOCK): a block continues the document
-            // of the blocks before it and hands its state on.
-            if let Some(carry) = reports.x_xml2_carry {
-                document
-                    .document_mut()
-                    .resume(std::mem::take(&mut *carry.lock().expect("the carry")));
+            // A psiblast round, and a block of EXPERIMENT (LOSAT_X_BPQBLOCK), continues the
+            // document of the calls before it and hands its state on (`Xml2Carries`).
+            if let Some(carries) = reports.xml2_carries {
+                document.document_mut().resume(carries.take(format_index));
             }
             blast_xml::write_blastp_xml(
                 &xml,
@@ -714,12 +690,98 @@ pub(super) fn write_xml(
                 &mut writer,
                 warnings.as_mut(),
             )?;
-            if let Some(carry) = reports.x_xml2_carry {
-                *carry.lock().expect("the carry") = document.document_mut().take_carry();
+            if let Some(carries) = reports.xml2_carries {
+                carries.put(format_index, document.document_mut().take_carry());
             }
         }
     }
     // Flushed when written, as the other reports are.
+    writer.flush()?;
+    Ok(())
+}
+
+/// What the XML2 and JSON documents of blastp's, psiblast's and rpsblast's run need beyond outfmt
+/// 5's (`blast_xml2::Xml2Run`): the search's target (a `database`, else the `-subject` records
+/// `subject_records`), the gap costs of a gapped search, `cbs` when the composition-based
+/// statistics are on (blastxml2_format.cpp:531-546), psiblast's iterative search
+/// (`ProgramType::is_iterative`), and whether NCBI's formatter dropped its queries
+/// (`blast_xml2::queries_dropped`; `fasta_queries`: not the PSSM's query of `-in_pssm` or
+/// `-in_msa`).
+pub(super) fn blastp_xml2_run(
+    args: &ResolvedBlastpArgs,
+    database: bool,
+    subject_records: &[FastaRecord],
+    fasta_queries: bool,
+) -> crate::report::blast_xml2::Xml2Run {
+    let program_type = args.app.program_type();
+    crate::report::blast_xml2::Xml2Run {
+        target: if database {
+            crate::report::blast_xml2::Xml2Target::Database
+        } else {
+            crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
+        },
+        subject_names: if database {
+            None
+        } else {
+            crate::report::blast_xml2::subject_names(
+                subject_records.iter().map(FastaRecord::believed),
+            )
+        },
+        gapped: !args.ungapped,
+        cbs: match args.comp_based_stats.mode {
+            BlastpCompositionMode::NoCompositionBasedStats => 0,
+            BlastpCompositionMode::CompositionBasedStats => 1,
+            BlastpCompositionMode::CompositionMatrixAdjust => 2,
+            BlastpCompositionMode::ForceFullMatrixAdjust => 3,
+        },
+        query_gencode: None,
+        db_gencode: None,
+        program_type,
+        query_dropped: crate::report::blast_xml2::queries_dropped(
+            !database,
+            program_type.is_some_and(crate::report::record::ProgramType::is_iterative),
+            fasta_queries,
+        ),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:562
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+/// The end of psiblast's XML2 or JSON document of kind `kind` after the last round of its last
+/// query (`PrintEpilog`): the held report of that query's rounds (`carry`, the state that the
+/// rounds' calls handed on, `Xml2Carries`), then the document's end, with the posts of the held
+/// report on the run's diagnostics (`write_document_end`). `params` is the run's
+/// (`blastp_xml2_run`).
+pub(super) fn write_xml2_round_end(
+    args: &ResolvedBlastpArgs,
+    (kind, params): (
+        crate::report::blast_xml2::Xml2Kind,
+        crate::report::blast_xml2::Xml2Run,
+    ),
+    carry: crate::report::blast_xml2::Xml2Carry,
+    format: &mut FormatOutput<'_>,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<()> {
+    let side_sink = format.sink.side_files().cloned();
+    let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
+        kind,
+        params,
+        args.out.as_deref(),
+        side_sink.as_ref(),
+    );
+    document.document_mut().resume(carry);
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+    let mut buf = Vec::new();
+    let written = crate::report::blast_xml::StructuredXml::finish(&mut document, &mut buf);
+    let mut warnings = QueryWarnings::of_posts(&[], args.archive.as_ref(), diagnostics);
+    crate::report::query_warnings::write_document_end(
+        written,
+        &buf,
+        &mut document,
+        args.app.ncbi_name(),
+        &mut writer,
+        Some(&mut warnings),
+    )?;
     writer.flush()?;
     Ok(())
 }

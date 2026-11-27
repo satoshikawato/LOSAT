@@ -479,7 +479,7 @@ impl PsiblastArgs {
         if ReportFormat::from_number(choice.number).is_some() {
             // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), formats
             // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
-            // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
+            // Without a pattern: `writes_outfmt` (0..=16, 18, 20).
             let allowed = if phi {
                 matches!(choice.number, 0 | 5..=12 | 20)
             } else {
@@ -500,10 +500,11 @@ impl PsiblastArgs {
 /// Whether LOSAT's psiblast writes the output format `number` for its queries (FASTA, `-in_pssm`
 /// and `-in_msa`, at any `-num_iterations`, `-db` and `-subject`): the one rule of the command
 /// line's refusal (`PsiblastArgs::check_outfmt`). NCBI writes every round through the formatter of
-/// the format (`WriteArchive`, or `PrintOneResultSet` with the round's number); LOSAT writes all
-/// but the XML2 and JSON documents of outfmt 13 to 16 (item PS15b-2 of line PS, its second part).
+/// the format (`WriteArchive`, or `PrintOneResultSet` with the round's number); LOSAT writes each
+/// of them (the XML2 and JSON documents of outfmt 13 to 16 hold a query's rounds as NCBI's
+/// formatter does, `blast_xml2::Xml2Carries`).
 pub(crate) fn writes_outfmt(number: i32) -> bool {
-    matches!(number, 0..=12 | 18 | 20)
+    matches!(number, 0..=16 | 18 | 20)
 }
 
 #[cfg(test)]

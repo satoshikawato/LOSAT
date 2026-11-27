@@ -74,6 +74,7 @@ fn a_round_may_make_a_pssm_only_where_a_round_follows_or_the_last_is_saved() {
             save_last: plan.save_last,
             request: plan.request,
             query_id: None,
+            fasta_query: true,
             outcome: std::sync::Mutex::new(None),
         }
     };

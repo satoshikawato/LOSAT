@@ -2266,19 +2266,18 @@ fn a_pssm_query_is_the_command_lines() {
     let (stdout, _) = case.cli(&pssm, &["-out_ascii_pssm", cli_file.to_str().unwrap()], "6");
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
-    // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0 to 12, 18 and 20 (`in_pssm::check_in_pssm_options`; the XML2 and JSON documents
-    // are the second part of item PS15b-2), whatever the order of the formats.
+    // Each format is written as the command line writes it alone: psiblast's `-in_pssm` writes
+    // the XML2 and JSON documents (item PS15b-4 of line PS) with the other formats, whatever the
+    // order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
     for formats in [&["6", "16"][..], &["16", "6"], &["0", "15"]] {
-        let error =
-            run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("is not supported by LOSAT's PSIBLAST yet"),
-            "{formats:?}: {error}"
-        );
+        let outcome =
+            run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap();
+        assert_eq!(outcome.reports.len(), formats.len(), "{formats:?}");
+        for (report, format) in outcome.reports.iter().zip(formats) {
+            let (stdout, _) = PSSM_CASES[1].cli(&pssm, &[], format);
+            assert!(report.bytes == stdout, "{formats:?}: outfmt {format}");
+        }
     }
     let outcome = run_collect(
         &search,

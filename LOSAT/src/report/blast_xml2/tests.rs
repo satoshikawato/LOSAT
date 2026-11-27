@@ -156,6 +156,7 @@ fn params(target: Xml2Target) -> Xml2Run {
         query_gencode: None,
         db_gencode: None,
         program_type: None,
+        query_dropped: false,
     }
 }
 

@@ -336,6 +336,15 @@ pub trait StructuredXml {
         false
     }
 
+    /// Whether NCBI's formatter has dropped the queries from its scope when the document's reports
+    /// are made (`blast_xml2::Xml2Run::query_dropped`), so that a query's report names it by its
+    /// Seq-loc's id without a title (`names::dropped_query_text`) and reads none of its
+    /// alignments' rows (`HspSink::reads_alignment`). BLAST XML writes each report at once, with
+    /// the query in the scope.
+    fn drops_queries(&self) -> bool {
+        false
+    }
+
     /// Takes the place of the report of the last query of a run that stops, which the document
     /// holds back and never writes (`holds_back`): that report is not made, and `out` gets what
     /// the document writes when it arrives (the report held before it, unless the query's result

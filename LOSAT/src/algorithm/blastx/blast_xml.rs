@@ -1413,6 +1413,7 @@ pub(super) fn xml2_writer(
         query_gencode: Some(i32::from(options.query_gencode)),
         db_gencode: None,
         program_type: options.program_type(),
+        query_dropped: false,
     };
     let delayed = params.holds_back();
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)

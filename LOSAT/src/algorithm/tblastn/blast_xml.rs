@@ -355,6 +355,8 @@ pub(super) fn prepare(
         db_gencode: Some(values.db_gencode),
         // PSI-TBLASTN is an iterative search (`ProgramType::is_iterative`): one round.
         program_type: super::in_pssm::program_type(values.pssm),
+        // The PSSM's query of `-in_pssm` stays in NCBI's scope (`queries_dropped`).
+        query_dropped: false,
     };
     Ok(PreparedXml {
         values,

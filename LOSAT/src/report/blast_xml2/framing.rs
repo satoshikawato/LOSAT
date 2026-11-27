@@ -216,14 +216,17 @@ pub fn prolog_bytes(kind: Xml2Kind) -> Vec<u8> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:579-612
-/// What the held report of a `-subject` run keeps for the results that join it
-/// (`XmlQuery::joins_held`, `Xml2Writer`): where its last `Search` ends, the id, title and length
-/// that its first `Search` shows and the masks that it lists and applies (NCBI's report shows
-/// every `Search` with its query `m_Query` and the masks of its first result), and whether its
-/// stream threw (no later `Search` is written). The buffers are reused from report to report.
+/// What the held report of a `-subject` or iterative run keeps for the results that join it
+/// (`XmlQuery::joins_held`, `Xml2Writer`): where its last `Search` ends (its last `Iteration`, of
+/// an iterative database search), how many results it holds (`count`, which numbers the next
+/// `Iteration`), the id, title and length that its first `Search` shows and the masks that it
+/// lists and applies (NCBI's report shows every `Search` with its query `m_Query` and the masks
+/// of its first result), and whether its stream threw (no later `Search` is written). The
+/// buffers are reused from report to report.
 #[derive(Clone, Debug, Default)]
 pub struct HeldSearches {
     pub(super) end: usize,
+    pub(super) count: i32,
     pub(super) id: Vec<u8>,
     pub(super) title: Vec<u8>,
     pub(super) len: i32,
@@ -293,8 +296,9 @@ impl Xml2Document<RunSideFiles> {
 }
 
 /// The framing state that one report call hands to the next when a run's reports are written by
-/// several calls (the BLASTP block search, `x_query_blocks.rs`): the count of reports written, whether
-/// the start of the document has been written, and the held report of a `-subject` run.
+/// several calls (psiblast's rounds, each a call of its own, `blastp::blast_engine::psi_round`; the
+/// BLASTP block search, `x_query_blocks.rs`): the count of reports written, whether the start of
+/// the document has been written, and the held report of a `-subject` or iterative run.
 #[derive(Default)]
 pub struct Xml2Carry {
     written: u32,
@@ -304,6 +308,41 @@ pub struct Xml2Carry {
     has_pending: bool,
     pending_failure: Option<crate::ncbi_exception::NcbiException>,
     held: HeldSearches,
+}
+
+/// The framing states of a run's output formats (`Xml2Carry`, by the format's place in the run's
+/// outputs), which the run's report calls hand on: a call's document of an XML2 or JSON format
+/// takes the state of its format (`take`) and puts it back after its reports (`put`).
+#[derive(Default)]
+pub struct Xml2Carries {
+    carries: std::sync::Mutex<Vec<Xml2Carry>>,
+}
+
+impl Xml2Carries {
+    /// The state that the calls before handed on for the format at `format`, leaving a new one
+    /// (a run's first call gets a new one).
+    pub fn take(&self, format: usize) -> Xml2Carry {
+        let mut carries = self
+            .carries
+            .lock()
+            .expect("the carries of the run's formats");
+        carries
+            .get_mut(format)
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// Hands the state `carry` of the format at `format` on to the next call.
+    pub fn put(&self, format: usize, carry: Xml2Carry) {
+        let mut carries = self
+            .carries
+            .lock()
+            .expect("the carries of the run's formats");
+        if carries.len() <= format {
+            carries.resize_with(format + 1, Xml2Carry::default);
+        }
+        carries[format] = carry;
+    }
 }
 
 impl<F: SideFiles> Xml2Document<F> {

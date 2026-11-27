@@ -6754,7 +6754,7 @@ fn search(
             epilog,
             x_prolog: true,
             x_queries_before: 0,
-            x_xml2_carry: None,
+            xml2_carries: None,
             last_call: true,
             psi_round: None,
             stopped_pssms: Some(&stopped),
@@ -6933,7 +6933,7 @@ fn search(
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state that the blocks of an outfmt 13 to 16
         // run hand on (such a run has one output, `x_query_block_plan`).
-        let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
+        let x_xml2_carries = crate::report::blast_xml2::Xml2Carries::default();
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
@@ -7167,9 +7167,9 @@ fn search(
                                 epilog: epilog && index + 1 == blocks.len(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
-                                x_xml2_carry: x_kinds
+                                xml2_carries: x_kinds
                                     .contains(&XBlockReport::Xml2)
-                                    .then_some(&x_xml2_carry),
+                                    .then_some(&x_xml2_carries),
                                 last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 stopped_pssms: None,
@@ -8968,7 +8968,7 @@ fn reports_then_engine_error(
         epilog: false,
         x_prolog: reports.x_prolog,
         x_queries_before: reports.x_queries_before,
-        x_xml2_carry: reports.x_xml2_carry,
+        xml2_carries: reports.xml2_carries,
         // The engine error follows this report and ends the run: it is the run's last report
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
@@ -9024,10 +9024,12 @@ struct BlastpReports<'a> {
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state of an outfmt 13 to 16 run that the
-    /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
-    /// report; `None` outside the block search).
-    x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// The framing states of the run's outfmt 13 to 16 formats that its report calls hand on (the
+    /// count of reports, the start of the document, the held report of a `-subject` or psiblast
+    /// run; `blast_xml2::Xml2Carries`, by the format's place in the outputs): psiblast's rounds
+    /// (`psi_round`) and, EXPERIMENT (LOSAT_X_BPQBLOCK), the blocks of the block search; `None`
+    /// for a call that writes the run's whole document.
+    xml2_carries: Option<&'a crate::report::blast_xml2::Xml2Carries>,
     /// Whether this call is the run's last report call, so that without the epilog the run stops
     /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
     /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (whose
@@ -9077,7 +9079,7 @@ impl<'a> BlastpReports<'a> {
             epilog: false,
             x_prolog,
             x_queries_before: 0,
-            x_xml2_carry: None,
+            xml2_carries: None,
             last_call: false,
             psi_round: None,
             stopped_pssms: None,
@@ -11449,6 +11451,7 @@ fn run_call(
             format,
             (&mut warnings, &mut probe, &pairwise_shown, &side_sink),
             (&first_context, &batch_spans, &query_stats, &rows_of),
+            format_index,
         );
         // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
         // the formats after it are written then.
@@ -11570,6 +11573,7 @@ fn write_format_report(
         &impl Fn() -> Vec<crate::report::blast_xml::XmlStats>,
         &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     ),
+    format_index: usize,
 ) -> Result<()> {
     match outfmt {
         _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
@@ -11600,7 +11604,7 @@ fn write_format_report(
         }
         BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
             report_view,
-            outfmt,
+            (outfmt, format_index),
             format,
             warnings,
             side_sink,

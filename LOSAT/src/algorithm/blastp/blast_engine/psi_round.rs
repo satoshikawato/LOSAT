@@ -256,6 +256,9 @@ fn run_queries(
     };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
+    // The XML2 and JSON documents of the run's formats, which every round's call continues: NCBI's
+    // formatter holds a query's report across its rounds (`Xml2Carries`).
+    let xml2_carries = crate::report::blast_xml2::Xml2Carries::default();
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
@@ -457,6 +460,7 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.query_seq_loc_id().cloned()),
+                fasta_query: args.psi_search.is_none(),
                 outcome: std::sync::Mutex::new(None),
             };
             // The library's records of the round (`FormatObserver::round_begin`): the call's hit
@@ -488,7 +492,7 @@ fn run_queries(
                     // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
                     // each round's `Iteration` after them and writes its header with the first.
                     x_queries_before: calls,
-                    x_xml2_carry: None,
+                    xml2_carries: Some(&xml2_carries),
                     last_call: false,
                     psi_round: Some(&io),
                     stopped_pssms: None,
@@ -607,7 +611,18 @@ fn run_queries(
         }
     }
     if epilog {
-        write_round_epilogs(args, subject_source, subject_label, outputs, calls)?;
+        let ends = RoundEnds {
+            rounds: calls,
+            xml2_carries: &xml2_carries,
+            xml_fails_at_end: super::blastp_xml_failing_query(
+                args,
+                outputs,
+                subject_source.database().is_some(),
+                batches.query_scopes.as_ref(),
+            )
+            .is_some_and(|failure| failure.fails_at_end(batches.searched_done)),
+        };
+        write_round_epilogs(args, subject_source, subject_label, outputs, &ends)?;
     }
     Ok(())
 }
@@ -805,18 +820,33 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     Ok(())
 }
 
+/// What the epilogs after the last round need of the rounds (`write_round_epilogs`).
+struct RoundEnds<'a> {
+    /// The rounds formatted (`m_QueriesFormatted`).
+    rounds: usize,
+    /// The XML2 and JSON documents of the run's formats, as the rounds' calls left them.
+    xml2_carries: &'a crate::report::blast_xml2::Xml2Carries,
+    /// Whether the held report of the XML2 and JSON documents fails at the end for a matrix name
+    /// that NCBI's XML does not know (`XmlFailingQuery::fails_at_end`: no query of the run made
+    /// the report fail before).
+    xml_fails_at_end: bool,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238 (cited at
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
 /// The epilog of each report after the last round: outfmt 0's (also that of the query-anchored
 /// reports 1 to 4), outfmt 7's `# BLAST processed R queries` (R the rounds formatted,
-/// `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt 6, 8 to 12, 18 and 20.
+/// `m_QueriesFormatted`), BLAST XML's end, the held report and end of the XML2 and JSON documents
+/// (`write_xml2_round_end`; NCBI's error there for a matrix name its XML does not know), nothing
+/// for outfmt 6, 8 to 12, 18 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    rounds: usize,
+    ends: &RoundEnds<'_>,
 ) -> Result<()> {
+    let rounds = ends.rounds;
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
         .database()
@@ -825,7 +855,7 @@ fn write_round_epilogs(
         Some(database) => database.taxdb_found(),
         None => args.subject_taxdb_found,
     };
-    for format in outputs.formats.iter_mut() {
+    for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::super::tabular::write_tabular_round_epilog(
@@ -862,6 +892,36 @@ fn write_round_epilogs(
                 let mut writer = format.sink.open()?;
                 writeln!(writer, "# BLAST processed {rounds} queries")?;
                 writer.flush()?;
+                continue;
+            }
+            number @ 13..=16 => {
+                // A format that failed alone writes nothing more (`FormatRefusal`).
+                if format.refusal.refused() {
+                    continue;
+                }
+                let kind = crate::blastinput::app::ReportFormat::from_number(number)
+                    .and_then(crate::report::blast_xml2::Xml2Kind::of)
+                    .expect("outfmt 13 to 16 are the XML2 and JSON documents");
+                let carry = ends.xml2_carries.take(format_index);
+                let ended = if ends.xml_fails_at_end {
+                    Err(crate::report::blast_xml::matrix::unsupported_score_matrix())
+                } else {
+                    let database = subject_source.database().is_some();
+                    let params = super::report_write::blastp_xml2_run(
+                        args,
+                        database,
+                        subject_source.fasta_records(),
+                        args.psi_search.is_none(),
+                    );
+                    super::report_write::write_xml2_round_end(
+                        args,
+                        (kind, params),
+                        carry,
+                        format,
+                        &mut *outputs.diagnostics,
+                    )
+                };
+                format.refusal.check(ended)?;
                 continue;
             }
             _ => continue,

@@ -169,7 +169,7 @@
 //!   the `searched` flag of the query's batch, a batch property, and blocks are whole batches).
 //!   The framing state that outlives a report (the count of documents written, whether the start
 //!   was written, the held document) moves from block to block (`Xml2Carry`, taken from a block's
-//!   document and put into the next block's, `BlastpReports::x_xml2_carry`); the epilog flag is
+//!   document and put into the next block's, `BlastpReports::xml2_carries`); the epilog flag is
 //!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
 //!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
 //!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats

@@ -259,6 +259,10 @@ pub(crate) struct PsiRoundIo {
     /// The Seq-id of the next PSSM's query: the PSSM query's of `-in_pssm`, `None` for a FASTA
     /// query (`Query_<n>`).
     pub(crate) query_id: Option<crate::seqid::ParsedSeqId>,
+    /// Whether the query is a FASTA query (`-query`), not the PSSM's of `-in_pssm` or `-in_msa`:
+    /// NCBI's loop drops it from the scope after its rounds, before its XML2 and JSON report is
+    /// made (`blast_xml2::queries_dropped`).
+    pub(crate) fasta_query: bool,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 

@@ -156,11 +156,15 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   stops where the crash cuts it, which its heap and the environment move (the same official 2.17.0 binary
   wrote 349 bytes of db.x2g.bx.of.p0127.nd0.1 when it was frozen and 17 in later runs): no expectation.
   `freeze` stops on such a run before it writes a file (`refuse_signal`); the row takes its stdout from a near
-  row, or has empty stdout cells where LOSAT writes nothing before it refuses. A rejection row whose `covers` cell
-  has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the refusal) must be
-  NCBI's stderr of the row's own command up to its exception report (`Error: NCBI C++ Exception:`), which
-  `freeze` runs and writes as <row_id>.err with `stderr_sha256` (`ncbi_stderr`; a run without that report
-  stops it).
+  row, or has empty stdout cells where LOSAT writes nothing before it refuses. A rejection row whose `covers`
+  cell has a part ` | ncbi-first: N bytes` expects the first N bytes of NCBI's run of its own command, the
+  bytes before a value that NCBI's run leaves undetermined (line RG-KB item 18b: the uninitialised `staxid`
+  of a query's first row, a different number in each run, which LOSAT refuses after the bytes before it);
+  `freeze` keeps only those N bytes (`own_cut`), and stops where NCBI wrote fewer. A rejection row whose
+  `covers` cell has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the
+  refusal) must be NCBI's stderr of the row's own command up to its exception report
+  (`Error: NCBI C++ Exception:`), which `freeze` runs and writes as <row_id>.err with `stderr_sha256`
+  (`ncbi_stderr`; a run without that report stops it).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -713,6 +717,19 @@ def near_row(row: dict[str, str]) -> tuple[str, int | None] | None:
         return words[0], int(words[2])
     raise SystemExit(f"{row.get('row_id')}: 'ncbi-near: {rest.split(' | ')[0]}' is neither "
                      "'ncbi-near: ROW_ID' nor 'ncbi-near: ROW_ID first N bytes'")
+
+
+def own_cut(row: dict[str, str]) -> int | None:
+    """The N of a ` | ncbi-first: N bytes` part of the covers cell: a rejection row whose stdout is the first N bytes
+    of NCBI's run of its own command (the bytes before a value that NCBI leaves undetermined); None without it."""
+    for part in row["covers"].split(" | ")[1:]:
+        words = part.split()
+        if words[:1] != ["ncbi-first:"]:
+            continue
+        if len(words) == 3 and words[1].isdecimal() and words[2] == "bytes":
+            return int(words[1])
+        raise SystemExit(f"{row.get('row_id')}: '{part.strip()}' is not 'ncbi-first: N bytes'")
+    return None
 
 
 def near_row_id(row: dict[str, str]) -> str | None:
@@ -1283,6 +1300,11 @@ def freeze(args: argparse.Namespace) -> int:
                 print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstderr before the exception={len(err)}")
             if own_stdout:
                 out = frozen_stdout(row, run.stdout)
+                cut = own_cut(row)
+                if cut is not None:
+                    if cut > len(out):
+                        raise SystemExit(f"{row['row_id']}: NCBI wrote {len(out)} bytes, fewer than its first {cut}")
+                    out = out[:cut]
                 (FROZEN / f"{row['row_id']}.out").write_bytes(out)
                 row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
                 print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")

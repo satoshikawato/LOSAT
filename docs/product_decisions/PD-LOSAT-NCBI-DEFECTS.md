@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.122
+- Version: 1.123
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -986,7 +986,13 @@
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
-  then 1.118, then 1.120, then 1.121)
+  then 1.118, then 1.120, then 1.121);
+  1.123 2026-11-27 (rule 2's explicit rejection of a reported database sequence whose Seq-align
+  id NCBI's scope finds as the generated id `lcl|Query_N` of a query of its batch, or the id of a
+  PSSM query, widened from outfmt 1 to 4 of five programs to every format that shows that query
+  in its place in all eight search programs, and its display id to outfmt 0: 153 outputs that
+  differed from NCBI's without a refusal and 12 where NCBI throws, line RG item X7-1, decisions
+  XT-X7-1a to XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -5231,12 +5237,23 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
 - A reported sequence with the id, or the display id of its description line (outfmt 0 to 4 of
   BLASTP, PSIBLAST and RPSBLAST, 1 to 4 of BLASTN and TBLASTN since version 1.28, of BLASTX and
   TBLASTX since version 1.39), of a query read with `-parse_deflines` in the query batch that
-  reports it (with outfmt 5, in any batch), and in outfmt 1 to 4 of BLASTP, BLASTN, BLASTX, TBLASTN
-  and TBLASTX with the id or display id `lcl|Query_N` of a query read without it (TBLASTN's merge
-  then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's and
-  TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
-  `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
-  id (its second lookup, by the display id, the query's title in that line).
+  reports it (with outfmt 5, in any batch), and with the id `lcl|Query_N` of a query read without
+  it (any letter case) or the id of a PSSM query (`-in_pssm`) in the formats that show that query
+  in its place (version 1.123, line RG item X7-1, which widened outfmt 1 to 4 of BLASTP, BLASTN,
+  BLASTX, TBLASTN and TBLASTX to every program with `-db`, `rpsblast` and `rpstblastn` included):
+  as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
+  the run, also the id of a later batch's query, which NCBI then searches as the database
+  sequence, probe `b1.bp.q2x.f5`), in the tables (outfmt 6, 7, 10 and 20) whose fields show what
+  NCBI finds by that id (its ids, titles, length or letters; the default fields outside BLASTN),
+  in the organism report (outfmt 18) of a sequence with a taxid that the taxonomy database names,
+  and in psiblast's rounds that make the next PSSM; as the display id in outfmt 0 to 4 (TBLASTN's
+  merge then reads the protein query's letters as nucleotides, probe `tn.t3b.d.qid.f1`; BLASTX's
+  and TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
+  `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`, as BLASTX's and RPSTBLASTN's tables of a field of the
+  alignment): NCBI shows the query's title and letters for the id (its second lookup, by the
+  display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM
+  (17), the tables of fields that read nothing of the sequence and the organism report of a
+  sequence without such a taxid are NCBI's bytes.
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
   cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with

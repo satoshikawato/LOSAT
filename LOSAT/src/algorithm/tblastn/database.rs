@@ -1040,6 +1040,22 @@ pub(super) fn parsed_shown(
         .iter()
         .any(|format| (0..=4).contains(&super::stage_e_report::format_number(format.outfmt)));
     crate::algorithm::common::database::ParsedShown {
+        table_identities: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && crate::report::tabular::prints_identities(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+        }),
+        light_length: formats.iter().any(|format| {
+            matches!(
+                super::stage_e_report::format_number(format.outfmt),
+                6 | 7 | 10 | 20
+            ) && super::tabular::tabular_spec(format.outfmt)
+                .as_ref()
+                .is_some_and(crate::report::tabular::TabularSpec::light_length)
+        }),
         stops_at_failed_lookup: formats.iter().any(|format| {
             matches!(
                 super::stage_e_report::format_number(format.outfmt),
@@ -1349,7 +1365,11 @@ pub(super) fn reported_subjects(
     // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
+    // The holders whose records the writers write for subjects (`shared::ShownHolders`).
+    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
     for (rank, &ordinal) in ordinals.iter().enumerate() {
+        // The sequence whose letters and length the reports read: the subject's, or its holder's.
+        let mut read_ordinal = ordinal;
         let header = titles.get(&ordinal).with_context(|| {
             format!(
                 "database sequence {} has no title read",
@@ -1374,15 +1394,43 @@ pub(super) fn reported_subjects(
             ReportedHeader::Parsed(subject) => {
                 let taxdb =
                     shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                let shown_bioseq = if loads.writes_shown_records(ordinal as usize) {
+                    holders.shown(
+                        &loads,
+                        ordinal as usize,
+                        (ordinal, subject),
+                        |holder| titled(holder as usize),
+                        (shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?, true),
+                        (shown.light_length, seen_all.contains(&ordinal)),
+                    )?
+                } else {
+                    None
+                };
+                let (subject, checked, load) = match &shown_bioseq {
+                    Some(bioseq) => {
+                        holders.other_letters((ordinal, subject), bioseq, shown.table_identities, || {
+                            let letters = |ordinal| {
+                                database
+                                    .db
+                                    .nucleotide_iupac(ordinal)
+                                    .map_err(|error| shared::database_error(error, PROGRAM))
+                            };
+                            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
+                        })?;
+                        read_ordinal = bioseq.ordinal();
+                        (&bioseq.record, read_ordinal, crate::report::db_subject::HitLoad::Loaded)
+                    }
+                    None => (subject, ordinal, loads.load(ordinal as usize)),
+                };
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
                     reads.shown(shown, ordinal),
-                    loads.load(ordinal as usize),
+                    load,
                     false,
                     taxdb,
-                    ordinal,
-                    seen_all.contains(&ordinal),
+                    checked,
+                    shown_bioseq.is_none() && seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {
@@ -1407,16 +1455,16 @@ pub(super) fn reported_subjects(
             let SubjectLetters::Packed(stores) = stores else {
                 unreachable!("a -db search holds its sequences")
             };
-            stores.get(ordinal as usize).with_context(|| {
+            stores.get(read_ordinal as usize).with_context(|| {
                 format!(
                     "database sequence {} was not read",
-                    database.db.oid(ordinal)
+                    database.db.oid(read_ordinal)
                 )
             })
         };
         lengths.push(if letters {
             let store = match stores {
-                SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+                SubjectLetters::Stream(stream) => stream.read(read_ordinal as usize)?,
                 _ => stored()?.clone(),
             };
             let length = store.len();
@@ -1424,7 +1472,7 @@ pub(super) fn reported_subjects(
             length
         } else {
             match stores {
-                SubjectLetters::Stream(stream) => stream.read_length(ordinal as usize)?,
+                SubjectLetters::Stream(stream) => stream.read_length(read_ordinal as usize)?,
                 _ => stored()?.len(),
             }
         });

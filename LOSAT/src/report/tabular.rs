@@ -312,6 +312,21 @@ pub fn reads_subject(spec: Option<&TabularSpec>, program: crate::blastinput::app
     spec.is_none_or(|spec| spec.reads_subject(program))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1006-1020
+/// Whether a tabular report of `spec` (`None`: the default fields) prints identities (`nident`,
+/// `pident`, `mismatch`) without its rows, which NCBI counts on the letters of the subject's Bioseq
+/// and LOSAT's protein and translated programs on the search's (`common::database::ShownHolders::
+/// other_letters`).
+pub fn prints_identities(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(|spec| {
+        spec.has_any(&[
+            TabularField::NumIdentical,
+            TabularField::PercentIdentical,
+            TabularField::Mismatches,
+        ])
+    })
+}
+
 /// [`TabularSpec::writes_rows`] of a tabular report of `spec`, `None` for the default fields:
 /// the one rule by which the programs make (and refuse) the tabular subject ids of a report.
 pub fn writes_rows(spec: Option<&TabularSpec>) -> bool {
@@ -578,6 +593,14 @@ impl TabularSpec {
             SubjectAccession,
             SubjectAccessionVersion,
         ])
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898
+    /// Whether a row writes `slen` without reading the subject's Bioseq (none of the fields of
+    /// [`TabularSpec::reads_subject_bioseq`]): NCBI then asks the scope for the length by the
+    /// Seq-align id (`sequence::GetLength`), apart from the Bioseq's lookup.
+    pub fn light_length(&self) -> bool {
+        self.has(SubjectLength) && !self.reads_subject_bioseq()
     }
 
     /// Whether NCBI's formatter opens its alignment block for a row whose Seq-align counts

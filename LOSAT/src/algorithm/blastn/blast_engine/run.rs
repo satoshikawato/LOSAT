@@ -6247,7 +6247,7 @@ fn write_custom_tabular(
     let (lengths, taxonomy) = match (report.database_ordinals, report.database_reader) {
         (Some(ordinals), Some(database)) => (
             if spec.has(crate::report::tabular::TabularField::SubjectLength) {
-                database.sam_lengths(ordinals)?
+                database.tabular_lengths(ordinals, report.database_parsed)?
             } else {
                 Vec::new()
             },

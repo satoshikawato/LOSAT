@@ -1092,6 +1092,19 @@ pub(crate) fn parsed_shown(
 ) -> ParsedShown {
     let pairwise = formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
+        table_identities: formats.iter().any(|format| {
+            format.is_tabular()
+                && format.tabular_spec().is_none_or(|spec| {
+                    spec.kind != crate::report::tabular::TabularKind::TaxReport
+                        && crate::report::tabular::prints_identities(Some(spec))
+                })
+        }),
+        light_length: formats.iter().any(|format| {
+            format.is_tabular()
+                && format
+                    .tabular_spec()
+                    .is_some_and(crate::report::tabular::TabularSpec::light_length)
+        }),
         tabular: formats.iter().any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: formats.iter().any(|format| {
             format.is_tabular()
@@ -1206,7 +1219,15 @@ pub(crate) fn reported_subjects(
     let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     let mut sources = Vec::new();
+    // The holders whose records the writers write for subjects (`shared::ShownHolders`).
+    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
+    let titled = |ordinal: u32| match titles.get(&ordinal) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+        _ => None,
+    };
     for (rank, &ordinal) in ordinals.iter().enumerate() {
+        // The sequence whose letters and length the reports read: the subject's, or its holder's.
+        let mut read_ordinal = ordinal;
         let header = titles.get(&ordinal).with_context(|| {
             format!(
                 "database sequence {} has no title read",
@@ -1232,15 +1253,43 @@ pub(crate) fn reported_subjects(
                 // Whether `taxdb.bti` is on the search path, looked up at the first sequence
                 // with parsed Seq-ids that outfmt 0 shows (once for the run, `taxdb_found`).
                 let taxdb = shown.pairwise && database.taxdb_found();
+                let shown_bioseq = if loads.writes_shown_records(ordinal as usize) {
+                    holders.shown(
+                        &loads,
+                        ordinal as usize,
+                        (ordinal, subject),
+                        titled,
+                        (shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?, true),
+                        (shown.light_length, seen_all.contains(&ordinal)),
+                    )?
+                } else {
+                    None
+                };
+                let (subject, checked, load) = match &shown_bioseq {
+                    Some(bioseq) => {
+                        holders.other_letters((ordinal, subject), bioseq, shown.table_identities, || {
+                            let letters = |ordinal| {
+                                database
+                                    .db
+                                    .nucleotide_iupac(ordinal)
+                                    .map_err(|error| shared::database_error(error, PROGRAM))
+                            };
+                            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
+                        })?;
+                        read_ordinal = bioseq.ordinal();
+                        (&bioseq.record, read_ordinal, crate::report::db_subject::HitLoad::Loaded)
+                    }
+                    None => (subject, ordinal, loads.load(ordinal as usize)),
+                };
                 shared::check_reported_parsed(
                     &database.db,
                     subject,
                     reads.shown(shown, ordinal),
-                    loads.load(ordinal as usize),
+                    load,
                     false,
                     taxdb,
-                    ordinal,
-                    seen_all.contains(&ordinal),
+                    checked,
+                    shown_bioseq.is_none() && seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {
@@ -1252,19 +1301,19 @@ pub(crate) fn reported_subjects(
         };
         lengths.push(match stores {
             Some(stores) => {
-                let store = stores.get(&ordinal).with_context(|| {
+                let store = stores.get(&read_ordinal).with_context(|| {
                     format!(
                         "database sequence {} was not read",
-                        database.db.oid(ordinal)
+                        database.db.oid(read_ordinal)
                     )
                 })?;
                 kept.push(store.clone());
                 u32::try_from(store.shown.len()).expect("a database sequence's length fits Int4")
             }
-            None => *read_lengths.get(&ordinal).with_context(|| {
+            None => *read_lengths.get(&read_ordinal).with_context(|| {
                 format!(
                     "database sequence {} was not read",
-                    database.db.oid(ordinal)
+                    database.db.oid(read_ordinal)
                 )
             })?,
         });

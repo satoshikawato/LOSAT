@@ -552,6 +552,56 @@ impl BatchTitles {
     }
 }
 
+/// The records of the holders that the reports of the batch `batches` write for its subjects
+/// (`shared::ShownHolders::shown`; `parsed`: the batch's subjects with parsed Seq-ids by ordinal
+/// id, `loads` by ordinal id), by ordinal id: LOSAT refuses a holder of other letters where a
+/// table prints identities (`shown.0`, `ShownHolders::other_letters`: BLASTX counts them on the
+/// search's letters), and a table's `slen` without the Bioseq (`shown.1`).
+fn shown_records(
+    database: &BlastxDatabase,
+    subjects: Subjects<'_>,
+    batches: &[BatchResults],
+    parsed: &BTreeMap<usize, Arc<ParsedSubject>>,
+    loads: &HitLoads,
+    (table_identities, light_length): (bool, bool),
+) -> Result<BTreeMap<usize, crate::report::shown_bioseq::ShownBioseq>> {
+    let mut records = BTreeMap::new();
+    if !loads.writes_any_shown() {
+        return Ok(records);
+    }
+    let holders = shared::ShownHolders::new(&database.db, true, database.program);
+    let mut ends: BTreeMap<usize, usize> = BTreeMap::new();
+    for list in batches
+        .iter()
+        .flat_map(|batch| &batch.queries)
+        .flatten()
+    {
+        let end = ends.entry(list.oid).or_default();
+        for hsp in &list.hsps {
+            *end = (*end).max(usize::try_from(hsp.seqalign_ends().1).unwrap_or(0));
+        }
+    }
+    for (&oid, subject) in parsed {
+        let ordinal = u32::try_from(oid)?;
+        let Some(bioseq) = holders.shown(
+            loads,
+            oid,
+            (ordinal, subject),
+            |holder| parsed.get(&(holder as usize)).map(Arc::as_ref),
+            (ends.get(&oid).copied().unwrap_or(0), false),
+            (light_length, false),
+        )?
+        else {
+            continue;
+        };
+        holders.other_letters((ordinal, subject), &bioseq, table_identities, || {
+            Ok(subjects.read_encoded(oid)? == subjects.read_encoded(bioseq.ordinal() as usize)?)
+        })?;
+        records.insert(oid, bioseq);
+    }
+    Ok(records)
+}
+
 /// What one query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, by the key
 /// that `lists` names the subjects by, an ordinal id or a rank (`QueryGroup::read_order` of the
 /// rows' hits as the writer reads them, `reading`: each list's HSPs that the reports show in the
@@ -742,7 +792,9 @@ impl ReportedSubjects {
     /// tables' rows, the taxonomy reads and the run's record of the loads, `note_loaded`, take that
     /// one answer), with how a pairwise report reads the subjects (`pairwise_read_order`): the
     /// batch's reports come after the loads of the record (the batches before and the calls
-    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`).
+    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`). `shown`: whether
+    /// a table prints identities and whether it writes `slen` without the subject's Bioseq, which
+    /// decide whether the reports write the record of a holder (`shown_records`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -765,6 +817,7 @@ impl ReportedSubjects {
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
         ),
+        shown: (bool, bool),
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -897,6 +950,12 @@ impl ReportedSubjects {
         // The formats that read the subject's Bioseq; the Seq-annots and the archive write its
         // Seq-align id alone.
         let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
+        // The holders' records that the reports write for subjects (`shared::ShownHolders`).
+        let shown_records = if reports {
+            shown_records(database, subjects, batches, &parsed, &loads, shown)?
+        } else {
+            BTreeMap::new()
+        };
         let mut reported = ReportedSubjects {
             resolves_subjects: reads || prefetched,
             checks_handle_loads: reports && (reads || prefetched),
@@ -915,12 +974,22 @@ impl ReportedSubjects {
                     database.program,
                 )?;
             }
-            if let Some(subject) = parsed.get(&oid) {
+            let shown_record = shown_records.get(&oid);
+            // The letters and the title of the holder whose record the reports write.
+            let read_oid = shown_record.map_or(oid, |bioseq| bioseq.ordinal() as usize);
+            let title = shown_record.map_or(title, |bioseq| {
+                Arc::from(bioseq.record.first_title())
+            });
+            if let Some(subject) = shown_record.map(|bioseq| &bioseq.record).or(parsed.get(&oid)) {
+                let load = match shown_record {
+                    Some(_) => crate::report::db_subject::HitLoad::Loaded,
+                    None => loads.load(oid),
+                };
                 if reports && reads {
                     // `handle_load_refusal` is checked in `check_handle_loads` after
                     // `refuse_ids_of_queries` has populated `seen`.
                     subject
-                        .fetched_with_scope(taxonomy, loads.load(oid), true)
+                        .fetched_with_scope(taxonomy, load, true)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -932,7 +1001,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
-                        loads.load(oid),
+                        load,
                         ordinal,
                         subject.load_throws(),
                         database.program,
@@ -1012,7 +1081,7 @@ impl ReportedSubjects {
                         Some([accession.clone(), accession]);
                 }
             }
-            let encoded = subjects.read_encoded(oid)?;
+            let encoded = subjects.read_encoded(read_oid)?;
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
             let db_oid = database.db.oid(ordinal);

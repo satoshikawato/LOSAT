@@ -3085,6 +3085,20 @@ impl ListedTitles<'_> {
             .collect()
     }
 
+    /// The holders' records `shown` (by rank, `check_parsed_reports`) in the places of their
+    /// subjects among the subjects with parsed Seq-ids `parsed` (a `ListedTitles`'): every writer
+    /// reads a subject's record there (report::shown_bioseq).
+    pub(super) fn show_holders(
+        parsed: &mut [Option<Arc<ParsedSubject>>],
+        shown: &[(usize, crate::report::shown_bioseq::ShownBioseq)],
+    ) {
+        for (rank, bioseq) in shown {
+            if let Some(place) = parsed.get_mut(*rank) {
+                *place = Some(Arc::clone(&bioseq.record));
+            }
+        }
+    }
+
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
@@ -3112,23 +3126,28 @@ impl ListedTitles<'_> {
     /// writes the subjects' taxids or their names (13 to 16, a table of taxonomy fields).
     /// `hit_lists` are in the order of the reports. `loads`: what the reports do at each
     /// subject's `Hit` (`hit_loads`, the one answer: a `Hit` that throws, a subject that no
-    /// report loads, one for which NCBI's places give another sequence).
+    /// report loads, one for which NCBI's places give another sequence). Returns, by rank, the
+    /// records of the holders that the reports write for subjects (`shown_record`), whose own
+    /// checks are made here; `light_length`: a table writes `slen` without the subject's Bioseq.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_parsed_reports(
         &self,
-        _database: Option<&BlastpDatabase>,
+        database: Option<&BlastpDatabase>,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
         taxonomy: bool,
         loads: &HitLoads,
-        words: crate::report::tabular::PrintedIds,
-    ) -> Result<()> {
+        (words, light_length): (crate::report::tabular::PrintedIds, bool),
+    ) -> Result<Vec<(usize, crate::report::shown_bioseq::ShownBioseq)>> {
+        let mut shown_records = Vec::new();
         if self.parsed.is_empty() {
-            return Ok(());
+            return Ok(shown_records);
         }
         if fetched {
             let seen = self.seen();
+            let holders = database
+                .map(|database| shared::ShownHolders::new(database.seqdb(), true, self.program));
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
                     let ordinal = self.listed.ordinals[rank];
@@ -3148,8 +3167,26 @@ impl ListedTitles<'_> {
                                 }),
                             ordinal,
                         );
+                    let shown = match &holders {
+                        Some(holders) if loads.writes_shown_records(rank) => self.shown_record(
+                            holders,
+                            loads,
+                            (rank, subject),
+                            (light_length, seen_by_scope),
+                        )?,
+                        _ => None,
+                    };
+                    // The holder's record is checked as the subject's own (`HitLoad::Loaded`).
+                    let (subject, load, seen_by_scope) = match &shown {
+                        Some(bioseq) => (
+                            bioseq.record.as_ref(),
+                            crate::report::db_subject::HitLoad::Loaded,
+                            false,
+                        ),
+                        None => (subject, loads.load(rank), seen_by_scope),
+                    };
                     subject
-                        .fetched_with_scope(taxonomy, loads.load(rank), seen_by_scope)
+                        .fetched_with_scope(taxonomy, load, seen_by_scope)
                         .map_err(|reason| {
                             shared::parsed_refusal(self.oids.oid(ordinal), &reason, self.program)
                         })?;
@@ -3160,6 +3197,9 @@ impl ListedTitles<'_> {
                             self.program,
                         )
                     })?;
+                    if let Some(bioseq) = shown {
+                        shown_records.push((rank, bioseq));
+                    }
                 }
             }
         }
@@ -3181,7 +3221,43 @@ impl ListedTitles<'_> {
                 )?;
             }
         }
-        Ok(())
+        Ok(shown_records)
+    }
+
+    /// The record of the holder that the reports write for the subject of rank `rank` (with the
+    /// record `subject`) where its loads give one (`shared::ShownHolders::shown`; `flags`: a
+    /// table's light `slen`, a query's scope that finds the subject): the holder's record of
+    /// this call, by its rank. BLASTP's reports count and show the subject's own letters (the
+    /// recount and the rows, `recount_shown_identities`, read them before the loads are known),
+    /// so a holder of other letters is LOSAT's refusal (`ShownHolders::other_letters`).
+    fn shown_record(
+        &self,
+        holders: &shared::ShownHolders<'_>,
+        loads: &HitLoads,
+        (rank, subject): (usize, &ParsedSubject),
+        flags: (bool, bool),
+    ) -> Result<Option<crate::report::shown_bioseq::ShownBioseq>> {
+        let ordinal = self.listed.ordinals[rank];
+        let holder_record = |holder: u32| {
+            let rank = self.listed.ordinals.binary_search(&holder).ok()?;
+            self.parsed_subject(rank)
+        };
+        let Some(bioseq) =
+            holders.shown(loads, rank, (ordinal, subject), holder_record, (0, false), flags)?
+        else {
+            return Ok(None);
+        };
+        holders.other_letters((ordinal, subject), &bioseq, true, || {
+            let letters = |ordinal| {
+                holders
+                    .db()
+                    .read_sequence(ordinal)
+                    .map(|block| block.protein(0).to_vec())
+                    .map_err(|error| shared::database_error(error, self.program))
+            };
+            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
+        })?;
+        Ok(Some(bioseq))
     }
 
     /// What the XML2 and JSON reports of the final hit lists `hit_lists` (in the order of the

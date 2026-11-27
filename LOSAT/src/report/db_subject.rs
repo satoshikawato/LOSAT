@@ -790,12 +790,14 @@ impl LoaderIds {
 }
 
 /// What a load of a Seq-align id gave in [`ScopeWalk`], as the scope's cache (`m_Seq_idMap`)
-/// keeps it: the sequence whose blob it holds and how it came to it, or a sequence whose place
-/// LOSAT does not know (`Unknown`: another sequence, `None` where LOSAT does not name it, may have
-/// come first), or a lookup that throws (never kept).
+/// keeps it: the sequence whose blob it holds, how it came to it and the definition line by which
+/// that blob's Bioseq was loaded (its `Bioseq.id` and title, the B-line; [`NO_LINE`] where LOSAT
+/// does not hold the blob's lines), or a sequence whose place LOSAT does not know (`Unknown`:
+/// another sequence, `None` where LOSAT does not name it, may have come first), or a lookup that
+/// throws (never kept).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Resolved {
-    Blob(DbSequence, ShownBy),
+    Blob(DbSequence, ShownBy, u32),
     Unknown(Option<DbSequence>, ShownBy),
     Throws,
     /// No Bioseq (the loader gave none: the lookup found nothing, or a sequence whose lines do
@@ -805,18 +807,40 @@ enum Resolved {
     Nothing,
 }
 
+impl Resolved {
+    /// This place where LOSAT does not know that NCBI's places reach it (whether `m_Ids` still
+    /// holds a handle, whether a failed prefetch loaded a blob): a holder or a weak match answers
+    /// [`ShownBy::Order`], so that [`ShownBy::Holder`] and [`ShownBy::Weak`] with a holder name
+    /// the sequence that NCBI gives (whose record the writers write, `report::shown_bioseq`; line
+    /// DBID hr-3 takes the same rule for psiblast's PSSM).
+    fn unsure(self) -> Self {
+        match self {
+            Self::Blob(sequence, ShownBy::Holder | ShownBy::Weak, line) => {
+                Self::Blob(sequence, ShownBy::Order, line)
+            }
+            Self::Unknown(holder, ShownBy::Holder | ShownBy::Weak) => {
+                Self::Unknown(holder, ShownBy::Order)
+            }
+            other => other,
+        }
+    }
+}
+
 /// How a load came to another sequence than the subject ([`ShownInstead`]): the words of LOSAT's refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShownBy {
     /// The lookup itself (step 4), the loader's `m_Ids` by the exact handle (step 3), or the
-    /// scope's index by the exact handle or an id that it takes for the Seq-align id (step 2).
+    /// scope's index by the exact handle or an id that it takes for the Seq-align id (step 2),
+    /// where LOSAT knows that NCBI's places reach it.
     Holder,
-    /// The scope's index by a weak match (an accession with a version for one without, a name).
+    /// The scope's index by a weak match (an accession with a version for one without, a name),
+    /// where LOSAT knows that NCBI's places reach it.
     Weak,
     /// An order that LOSAT does not know: of a prefetch, two handles that no Seq-id orders (their
     /// infos' addresses); of a record of loads, two sequences of one batch that registered the
-    /// same handle; or whether NCBI keeps its scope for the run (a call whose formats LOSAT
-    /// refuses a throw for, `FormatThrow::Refused`).
+    /// same handle; whether `m_Ids` still holds a handle, or a failed prefetch loaded a blob
+    /// (`Resolved::unsure`); or whether NCBI keeps its scope for the run (a call whose formats
+    /// LOSAT refuses a throw for, `FormatThrow::Refused`).
     Order,
     /// The calls of the run before this one, of which LOSAT has no record
     /// ([`ScopeHolders`]).
@@ -825,12 +849,50 @@ pub enum ShownBy {
     Display,
 }
 
+/// The line of a [`ShownInstead`] (and of a `Resolved::Blob`) where LOSAT does not know by which
+/// definition line the holder's blob was loaded (its keys are not held).
+pub const NO_LINE: u32 = u32::MAX;
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1305-1470
+// The holder's Bioseq (`CSeqDBVol::GetBioseq` with the blob's handle as the target) has the ids
+// and title of the target line, every line in its user object, and the holder's length and
+// letters (design of line DBID holdrec, `R/hr/logs/ncbi_model.md` 1.2).
 /// Another sequence that NCBI gives for a subject's Seq-align id at a load ([`HitLoad::Shown`]):
-/// that sequence (`None` where LOSAT does not name it) and how it came to it.
+/// that sequence (`None` where LOSAT does not name it), how it came to it, and the definition
+/// line of it by which its Bioseq was loaded (`line`, the B-line: its `Bioseq.id` and title;
+/// [`NO_LINE`] where LOSAT does not know it), whose record the writers write for the subject
+/// ([`ShownInstead::written`], `report::shown_bioseq`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShownInstead {
     pub holder: Option<DbSequence>,
     pub by: ShownBy,
+    pub line: u32,
+}
+
+impl ShownInstead {
+    /// A sequence (or none) given by `by`, of a line that LOSAT does not know.
+    pub fn unlined(holder: Option<DbSequence>, by: ShownBy) -> Self {
+        ShownInstead {
+            holder,
+            by,
+            line: NO_LINE,
+        }
+    }
+
+    /// The holder and its B-line where LOSAT knows the Bioseq that NCBI's place gives, so that the
+    /// record writers write it (`report::shown_bioseq::ShownBioseq`): a holder that the scope's
+    /// index, the loader's `m_Ids`, the prefetch's order or the lookup gives (`ShownBy::Holder`,
+    /// `ShownBy::Weak`); `None` where LOSAT does not name the holder or its line, or does not know
+    /// the order (`Order`, `Calls`), and for the description table's second lookup (`Display`,
+    /// a pairwise title).
+    pub fn written(self) -> Option<(DbSequence, usize)> {
+        match self.by {
+            ShownBy::Holder | ShownBy::Weak if self.line != NO_LINE => {
+                Some((self.holder?, self.line as usize))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Inverted index built lazily for [`ScopePlaces`] only when `holders()` is actually queried
@@ -889,6 +951,8 @@ struct ScopePlaces {
     cache: rustc_hash::FxHashMap<HandleKey, Resolved>,
     /// The sequences loaded, in order (8 bytes per load).
     loads: Vec<DbSequence>,
+    /// The definition line of each load (its B-line, 4 bytes per load).
+    lines: Vec<u32>,
     /// Flat arenas of the ONE loaded definition line per entry in `loads`.
     line_handles: Vec<HandleKey>,
     handle_ends: Vec<u32>,
@@ -908,6 +972,7 @@ impl Clone for ScopePlaces {
         ScopePlaces {
             cache: self.cache.clone(),
             loads: self.loads.clone(),
+            lines: self.lines.clone(),
             line_handles: self.line_handles.clone(),
             handle_ends: self.handle_ends.clone(),
             line_scope: self.line_scope.clone(),
@@ -921,9 +986,9 @@ impl Clone for ScopePlaces {
 }
 
 impl ScopePlaces {
-    /// Adds a load of `sequence` directly from the Seq-ids `ids` of its loaded definition line
-    /// (zero temporary heap allocations).
-    fn add_ids(&mut self, sequence: DbSequence, ids: &[ParsedSeqId]) {
+    /// Adds a load of `sequence` by its definition line `line`, directly from that line's Seq-ids
+    /// `ids` (zero temporary heap allocations).
+    fn add_ids(&mut self, sequence: DbSequence, line: usize, ids: &[ParsedSeqId]) {
         let at = u32::try_from(self.loads.len()).unwrap_or(u32::MAX);
         let h_start = self.line_handles.len();
         let s_start = self.line_scope.len();
@@ -937,6 +1002,7 @@ impl ScopePlaces {
         self.scope_ends.push(self.line_scope.len() as u32);
         self.kinds_ends.push(self.line_kinds.len() as u32);
         self.loads.push(sequence);
+        self.lines.push(line_number(line));
         if let Some(index) = self.index.get_mut() {
             index.add_load(
                 at,
@@ -963,6 +1029,7 @@ impl ScopePlaces {
         self.scope_ends.push(self.line_scope.len() as u32);
         self.kinds_ends.push(self.line_kinds.len() as u32);
         self.loads.push(sequence);
+        self.lines.push(line_number(line));
         if let Some(index) = self.index.get_mut() {
             index.add_load(at, handles, scope, kinds);
         }
@@ -1013,20 +1080,30 @@ impl ScopePlaces {
             None => (found, false),
         };
         let &(first, by) = candidates.first()?;
-        let sequence = self.sequence(first);
+        let (sequence, line) = (self.sequence(first), self.line(first));
         if candidates
             .iter()
-            .any(|&(at, _)| self.sequence(at) != sequence)
+            .any(|&(at, _)| (self.sequence(at), self.line(at)) != (sequence, line))
         {
             return Some((Resolved::Unknown(Some(sequence), ShownBy::Order), definite));
         }
-        Some((Resolved::Blob(sequence, by), definite))
+        Some((Resolved::Blob(sequence, by, line), definite))
     }
 
     /// The sequence of the load `at`.
     fn sequence(&self, at: u32) -> DbSequence {
         self.loads[at as usize]
     }
+
+    /// The definition line by which the load `at` was made.
+    fn line(&self, at: u32) -> u32 {
+        self.lines[at as usize]
+    }
+}
+
+/// The B-line number of a definition line index ([`NO_LINE`] past `u32`).
+fn line_number(line: usize) -> u32 {
+    u32::try_from(line).unwrap_or(NO_LINE)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:438-447 (the blob
@@ -1074,12 +1151,12 @@ impl RecordedBatchScope {
             .into_iter()
             .flatten()
             .filter(|&&(at, _)| at < loads)
-            .map(|&(_, sequence)| sequence);
+            .map(|&(at, sequence)| (sequence, self.places.line(at)));
         let Some(first) = found.next() else {
             return unresolved.then_some(Resolved::Nothing);
         };
-        Some(if !unresolved && found.all(|sequence| sequence == first) {
-            Resolved::Blob(first, ShownBy::Holder)
+        Some(if !unresolved && found.all(|load| load == first) {
+            Resolved::Blob(first.0, ShownBy::Holder, first.1)
         } else {
             Resolved::Unknown(None, ShownBy::Order)
         })
@@ -1093,13 +1170,13 @@ impl RecordedBatchScope {
         let mut found: Vec<(u32, ShownBy)> = self.places.holders(keys, exact);
         found.retain(|&(at, _)| at < loads);
         let &(first, by) = found.first()?;
-        let sequence = self.places.sequence(first);
+        let (sequence, line) = (self.places.sequence(first), self.places.line(first));
         Some(
             if found
                 .iter()
-                .all(|&(at, _)| self.places.sequence(at) == sequence)
+                .all(|&(at, _)| (self.places.sequence(at), self.places.line(at)) == (sequence, line))
             {
-                Resolved::Blob(sequence, by)
+                Resolved::Blob(sequence, by, line)
             } else {
                 Resolved::Unknown(Some(sequence), ShownBy::Order)
             },
@@ -1525,7 +1602,7 @@ impl LoadedBlobRef {
     fn add_to_places(&self, places: &mut ScopePlaces, subject: &ParsedSubject) {
         match self {
             LoadedBlobRef::Own { sequence, line } => {
-                places.add_ids(*sequence, &subject.set.deflines[*line].ids);
+                places.add_ids(*sequence, *line, &subject.set.deflines[*line].ids);
             }
             LoadedBlobRef::External { blob, line, .. } => {
                 places.add_blob(blob, *line);
@@ -1734,17 +1811,32 @@ impl ScopeWalk {
     /// `Unknown` where LOSAT does not know that it registered it last.
     fn registered_place(&self, handle: HandleKey) -> Option<Resolved> {
         match self.ids.held(handle) {
-            Held::Present(registrant) | Held::Maybe(registrant) => Some(Self::place(registrant)),
+            Held::Present(registrant) | Held::Maybe(registrant) => {
+                Some(self.place(registrant, handle))
+            }
             Held::Absent => None,
         }
     }
 
-    /// The place that `m_Ids`' registrant `registrant` gives.
-    fn place(registrant: Registrant) -> Resolved {
+    /// The place that `m_Ids`' registrant `registrant` gives for `handle`: its blob by that
+    /// handle, whose Bioseq's line is the first of its lines that holds the handle
+    /// (`CSeqDBVol::GetBioseq`'s target; [`NO_LINE`] where LOSAT does not hold its keys).
+    fn place(&self, registrant: Registrant, handle: HandleKey) -> Resolved {
         match registrant.sure {
-            true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
+            true => Resolved::Blob(
+                registrant.sequence,
+                ShownBy::Holder,
+                self.registered_line(registrant.sequence, handle),
+            ),
             false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
         }
+    }
+
+    /// The first line of `sequence` that holds `handle`, where LOSAT holds its keys.
+    fn registered_line(&self, sequence: DbSequence, handle: HandleKey) -> u32 {
+        self.blob_of(sequence)
+            .and_then(|keys| keys.line_of(handle))
+            .map_or(NO_LINE, line_number)
     }
 
     /// Step 2: the scope's index, for the Seq-align id of `keys`: the exact handle first, then
@@ -1761,23 +1853,23 @@ impl ScopeWalk {
         match (exact, weak) {
             (None, weak) => weak,
             (Some(exact), None) => Some(exact),
-            (Some((Resolved::Blob(a, by), false)), Some((Resolved::Blob(b, _), definite)))
-                if a == b =>
-            {
-                Some((Resolved::Blob(a, by), definite))
-            }
+            (
+                Some((Resolved::Blob(a, by, line), false)),
+                Some((Resolved::Blob(b, _, other_line), definite)),
+            ) if (a, line) == (b, other_line) => Some((Resolved::Blob(a, by, line), definite)),
             (Some((exact, false)), Some((weak, _))) => {
-                let (holder, by) = match weak {
-                    Resolved::Blob(sequence, by) => (Some(sequence), by),
-                    Resolved::Unknown(holder, by) => (holder, by),
-                    Resolved::Throws | Resolved::Nothing => (None, ShownBy::Order),
+                let holder = match weak {
+                    Resolved::Blob(sequence, ..) => Some(sequence),
+                    Resolved::Unknown(holder, _) => holder,
+                    Resolved::Throws | Resolved::Nothing => None,
                 };
                 let holder = holder.or(match exact {
-                    Resolved::Blob(sequence, _) => Some(sequence),
+                    Resolved::Blob(sequence, ..) => Some(sequence),
                     Resolved::Unknown(holder, _) => holder,
                     Resolved::Throws | Resolved::Nothing => None,
                 });
-                Some((Resolved::Unknown(holder, by), true))
+                // Which of the two NCBI's scope gives depends on what the failed prefetch loaded.
+                Some((Resolved::Unknown(holder, ShownBy::Order), true))
             }
             (Some((_, true)), _) => unreachable!("definite exact match returned above"),
         }
@@ -1840,7 +1932,7 @@ impl ScopeWalk {
             self.blob_ids.insert(id);
         }
         self.scope
-            .add_ids(sequence, &subject.set.deflines[line].ids);
+            .add_ids(sequence, line, &subject.set.deflines[line].ids);
         if self.ids.has_sequence(ord) {
             self.blobs
                 .entry(ord)
@@ -1913,7 +2005,7 @@ impl ScopeWalk {
     /// lines ([`LoaderIds::maybe_use`]). When `subject.mine(sequence)`, reads `subject` directly
     /// with zero lookup or allocation.
     fn relock(&mut self, subject: &ParsedSubject, resolved: Option<Resolved>) {
-        let Some(Resolved::Blob(sequence, _) | Resolved::Unknown(Some(sequence), _)) = resolved
+        let Some(Resolved::Blob(sequence, ..) | Resolved::Unknown(Some(sequence), _)) = resolved
         else {
             return;
         };
@@ -1957,7 +2049,7 @@ impl ScopeWalk {
                     self.ids.maybe_use(handle, registrant);
                     return Some(match subject.mine(registrant.sequence) {
                         true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-                        false => Self::place(registrant),
+                        false => self.place(registrant, handle).unsure(),
                     });
                 }
                 Held::Absent => None,
@@ -1976,10 +2068,14 @@ impl ScopeWalk {
                     // only where its blob id is new (`load_subject_blob`).
                     let line = subject.line_of_handle(handle).unwrap_or(subject.target);
                     self.load_subject_blob(subject, registrant.sequence, line, Some(handle));
-                } else {
-                    self.held_blob(registrant.sequence, handle);
+                    return Some(Resolved::Blob(
+                        registrant.sequence,
+                        ShownBy::Holder,
+                        line_number(line),
+                    ));
                 }
-                return Some(Resolved::Blob(registrant.sequence, ShownBy::Holder));
+                let line = self.held_blob(registrant.sequence, handle);
+                return Some(Resolved::Blob(registrant.sequence, ShownBy::Holder, line));
             }
         }
         if self.before.unrecorded {
@@ -1994,7 +2090,7 @@ impl ScopeWalk {
             return Some(Resolved::Throws);
         }
         let blob = subject.loaded_blob_ref()?;
-        let sequence = blob.sequence();
+        let (sequence, line) = (blob.sequence(), line_number(blob.line()));
         // The lookup adds the handle with the sequence it gives.
         if let Some(handle) = handle {
             self.ids.use_now(handle, Registrant::of(sequence));
@@ -2007,7 +2103,7 @@ impl ScopeWalk {
                 self.load_blob(&blob, line, handle);
             }
         }
-        Some(Resolved::Blob(sequence, ShownBy::Holder))
+        Some(Resolved::Blob(sequence, ShownBy::Holder, line))
     }
 
     /// The sequence whose blob the lookup of `subject`'s Seq-align id gives ([`ScopeResolution`]),
@@ -2028,13 +2124,17 @@ impl ScopeWalk {
 
     /// Where step 3 gave another sequence, `holder`, for the handle `handle`: its new blob (by
     /// that handle) registers its lines again and puts its Bioseq into the scope by the first
-    /// line that holds the handle, where LOSAT holds its keys (the walk's or the record's).
-    fn held_blob(&mut self, holder: DbSequence, handle: HandleKey) {
-        if let Some(keys) = self.blob_of(holder) {
-            if let Some(line) = keys.line_of(handle) {
-                self.load_blob(&keys, line, Some(handle));
-            }
-        }
+    /// line that holds the handle, where LOSAT holds its keys (the walk's or the record's): that
+    /// line ([`NO_LINE`] where LOSAT does not hold them).
+    fn held_blob(&mut self, holder: DbSequence, handle: HandleKey) -> u32 {
+        let Some(keys) = self.blob_of(holder) else {
+            return NO_LINE;
+        };
+        let Some(line) = keys.line_of(handle) else {
+            return NO_LINE;
+        };
+        self.load_blob(&keys, line, Some(handle));
+        line_number(line)
     }
 
     /// Resolves the Seq-align id of `subject` at a load by a report that reads it (steps 1 to 4,
@@ -2069,10 +2169,10 @@ impl ScopeWalk {
         if one == other {
             return one;
         }
-        Some(ShownInstead {
-            holder: one.or(other).and_then(|shown| shown.holder),
-            by: ShownBy::Display,
-        })
+        Some(ShownInstead::unlined(
+            one.or(other).and_then(|shown| shown.holder),
+            ShownBy::Display,
+        ))
     }
 
     /// [`ScopeWalk::display`] of this walk alone.
@@ -2086,10 +2186,21 @@ impl ScopeWalk {
         self.scope.cache.insert(handle, resolved);
         match Self::answer(subject, Some(resolved)) {
             HitLoad::Shown(shown) => Some(ShownInstead {
-                holder: shown.holder,
                 by: ShownBy::Display,
+                ..shown
             }),
             _ => None,
+        }
+    }
+
+    /// Whether the answers `one` and `other` give the same sequence the same way, whatever the
+    /// line of a holder's Bioseq ([`ScopeWalk::bulk_ties`]).
+    fn same_sequence(one: HitLoad, other: HitLoad) -> bool {
+        match (one, other) {
+            (HitLoad::Shown(one), HitLoad::Shown(other)) => {
+                (one.holder, one.by) == (other.holder, other.by)
+            }
+            (one, other) => one == other,
         }
     }
 
@@ -2102,10 +2213,7 @@ impl ScopeWalk {
             HitLoad::Shown(shown) => shown.holder,
             _ => None,
         });
-        HitLoad::Shown(ShownInstead {
-            holder,
-            by: ShownBy::Order,
-        })
+        HitLoad::Shown(ShownInstead::unlined(holder, ShownBy::Order))
     }
 
     /// [`ScopeWalk::load`]'s resolution; `scope`: whether the scope's index answers (a report's
@@ -2133,22 +2241,23 @@ impl ScopeWalk {
                     // where that blob was loaded before the failure, the scope gives `resolved`;
                     // where it was not, the read misses the scope and reaches the loader.
                     match resolved {
-                        Resolved::Blob(sequence, _) if subject.mine(sequence) => {
+                        Resolved::Blob(sequence, ..) if subject.mine(sequence) => {
                             match self.resolve_after_scope(subject, handle, true) {
-                                Some(Resolved::Blob(other, _)) if other == sequence => {
+                                Some(Resolved::Blob(other, ..)) if other == sequence => {
                                     Some(resolved)
                                 }
                                 other => {
                                     let (holder, by) = match other {
-                                        Some(Resolved::Blob(holder, by)) => (Some(holder), by),
+                                        Some(Resolved::Blob(holder, by, _)) => (Some(holder), by),
                                         Some(Resolved::Unknown(holder, by)) => (holder, by),
                                         _ => (Some(sequence), ShownBy::Order),
                                     };
-                                    Some(Resolved::Unknown(holder, by))
+                                    Some(Resolved::Unknown(holder, by).unsure())
                                 }
                             }
                         }
                         other => {
+                            let other = other.unsure();
                             self.relock(subject, Some(other));
                             Some(other)
                         }
@@ -2202,15 +2311,16 @@ impl ScopeWalk {
         match resolved {
             None | Some(Resolved::Nothing) => HitLoad::Loaded,
             Some(Resolved::Throws) => HitLoad::Throws,
-            Some(Resolved::Blob(sequence, _)) if subject.mine(sequence) => HitLoad::Loaded,
-            Some(Resolved::Blob(sequence, by)) => HitLoad::Shown(ShownInstead {
+            Some(Resolved::Blob(sequence, ..)) if subject.mine(sequence) => HitLoad::Loaded,
+            Some(Resolved::Blob(sequence, by, line)) => HitLoad::Shown(ShownInstead {
                 holder: Some(sequence),
                 by,
+                line,
             }),
-            Some(Resolved::Unknown(holder, by)) => HitLoad::Shown(ShownInstead {
-                holder: holder.filter(|&holder| !subject.mine(holder)),
+            Some(Resolved::Unknown(holder, by)) => HitLoad::Shown(ShownInstead::unlined(
+                holder.filter(|&holder| !subject.mine(holder)),
                 by,
-            }),
+            )),
         }
     }
 
@@ -2444,7 +2554,7 @@ impl ScopeWalk {
                 }
                 let blob_load = if self.many_blobs() {
                     match resolved {
-                        Resolved::Blob(seq, _) | Resolved::Unknown(Some(seq), _) => {
+                        Resolved::Blob(seq, ..) | Resolved::Unknown(Some(seq), _) => {
                             if subject.mine(seq) {
                                 Some(AloneBlobLoad {
                                     sequence: seq,
@@ -2504,7 +2614,7 @@ impl ScopeWalk {
                     return AloneResult {
                         resolved: Some(match subject.mine(registrant.sequence) {
                             true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
-                            false => Self::place(registrant),
+                            false => self.place(registrant, handle).unsure(),
                         }),
                         requested_use: Some((handle, registrant, true)),
                         blob_load: None,
@@ -2537,8 +2647,11 @@ impl ScopeWalk {
                         ))
                     })
                 };
+                let line = blob_load
+                    .as_ref()
+                    .map_or(NO_LINE, |load| line_number(load.line));
                 return AloneResult {
-                    resolved: Some(Resolved::Blob(registrant.sequence, ShownBy::Holder)),
+                    resolved: Some(Resolved::Blob(registrant.sequence, ShownBy::Holder, line)),
                     requested_use: Some((handle, registrant, false)),
                     blob_load,
                 };
@@ -2577,7 +2690,7 @@ impl ScopeWalk {
             LoadedBlobRef::External { blob, .. } => Some(blob),
         };
         AloneResult {
-            resolved: Some(Resolved::Blob(sequence, ShownBy::Holder)),
+            resolved: Some(Resolved::Blob(sequence, ShownBy::Holder, line_number(line))),
             requested_use: handle.map(|h| (h, Registrant::of(sequence), false)),
             blob_load: Some(self.plan_alone_blob(sequence, line, handle, external)),
         }
@@ -2701,9 +2814,13 @@ impl ScopeWalk {
                             if other == index {
                                 continue;
                             }
-                            let later =
-                                Self::answer(subject, Some(Resolved::Blob(seq, ShownBy::Holder)));
-                            if later != answer {
+                            // The line of that blob's Bioseq does not move the answer: the same
+                            // holder by its first line that holds the handle.
+                            let later = Self::answer(
+                                subject,
+                                Some(Resolved::Blob(seq, ShownBy::Holder, NO_LINE)),
+                            );
+                            if !Self::same_sequence(later, answer) {
                                 answer = Self::either(answer, later);
                                 moved[index] = true;
                             }
@@ -2739,7 +2856,7 @@ impl ScopeWalk {
                         self.scope.add_blob(ext, load.line);
                     } else {
                         self.scope
-                            .add_ids(load.sequence, &subject.set.deflines[load.line].ids);
+                            .add_ids(load.sequence, load.line, &subject.set.deflines[load.line].ids);
                     }
                 }
                 let ord = load.sequence.ordinal();
@@ -3030,6 +3147,59 @@ impl ParsedSubject {
             query_scope_keys: std::sync::OnceLock::new(),
             skipped_id: std::sync::OnceLock::new(),
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1305-1470
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:46-73
+    /// The Bioseq of the sequence `holder` (its record as the reports read it: its source, GIs and
+    /// sequence) that NCBI's places give for another subject's Seq-align id `alignment_id`, loaded
+    /// by its line `line` (the B-line, `ShownInstead::written`): its ids and title are that
+    /// line's (`tabular_ids`, `xml_hit`'s accession), every other writer reads all its lines, and
+    /// the reports name the Seq-align id of the subject (`alignment_id`). Its lookup is the
+    /// places' answer, so nothing of the holder's own lookup is refused for it. `Err` for a line
+    /// that the holder does not have (LOSAT's internal error).
+    pub fn shown_by(
+        holder: &ParsedSubject,
+        line: usize,
+        alignment_id: &ParsedSeqId,
+    ) -> Result<Self, String> {
+        if line >= holder.set.deflines.len() {
+            return Err(format!(
+                "is shown by definition line {line} of a sequence of {} (internal error)",
+                holder.set.deflines.len()
+            ));
+        }
+        Ok(Self {
+            set: holder.set.clone(),
+            alignment_id: alignment_id.clone(),
+            target: line,
+            unfetchable: false,
+            resolution: ScopeResolution::default(),
+            scope_finds_none: false,
+            load_throws: false,
+            sequence: holder.sequence,
+            show_gis: holder.show_gis,
+            source: holder.source.clone(),
+            record: false,
+            local_record: false,
+            use_this_seqid: holder.use_this_seqid.clone(),
+            saccver: std::sync::OnceLock::new(),
+            query_scope_keys: std::sync::OnceLock::new(),
+            skipped_id: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// The sequence of the database whose Bioseq this record is (`in_database`; the holder of a
+    /// record of [`ParsedSubject::shown_by`]), `None` for a `-subject` record: its length is the
+    /// subject's `slen` (`report::shown_bioseq`).
+    pub fn database_sequence(&self) -> Option<DbSequence> {
+        self.sequence
+    }
+
+    /// Whether the header of this sequence was read with a UTF8String, whose load NCBI posts a
+    /// warning at (`common::database::HeaderReader::note_utf8`).
+    pub fn header_utf8(&self) -> bool {
+        self.set.utf8
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
@@ -5846,6 +6016,19 @@ pub struct HitLoads {
     /// The reads after the reports ([`CallReads::after`]) for which a load gives another
     /// sequence, by report and key ([`HitLoads::read_after`], made by `HitLoads::load_after`).
     after_shown: std::collections::HashMap<(usize, usize), ShownInstead>,
+    /// The sequence and its loaded line that the loads (each report's, or its batch's prefetch)
+    /// give for a subject where that is another sequence ([`ShownInstead::written`]), by key:
+    /// `None` where two loads give other ones, or one names no line ([`HitLoads::written_holder`]).
+    written: std::collections::HashMap<usize, Option<(DbSequence, usize)>>,
+    /// The subjects that some report's load gives as themselves (`HitLoad::Loaded`), also where
+    /// another report's gives another sequence (`shown`): one subject can be itself in one
+    /// batch's scope and another sequence in the next.
+    own: std::collections::HashSet<usize>,
+    /// Whether the run's formats write the record of the sequence that a load gives for a subject
+    /// (`ShownInstead::written`, the record writers of line DBID hr-2a: the tables of outfmt 6,
+    /// 7, 10 and 20, BLAST XML, outfmt 13 to 16 and 18); not the pairwise reports and SAM yet, nor a
+    /// run whose formats refuse a throw (`HitLoads::unordered`, whose holders are only possible).
+    writes_shown: bool,
 }
 
 /// What a call's walk ([`HitLoads::of_call`]) loads besides its reports' own subjects, by report
@@ -5992,6 +6175,9 @@ impl HitLoads {
             }
             FormatThrow::Unread => None,
         };
+        loads.writes_shown = run.is_some_and(|run| !run.after.is_pairwise());
+        // The answers of the prefetch of the batch of the reports read last (`ScopeWalk::bulk`).
+        let mut batch_answers: std::collections::HashMap<usize, HitLoad> = Default::default();
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
         // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
@@ -6054,6 +6240,7 @@ impl HitLoads {
                             }
                         }
                     }
+                    batch_answers.clone_from(&answers);
                     // The description lines of a pairwise report look each title up again
                     // (`ScopeWalk::display`); the bulk resolved every Seq-align id, so the order
                     // of the lines does not change what each finds.
@@ -6069,6 +6256,7 @@ impl HitLoads {
                 }
                 if !ended.get() {
                     loaded.extend(keys.keys());
+                    loads.note_batch_answers(keys, &batch_answers);
                 }
                 continue;
             }
@@ -6137,6 +6325,7 @@ impl HitLoads {
                 let exception = match walk.load(subject) {
                     HitLoad::Shown(shown) => {
                         loads.shown.insert(first, shown);
+                        loads.note_shown(first, shown);
                         loaded.extend(keys);
                         continue;
                     }
@@ -6144,6 +6333,7 @@ impl HitLoads {
                     _ => None,
                 };
                 let Some(exception) = exception else {
+                    loads.own.insert(first);
                     loaded.extend(keys);
                     continue;
                 };
@@ -6182,6 +6372,38 @@ impl HitLoads {
         loads.prefetched_only = prefetched_only;
         loads.unread = unread;
         loads
+    }
+
+    /// The answers of a batch's prefetch (`answers`, [`ScopeWalk::bulk`]) that a report of that
+    /// batch finds in the scope's cache for its subjects `keys`: each another sequence
+    /// (`note_shown`), or anything else (`own`: the subject itself, a throw, no load).
+    fn note_batch_answers(
+        &mut self,
+        keys: &ReportKeys,
+        answers: &std::collections::HashMap<usize, HitLoad>,
+    ) {
+        for key in keys.keys() {
+            match answers.get(&key) {
+                Some(&HitLoad::Shown(shown)) => self.note_shown(key, shown),
+                Some(_) => {
+                    self.own.insert(key);
+                }
+                None => {}
+            }
+        }
+    }
+
+    /// A load's answer `shown` for the subject `key` ([`HitLoads::written`]).
+    fn note_shown(&mut self, key: usize, shown: ShownInstead) {
+        let holder = shown.written();
+        self.written
+            .entry(key)
+            .and_modify(|written| {
+                if *written != holder {
+                    *written = None;
+                }
+            })
+            .or_insert(holder);
     }
 
     /// The prefetch of a batch that fails at a subject whose lookup throws on the id
@@ -6283,7 +6505,7 @@ impl HitLoads {
         let mut registry: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> = Default::default();
         for (_, subject) in &subjects {
             if let Some(sequence) = subject.sequence {
-                places.add_ids(sequence, &subject.set.deflines[subject.target].ids);
+                places.add_ids(sequence, subject.target, &subject.set.deflines[subject.target].ids);
                 for handle in subject.line_handles() {
                     registry.entry(handle).or_default().push(sequence);
                 }
@@ -6304,10 +6526,9 @@ impl HitLoads {
                         .copied(),
                 )
                 .filter(|&other| !subject.mine(other));
-            let mut shown = others.next().map(|holder| ShownInstead {
-                holder: Some(holder),
-                by: ShownBy::Order,
-            });
+            let mut shown = others
+                .next()
+                .map(|holder| ShownInstead::unlined(Some(holder), ShownBy::Order));
             // A description line's second lookup by the display id (`ScopeWalk::display`).
             if shown.is_none() {
                 shown = subject.display_keys().and_then(|keys| {
@@ -6316,10 +6537,7 @@ impl HitLoads {
                         .into_iter()
                         .map(|(at, _)| places.sequence(at))
                         .find(|&other| !subject.mine(other))
-                        .map(|holder| ShownInstead {
-                            holder: Some(holder),
-                            by: ShownBy::Display,
-                        })
+                        .map(|holder| ShownInstead::unlined(Some(holder), ShownBy::Display))
                 });
             }
             if shown.is_none() {
@@ -6511,6 +6729,13 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|((report, old), shown)| Some(((report, key(old)?), shown)))
                 .collect(),
+            written: self
+                .written
+                .into_iter()
+                .filter_map(|(old, holder)| Some((key(old)?, holder)))
+                .collect(),
+            own: self.own.into_iter().filter_map(&key).collect(),
+            writes_shown: self.writes_shown,
         }
     }
 
@@ -6544,16 +6769,21 @@ impl HitLoads {
         self.after_shown.get(&(report, key)).copied()
     }
 
-    /// Whether a report (or a batch's prefetch) loads the subject `key` by a read of its own: not
-    /// a subject for which a load gives another sequence (`HitLoad::Shown`), which
-    /// `ParsedSubject::fetched` refuses with the words of that sequence (the reads of the taxonomy
-    /// texts, which BLASTN and TBLASTX make before they ask `fetched`, would refuse it with the
-    /// words of its lookup); nor a subject that only a batch's failed prefetch may have loaded,
-    /// which no report reaches ([`HitLoads::reached`]): no row, `Hit` or name of it is written, so
-    /// none looks it up.
+    /// Whether a report (or a batch's prefetch) loads the subject `key`: by a read of its own, or
+    /// as the other sequence whose record the writers write ([`HitLoads::writes_shown_records`]:
+    /// its taxonomy is that sequence's); not another subject for which a load gives another
+    /// sequence (`HitLoad::Shown`), which `ParsedSubject::fetched` refuses with the words of that
+    /// sequence (the reads of the taxonomy texts, which BLASTN and TBLASTX make before they ask
+    /// `fetched`, would refuse it with the words of its lookup); nor a subject that only a batch's
+    /// failed prefetch may have loaded, which no report reaches ([`HitLoads::reached`]): no row,
+    /// `Hit` or name of it is written, so none looks it up.
     pub fn loaded(&self, key: usize) -> bool {
-        matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
-            && !self.prefetched_only.contains(&key)
+        let loaded = match self.load(key) {
+            HitLoad::Loaded | HitLoad::Refused(_) => true,
+            HitLoad::Shown(_) => self.writes_shown_records(key),
+            HitLoad::Throws | HitLoad::Unread => false,
+        };
+        loaded && !self.prefetched_only.contains(&key)
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
@@ -6573,7 +6803,9 @@ impl HitLoads {
     /// header among them (`ParsedSubject::scope_utf8_read`, `common::database::load_read_texts`),
     /// though nothing of the subject is loaded (`loaded`: no taxonomy text, no definition line).
     /// A subject for which a load gives another sequence (`HitLoad::Shown`) is reached too:
-    /// `ParsedSubject::fetched` refuses it, so no read is written.
+    /// `ParsedSubject::fetched` refuses it, so no read is written, or the writers write that
+    /// sequence's record, whose header LOSAT refuses where its load posts a text
+    /// (`common::database::ShownHolders`).
     /// A subject that a batch's failed prefetch may have loaded is loaded (`load`), but reached
     /// only where a report reaches it: one shown only after a `Hit` that threw is read by no
     /// report, and its texts are the prefetch's or none (review 1 of line DBID pf7, H1).
@@ -6592,6 +6824,42 @@ impl HitLoads {
     /// Whether the load of some subject throws (`HitLoad::Throws`).
     pub fn any_throws(&self) -> bool {
         !self.throws.is_empty()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:749-1096 (cited at
+    // `report::shown_bioseq`: every record writer reads the Bioseq of the scope's handle)
+    /// Whether the record writers write, for the subject `key`, the record of the other sequence
+    /// that its loads give (`HitLoad::Shown`): the run's formats write such records
+    /// (`writes_shown`: not the pairwise reports and SAM yet), every load of the subject gives
+    /// that sequence and its line ([`HitLoads::written_holder`]), and no report's load gives the
+    /// subject itself or throws (`own`, `throws`: one report of a batch whose prefetch is off can
+    /// fail the lookup where a later one finds the sequence that the first loaded). `false` where
+    /// LOSAT refuses the subject for that sequence (`ParsedSubject::shown_reason`).
+    pub fn writes_shown_records(&self, key: usize) -> bool {
+        self.writes_shown
+            && self.shown.contains_key(&key)
+            && !self.own.contains(&key)
+            && !self.throws.contains_key(&key)
+            && matches!(self.written.get(&key), Some(Some(_)))
+    }
+
+    /// Whether the writers write another sequence's record for some subject
+    /// ([`HitLoads::writes_shown_records`]).
+    pub fn writes_any_shown(&self) -> bool {
+        self.writes_shown
+            && self
+                .written
+                .iter()
+                .any(|(key, holder)| holder.is_some() && self.writes_shown_records(*key))
+    }
+
+    /// The other sequence, and its definition line that NCBI's Bioseq of it names, whose record
+    /// the writers write for the subject `key` ([`HitLoads::writes_shown_records`]).
+    pub fn written_holder(&self, key: usize) -> Option<(DbSequence, usize)> {
+        if !self.writes_shown_records(key) {
+            return None;
+        }
+        self.written.get(&key).copied().flatten()
     }
 }
 

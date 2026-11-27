@@ -247,6 +247,10 @@ pub(super) struct ReportedPrefetch {
     /// What the XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for
     /// the writer.
     pub(super) hit_loads: crate::report::db_subject::HitLoads,
+    /// The records of the holders that the reports write for subjects, by rank
+    /// (`ListedTitles::check_parsed_reports`), which `run_call` puts in the subjects' places
+    /// (`ListedTitles::show_holders`) before the writers read them.
+    pub(super) shown_records: Vec<(usize, crate::report::shown_bioseq::ShownBioseq)>,
 }
 
 /// Check the reported subjects before any format is written and read each query batch's prefetch
@@ -420,6 +424,7 @@ pub(super) fn prefetch_reported_subjects(
     // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
+    let mut shown_records = Vec::new();
     if let Some(titles) = listed_titles.as_ref() {
         let db = database.expect("listed titles are a database's");
         let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
@@ -452,7 +457,7 @@ pub(super) fn prefetch_reported_subjects(
         // do (review 1 of line DBID tabfields, H1). `ListedTitles::pssm_reads` reads those, before
         // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
-        titles.check_parsed_reports(
+        shown_records = titles.check_parsed_reports(
             database,
             reported_lists,
             format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
@@ -467,11 +472,27 @@ pub(super) fn prefetch_reported_subjects(
                 _ => false,
             }),
             &hit_loads,
-            format_plans.iter().fold(
-                crate::report::tabular::PrintedIds::default(),
-                |words, outfmt| words.or(outfmt.printed_ids()),
+            (
+                format_plans.iter().fold(
+                    crate::report::tabular::PrintedIds::default(),
+                    |words, outfmt| words.or(outfmt.printed_ids()),
+                ),
+                format_plans.iter().any(|outfmt| match outfmt {
+                    BlastpReport::CustomTabular(spec) => spec.light_length(),
+                    _ => false,
+                }),
             ),
         )?;
+        // The holders' titles are read as the subjects' own (`check_reported_titles`).
+        for (_, bioseq) in &shown_records {
+            crate::algorithm::common::database::check_reported_title(
+                db.seqdb(),
+                bioseq.ordinal(),
+                bioseq.record.replaced_title_bytes(),
+                title_reads,
+                args.app.name(),
+            )?;
+        }
         // A PSSM read whose failing lookup NCBI answers with a sequence loaded before (by the
         // run's record, the reports and the reads before it), as a report's (`HitLoad::Held`):
         // after the reports' refusals, as NCBI reads the PSSM after the round's reports.
@@ -933,6 +954,7 @@ pub(super) fn prefetch_reported_subjects(
         subject_reads,
         posts,
         hit_loads,
+        shown_records,
     })
 }
 
@@ -1465,7 +1487,7 @@ pub(super) fn refuse_prefetch_environment(
 /// formatter reads them from its scope.
 #[allow(clippy::type_complexity)]
 pub(super) fn shown_of<'a>(
-    listed_titles: &'a Option<database::ListedTitles<'_>>,
+    listed_shown: Option<&'a database::ListedShown>,
     subjects: &'a [EncodedProtein],
     set_records: &'a [FastaRecord],
     set_titles: &'a [Arc<[u8]>],
@@ -1474,7 +1496,7 @@ pub(super) fn shown_of<'a>(
     std::borrow::Cow<'a, [Arc<[u8]>]>,
     ShownSubjects<'a>,
 ) {
-    match listed_titles.as_ref().map(|titles| &titles.shown) {
+    match listed_shown {
         // A database's subjects have no records with the switch: every reader of a listed
         // subject takes `shown_subjects`, the titles by rank or the stored residues.
         Some(database::ListedShown::Lean(titles)) => (

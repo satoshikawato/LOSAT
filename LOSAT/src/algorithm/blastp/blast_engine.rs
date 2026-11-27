@@ -10864,8 +10864,15 @@ fn run_call(
         ranges.query_input.range_length.is_none()
             && database.is_some_and(|database| !database.loads_write_texts()),
     )?;
+    // The letters and titles that the reports read (`shown_of`), borrowed from the listed
+    // titles' `shown` alone: the holders' records go in their `parsed` after the checks
+    // (`ListedTitles::show_holders`).
+    let listed_shown = match listed_titles {
+        Some(database::ListedTitles { ref shown, .. }) => Some(shown),
+        None => None,
+    };
     let (subject_records, subject_titles, shown_subjects) =
-        report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
+        report_prep::shown_of(listed_shown, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
         prefetch_format,
         batches_prefetch,
@@ -11060,6 +11067,11 @@ fn run_call(
         &ranges.query_input.placements,
     )?;
     unreportable?;
+    // The holders' records that the reports write for subjects (`ReportedPrefetch::shown_records`)
+    // in their places, before any writer reads them.
+    if let Some(database::ListedTitles { ref mut parsed, .. }) = listed_titles {
+        database::ListedTitles::show_holders(parsed, &prefetched.shown_records);
+    }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).

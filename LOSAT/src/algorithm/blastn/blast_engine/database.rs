@@ -316,6 +316,32 @@ impl BlastnDatabase {
             .collect()
     }
 
+    /// The tabular `slen` of the reported sequences `ordinals` by rank: the length of the Bioseq
+    /// whose record the rank's row writes (`parsed[rank]`, the holder's where the record writers
+    /// write another sequence's record for it, `report::shown_bioseq`), else of the sequence.
+    pub(super) fn tabular_lengths(
+        &self,
+        ordinals: &[u32],
+        parsed: &[Option<Arc<ParsedSubject>>],
+    ) -> Result<Vec<usize>> {
+        let read = |rank: usize, ordinal: u32| {
+            parsed
+                .get(rank)
+                .and_then(Option::as_deref)
+                .and_then(ParsedSubject::database_sequence)
+                .map_or(ordinal, |sequence| sequence.ordinal())
+        };
+        ordinals
+            .iter()
+            .enumerate()
+            .map(|(rank, &ordinal)| {
+                self.db
+                    .nucleotide_length(read(rank, ordinal))
+                    .map_err(database_error)
+            })
+            .collect()
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
     /// The taxonomy of the tabular fields (`staxid`, `staxids`;
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals`, by
@@ -1751,6 +1777,14 @@ pub(super) fn read_titles(
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
+        // BLASTN's tables count the identities on the rows where NCBI does.
+        table_identities: false,
+        light_length: output_formats.iter().any(|format| {
+            format.is_tabular()
+                && format
+                    .tabular_spec()
+                    .is_some_and(crate::report::tabular::TabularSpec::light_length)
+        }),
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
@@ -1901,6 +1935,29 @@ fn shown_lists(hit_list: &Option<BlastnHitList>) -> &[BlastnHspList] {
     hit_list.as_ref().map_or(&[][..], |hit_list| {
         &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
     })
+}
+
+/// The end (exclusive, 0-based) of the subject range of the HSPs of each rank of `hit_lists`
+/// (subjects named by rank, `ranks` of them), which the holder of a subject whose record the
+/// writers write must reach (`shared::ShownHolders::shown`); empty where `loads` (by ordinal id)
+/// write no such record.
+fn shown_subject_ends(
+    hit_lists: &[Option<BlastnHitList>],
+    ranks: usize,
+    loads: &HitLoads,
+) -> Vec<usize> {
+    if !loads.writes_any_shown() {
+        return Vec::new();
+    }
+    let mut ends = vec![0; ranks];
+    for hsp_list in hit_lists.iter().flat_map(shown_lists) {
+        if let Some(end) = ends.get_mut(hsp_list.oid as usize) {
+            for hsp in &hsp_list.hsps {
+                *end = (*end).max(hsp.s_start.max(hsp.s_end));
+            }
+        }
+    }
+    ends
 }
 
 /// The most identities of an HSP of `hsp_list` (the Seq-align's `num_ident`), which tells whether
@@ -2394,6 +2451,10 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let taxdb_found = std::sync::OnceLock::new();
     let db = &database.db;
+    // The holders whose records the writers write for subjects (`shared::ShownHolders`), and the
+    // end of each rank's aligned subject range (`shown_subject_ends`).
+    let holders = shared::ShownHolders::new(db, false, PROGRAM);
+    let subject_ends = shown_subject_ends(hit_lists, ordinals.len(), &loads);
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
@@ -2415,6 +2476,45 @@ pub(super) fn reported_subjects(
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
                 let shown = reads.shown(shown, ordinal);
+                if let Some(bioseq) = holders.shown(
+                    &loads,
+                    ordinal as usize,
+                    (ordinal, subject),
+                    |holder| titled_parsed(titles, holder as usize),
+                    (
+                        subject_ends
+                            .get(ordinals.binary_search(&ordinal).unwrap_or(usize::MAX))
+                            .copied()
+                            .unwrap_or(0),
+                        false,
+                    ),
+                    (shown.light_length, seen_all.contains(&ordinal)),
+                )? {
+                    shared::check_reported_parsed(
+                        db,
+                        &bioseq.record,
+                        shown,
+                        crate::report::db_subject::HitLoad::Loaded,
+                        false,
+                        taxdb,
+                        bioseq.ordinal(),
+                        false,
+                        PROGRAM,
+                    )?;
+                    let store = if letters {
+                        Some(reported_store(db, bioseq.ordinal())?)
+                    } else {
+                        None
+                    };
+                    let record = FastaRecord {
+                        local_id: db.oid(ordinal).fasta_id(),
+                        title: bioseq.record.first_title().to_vec(),
+                        sequence: Vec::new(),
+                        warnings: Vec::new(),
+                        source: Default::default(),
+                    };
+                    return Ok((record, store, Some(bioseq.record), Default::default()));
+                }
                 shared::check_reported_parsed(
                     db,
                     subject,

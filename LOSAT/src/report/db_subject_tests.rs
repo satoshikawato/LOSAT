@@ -298,10 +298,10 @@ fn recorded(
 
 /// The answer of a load that gives another sequence, `holder`, as `by` came to it.
 fn shown(holder: Option<u32>, by: ShownBy) -> HitLoad {
-    HitLoad::Shown(ShownInstead {
-        holder: holder.map(DbSequence::of_unrestricted),
+    HitLoad::Shown(ShownInstead::unlined(
+        holder.map(DbSequence::of_unrestricted),
         by,
-    })
+    ))
 }
 
 fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
@@ -1523,10 +1523,10 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     assert!(shown_line.unfetchable());
     assert!(!shown_line.bioseq_holds_alignment_id());
     assert_eq!(read(&shown_line), Ok(()));
-    let error = shown_line.shown_reason(ShownInstead {
-        holder: Some(DbSequence::of_unrestricted(2)),
-        by: ShownBy::Holder,
-    });
+    let error = shown_line.shown_reason(ShownInstead::unlined(
+        Some(DbSequence::of_unrestricted(2)),
+        ShownBy::Holder,
+    ));
     assert!(
         error.contains("which database sequence 2 also holds"),
         "{error}"
@@ -3714,6 +3714,16 @@ fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
     let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
     walk.failed_prefetch([(0, &s), (1, &t)]);
     assert_eq!(walk.load(&s), shown(Some(1), ShownBy::Order));
+
+    // Line DBID hr-3: another sequence that only a failed prefetch's maybe load puts in the scope
+    // (versioned `gb|AAA00001.1|`, OID 1, which matches unversioned `gb|AAA00001|` weakly) is
+    // given or not as the failure falls: `ShownBy::Order`, not `ShownBy::Weak`, which names a
+    // sequence that NCBI gives (psiblast's PSSM reads its letters, `ListedTitles::pssm_holds`).
+    let u0 = sequence(vec![gb_unversioned("AAA00001")], 0);
+    let u1 = sequence(vec![gb("AAA00001", 1)], 1);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(1, &u1)]);
+    assert_eq!(walk.load(&u0), shown(Some(1), ShownBy::Order));
 }
 
 #[test]

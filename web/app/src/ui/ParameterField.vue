@@ -319,6 +319,7 @@ function onList(next: string): void {
               />
               {{ choiceLabel(choice) }}
             </label>
+            <slot name="after-radios" />
           </div>
           <!-- The filter's arguments (the CLI's value), as NCBI's "Species-specific repeats" has its select after the box. -->
           <template v-else-if="field.kind === 'filter'">

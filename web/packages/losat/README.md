@@ -1,6 +1,6 @@
 # losat
 
-LOSAT's local sequence search (BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX) for the browser.
+LOSAT's local sequence search (BLASTN, BLASTP, BLASTX, PSIBLAST, TBLASTN and TBLASTX) for the browser.
 Searches run on the user's machine, so sequences never leave it. The package holds two
 WebAssembly builds of the [LOSAT](https://github.com/satoshikawato/LOSAT) engine, the same
 engine as the `losat` command line, together with the TypeScript host that runs them. LOSAT Web
@@ -10,8 +10,8 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 15, `docs/web/abi_v2.md` in the repository). A search
-gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
+The two builds speak the same ABI (ABI v2 at version 16, `docs/web/abi_v2.md` in the repository). A search
+gets an argv, as on the command line, and FASTA bytes (or `-in_pssm`/`-in_msa` files in the run directory). It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
 
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 15 |
+| 0.2.0 | 0.2.0 | 16 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard

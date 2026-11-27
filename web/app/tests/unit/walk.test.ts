@@ -216,6 +216,8 @@ describe('walk fixtures', () => {
   it('picks the mode alphabet for a low draw, another or an odd text for a high one', () => {
     expect(alphabetOf('blastx', 'query')).toBe('nucleotide');
     expect(alphabetOf('blastx', 'subject')).toBe('protein');
+    expect(alphabetOf('psiblast', 'query')).toBe('protein');
+    expect(alphabetOf('psiblast', 'subject')).toBe('protein');
     expect(pickFor(fixtures.texts, fixtures.odd, 'protein', 0.1, 0.5).alphabet).toBe('protein');
     expect(pickFor(fixtures.texts, fixtures.odd, 'protein', 0.75, 0.5).alphabet).toBe('nucleotide');
     expect(fixtures.odd).toContain(pickFor(fixtures.texts, fixtures.odd, 'protein', 0.9, 0.5));

@@ -3,7 +3,7 @@
 // "HSP 一覧"): the fields of each HSP's outfmt 6 row as written, the frames of the record,
 // and the orientation that the record's coordinates and frames give.
 import { computed, ref } from 'vue';
-import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
+import { sameHsp, type HspEntry, type HspId, type ResultsBrowser, type ResultsState } from '../application/results';
 import type { HspSortKey } from '../domain/result-index';
 import { formatCount, framesLabel, framesText } from './format';
 import SortButton from './SortButton.vue';
@@ -15,7 +15,7 @@ const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 const emit = defineEmits<{ chosen: [id: HspId] }>();
 const ROW_PX = 28;
 const selectedPosition = computed(() =>
-  props.state.hsps.findIndex((hsp) => hsp.id.qIdx === props.state.hsp?.qIdx && hsp.id.rank === props.state.hsp?.rank),
+  props.state.hsps.findIndex((hsp) => sameHsp(hsp.id, props.state.hsp)),
 );
 const units = computed(() => props.state.loaded?.units ?? { query: '', subject: '' });
 const framed = computed(() => props.state.hsps.some((hsp) => hsp.queryFrame !== undefined || hsp.subjectFrame !== undefined));
@@ -101,7 +101,7 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
         :row-px="ROW_PX"
         :max-rows="8"
         :reveal="selectedPosition"
-        :reveal-key="`${state.runId}:${state.hsp?.qIdx}:${state.hsp?.rank}`"
+        :reveal-key="`${state.runId}:${state.hsp?.qIdx}:${state.hsp?.round}:${state.hsp?.rank}`"
         :order-key="`${state.hspSort.key}:${state.hspSort.descending}`"
         kind="grid"
         testid="hsp-list"
@@ -110,7 +110,7 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
         <template #row="{ position, tabindex }">
           <div
             v-for="hsp in [state.hsps[position]!]"
-            :key="`${hsp.id.qIdx}:${hsp.id.rank}`"
+            :key="`${hsp.id.qIdx}:${hsp.id.round}:${hsp.id.rank}`"
             role="row"
             :aria-rowindex="position + 2"
             :aria-selected="position === selectedPosition"

@@ -1033,6 +1033,7 @@ describe('program descriptors', () => {
       tblastn: [2, 1],
       tblastx: [1, 1],
       blastx: [1, 2],
+      psiblast: [2, 2],
     });
   });
 
@@ -1050,7 +1051,14 @@ describe('program descriptors', () => {
   });
 
   it.each(PROGRAMS.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
-    const order = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Discontiguous Word Options', 'Other Parameters'];
+    const order = [
+      'General Parameters',
+      'Scoring Parameters',
+      'Filters and Masking',
+      'PSI-BLAST Parameters',
+      'Discontiguous Word Options',
+      'Other Parameters',
+    ];
     const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
     expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));
     expect(titles.every((title) => order.includes(title))).toBe(true);

@@ -235,7 +235,11 @@ impl SumStatsCutoffs {
         }
     }
 
-    /// The sum statistics' cutoff of the next valid context, whose block is `kbp`.
+    /// The sum statistics' cutoff of the next valid context, whose block is `kbp`. For contexts
+    /// that share one block, the state after the first is the state after any number of them:
+    /// the e-value is written back only while the cutoff stays 1, and then it is the e-value of a
+    /// score of 1 each time, so a caller that resumes after valid contexts of that block (a
+    /// BLASTX unit within its reader batch) steps once for them.
     pub fn next_valid_context(&mut self, kbp: &KarlinParams) -> i32 {
         let mut score = 1;
         blast_cutoffs(

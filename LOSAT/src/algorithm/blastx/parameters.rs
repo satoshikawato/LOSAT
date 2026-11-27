@@ -618,8 +618,15 @@ fn context_cutoffs(
     // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
     let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;
     // The sum statistics' cutoffs carry their e-value from one valid context to the next
-    // (`stats::cutoffs::SumStatsCutoffs`, blast_parameters.c:949-976).
+    // (`stats::cutoffs::SumStatsCutoffs`, blast_parameters.c:949-976), over the query batch: a
+    // unit after a valid context of its reader batch starts where those contexts left the e-value
+    // (`PreparedQueryBatch::batch_valid_before`). They all read the gapped block and the space
+    // of `avg_q` and `n`, so one step gives the state after any number of them
+    // (`SumStatsCutoffs::next_valid_context`).
     let mut sum_stats = SumStatsCutoffs::new(avg_q, n, decay, CutoffConversion::FiniteQuotient);
+    if options.gapped && decay != 0.0 && batch.batch_valid_before {
+        sum_stats.next_valid_context(&gapped);
+    }
     for (c, p) in batch.contexts.iter().zip(parameters) {
         if !p.valid {
             continue;

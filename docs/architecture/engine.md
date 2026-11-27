@@ -211,6 +211,7 @@ rpsblast yet.
 | Piece | Owner |
 | :--- | :--- |
 | Karlin-Altschul, length adjustment, search space, sum statistics | `stats` |
+| the cutoff score of an e-value (`BLAST_Cutoffs`) and the e-value of a score (`BLAST_KarlinStoE_simple`), every program's | `stats::cutoffs`, `stats::karlin` |
 | scoring matrices | `utils::matrix`; their Karlin tables in `stats::protein_tables` |
 | composition-based statistics | `core::composition_adjustment` |
 | PSSM engine | `core::psi` |

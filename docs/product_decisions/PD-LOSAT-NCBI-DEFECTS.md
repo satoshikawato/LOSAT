@@ -1423,7 +1423,7 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    extreme `-searchsp` and `-evalue` on a small input NCBI does write rows: 320 for a
    6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue 1e-300`.
    A valid result exists and can be checked: LOSAT keeps the finite cutoff of the mathematically
-   equal `ln K + ln searchsp - ln E` (`algorithm::tblastx::ncbi_cutoffs`), and on a nearby pair
+   equal `ln K + ln searchsp - ln E` (`stats::cutoffs`), and on a nearby pair
    whose quotient stays finite (the same 1.2 Mb query against a 2 Mb subject made of 30 kb of
    the Sakai genome inside N) NCBI and LOSAT write the same 457 rows byte for byte. On the
    genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The

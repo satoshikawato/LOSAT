@@ -326,3 +326,24 @@ fn the_sum_statistics_carry_their_evalue_across_contexts() {
         assert_eq!(sum.next_valid_context(&gapped), 1);
     }
 }
+
+/// For contexts that share one block, the state after one valid context is the state after any
+/// number of them (`SumStatsCutoffs::next_valid_context`: a BLASTX unit resumes the carry of its
+/// reader batch with one step), whether the first cutoff stays 1 or rises.
+#[test]
+fn one_valid_context_gives_the_state_of_any_number() {
+    let conversion = CutoffConversion::FiniteQuotient;
+    for gapped in [blosum62_gapped(), blosum62_ungapped()] {
+        for (avg_qlen, avg_subject_length) in [(5, 5), (100, 5), (100, 3), (160, 2500), (1, 1)] {
+            for rate in [0.1, 0.5] {
+                let mut once = SumStatsCutoffs::new(avg_qlen, avg_subject_length, rate, conversion);
+                once.next_valid_context(&gapped);
+                let mut more = once;
+                for _ in 0..6 {
+                    more.next_valid_context(&gapped);
+                    assert_eq!(more.evalue_hsp.to_bits(), once.evalue_hsp.to_bits());
+                }
+            }
+        }
+    }
+}

@@ -326,14 +326,22 @@ pub(crate) fn prepare_lone_unit(
     })
 }
 
-/// The end of phase 1 for the units of a reader batch: the batch's shape replaces the layout.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (cited at
+// `stats::cutoffs::SumStatsCutoffs`)
+/// The end of phase 1 for the units `units` of a reader batch, in order: the batch's shape
+/// replaces the layout, and each unit learns whether a context of the batch before it is valid
+/// (`PreparedQueryBatch::batch_valid_before`), as NCBI's sum statistics carry their e-value from
+/// one valid context of the query batch to the next.
 pub(crate) fn attach<'u>(
     units: impl IntoIterator<Item = &'u mut UnitPrep>,
     shape: ReaderBatchShape,
 ) {
     let shape = Arc::new(shape);
+    let mut valid_before = false;
     for unit in units {
         unit.prepared.reader_shape = Some(Arc::clone(&shape));
+        unit.prepared.batch_valid_before = valid_before;
+        valid_before |= unit.params.iter().any(|p| p.valid);
     }
 }
 

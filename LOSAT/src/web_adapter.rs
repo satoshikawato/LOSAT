@@ -140,6 +140,7 @@ pub fn search_database_read_files(
         | crate::api::Program::Tblastn
         | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
     };
+    let db_use = crate::report::log_inputs::db_use(program.name(), arguments);
     let mut out = Vec::new();
     let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
         let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
@@ -147,6 +148,7 @@ pub fn search_database_read_files(
             trimmed,
             db_type,
             blastdb.as_deref(),
+            db_use,
         ));
     };
     for db in dbs {

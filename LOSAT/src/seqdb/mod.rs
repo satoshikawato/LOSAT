@@ -39,6 +39,7 @@
 pub mod alias;
 pub mod column;
 pub mod date;
+pub(crate) mod db_use;
 pub mod file;
 pub mod filter;
 pub(crate) mod find;
@@ -60,6 +61,7 @@ pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 
+pub(crate) use db_use::DbUse;
 pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
@@ -1346,14 +1348,15 @@ pub(crate) struct DbReadPaths {
     /// Resolved volume paths without extension, in NCBI's `FindVolumePaths` order (none when
     /// the name does not resolve).
     pub(crate) volumes: Vec<Vec<u8>>,
-    /// Every file that reading the database checks or opens, each once: first the files that the
-    /// resolution and `ComputeMasks` check or open, in their order (the lookup candidates of each
-    /// name along the search path up to the one found, missing ones included, the group alias
-    /// files, the alias files and their `DBLIST` targets, the `OIDLIST` path, and its fallback
-    /// beside the first volume only where the primary path is not a file, and the id lists);
-    /// then the LMDB files and `.?js` of each alias file, the `MASKLIST` GI-mask files, and each
-    /// volume's component files (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`, and for protein
-    /// databases, `rps::RPS_EXTENSIONS`).
+    /// Every file that reading the database checks or opens for a run of the given [`DbUse`],
+    /// each once: first the files that the resolution and `ComputeMasks` check or open, in their
+    /// order (the lookup candidates of each name along the search path up to the one found,
+    /// missing ones included, the group alias files, the alias files and their `DBLIST` targets,
+    /// the `OIDLIST` path, and its fallback beside the first volume only where the primary path
+    /// is not a file, and the id lists); then the files of what they found that the run can open:
+    /// each volume's index, header and sequence files, the string index and LMDB file, and as
+    /// the run's options ask the id-lookup files, the column files and `MASKLIST` GI-mask files
+    /// of the masks, and the RPS files (`DbUse`).
     pub(crate) files: Vec<Vec<u8>>,
     /// How many of the first `files` the resolution and `ComputeMasks` check or open: the files
     /// whose presence decides what the opening reads, so a file made there changes the run. The
@@ -1621,7 +1624,12 @@ impl SeqDb {
     /// or opens ([`DbReadPaths`]): the engine's own resolution and `ComputeMasks`
     /// (`alias::resolve_in_recording`, `alias::compute_masks_recording`), which record what they
     /// check or open, then the files of the alias files, the GI masks and the volumes found.
-    pub(crate) fn read_paths(name: &[u8], seqtype: SeqType, path: &SearchPath) -> DbReadPaths {
+    pub(crate) fn read_paths(
+        name: &[u8],
+        seqtype: SeqType,
+        path: &SearchPath,
+        db_use: DbUse,
+    ) -> DbReadPaths {
         let mut recorded = Vec::new();
         let mut tree = match alias::resolve_in_recording(name, seqtype, path, Some(&mut recorded)) {
             Ok(tree) => tree,
@@ -1637,7 +1645,7 @@ impl SeqDb {
         let masks = alias::compute_masks_recording(&mut tree.root, Some(&mut recorded));
         let volumes =
             Self::sort_volume_set(std::mem::take(&mut tree.volumes).into_iter().collect());
-        let found = Self::found_files(&tree, &volumes, seqtype, path);
+        let found = Self::found_files(&tree, &volumes, seqtype, path, db_use);
         let seen: std::collections::HashSet<Vec<u8>> = recorded.iter().cloned().collect();
         let looked_up = recorded.len();
         let mut files = recorded;
@@ -1651,13 +1659,14 @@ impl SeqDb {
     }
 
     /// The files of the resolved alias tree `tree` that [`SeqDb::read_paths`] adds to what the
-    /// resolution recorded: the LMDB files and `.?js` of each alias file, the `MASKLIST` GI-mask
-    /// files, and the component files of each of `volumes`.
+    /// resolution recorded and that a run of `db_use` can open: the LMDB files of each alias
+    /// file, the `MASKLIST` GI-mask files, and the component files of each of `volumes`.
     fn found_files(
         tree: &alias::AliasTree,
         volumes: &[Vec<u8>],
         seqtype: SeqType,
         path: &SearchPath,
+        db_use: DbUse,
     ) -> std::collections::BTreeSet<Vec<u8>> {
         use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
         let mut alias_files = std::collections::BTreeSet::new();
@@ -1668,22 +1677,35 @@ impl SeqDb {
             SeqType::Nucleotide => b".nal".as_slice(),
             SeqType::Protein => b".pal".as_slice(),
         };
+        let read = |extensions: &[&'static str]| -> Vec<&'static str> {
+            extensions
+                .iter()
+                .copied()
+                .filter(|ext| db_use.reads_extension(ext))
+                .collect()
+        };
         for alias in &alias_files {
             files.insert(alias.clone());
             if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
-                push_mol_extensions(&mut files, stem, mol, &LMDB_EXTENSIONS);
-                files.insert([stem, b".", mol, b"js"].concat());
+                push_mol_extensions(&mut files, stem, mol, &read(&LMDB_EXTENSIONS));
+                if db_use.reads_alias_metadata() {
+                    files.insert([stem, b".", mol, b"js"].concat());
+                }
             }
         }
-        if let Some(gi_masks) = &tree.gi_masks {
-            for mask_name in gi_masks {
+        if db_use.reads_masks() {
+            for mask_name in tree.gi_masks.iter().flatten() {
                 gi_mask::read_paths(mask_name, path, &mut files);
             }
         }
+        let (volume_read, lmdb_read) = (read(&VOLUME_EXTENSIONS), read(&LMDB_EXTENSIONS));
         for volume in volumes {
-            push_mol_extensions(&mut files, volume, mol, &VOLUME_EXTENSIONS);
-            push_mol_extensions(&mut files, volume, mol, &LMDB_EXTENSIONS);
-            if seqtype == SeqType::Protein {
+            push_mol_extensions(&mut files, volume, mol, &volume_read);
+            push_mol_extensions(&mut files, volume, mol, &lmdb_read);
+            if db_use.reads_masks() {
+                column::read_paths(&path_of_bytes(volume), seqtype, &mut files);
+            }
+            if db_use.reads_rps() {
                 for ext in rps::RPS_EXTENSIONS {
                     files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());
                 }

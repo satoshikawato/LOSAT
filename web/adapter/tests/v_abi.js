@@ -1512,13 +1512,17 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     // D19b: `-db` missing alias file `.nal` refused at validate and run (CLI creates and reads it back).
     { id: "s2-db-nal", program: "blastn", query: ["q.fa", Q], db: "db/wm", work: { "db/wm.nin": Buffer.from("") }, logfile: "db/wm.nal", expect: "refusal", cliRefuses: "db/wm.nal" },
     // D26: the files of a `-db` that the run checks or opens, missing ones too, are refused by LOSAT Web and the CLI
-    // alike (one producer): a volume's component file, the group alias file, a lookup candidate of a database that
-    // does not resolve, and the GI-mask index of the alias file's MASKLIST; a file of the database's folder that the
-    // run does not read is the run's log.
-    { id: "s2-db-component", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/x.nog", expect: "refusal", cliRefuses: "db/x.nog" },
+    // alike (one producer): the string index of a volume (the run opens it), the group alias file, a lookup candidate
+    // of a database that does not resolve, and the GI-mask index of the alias file's MASKLIST with a mask option. A
+    // file of the database that this run cannot open (the GI index and the GI-mask files without a mask option) or
+    // of the database's folder that the run does not read is the run's log (round 1: only the files that the run opens).
+    { id: "s2-db-component", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/x.nsd", expect: "refusal", cliRefuses: "db/x.nsd" },
     { id: "s2-db-group-alias", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/index.alx", expect: "refusal", cliRefuses: "db/index.alx" },
     { id: "s2-db-unresolved", program: "blastn", query: ["q.fa", Q], db: "db/none", work: DBX, logfile: "db/none.nal", expect: "refusal", cliRefuses: "db/none.nal" },
-    { id: "s2-db-gi-mask", program: "blastn", query: ["q.fa", Q], db: "db/m", work: { ...DBX, "db/m.nal": Buffer.from("TITLE m\nDBLIST x\nMASKLIST mk\n") }, logfile: "mk.gni", expect: "refusal", cliRefuses: "mk.gni" },
+    { id: "s2-db-gi-mask", program: "blastn", query: ["q.fa", Q], db: "db/m", work: { ...DBX, "db/m.nal": Buffer.from("TITLE m\nDBLIST x\nMASKLIST mk\n") }, extra: ["-db_soft_mask", "0"], logfile: "mk.gni", expect: "refusal", cliRefuses: "mk.gni" },
+    { id: "s2-db-gi-index", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, extra: ["-db_hard_mask", "0"], logfile: "db/x.nog", expect: "refusal", cliRefuses: "db/x.nog" },
+    { id: "s0-db-gi-index-unasked", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/x.nog" },
+    { id: "s0-db-gi-mask-unasked", program: "blastn", query: ["q.fa", Q], db: "db/m", work: { ...DBX, "db/m.nal": Buffer.from("TITLE m\nDBLIST x\nMASKLIST mk\n") }, logfile: "mk.gni" },
     { id: "s0-db-log", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/run.log" },
   ];
   const { reactor, close, waitForWorkers } = await engine.open(workDir);

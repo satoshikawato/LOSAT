@@ -20,7 +20,7 @@ use crate::blastinput::ncbi_environment::{
     Preparsed,
 };
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
-use crate::seqdb::{SearchPath, SeqDb, SeqType};
+use crate::seqdb::{DbUse, SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
 /// Data files that `rpsbproc` reads from its `-d` directory (default `data`).
@@ -34,7 +34,7 @@ const RPSBPROC_DATA_FILES: &[&str] = &[
 ];
 
 /// The input files and database names that a run of `program` with `words` reads.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct RunInputs {
     /// Direct file paths read by the run (command-line input files, list files, WindowMasker
     /// counts, registry files, and `rpsbproc` data files).
@@ -46,7 +46,50 @@ pub(crate) struct RunInputs {
     pub(crate) mb_index: Option<MbIndexNames>,
     /// Explicit `-dbtype` (`prot` or `nucl`) for tools whose database type is not fixed by program.
     pub(crate) dbtype: Option<SeqType>,
+    /// What the run can open of the files of its databases ([`db_use`]).
+    pub(crate) db_use: DbUse,
 }
+
+impl RunInputs {
+    fn new(db_use: DbUse) -> Self {
+        Self {
+            files: Vec::new(),
+            databases: Vec::new(),
+            mb_index: None,
+            dbtype: None,
+            db_use,
+        }
+    }
+}
+
+/// What the run of `program` with `words` can open of the files of its databases: for a search
+/// (`db_seqtypes` names them, `rpsblast` and `rpstblastn` among them) what its options ask for
+/// ([`DbUse::note_option`]), for any other program (a tool) every file of the database that a
+/// tool may open. The one reader of the options, for the command line and for LOSAT Web.
+pub(crate) fn db_use<S: AsRef<OsStr>>(program: &str, words: &[S]) -> DbUse {
+    if !SEARCH_PROGRAMS.contains(&program) {
+        return DbUse::TOOL;
+    }
+    let mut db_use = DbUse::search(program);
+    scan_argv_kinds(program, words, |name, _, value| {
+        if value.is_some() {
+            db_use.note_option(name);
+        }
+    });
+    db_use
+}
+
+/// The programs that search a database.
+const SEARCH_PROGRAMS: [&str; 8] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "rpsblast",
+    "rpstblastn",
+];
 
 /// The names of the MegaBLAST index that NCBI's handler asks the loader for
 /// (`BlastnArgs::megablast_index_name`, cited at `blast_engine::mb_index::megablast_index`).
@@ -187,7 +230,7 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     words: &[S],
     start: &ApplicationStart,
 ) -> RunInputs {
-    let mut inputs = RunInputs::default();
+    let mut inputs = RunInputs::new(db_use(program, words));
     for path in start.registry_inputs() {
         push_file(&mut inputs.files, path.clone());
     }
@@ -515,7 +558,7 @@ fn matches_any_input(
     let seqtypes = db_seqtypes(program, inputs.dbtype);
     let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::with_capacity(inputs.databases.len());
     for db in &inputs.databases {
-        let (files, volumes) = database_read_paths(db, seqtypes, &search_path);
+        let (files, volumes) = database_read_paths(db, seqtypes, &search_path, inputs.db_use);
         if files
             .iter()
             .any(|file| matches_bytes_path(candidates, file))
@@ -557,11 +600,12 @@ fn database_read_paths(
     db_name: &OsStr,
     seqtypes: &[SeqType],
     search_path: &SearchPath,
+    db_use: DbUse,
 ) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let db_bytes = crate::utils::os_bytes::os_str_bytes(db_name);
     let mut files = Vec::new();
     let volumes = SeqDb::open_guessing(seqtypes, |seqtype| {
-        let read = SeqDb::read_paths(db_bytes.as_ref(), seqtype, search_path);
+        let read = SeqDb::read_paths(db_bytes.as_ref(), seqtype, search_path, db_use);
         files.extend(read.files);
         match read.error {
             None => Ok(read.volumes),
@@ -601,7 +645,10 @@ fn matches_mb_index(
 /// `volumes` that the loader reads (`AddIndexInfo`): each volume's super header (`<volume>.shd`),
 /// and where it loads, the index volumes it names along `search_path` up to the first one not
 /// found (`volume_super_header`, `index_volume_names`). A volume without a super header has no
-/// index volume that the loader reads.
+/// index volume that the loader reads. The names are a superset where the loader stops before it
+/// reads them: it compares the volume's number of sequences with the super header's first, which
+/// needs the volume's own index file, and the check does not read it; and the old-style names of
+/// the `-db` value that [`matches_mb_index`] adds are read only after the new style fails.
 fn matches_new_style_index(
     candidates: &[PathBuf],
     volumes: &[Vec<u8>],

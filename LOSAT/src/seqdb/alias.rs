@@ -985,16 +985,18 @@ pub(crate) struct DatabaseFiles {
 }
 
 /// The files that reading `dbname` (`seqtype`) along the engine's own
-/// [`SearchPath::from_environment`] checks or opens ([`super::SeqDb::read_paths`]), with the paths
+/// [`SearchPath::from_environment`] checks or opens for a run of `db_use`
+/// ([`super::SeqDb::read_paths`]), with the paths
 /// inside the working directory relative to it so `run_files` matches them without making missing
 /// parent folders present.
 pub(crate) fn database_files(
     dbname: &[u8],
     seqtype: SeqType,
     blastdb: Option<&[u8]>,
+    db_use: super::DbUse,
 ) -> DatabaseFiles {
     let search = SearchPath::from_environment(blastdb);
-    let read = super::SeqDb::read_paths(dbname, seqtype, &search);
+    let read = super::SeqDb::read_paths(dbname, seqtype, &search, db_use);
     let cwd = fix_delimiters(&search.cwd);
     let norm_cwd = normalize_path(&cwd);
     let mut seen = std::collections::HashSet::with_capacity(read.files.len());
@@ -1021,11 +1023,12 @@ pub(crate) fn database_lookup_files(
     dbname: &[u8],
     seqtype: SeqType,
     blastdb: Option<&[u8]>,
+    db_use: super::DbUse,
 ) -> Vec<Vec<u8>> {
     let DatabaseFiles {
         mut looked_up,
         found,
-    } = database_files(dbname, seqtype, blastdb);
+    } = database_files(dbname, seqtype, blastdb, db_use);
     looked_up.extend(found);
     looked_up
 }

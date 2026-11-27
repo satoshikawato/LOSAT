@@ -602,7 +602,7 @@ the run opens or checks for reading even when that file is missing (a `-db` sear
 `-negative_taxidlist`, the files that reading the database of `-db`, BLASTN's `-filtering_db` or
 `windowmasker -infmt blastdb` checks or opens, which the command line refuses too (line WQA D26) — lookup
 candidates (alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx`, `DBLIST` targets and local-copy/search-path
-candidates), alias lists, GI-mask files and each volume's component files — `taxdb.bti` or paired `taxdb.btd` when the `-outfmt` consults the taxonomy database,
+candidates), alias lists and the files of each volume that the run can open (its index, header, sequence and string-index files and LMDB file; the id-lookup files only with an id list or taxonomy option, the column, GI-index and GI-mask files only with `-db_soft_mask` or `-db_hard_mask`) — `taxdb.bti` or paired `taxdb.btd` when the `-outfmt` consults the taxonomy database,
 `taxonomy4blast.sqlite3` when shadowing an existing file on
 the search path, or `windowmasker`'s `-in`, `-fa_list true` listed entries, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`

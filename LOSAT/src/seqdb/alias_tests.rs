@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use super::super::{SeqDb, SeqDbError, SeqType};
+use super::super::{DbUse, SeqDb, SeqDbError, SeqType};
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/oidmask")
@@ -348,11 +348,11 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     use super::database_lookup_files;
     // Plain nucleotide and protein names yield group alias + alias + index in lookup order.
     assert_eq!(
-        database_lookup_files(b"x", SeqType::Nucleotide, None),
+        database_lookup_files(b"x", SeqType::Nucleotide, None, DbUse::search("blastn")),
         vec![b"index.alx".to_vec(), b"x.nal".to_vec(), b"x.nin".to_vec()]
     );
     assert_eq!(
-        database_lookup_files(b"p5", SeqType::Protein, None),
+        database_lookup_files(b"p5", SeqType::Protein, None, DbUse::search("blastn")),
         vec![
             b"index.alx".to_vec(),
             b"p5.pal".to_vec(),
@@ -362,7 +362,12 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     // Multiple quoted names with spaces: stops at the first missing name (matching NCBI's
     // `resolve_in` short-circuit), and continues to the second name when the first exists.
     assert_eq!(
-        database_lookup_files(b"\"sub dir/x1\" x2", SeqType::Nucleotide, None),
+        database_lookup_files(
+            b"\"sub dir/x1\" x2",
+            SeqType::Nucleotide,
+            None,
+            DbUse::search("blastn")
+        ),
         vec![
             b"sub dir/index.alx".to_vec(),
             b"sub dir/x1.nal".to_vec(),
@@ -374,7 +379,12 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(sub.join("x1.nin"), b"x").unwrap();
     let quoted_arg = format!("\"{}\" x2", sub.join("x1").display());
-    let quoted_got = database_lookup_files(quoted_arg.as_bytes(), SeqType::Nucleotide, None);
+    let quoted_got = database_lookup_files(
+        quoted_arg.as_bytes(),
+        SeqType::Nucleotide,
+        None,
+        DbUse::search("blastn"),
+    );
     assert!(quoted_got.iter().any(|p| p == b"x2.nal"), "{quoted_got:?}");
     assert!(quoted_got.iter().any(|p| p == b"x2.nin"), "{quoted_got:?}");
     // Existing alias file expands DBLIST and stops on mutual recursion (before `compute_masks`
@@ -392,6 +402,7 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
         base.as_os_str().as_encoded_bytes(),
         SeqType::Nucleotide,
         None,
+        DbUse::search("blastn"),
     );
     let has = |list: &[Vec<u8>], path: &std::path::Path| {
         let want = path.as_os_str().as_encoded_bytes();
@@ -421,6 +432,7 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
             mask_dir.join(alias_name).as_os_str().as_encoded_bytes(),
             SeqType::Nucleotide,
             Some(vol_dir.as_os_str().as_encoded_bytes()),
+            DbUse::search("blastn"),
         )
     };
     let got_m = lookup_mask("m");
@@ -461,6 +473,7 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
         b"a",
         SeqType::Protein,
         Some(b_dbs.as_os_str().as_encoded_bytes()),
+        DbUse::search("blastn"),
     );
     assert!(
         got_b.iter().any(|p| p == b"v1.pin"),
@@ -479,6 +492,7 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
         case_c.join("a").as_os_str().as_encoded_bytes(),
         SeqType::Protein,
         Some(c_dbs.as_os_str().as_encoded_bytes()),
+        DbUse::search("blastn"),
     );
     assert!(has(&got_c, &c_dbs.join("sub.pal")), "{got_c:?}");
     assert!(has(&got_c, &c_dbs.join("v1.pal")), "{got_c:?}");
@@ -511,6 +525,7 @@ fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
         dir.join("m").as_os_str().as_encoded_bytes(),
         SeqType::Nucleotide,
         Some(vols.as_os_str().as_encoded_bytes()),
+        DbUse::TOOL,
     );
     let has = |path: &std::path::Path| {
         let want = path.as_os_str().as_encoded_bytes();
@@ -538,6 +553,7 @@ fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
         dir.join("m").as_os_str().as_encoded_bytes(),
         SeqType::Nucleotide,
         Some(vols.as_os_str().as_encoded_bytes()),
+        DbUse::TOOL,
     );
     let within = |files: &[Vec<u8>], path: std::path::PathBuf| {
         files
@@ -557,6 +573,107 @@ fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
         );
     }
     assert_eq!(split.looked_up.len() + split.found.len(), got.len());
+}
+
+// Line WQA D26 round 1: the files of a database that a run can open follow its program and its
+// options (`DbUse`): a search of the sequences opens the volume's index, header, sequence and
+// string-index files and the LMDB file; the id-lookup files only with an id list or a taxonomy
+// filter, the column files and GI-mask files only with a mask option, the RPS files only for the
+// RPS searches; a name that none of these can open is not a file the run reads.
+#[test]
+fn database_files_follow_what_the_run_asks_for() {
+    use super::database_lookup_files;
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d26-use");
+    for ext in ["nin", "nhr", "nsq", "naa"] {
+        std::fs::write(dir.join(format!("v.{ext}")), b"x").unwrap();
+    }
+    for ext in ["pin", "phr", "psq"] {
+        std::fs::write(dir.join(format!("w.{ext}")), b"x").unwrap();
+    }
+    std::fs::write(
+        dir.join("m.nal"),
+        format!("TITLE m\nDBLIST v\nMASKLIST {}\n", dir.join("mk").display()),
+    )
+    .unwrap();
+    let files = |name: &[u8], seqtype: SeqType, db_use: DbUse| -> Vec<String> {
+        let base = dir.as_os_str().as_encoded_bytes();
+        let name = [base, b"/", name].concat();
+        database_lookup_files(&name, seqtype, Some(base), db_use)
+            .iter()
+            .map(|file| {
+                let file = String::from_utf8_lossy(file).into_owned();
+                file.strip_prefix(&format!("{}/", dir.display()))
+                    .map_or(file.clone(), str::to_string)
+            })
+            .collect()
+    };
+    let with = |option: &str| {
+        let mut db_use = DbUse::search("blastn");
+        db_use.note_option(option);
+        db_use
+    };
+    let has = |files: &[String], name: &str| files.iter().any(|file| file == name);
+    // The plain search.
+    let plain = files(b"m", SeqType::Nucleotide, DbUse::search("blastn"));
+    for name in [
+        "m.nal", "v.nin", "v.nhr", "v.nsq", "v.nsd", "v.nsi", "v.ndb",
+    ] {
+        assert!(has(&plain, name), "{name} in {plain:?}");
+    }
+    for name in [
+        "mk.gni", "mk.gno", "v.nog", "v.naa", "v.nba", "v.nnd", "v.nni", "v.nos", "v.nto", "v.njs",
+        "v.nhd", "v.pin", "v.rps", "m.njs",
+    ] {
+        assert!(!has(&plain, name), "{name} in {plain:?}");
+    }
+    // A mask option: the GI masks, the GI index, and each volume's columns (the data files only
+    // where the column's index file exists).
+    for option in ["db_soft_mask", "db_hard_mask", "import_search_strategy"] {
+        let masked = files(b"m", SeqType::Nucleotide, with(option));
+        for name in [
+            "mk.gni", "mk.gno", "v.nog", "v.naa", "v.nab", "v.nac", "v.nba", "v.nza",
+        ] {
+            assert!(has(&masked, name), "{option}: {name} in {masked:?}");
+        }
+        for name in ["v.nbb", "v.nbc", "v.nnd", "v.nos"] {
+            assert!(!has(&masked, name), "{option}: {name} in {masked:?}");
+        }
+    }
+    // An id list or a taxonomy filter: the lookup files, not the masks.
+    for option in [
+        "gilist",
+        "negative_seqidlist",
+        "taxids",
+        "taxidlist",
+        "negative_taxids",
+    ] {
+        let filtered = files(b"m", SeqType::Nucleotide, with(option));
+        for name in [
+            "v.nni", "v.nnd", "v.nos", "v.not", "v.ntf", "v.nto", "v.nti", "v.ntd",
+        ] {
+            assert!(has(&filtered, name), "{option}: {name} in {filtered:?}");
+        }
+        for name in ["mk.gni", "v.nog", "v.naa", "v.nhd", "v.njs"] {
+            assert!(!has(&filtered, name), "{option}: {name} in {filtered:?}");
+        }
+    }
+    // The RPS files belong to the RPS searches only.
+    let blastp = files(b"w", SeqType::Protein, DbUse::search("blastp"));
+    let rps = files(b"w", SeqType::Protein, DbUse::search("rpsblast"));
+    for name in ["w.pin", "w.phr", "w.psq", "w.pdb"] {
+        assert!(has(&blastp, name) && has(&rps, name), "{name}");
+    }
+    for name in ["w.rps", "w.loo", "w.aux", "w.freq"] {
+        assert!(!has(&blastp, name), "{name} in {blastp:?}");
+        assert!(has(&rps, name), "{name} in {rps:?}");
+    }
+    // A tool that is not a search may open all of them, but not the RPS files.
+    let tool = files(b"m", SeqType::Nucleotide, DbUse::TOOL);
+    for name in [
+        "v.nog", "v.naa", "v.nnd", "v.nos", "v.nhd", "v.njs", "mk.gni", "m.njs",
+    ] {
+        assert!(has(&tool, name), "{name} in {tool:?}");
+    }
 }
 
 #[test]

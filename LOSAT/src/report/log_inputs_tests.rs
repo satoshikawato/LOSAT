@@ -176,13 +176,28 @@ fn detects_database_component_files() {
     let db = dir.join("mydb");
     let words: Vec<OsString> = vec!["-db".into(), db.as_os_str().to_os_string()];
     let start = blastn_start(&words);
-    for refused in [&nhr, &naa] {
-        assert!(
-            check_disk_logfile("blastn", &words, &start, Some(refused.as_os_str())).is_err(),
-            "expected blastn refusal for {}",
-            refused.display()
-        );
-    }
+    assert!(
+        check_disk_logfile("blastn", &words, &start, Some(nhr.as_os_str())).is_err(),
+        "expected blastn refusal for {}",
+        nhr.display()
+    );
+    // The mask column is opened with a mask option only (line WQA D26 round 1): without one it
+    // is the run's log; with one it is refused.
+    let masked_words: Vec<OsString> = vec![
+        "-db".into(),
+        db.as_os_str().to_os_string(),
+        "-db_soft_mask".into(),
+        "0".into(),
+    ];
+    let masked_start = blastn_start(&masked_words);
+    assert!(check_disk_logfile("blastn", &words, &start, Some(naa.as_os_str())).is_ok());
+    assert!(check_disk_logfile(
+        "blastn",
+        &masked_words,
+        &masked_start,
+        Some(naa.as_os_str())
+    )
+    .is_err());
     // The MegaBLAST index files are read with `-use_index true` only (line WQA D26).
     let index_words: Vec<OsString> = vec![
         "-db".into(),
@@ -213,11 +228,12 @@ fn detects_database_component_files() {
     }
     // Non-blastn nucleotide search (tblastx) does not read MegaBLAST index files.
     let tbx_start = ApplicationStart::of_process("tblastx", &words);
-    assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(naa.as_os_str())).is_err());
+    assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(nhr.as_os_str())).is_err());
     assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(shd.as_os_str())).is_ok());
     assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(idx00.as_os_str())).is_ok());
 
-    // Protein volume: PIG ISAM (.ppi/.ppd), mask column (.paa), RPS (.rps), and bogus .pma allowed.
+    // Protein volume: PIG ISAM (.ppi/.ppd, with an id list), mask column (.paa, with a mask
+    // option), RPS (.rps, for the RPS searches), and bogus .pma allowed.
     let pin = dir.join("protdb.pin");
     let ppi = dir.join("protdb.ppi");
     let paa = dir.join("protdb.paa");
@@ -229,11 +245,26 @@ fn detects_database_component_files() {
     let prot_words: Vec<OsString> =
         vec!["-db".into(), dir.join("protdb").as_os_str().to_os_string()];
     let bp_start = ApplicationStart::of_process("blastp", &prot_words);
-    for refused in [&ppi, &paa, &rps] {
+    for (option, refused, program) in [
+        ("-gilist", &ppi, "blastp"),
+        ("-db_hard_mask", &paa, "blastp"),
+        ("-db", &rps, "rpsblast"),
+    ] {
+        let mut words = prot_words.clone();
+        if option != "-db" {
+            words.extend([option.into(), "x".into()]);
+        }
+        let start = ApplicationStart::of_process(program, &words);
         assert!(
-            check_disk_logfile("blastp", &prot_words, &bp_start, Some(refused.as_os_str()))
-                .is_err(),
-            "expected blastp refusal for {}",
+            check_disk_logfile(program, &words, &start, Some(refused.as_os_str())).is_err(),
+            "expected {program} {option} refusal for {}",
+            refused.display()
+        );
+        // The same name, not asked for, is the run's log.
+        let start = ApplicationStart::of_process("blastp", &prot_words);
+        assert!(
+            check_disk_logfile("blastp", &prot_words, &start, Some(refused.as_os_str())).is_ok(),
+            "expected plain blastp to allow {}",
             refused.display()
         );
     }
@@ -279,9 +310,37 @@ fn detects_database_component_files() {
         "true".into(),
     ];
     let alias_start = blastn_start(&alias_words);
-    for refused in [
-        &real_nhr, &alias_nal, &gi_file, &oid_file, &mask_gni, &mask_gnd, &alias_idx,
-    ] {
+    // The GI-mask files are opened with a mask option only (line WQA D26 round 1).
+    for allowed in [&mask_gni, &mask_gnd] {
+        assert!(
+            check_disk_logfile(
+                "blastn",
+                &alias_words,
+                &alias_start,
+                Some(allowed.as_os_str())
+            )
+            .is_ok(),
+            "expected alias blastn to allow {} without a mask option",
+            allowed.display()
+        );
+    }
+    let mut mask_words = alias_words.clone();
+    mask_words.extend(["-db_soft_mask".into(), "0".into()]);
+    let mask_start = blastn_start(&mask_words);
+    for refused in [&mask_gni, &mask_gnd] {
+        assert!(
+            check_disk_logfile(
+                "blastn",
+                &mask_words,
+                &mask_start,
+                Some(refused.as_os_str())
+            )
+            .is_err(),
+            "expected alias blastn -db_soft_mask refusal for {}",
+            refused.display()
+        );
+    }
+    for refused in [&real_nhr, &alias_nal, &gi_file, &oid_file, &alias_idx] {
         assert!(
             check_disk_logfile(
                 "blastn",
@@ -417,9 +476,13 @@ fn lookup_candidates_of_a_resolved_database_are_refused() {
         std::fs::write(dir.join(format!("x.{ext}")), b"x").unwrap();
     }
     let words = db_words(&dir.join("x"), &[]);
-    for name in ["index.alx", "x.nal", "x.nsq", "x.nog"] {
+    for name in ["index.alx", "x.nal", "x.nsq"] {
         assert!(refused("blastn", &words, &dir.join(name)), "{name}");
     }
+    // The GI index is opened with a mask option only (round 1).
+    assert!(!refused("blastn", &words, &dir.join("x.nog")));
+    let masked = db_words(&dir.join("x"), &["-db_hard_mask", "0"]);
+    assert!(refused("blastn", &masked, &dir.join("x.nog")));
     assert!(!refused("blastn", &words, &dir.join("x.log")));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -533,7 +596,7 @@ fn new_style_index_volumes_are_refused_only_where_the_run_reads_them() {
 }
 
 // Line WQA D26 item 5: the GI-mask data files are read only after an index that reads, up to the
-// first one not found.
+// first one not found; the GI-mask files are opened only with a mask option (round 1).
 #[test]
 fn gi_mask_data_files_are_refused_only_where_the_run_reads_them() {
     let dir = fresh_dir("d26-gi-mask");
@@ -546,7 +609,11 @@ fn gi_mask_data_files_are_refused_only_where_the_run_reads_them() {
         format!("TITLE m\nDBLIST v\nMASKLIST {}\n", mask.display()),
     )
     .unwrap();
-    let words = db_words(&dir.join("m"), &[]);
+    let plain = db_words(&dir.join("m"), &[]);
+    for name in ["mk.gni", "mk.gno", "mk.gnd"] {
+        assert!(!refused("blastn", &plain, &dir.join(name)), "{name}");
+    }
+    let words = db_words(&dir.join("m"), &["-db_soft_mask", "0"]);
     // No index: its name and the offset file's are refused, no data file.
     for name in ["mk.gni", "mk.gno"] {
         assert!(refused("blastn", &words, &dir.join(name)), "{name}");

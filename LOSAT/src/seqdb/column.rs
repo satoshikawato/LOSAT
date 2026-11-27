@@ -19,7 +19,7 @@
 //! words.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::file::DbFile;
 use super::volume::with_extension;
@@ -539,6 +539,36 @@ impl Column {
 // from its `.?xb` alone on a little-endian host gives each number byte-reversed, a
 // deterministic result that LOSAT reproduces (line SW, SW8 DECISIONS 40; a refusal remains
 // where a consumer would index letters with those ranges).
+/// The files of the column of `letter` in the volume `base`: its index file `.?Xa` and its two
+/// data files `.?Xb` and `.?Xc` (`x_OpenAllColumns`; the one reader of these names, [`open_all`]
+/// and [`read_paths`]).
+fn column_files(base: &Path, seqtype: SeqType, letter: char) -> [PathBuf; 3] {
+    [
+        with_extension(base, seqtype, &format!("{letter}a")),
+        with_extension(base, seqtype, &format!("{letter}b")),
+        with_extension(base, seqtype, &format!("{letter}c")),
+    ]
+}
+
+/// The files that [`open_all`] checks for the volume `base`, as the bytes of their paths: for
+/// each letter `a` to `z` the index file, and the two data files of a column whose index file
+/// exists.
+pub(super) fn read_paths(
+    base: &Path,
+    seqtype: SeqType,
+    out: &mut std::collections::BTreeSet<Vec<u8>>,
+) {
+    for letter in b'a'..=b'z' {
+        let [index, big, small] = column_files(base, seqtype, char::from(letter));
+        let found = super::alias::exists(&index);
+        out.insert(crate::utils::os_bytes::path_bytes(&index).into_owned());
+        if found {
+            out.insert(crate::utils::os_bytes::path_bytes(&big).into_owned());
+            out.insert(crate::utils::os_bytes::path_bytes(&small).into_owned());
+        }
+    }
+}
+
 /// Opens every column of the volume `base` (`CSeqDBVol::x_OpenAllColumns`): for the letters
 /// `a` to `z`, the columns whose index file exists, in letter order. `volume_oids` is the
 /// number of sequences of the volume.
@@ -549,13 +579,10 @@ pub(super) fn open_all(
 ) -> Result<Vec<Column>, SeqDbError> {
     let mut columns: Vec<Column> = Vec::new();
     for letter in b'a'..=b'z' {
-        let letter = char::from(letter);
-        let index_path = with_extension(base, seqtype, &format!("{letter}a"));
+        let [index_path, big_path, small_path] = column_files(base, seqtype, char::from(letter));
         if !super::alias::exists(&index_path) {
             continue;
         }
-        let big_path = with_extension(base, seqtype, &format!("{letter}b"));
-        let small_path = with_extension(base, seqtype, &format!("{letter}c"));
         let big = super::alias::exists(&big_path);
         let small = super::alias::exists(&small_path);
         if !(big || small) {

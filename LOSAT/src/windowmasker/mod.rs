@@ -168,6 +168,7 @@ pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>,
                 &crate::utils::os_bytes::os_str_bytes(&db),
                 crate::seqdb::SeqType::Nucleotide,
                 blastdb.as_deref(),
+                crate::seqdb::DbUse::TOOL,
             );
             // A missing component, GI-mask or alias LMDB file that `-out` makes is never read by
             // the run's reading of the sequences, so only the looked-up files count for `-out`.

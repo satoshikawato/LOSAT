@@ -5,5 +5,8 @@
   and then read as a database, and every volume of an `-index_name base,,first,last` range; it no
   longer refuses the MegaBLAST index files of a search without `-use_index true`, the copy of an
   `OIDLIST` file beside the first volume when the file the alias names exists, or GI-mask data files
-  that the run does not read. LOSAT Web now also refuses a volume's component files and the GI-mask
-  files of an alias's `MASKLIST`, as the command line does.
+  that the run does not read. A database's files that a run cannot open are no longer refused on the
+  command line either: the GI-mask files, the GI index and the mask columns of a search without
+  `-db_soft_mask` / `-db_hard_mask`, the id-lookup files of a search without an id list or taxonomy
+  option, the RPS files of every search but `rpsblast` and `rpstblastn`. LOSAT Web now refuses the
+  same files as the command line, from the same function, and a volume's component files.

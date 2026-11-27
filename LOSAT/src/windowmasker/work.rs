@@ -2,11 +2,12 @@
 //! of `-outfmt`, the id lists, and the masks of each nucleotide sequence (WindowMasker, then
 //! DUST with `-dust T`).
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::ncbi_app::files::Ostream;
+use crate::algorithm::common::database::TaxdbRun;
+use crate::ncbi_app::files::OutputFile;
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::seqdb::mask::FilterProgram;
@@ -149,16 +150,19 @@ pub(super) const INCONSISTENT: &str = "CWinMaskConfigException::inconsistent pro
 /// The function of the `CWinMaskConfig` constructor in NCBI's reports.
 pub(super) const CONFIG: &str = "ncbi::CWinMaskConfig::CWinMaskConfig";
 
-/// `CMaskReader::GetNextSequence` of a source of sequences; `out` is the output, which comes
-/// out before a post of the reader (NCBI's `cerr` is tied to `cout`).
+/// `CMaskReader::GetNextSequence` of a source of sequences; a post of the reader comes after
+/// NCBI's writes of the output so far (NCBI's `cerr` is tied to `cout`, `Diag`).
 pub(super) trait SequenceSource {
-    fn next_record(
-        &mut self,
-        out: &mut Ostream<'_>,
-        diag: &mut Diag,
-    ) -> Result<Option<Record>, Failure>;
+    fn next_record(&mut self, diag: &mut Diag) -> Result<Option<Record>, Failure>;
     /// From now on the records carry their titles (`Record::get_title`).
     fn make_titles(&mut self);
+    /// The taxonomy database of a database's reads (`MaskBdbReader::taxonomy`).
+    fn taxonomy(&self) -> Option<&TaxdbRun> {
+        None
+    }
+    /// The reads look names up in the taxonomy database `previous` of the process
+    /// (`MaskBdbReader::follow_taxonomy_of`).
+    fn follow_taxonomy_of(&mut self, _previous: &TaxdbRun) {}
 }
 
 /// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader` of the opened input
@@ -223,18 +227,12 @@ struct FastaSource<R: Read> {
 impl<R: Read> SequenceSource for FastaSource<R> {
     // windowmasker posts at the level Warning (`SetDiagPostLevel` to `eDiag_Warning`,
     // win_mask_app.cpp:118): the reader's warnings are written, each on its line (the line
-    // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306). The
-    // output written so far comes out first, whatever its last byte (`cerr` is tied to `cout`);
-    // a closed pipe ends the run there, as SIGPIPE ends NCBI's.
-    fn next_record(
-        &mut self,
-        out: &mut Ostream<'_>,
-        diag: &mut Diag,
-    ) -> Result<Option<Record>, Failure> {
+    // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306). NCBI's
+    // writes of the output so far come first (`cerr` is tied to `cout`, `Diag`); a closed pipe
+    // ends the run there, as SIGPIPE ends NCBI's.
+    fn next_record(&mut self, diag: &mut Diag) -> Result<Option<Record>, Failure> {
         let mut closed = false;
         let record = self.reader.next(&mut |warning| {
-            let _ = out.flush();
-            closed |= out.closed();
             if closed {
                 return;
             }
@@ -242,6 +240,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
                 ReaderWarning::Line(line) => diag.post_bytes(line),
                 ReaderWarning::SeqId(warning) => post_seq_id_warning(diag, &warning),
             }
+            closed = diag.closed();
         });
         if closed {
             return Err(Failure::closed_pipe());
@@ -317,11 +316,7 @@ fn database_failure(error: BdbError) -> Failure {
 }
 
 impl SequenceSource for DatabaseSource {
-    fn next_record(
-        &mut self,
-        _out: &mut Ostream<'_>,
-        _diag: &mut Diag,
-    ) -> Result<Option<Record>, Failure> {
+    fn next_record(&mut self, _diag: &mut Diag) -> Result<Option<Record>, Failure> {
         let record = self.reader.next_record().map_err(database_failure)?;
         Ok(record.map(|record| Record {
             ids: record.ids,
@@ -337,6 +332,14 @@ impl SequenceSource for DatabaseSource {
     fn make_titles(&mut self) {
         self.reader.ask_get_title();
     }
+
+    fn taxonomy(&self) -> Option<&TaxdbRun> {
+        Some(self.reader.taxonomy())
+    }
+
+    fn follow_taxonomy_of(&mut self, previous: &TaxdbRun) {
+        self.reader.follow_taxonomy_of(previous);
+    }
 }
 
 /// `CWinMaskConfig::x_GetWriter`: the writer of `-outfmt`.
@@ -351,9 +354,7 @@ pub(super) fn writer(outfmt: &str) -> MaskWriter {
         |serial| MaskWriter::mask_info(Some(serial), 3, FilterProgram::Windowmasker, Vec::new());
     match outfmt {
         "interval" => MaskWriter::Interval,
-        "fasta" => MaskWriter::Fasta {
-            hard_masking: false,
-        },
+        "fasta" => MaskWriter::fasta(false),
         "seqloc_asn1_bin" => MaskWriter::SeqLoc(Serial::AsnBinary),
         "seqloc_asn1_text" => MaskWriter::SeqLoc(Serial::AsnText),
         "seqloc_xml" => MaskWriter::SeqLoc(Serial::Xml),
@@ -375,10 +376,9 @@ pub(super) fn run(
     source: Option<Box<dyn SequenceSource + '_>>,
     writer: MaskWriter,
     lists: &IdLists,
-    out: &mut dyn Write,
+    out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
-    let mut out = Ostream::new(out);
     let mut writer = writer;
     let (result, status) = match source {
         None => {
@@ -386,18 +386,11 @@ pub(super) fn run(
             (Ok(()), 1)
         }
         Some(mut source) => (
-            mask_input(options, &mut *source, &mut writer, lists, &mut out, diag),
+            mask_input(options, &mut *source, &mut writer, lists, out, diag),
             0,
         ),
     };
-    finish(
-        writer,
-        &mut out,
-        diag,
-        result,
-        options.outfmt,
-        super::PROGRAM,
-    )?;
+    finish(writer, out, diag, result, options.outfmt, super::PROGRAM)?;
     Ok(status)
 }
 
@@ -473,13 +466,13 @@ fn mask_input(
     source: &mut (dyn SequenceSource + '_),
     writer: &mut MaskWriter,
     lists: &IdLists,
-    out: &mut Ostream<'_>,
+    out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let masker = masker(options, diag)?;
     let mut duster = options.dust_level.map(SDustMasker::new);
-    while let Some(record) = source.next_record(out, diag)? {
-        post_read_texts::<Failure>(&record.texts, out, diag)?;
+    while let Some(record) = source.next_record(diag)? {
+        post_read_texts::<Failure>(&record.texts, diag)?;
         if record.iupac.is_empty() || !lists.consider(&record) {
             continue;
         }

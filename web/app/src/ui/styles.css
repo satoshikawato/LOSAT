@@ -772,10 +772,14 @@ input[type='radio'] {
   white-space: nowrap;
 }
 
+/* One column: a control and its "?" are one item (`.control-tip`), a sentence and its "?" another
+   (`.hint-line`). A second column for the "?" would stay empty and its 8 px gap would narrow the
+   control, so a phone wrapped one more radio name of the task and cut 8 px more off the genetic
+   code selects. */
 .param-control {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, max-content) max-content;
+  grid-template-columns: minmax(0, max-content);
   align-content: start;
   align-items: center;
   justify-items: start;

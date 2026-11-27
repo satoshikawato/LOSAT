@@ -1,0 +1,23 @@
+Error: Error: Tax database file has wrong magic number.
+>no taxid title 0	229	236
+>no taxid title 0	512	521
+>no taxid title 1	229	236
+>no taxid title 1	512	521
+>titled human	229	236
+>titled human	512	521
+>	229	236
+>	512	521
+>	229	236
+>	512	521
+>t150	229	236
+>t150	512	521
+>t99990 again	229	236
+>t99990 again	512	521
+>first >gb|AB410008.1| second	229	236
+>first >gb|AB410008.1| second	512	521
+>	229	236
+>	512	521
+>	229	236
+>	512	521
+>titled human b	229	236
+>titled human b	512	521

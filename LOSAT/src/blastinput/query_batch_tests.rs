@@ -1404,48 +1404,25 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     expect_native(err, &twice);
     // Repeat filtering without DUST (NCBI BLAST+ 2.17.0, probe 2 of line RG-KB item 7b): its
     // search's set-up of the batch fails with each record's own message, and that failure is the
-    // message of every searched record; where it passes, WindowMasker's read fails as DUST's does,
-    // and without WindowMasker the batch is set up as without filtering.
+    // message of every searched record; where it passes, the batch is set up as without filtering.
     let both: [&[u8]; 2] = [
         b">q1\nACGTAC\n>q2\nACGTACGT\n",
         b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
     ];
     let pair = "Warning: CSeqVector_CI: cannot locate segment at 6 \
                 Warning: CSeqVector_CI: cannot locate segment at 8 ";
-    for then_reads in [false, true] {
-        let repeats = QueryMasks::Repeats { then_reads };
-        let err = refused_batch_error(
-            run_masked("BLASTN", None, false, repeats, &both),
-            false,
-            |_| panic!("no set-up"),
-        )
-        .unwrap_err();
-        expect_native(
-            err,
-            &format!("{ENGINE_ERROR} Warning: {pair}  Warning: {pair}  \n"),
-        );
-    }
     let err = refused_batch_error(
-        run_masked(
-            "BLASTN",
-            None,
-            false,
-            QueryMasks::Repeats { then_reads: true },
-            &mixed,
-        ),
+        run_masked("BLASTN", None, false, QueryMasks::Repeats, &both),
         false,
         |_| panic!("no set-up"),
     )
     .unwrap_err();
-    expect_native(err, &twice);
+    expect_native(
+        err,
+        &format!("{ENGINE_ERROR} Warning: {pair}  Warning: {pair}  \n"),
+    );
     let err = refused_batch_error(
-        run_masked(
-            "BLASTN",
-            None,
-            false,
-            QueryMasks::Repeats { then_reads: false },
-            &mixed,
-        ),
+        run_masked("BLASTN", None, false, QueryMasks::Repeats, &mixed),
         false,
         |own| {
             assert_eq!(own, [false, true]);
@@ -1458,7 +1435,7 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     assert_eq!(QueryMasks::of_blastn(false, false, true), QueryMasks::Reads);
     assert_eq!(
         QueryMasks::of_blastn(false, true, false),
-        QueryMasks::Repeats { then_reads: false }
+        QueryMasks::Repeats
     );
     assert_eq!(QueryMasks::of_blastn(false, false, false), QueryMasks::None);
 

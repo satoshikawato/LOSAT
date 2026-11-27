@@ -381,7 +381,6 @@ blastn.sub.pd.pastfirst.dustno.b2.f6	blastn	BATCH_SIZE=750	-query tests/fasta/st
 blastn.sub.pd.pastfirst.one.f0	blastn	-	-query tests/fasta/strategy/order_xmpd.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 0	ncbi	3	-	-
 blastn.sub.pd.pastfirst.dnfd.b2.f6	blastn	BATCH_SIZE=750	-query tests/fasta/strategy/order_pf2.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -dust no -filtering_db tests/db_search/rpt_d4 -outfmt 6	ncbi	3	-	-
 blastn.sub.pd.pastfirst.dnwm.mix.b2.f6	blastn	BATCH_SIZE=750	-query tests/fasta/strategy/order_pf2m.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -dust no -window_masker_db tests/winmask/counts/mg1655_u9.obinary -outfmt 6	ncbi	3	-	-
-blastn.sub.pd.pastfirst.dnfdwm.mix.b2.f6	blastn	BATCH_SIZE=750	-query tests/fasta/strategy/order_pf2m.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -dust no -filtering_db tests/db_search/rpt_d4 -window_masker_db tests/winmask/counts/mg1655_u9.obinary -outfmt 6	ncbi	3	-	-
 blastp.sub.pd.pastfirst.b2.f6	blastp	BATCH_SIZE=250	-query tests/fasta/strategy/order_pf2.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 6	ncbi	3	-	-
 blastp.sub.pd.xmlmatrix.b2.f15	blastp	-	-query tests/fasta/strategy/order_xmpd_b2.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
 tblastn.sub.pd.xmlmatrix.b2.f15	tblastn	-	-query tests/fasta/strategy/order_xmpd_b2.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-

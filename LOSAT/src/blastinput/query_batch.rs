@@ -935,18 +935,19 @@ pub(crate) enum QueryMasks {
     /// DUST (`-dust`, on by default), or WindowMasker without DUST and repeat filtering: the first
     /// mask made reads the records in the batch's order.
     Reads,
-    /// Repeat filtering without DUST: its search's set-up comes first, then WindowMasker's read
-    /// where `then_reads`.
-    Repeats { then_reads: bool },
+    /// Repeat filtering without DUST: its search's set-up of the batch.
+    Repeats,
 }
 
 impl QueryMasks {
-    /// BLASTN's filtering of the query letters: DUST (`dust`), repeat filtering (`repeats`) and
-    /// WindowMasker (`window_masker`).
+    /// BLASTN's filtering of the query letters: DUST (`dust`), repeat filtering (`repeats`) or
+    /// WindowMasker (`window_masker`; NCBI's arguments take at most one of these two).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:460-466
     pub(crate) fn of_blastn(dust: bool, repeats: bool, window_masker: bool) -> Self {
         match (dust, repeats, window_masker) {
             (true, _, _) | (false, false, true) => Self::Reads,
-            (false, true, then_reads) => Self::Repeats { then_reads },
+            (false, true, _) => Self::Repeats,
             (false, false, false) => Self::None,
         }
     }
@@ -1009,11 +1010,8 @@ fn setup_queries_failure(reads: &[SetUpRead], masks: QueryMasks) -> SetUpQueries
     let text = match masks {
         QueryMasks::None => own_messages(),
         QueryMasks::Reads => past_first.map(read_failure).or_else(own_messages),
-        QueryMasks::Repeats { then_reads } => match own_messages() {
-            // The repeat search's set-up of the batch throws its messages (`CBlastException`).
-            Some(search_failure) => Some(each_searched(&search_failure)),
-            None => past_first.filter(|_| then_reads).map(read_failure),
-        },
+        // The repeat search's set-up of the batch throws its messages (`CBlastException`).
+        QueryMasks::Repeats => own_messages().map(|search_failure| each_searched(&search_failure)),
     };
     match text {
         Some(text) => SetUpQueries::Fails(format!("{ENGINE_ERROR} {text}\n")),

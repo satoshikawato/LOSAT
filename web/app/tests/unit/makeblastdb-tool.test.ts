@@ -98,8 +98,11 @@ describe('makeblastdb domain helpers', () => {
     const withOut = mask(['windowmasker', '-ustat', 'c.obinary', '-in', 'a.fa', '-outfmt', 'maskinfo_asn1_bin', '-out', 'wm.asnb']);
     expect(maskDataName(withOut, { key: 'f0', name: 'wm.asnb' })).toBe('wm.asnb');
     expect(maskDataName(withOut, { key: 'stdout', name: 'stdout' })).toBeUndefined();
-    const toStdout = mask(['windowmasker', '-ustat', 'c.obinary', '-in', 'a.fa', '-outfmt', 'maskinfo_xml']);
-    expect(maskDataName(toStdout, { key: 'stdout', name: 'stdout' })).toBe('windowmasker-run7.xml');
+    const toStdout = mask(['windowmasker', '-ustat', 'c.obinary', '-in', 'a.fa', '-outfmt', 'maskinfo_asn1_text']);
+    expect(maskDataName(toStdout, { key: 'stdout', name: 'stdout' })).toBe('windowmasker-run7.asnt');
+    // makeblastdb reads ASN.1 mask data only: maskinfo_xml is not offered.
+    const xml = mask(['windowmasker', '-ustat', 'c.obinary', '-in', 'a.fa', '-outfmt', 'maskinfo_xml']);
+    expect(maskDataName(xml, { key: 'stdout', name: 'stdout' })).toBeUndefined();
     expect(maskDataName(mask(['windowmasker', '-ustat', 'c', '-in', 'a.fa', '-outfmt', 'fasta']), { key: 'stdout', name: 'stdout' })).toBeUndefined();
     expect(
       maskDataName({ tool: 'windowmasker', stage: 'mk_counts', argv: ['windowmasker', '-mk_counts', '-in', 'a.fa'], number: 1 }, { key: 'stdout', name: 'x' }),

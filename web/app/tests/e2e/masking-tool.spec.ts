@@ -4,12 +4,13 @@
 // convert2blastmask's required options refused in place until typed, the layout at 1280 and 390 px
 // (no horizontal overflow, no orphaned `?` help tips), and zero external network requests.
 //
-// With the real engine (LOSAT_WEB_REACTORS) and the native binary (LOSAT_WEB_NATIVE): each tool runs once through the
-// form with a maskinfo `-outfmt` (a different one each; two write to the standard output, one to a -out file), and
+// With the real engine (LOSAT_WEB_REACTORS) and the native binary (LOSAT_WEB_NATIVE): each tool runs through the form
+// with a maskinfo `-outfmt` (asn1_bin to a -out file, asn1_bin and the default asn1_text to the standard output), and
 // its download is the native command line's bytes (the argv shown beside Run LOSAT, in a folder of the same files);
 // "Use as -mask_data in makeblastdb" then hands that file to the makeblastdb tab, whose database files are the native
-// makeblastdb's but the seconds of their dates (support/native-run.ts). Without the engine the same steps run on the
-// FakeEngine's outputs and nothing is compared.
+// makeblastdb's but the seconds of their dates (support/native-run.ts). One more run writes maskinfo_xml, which
+// makeblastdb does not read: its bytes are the native's and no hand-over is offered. Without the engine the same steps
+// run on the FakeEngine's outputs and nothing is compared.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the Masking tab empty, filled and finished at 1280 and 390 px in the light and
 // the dark colour scheme (<browser>-ms-<state>-<width>-<scheme>.png), and in Chromium each tool's finished run.
@@ -316,8 +317,10 @@ interface MaskingCase {
   /** A `-out` file name; undefined writes to the standard output. */
   readonly out: string | undefined;
   readonly dbtype: 'nucl' | 'prot';
-  /** makeblastdb reads mask data in ASN.1 only: its run with a maskinfo_xml file is refused, as the command line refuses it. */
-  readonly refusedByMakeblastdb?: true;
+  /** makeblastdb reads mask data in ASN.1 only (it refuses maskinfo_xml): the run is compared, and no hand-over is offered. */
+  readonly noMaskData?: true;
+  /** The name of the case's screenshot of its finished run, when it is not the tool's. */
+  readonly label?: string;
   /** The command beside Run LOSAT: the words in the tool's usage order. */
   readonly command: string;
 }
@@ -325,10 +328,12 @@ interface MaskingCase {
 const MASKING_CASES: readonly MaskingCase[] = [
   { tool: 'dustmasker', input: 'basic.fa', open: false, outfmt: 'maskinfo_asn1_bin', extension: 'asnb', out: 'dust.asnb', dbtype: 'nucl',
     command: 'losat dustmasker -in input.fa -out dust.asnb -outfmt maskinfo_asn1_bin -parse_seqids' },
-  { tool: 'segmasker', input: 'basic.fa', open: true, outfmt: 'maskinfo_xml', extension: 'xml', out: undefined, dbtype: 'prot', refusedByMakeblastdb: true,
-    command: 'losat segmasker -in basic.fa -parse_seqids -outfmt maskinfo_xml' },
+  { tool: 'segmasker', input: 'basic.fa', open: true, outfmt: 'maskinfo_asn1_bin', extension: 'asnb', out: undefined, dbtype: 'prot',
+    command: 'losat segmasker -in basic.fa -parse_seqids -outfmt maskinfo_asn1_bin' },
   { tool: 'convert2blastmask', input: 'lc.fa', open: false, outfmt: undefined, extension: 'asnt', out: undefined, dbtype: 'nucl',
     command: 'losat convert2blastmask -in input.fa -parse_seqids -masking_algorithm dust -masking_options window=64' },
+  { tool: 'dustmasker', input: 'basic.fa', open: false, outfmt: 'maskinfo_xml', extension: 'xml', out: undefined, dbtype: 'nucl', noMaskData: true,
+    label: 'dustmasker-xml', command: 'losat dustmasker -in input.fa -outfmt maskinfo_xml -parse_seqids' },
 ];
 
 test.describe('Masking tab: each tool run, its output, and its mask data in makeblastdb', () => {
@@ -336,7 +341,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
   test.use({ timezoneId: ZONE });
 
   for (const [index, c] of MASKING_CASES.entries()) {
-    test(`${c.tool}: the download is the native command line's bytes, and makeblastdb's database made with it too`, async ({ page }) => {
+    test(`${c.label ?? c.tool}: the download is the native command line's bytes, and makeblastdb's database made with its mask data too`, async ({ page }) => {
       const real = BUILD_HAS_ENGINE && NATIVE !== undefined;
       const external = trackNet(page);
       const fasta = readFileSync(join(LOSAT, 'tests', c.tool, 'in', c.input));
@@ -382,7 +387,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       expect(argv.slice(0, 2), 'the command beside the run').toEqual(['losat', c.tool]);
       const made = await downloadActive(page);
       expect(made.length).toBeGreaterThan(0);
-      if (test.info().project.name === 'chromium') await maybeShot(page, `ms-finished-${c.tool}-1280-light.png`);
+      if (test.info().project.name === 'chromium') await maybeShot(page, `ms-finished-${c.label ?? c.tool}-1280-light.png`);
       if (first) await shots(page, 'finished');
       await page.setViewportSize(MOBILE_VIEWPORT);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'run view overflow at 390px').toBeLessThanOrEqual(1);
@@ -392,6 +397,14 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         expect(native.status, `native ${argv.slice(1).join(' ')}: ${native.stderr.toString()}`).toBe(0);
         expect(made.equals(c.out === undefined ? native.stdout : native.made.get(c.out)!), `${c.tool} ${argv.slice(1).join(' ')}: the downloaded bytes`).toBe(true);
         if (c.out !== undefined) expect([...native.made.keys()], 'the files the native run made').toEqual([c.out]);
+      }
+
+      if (c.noMaskData) {
+        // makeblastdb refuses this encoding (`maskDataName`): the output is shown and downloads, with no hand-over.
+        await expect(page.getByTestId('tool-output-download')).toBeVisible();
+        await expect(page.getByTestId('tool-use-as-mask-data')).toHaveCount(0);
+        expect(external, 'requests outside the origin').toEqual([]);
+        return;
       }
 
       // Use as -mask_data in makeblastdb: the file goes to -mask_data, the same FASTA is -in, and the database is built.
@@ -414,21 +427,6 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         [maskName, made],
       ]);
       await page.getByTestId('mk-run-losat').click();
-      if (c.refusedByMakeblastdb && BUILD_HAS_ENGINE) {
-        // The command line refuses the file (exit 1, its message on the standard error, no database): so does the run.
-        await waitStatus(page, 2, 'failed');
-        await page.getByTestId('tool-tab-stderr').click();
-        const shown = (await page.getByTestId('tool-output-text').textContent()) ?? '';
-        expect(shown).toContain(`Unknown encoding for mask data in '${maskName}'`);
-        if (real) {
-          const native = nativeRun(makeblastdbArgv, makeblastdbInputs, true);
-          expect(native.status, 'native makeblastdb refuses the file').toBe(1);
-          expect(shown, 'the run\'s standard error is the native one').toBe(native.stderr.toString());
-          expect([...native.made.keys()], 'no database files').toEqual([]);
-        }
-        expect(external, 'requests outside the origin').toEqual([]);
-        return;
-      }
       await waitStatus(page, 2, 'completed');
       await expect(page.getByTestId('tool-run-view')).toHaveAttribute('data-run', '2');
       await expect(page.getByTestId('tool-made-files')).toBeVisible();

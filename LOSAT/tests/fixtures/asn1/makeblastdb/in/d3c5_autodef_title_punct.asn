@@ -1,0 +1,9 @@
+Seq-entry ::= seq {
+  id { local str "s1" },
+  descr {
+    title " ..;",
+    source { org { taxname "Homo sapiens" } },
+    user { type str "AutodefOptions", data {  } }
+  },
+  inst { repr raw, mol dna, length 120, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT" }
+}

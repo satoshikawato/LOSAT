@@ -390,8 +390,8 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 110,
-        "expected >= 110 frozen cases, got {checked}"
+        checked >= 118,
+        "expected >= 118 frozen cases, got {checked}"
     );
 }
 
@@ -645,6 +645,60 @@ fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
                 "{label}: volume/LMDB file {fname} was left behind after refusal"
             );
         }
+    }
+}
+
+/// A feature-made title whose location Seq-id NCBI's scope resolves by state LOSAT cannot know
+/// (here a packed `pir` accession alone that matches the Bioseq's `pir` name) is refused before
+/// any volume is written.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510
+#[test]
+fn d3c5_scope_order_cases_are_refused_cleanly() {
+    let env_default = MakedbEnv {
+        skip_unverified: false,
+        scan_cfastareader: true,
+    };
+    let pir_accession_alone = br#"Seq-entry ::= seq {
+  id { other { accession "NM_000814", version 1 }, pir { name "PIR814" }, gi 900814 },
+  descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+  inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+  annot { { data ftable {
+    { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
+    { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } }
+  } } }
+}
+"#;
+    let dir = TempDir::unique("asn1-refuse-inline-pir_accession_alone");
+    let dir_str = dir_string(&dir);
+    let words = vec![
+        "-in".into(),
+        "-".into(),
+        "-input_type".into(),
+        "asn1_txt".into(),
+        "-dbtype".into(),
+        "nucl".into(),
+        "-title".into(),
+        "T".into(),
+        "-out".into(),
+        format!("{dir_str}/db"),
+    ];
+    let (rc, _, stderr) = run_case(&words, env_default, pir_accession_alone);
+    assert_refusal(
+        "pir_accession_alone",
+        rc,
+        &stderr,
+        "by the order of Seq-id handles in memory",
+    );
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(
+            !fname.ends_with(".nin")
+                && !fname.ends_with(".nhr")
+                && !fname.ends_with(".nsq")
+                && !fname.ends_with(".ndb"),
+            "pir_accession_alone: volume/LMDB file {fname} was left behind after refusal"
+        );
     }
 }
 

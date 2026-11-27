@@ -1376,6 +1376,12 @@ textarea {
   flex: none;
 }
 
+/* A tool option's checkbox row (Format Archive's -parse_deflines): the sentence takes the rest of the
+   line and wraps there, so the box is never alone on its line on a phone. */
+.parameter-form .param-row .param-control:has(> .control-tip > input[type='checkbox']) > .hint-line {
+  flex: 1 1 0;
+}
+
 /* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
    name stay together on the first line; when checked, the controls wrap after it and the counts
    file hint takes its own line. */

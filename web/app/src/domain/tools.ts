@@ -231,10 +231,13 @@ export function stageBlockParameter(description: MaybeToolDescription, stage: Wi
 
 /**
  * Maps an `-xmlhelp` parameter to a `ParameterField` for the shared ParameterField component:
- * label is the option name (`label: ''`, rendered with OptionName), with NCBI's sentence as `hint`.
+ * label is the option name (`label: ''`, rendered with OptionName), with NCBI's sentence as `hint`:
+ * the first line of its description (DW-55, DW-57). NCBI's `-help` writes some descriptions over
+ * several lines (blast_formatter's `-sorthits`: "Sorting option for hits:", then one line a value);
+ * the "?" holds every line (`toolParameterHelpText`), as the Search tab's "?" holds the CLI's help.
  */
 export function toToolParameterField(param: ToolParameterDescription): ParameterField {
-  const hint = param.help;
+  const hint = (param.help.split('\n')[0] ?? '').trim();
   if (param.kind === 'Flag') {
     return { flag: param.flag, label: '', kind: 'flag', hint };
   }

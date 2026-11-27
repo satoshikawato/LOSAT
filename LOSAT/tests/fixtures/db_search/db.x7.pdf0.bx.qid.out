@@ -1,0 +1,142 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: a protein database sequence under the id of a query
+           2 sequences; 192 total letters
+
+
+
+Query= bxq coding query in six frames
+
+Length=1229
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Query_1 protein named as the query                                    122     1e-38
+other_p other                                                         117     3e-37
+
+
+>Query_1 protein named as the query
+Length=125
+
+ Score = 122 bits (307),  Expect = 1e-38, Method: Compositional matrix adjust.
+ Identities = 58/63 (92%), Positives = 60/63 (95%), Gaps = 0/63 (0%)
+ Frame = +1
+
+Query  1    HHPMTMWATHIIKIVIIWTQVNVKCIWQPRERHGIWAAHPSGHFIVVIPEGWDHRHSAQE  180
+            HHPMTMWATHIIKIV IWTQVNVKCIWQPRERHGIWAAHPSGHFIVVIPEGWDHRHS QE
+Sbjct  1    HHPMTMWATHIIKIVAIWTQVNVKCIWQPRERHGIWAAHPSGHFIVVIPEGWDHRHSKQE  60
+
+Query  181  DTS  189
+             ++
+Sbjct  61   AST  63
+
+
+ Score = 107 bits (267),  Expect = 6e-33, Method: Compositional matrix adjust.
+ Identities = 49/53 (92%), Positives = 50/53 (94%), Gaps = 0/53 (0%)
+ Frame = -2
+
+Query  1069  F*SHTMLVKMNPENPDCYHNGLKMSPNVYCPTSAFPDCKPKQQKVHPKSQHGK  911
+             F +HTM VKMNPE PDCYHNGLKMSPNVYCPTSAFPDCKPKQQKVHPKSQHGK
+Sbjct  73    FGAHTMYVKMNPERPDCYHNGLKMSPNVYCPTSAFPDCKPKQQKVHPKSQHGK  125
+
+
+ Score = 16.9 bits (32),  Expect = 0.48, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  158  SHPSGITTIKWPEG  117
+            +HPSG   +  PEG
+Sbjct  38   AHPSGHFIVVIPEG  51
+
+
+ Score = 15.0 bits (27),  Expect = 2.3, Method: Composition-based stats.
+ Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  317  CPWLPQEAY  343
+            C W P+E +
+Sbjct  25   CIWQPRERH  33
+
+
+ Score = 14.2 bits (25),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = -3
+
+Query  168  VPVVPSFWYH  139
+            + V+P  W H
+Sbjct  45   IVVIPEGWDH  54
+
+
+ Score = 14.2 bits (25),  Expect = 3.4, Method: Compositional matrix adjust.
+ Identities = 4/9 (44%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  1092  PSVYSPNNS  1066
+             P+VY P ++
+Sbjct  98    PNVYCPTSA  106
+
+
+ Score = 13.9 bits (24),  Expect = 5.2, Method: Composition-based stats.
+ Identities = 5/9 (56%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  53   GLKLT*NAY  79
+            GLK++ N Y
+Sbjct  93   GLKMSPNVY  101
+
+
+>other_p other
+Length=67
+
+ Score = 117 bits (292),  Expect = 3e-37, Method: Compositional matrix adjust.
+ Identities = 61/73 (84%), Positives = 61/73 (84%), Gaps = 9/73 (12%)
+ Frame = -1
+
+Query  878  NMIHCRNVLILNAQIVAIAGLYACKQRMHT---WLEFLGISQRCKCCKWQFPLSQPFNDN  708
+            NMIHCRNVLILN QIVAIAGLYAC QRMHT   WLEFLGI QRCKCCKWQFPLSQ     
+Sbjct  1    NMIHCRNVLILNDQIVAIAGLYACGQRMHTCFWWLEFLGIQQRCKCCKWQFPLSQ-----  55
+
+Query  707  YSASQPVAEHYHE  669
+             SASQPVAEHYHE
+Sbjct  56   -SASQPVAEHYHE  67
+
+
+ Score = 14.6 bits (26),  Expect = 2.0, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 8/15 (53%), Gaps = 5/15 (33%)
+ Frame = +2
+
+Query  875  CYCVRWQDERVIFPM  919
+            C C +WQ     FP+
+Sbjct  44   CKCCKWQ-----FPL  53
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 55440
+
+
+  Database: a protein database sequence under the id of a query
+    Posted date:  Nov 15, 2026  10:24 AM
+  Number of letters in database: 192
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

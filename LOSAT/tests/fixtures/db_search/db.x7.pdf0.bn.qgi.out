@@ -1,0 +1,158 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: a nucleotide database sequence whose display id is a query id
+           2 sequences; 484 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Query_1 db gi copy                                                    420     6e-122
+other_rec2 other                                                      205     2e-57 
+
+
+>Query_1 db gi copy
+Length=300
+
+ Score = 420 bits (465),  Expect = 6e-122
+ Identities = 273/300 (91%), Gaps = 0/300 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+            |||||||||||||||||||||||||||||||| ||||||||||||||| |||||||||||
+Sbjct  1    TGTATATTCGGACTTGGCCTATCCACACAAGCTGTATTGAGGTGGAACCTTAGCGTTTGG  60
+
+Query  61   TACTGTCGGCACGTACGCCTCGTGAGGCATACAACATTTTTCGTATCCGCGAGCATAAAT  120
+            ||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  61   TACTGTCGGCACGTACGCCTCGTGAGGCAGACAACATTTTTCGTATCCGCGAGCATAAAT  120
+
+Query  121  GTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttttttttGCGGA  180
+            ||||||||||||||||||||||| ||||||| |         |  |         |||||
+Sbjct  121  GTTTCTAGCGTTTCCAGTTTTGAAGGTACATCTAACGACCAATCATGGGGCGGCAGCGGA  180
+
+Query  181  TGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACTCGACGACCCTAGGATTTATA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACTCGACGACCCTAGGATTTATA  240
+
+Query  241  TTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTCCGCGTGTCCCTGAACCTCTC  300
+            |||||||||||||||||||||||||||||||||||||||||||||||||| |||||| ||
+Sbjct  241  TTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTCCGCGTGTCCCAGAACCTGTC  300
+
+
+>other_rec2 other
+Length=184
+
+ Score = 205 bits (226),  Expect = 2e-57
+ Identities = 159/190 (84%), Gaps = 6/190 (3%)
+ Strand=Plus/Minus
+
+Query  101  TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttt  160
+            ||||||||| ||||||||||||||||||||||||||||| ||||||||||| |       
+Sbjct  184  TCGTATCCGGGAGCATAAATGTTTCTAGCGTTTCCAGTTATGACGGTACATCTAACGACC  125
+
+Query  161  tttttttttttttttGCGGATGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  220
+              |  |         ||||  |  | |||||||||||||||||||||||||| |||| ||
+Sbjct  124  AATCATGGG------GCGGCAGCGGAAGCACTCTTCAGACCGGAAGCCGTCATGCCATCT  71
+
+Query  221  CGACGACCCTAGGATTTATATTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTC  280
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  70   CGACGACCCTAGGATTTATATTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTC  11
+
+Query  281  CGCGTGTCCC  290
+            ||||| ||||
+Sbjct  10   CGCGTTTCCC  1
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 133518
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Query_1 db gi copy                                                    267     4e-76
+other_rec2 other                                                      232     9e-66
+
+
+>Query_1 db gi copy
+Length=300
+
+ Score = 267 bits (295),  Expect = 4e-76
+ Identities = 155/160 (97%), Gaps = 0/160 (0%)
+ Strand=Plus/Plus
+
+Query  1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+            |||||||||||||||||||||||||||||||||||||||||||  |||||||||||||||
+Sbjct  101  TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGAAGGTACATCTAACGACC  160
+
+Query  61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+             |||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||
+Sbjct  161  AATCATGGGGCGGCAGCGGATGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  220
+
+Query  121  CGACGACCCCAGGATTTATATTGCACAGTTGGGGTCACAC  160
+            ||||||||| ||||||||||||||||||||||||||||||
+Sbjct  221  CGACGACCCTAGGATTTATATTGCACAGTTGGGGTCACAC  260
+
+
+>other_rec2 other
+Length=184
+
+ Score = 232 bits (256),  Expect = 9e-66
+ Identities = 147/160 (92%), Gaps = 6/160 (4%)
+ Strand=Plus/Minus
+
+Query  1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+            ||||||||| ||||||||||||||||||||||||||||| |||| |||||||||||||||
+Sbjct  184  TCGTATCCGGGAGCATAAATGTTTCTAGCGTTTCCAGTTATGACGGTACATCTAACGACC  125
+
+Query  61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+             |||||||||||||||||||      |||||||||||||||||||||||||| |||| ||
+Sbjct  124  AATCATGGGGCGGCAGCGGA------AGCACTCTTCAGACCGGAAGCCGTCATGCCATCT  71
+
+Query  121  CGACGACCCCAGGATTTATATTGCACAGTTGGGGTCACAC  160
+            ||||||||| ||||||||||||||||||||||||||||||
+Sbjct  70   CGACGACCCTAGGATTTATATTGCACAGTTGGGGTCACAC  31
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 68838
+
+
+  Database: a nucleotide database sequence whose display id is a query id
+    Posted date:  Nov 15, 2026  2:47 AM
+  Number of letters in database: 484
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

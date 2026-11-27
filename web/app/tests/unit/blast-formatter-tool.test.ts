@@ -55,10 +55,10 @@ describe('blast_formatter domain helpers', () => {
     ).toEqual(['blast_formatter', '-archive', 'bn.asn', '-max_target_seqs', '5', '-parse_deflines', '-logfile', 'run.log']);
   });
 
-  it('offers the formats that blast_formatter writes, 8 first', () => {
+  it('offers the formats that blast_formatter writes, 0 (its default) first', () => {
     // Each PR that makes blast_formatter write another format adds it to the choices; the e2e test runs each on the engine.
-    expect(BLAST_FORMATTER_OUTFMT_CHOICES.map((choice) => choice.value)).toEqual(['8', '9', '12']);
-    expect(BLAST_FORMATTER_DEFAULT_OUTFMT).toBe('8');
+    expect(BLAST_FORMATTER_OUTFMT_CHOICES.map((choice) => choice.value)).toEqual(['0', '1', '2', '3', '4', '8', '9', '12']);
+    expect(BLAST_FORMATTER_DEFAULT_OUTFMT).toBe('0');
   });
 
   it('counts changed formatting options and identifies labels', () => {
@@ -189,7 +189,7 @@ describe('BlastFormatterDraft', () => {
     draft.removeRunFile(draft.state.get().runFiles[0]!.key);
     await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
     const last = validateTool.mock.calls.at(-1)!;
-    expect(last[0]).toEqual(['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8']);
+    expect(last[0]).toEqual(['blast_formatter', '-archive', 'bn.asn']);
     expect(last[1]?.directory?.map((entry) => entry.name)).toEqual(['bn.asn']);
   });
 
@@ -200,12 +200,12 @@ describe('BlastFormatterDraft', () => {
     draft.addRunFiles([new File(['Blast4-archive ::= {}'], 'res.asn')]);
     draft.setExtra('-archive res.asn');
     await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
-    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-outfmt', '8', '-archive', 'res.asn']);
+    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-archive', 'res.asn']);
 
     const res = await draft.submit();
     expect(res.ok).toBe(true);
     expect(queued).toHaveLength(1);
-    expect(queued[0]!.argv).toEqual(['blast_formatter', '-outfmt', '8', '-archive', 'res.asn']);
+    expect(queued[0]!.argv).toEqual(['blast_formatter', '-archive', 'res.asn']);
     // No archive of the source: the run directory is the files of the run, and the engine opens -archive there.
     expect(queued[0]!.directory.map((entry) => entry.name)).toEqual(['res.asn']);
   });
@@ -230,7 +230,7 @@ describe('BlastFormatterDraft', () => {
     expect(validateTool).not.toHaveBeenCalled();
     draft.setExtra('-rid ABCDEFGH01R');
     await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('invalid'));
-    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-outfmt', '8', '-rid', 'ABCDEFGH01R']);
+    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-rid', 'ABCDEFGH01R']);
   });
 
   it('reports a quote left open in Additional options once', async () => {

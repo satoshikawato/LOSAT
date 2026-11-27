@@ -1242,7 +1242,7 @@ describe.skipIf(REACTORS === undefined)('windowmasker through the host', () => {
 });
 
 describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () => {
-  it('formats -subject and -db archives in outfmt 8, 9 and 12, writes -out/-logfile, describes options, and validates', async () => {
+  it('formats -subject and -db archives in outfmt 0 to 4, 8, 9 and 12, writes -out/-logfile, describes options, and validates', async () => {
     const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
     const bfDir = join(LOSAT, 'tests/blast_formatter');
     const paths = new Map<Blob, string>();
@@ -1298,9 +1298,9 @@ describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () =
     expect(flags).toContain('-out');
     expect(flags).toContain('-max_target_seqs');
 
-    // -subject archive and local -db archive across supported formats (8, 9, 12).
+    // -subject archive and local -db archive across supported formats (0 to 4, 8, 9, 12).
     for (const archive of ['in/bn.asn', 'in/db.asn']) {
-      for (const outfmt of ['8', '9', '12']) {
+      for (const outfmt of ['0', '1', '2', '3', '4', '8', '9', '12']) {
         const words = ['blast_formatter', '-archive', archive, '-outfmt', outfmt];
         expect(abi.validateTool(words)).toEqual({ ok: true });
         const res = await run(words);

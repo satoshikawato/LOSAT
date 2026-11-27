@@ -193,7 +193,7 @@ test('Format Archive tab layout, -xmlhelp options, responsive viewports and -rid
   expectNoExternalRequests(external);
 });
 
-test('real engine: Format Archive matches native losat blast_formatter byte-for-byte (-subject, -db, outfmt 8/9/12, and Search -outfmt 11 shortcut)', async ({
+test('real engine: Format Archive matches native losat blast_formatter byte-for-byte (-subject, -db, every offered outfmt, and Search -outfmt 11 shortcut)', async ({
   page,
 }) => {
   test.skip(!BUILD_HAS_ENGINE, 'requires built Wasm reactors');

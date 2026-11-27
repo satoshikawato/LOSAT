@@ -8,3 +8,5 @@
   `-out`, matching NCBI BLAST+ 2.17.0 bytes, messages and exit statuses (apart from the LOSAT
   version line and error prefixes). Archives of translated searches and `-subject` archives with
   `BL2SEQ_LEGACY` set remain refused by name in these formats.
+- LOSAT Web: the **Format Archive** tab offers `-outfmt` 0 (now the selected default, as in
+  `blast_formatter`) to 4 beside 8, 9 and 12.

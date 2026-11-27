@@ -101,13 +101,13 @@ export const BLAST_FORMATTER_USAGE_ORDER: readonly string[] = Object.freeze([
  * choice on the engine (`tests/e2e/blast-formatter-tool.spec.ts`).
  */
 export const BLAST_FORMATTER_OUTFMT_CHOICES: readonly { readonly value: string; readonly label: string }[] = Object.freeze(
-  ([8, 9, 12] as const).map((num) => ({
+  ([0, 1, 2, 3, 4, 8, 9, 12] as const).map((num) => ({
     value: String(num),
     label: `${num} — ${FORMAT_NAMES[num]}`,
   })),
 );
 
-/** Default `-outfmt` selected in the Format Archive tab (the first of the choices). */
+/** Default `-outfmt` selected in the Format Archive tab (the first of the choices: 0, `blast_formatter`'s own default). */
 export const BLAST_FORMATTER_DEFAULT_OUTFMT = BLAST_FORMATTER_OUTFMT_CHOICES[0]!.value;
 
 /** All group-defined non-hidden options of `blast_formatter` in NCBI `-help` usage order. */

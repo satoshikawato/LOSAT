@@ -205,3 +205,118 @@ fn data_line_counts_match_the_loop() {
         }
     }
 }
+
+/// A record of `bases` in lines of 60 after the definition line `>name`.
+fn record_of(name: &str, bases: &[u8]) -> Vec<u8> {
+    let mut out = format!(">{name}\n").into_bytes();
+    for line in bases.chunks(60) {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+    }
+    out
+}
+
+/// `count` bases from a xorshift sequence, in lower case when `lower` (the reader stores them in
+/// upper case).
+fn bases(count: usize, lower: bool) -> Vec<u8> {
+    let mut next = xorshift64();
+    (0..count)
+        .map(|_| {
+            let base = b"ACGT"[(next() % 4) as usize];
+            if lower {
+                base.to_ascii_lowercase()
+            } else {
+                base
+            }
+        })
+        .collect()
+}
+
+/// makeblastdb's reader keeps its residue buffer from record to record, after a delta as after a
+/// raw sequence: `residues` holds the record's residues (upper case, without the gaps), which the
+/// delta's literals index; a record that fits is read into the same buffer, and a longer one
+/// grows it from the capacity that the records before it left. Records without residues and the
+/// last record are read the same way.
+#[test]
+fn the_residue_buffer_is_kept_after_a_delta() {
+    let runs = |parts: &[&[u8]]| parts.concat();
+    let long = bases(3000, false);
+    let mut input = Vec::new();
+    // (record, its residues, a delta).
+    let mut expected: Vec<(Vec<u8>, bool)> = Vec::new();
+    // A delta of NCBI2na and NCBI4na literals (a run of N between unambiguous runs).
+    let d1 = runs(&[&long[..], &[b'N'; 20][..], &long[..]]);
+    input.extend(record_of("d1", &d1));
+    expected.push((d1, true));
+    // A raw sequence, shorter.
+    let r1 = bases(100, true);
+    input.extend(record_of("r1", &r1));
+    expected.push((r1.to_ascii_uppercase(), false));
+    // A delta with a gap line and hyphens (gaps of `fParseGaps`), shorter.
+    input.extend(b">d2\nACGTACGTAC\n>?10\nACGT--ACGTA-\nGGCC\n");
+    expected.push((b"ACGTACGTACACGTACGTAGGCC".to_vec(), true));
+    // A longer delta, which grows the buffer.
+    let d3 = runs(&[
+        &long[..],
+        &[b'N'; 5][..],
+        &long[..],
+        &long[..],
+        &[b'R'; 3][..],
+        &long[..],
+    ]);
+    input.extend(record_of("d3", &d3));
+    expected.push((d3, true));
+    // A record without residues (virtual), then a shorter delta as the last record.
+    input.extend(b">e\n");
+    expected.push((Vec::new(), false));
+    let d4 = runs(&[&long[..500], &[b'N'; 64][..], &long[..700]]);
+    input.extend(record_of("d4", &d4));
+    expected.push((d4, true));
+
+    let mut reader = FastaReader::new(&input[..], ReaderFlags::fasta_bioseq_source(false, false));
+    let mut capacity = 0;
+    let mut buffer = std::ptr::null();
+    for (index, (residues, delta)) in expected.iter().enumerate() {
+        let record = reader.read_one_seq(&mut |_| ()).expect("a record");
+        assert_eq!(
+            matches!(record.inst, SeqInst::Delta { .. }),
+            *delta,
+            "record {index}"
+        );
+        assert_eq!(reader.residues(), &residues[..], "record {index}");
+        let seq_data = &reader.state.seq_data;
+        if seq_data.len() <= capacity {
+            assert_eq!(
+                (seq_data.capacity(), seq_data.as_ptr()),
+                (capacity, buffer),
+                "record {index} is read into the same buffer"
+            );
+        } else {
+            assert!(seq_data.capacity() > capacity, "record {index}");
+        }
+        capacity = seq_data.capacity();
+        buffer = seq_data.as_ptr();
+    }
+    assert!(reader.at_eof());
+    // The records that grew the buffer were the first and the longer delta.
+    assert!(capacity >= expected[3].0.len());
+}
+
+/// A masking program takes a delta's residues with their buffer, as before (`iupac_letters`), and
+/// the next record grows its own; a raw sequence's residues leave a buffer of their capacity.
+#[test]
+fn a_masking_program_takes_the_residues_with_their_buffer() {
+    let long = bases(3000, false);
+    let delta = [&long[..], &[b'N'; 20][..], &long[..]].concat();
+    let mut input = record_of("d", &delta);
+    input.extend(record_of("r", &long));
+    let mut reader = FastaReader::new(&input[..], ReaderFlags::mask_fasta_reader(false, false));
+    let record = reader.read_one_seq(&mut |_| ()).expect("a record");
+    assert!(matches!(record.inst, SeqInst::Delta { .. }));
+    assert_eq!(reader.take_delta_residues(), delta);
+    assert_eq!(reader.state.seq_data.capacity(), 0);
+    let record = reader.read_one_seq(&mut |_| ()).expect("a record");
+    assert!(matches!(record.inst, SeqInst::Raw { .. }));
+    assert_eq!(reader.take_raw_residues(), long);
+    assert_eq!(reader.state.seq_data.capacity(), long.len());
+}

@@ -217,7 +217,7 @@ impl<R: Read> FastaBioseqSource<R> {
         let (length, seq_data, delta_fix) = match record.inst {
             SeqInst::Delta { length, .. } if is_aa => (length, None, Some(DeltaFix::ProteinDelta)),
             inst => {
-                let Ok(fixed) = fix_bioseq_deltas(inst) else {
+                let Ok(fixed) = fix_bioseq_deltas(inst, reader.residues()) else {
                     self.reader = None;
                     return Err(SourceError::out_of_memory());
                 };
@@ -267,7 +267,8 @@ fn extract_title(
 }
 
 /// `s_FixBioseqDeltas`: the length (`Seq-inst.length`), the sequence data and what the fix made
-/// of a delta of a record.
+/// of a delta of a record, whose literals index the IUPACna `residues` (the reader's,
+/// `FastaReader::residues`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:290-295,306-311,318-334,343-382,395-398
 /// A sequence with `seq-data` (raw) or without a delta (virtual) is returned as it is.
@@ -295,16 +296,13 @@ fn extract_title(
 /// of the vector can fail.
 fn fix_bioseq_deltas(
     inst: SeqInst,
+    residues: &[u8],
 ) -> Result<(u64, Option<SeqData>, Option<DeltaFix>), std::collections::TryReserveError> {
     Ok(match inst {
         SeqInst::Virtual => (0, None, None),
         SeqInst::TooLong { length } => (length, None, None),
         SeqInst::Raw { length, seq_data } => (length, Some(seq_data), None),
-        SeqInst::Delta {
-            length,
-            residues,
-            pieces,
-        } => {
+        SeqInst::Delta { length, pieces } => {
             if pieces.first() == Some(&DeltaSeq::LocNull) {
                 return Ok((length, None, None));
             }

@@ -439,9 +439,9 @@ fn mask_record<R: Read>(record: Record, reader: &mut FastaReader<R>) -> MaskReco
 /// `AddAndSplit` packs it into (`pack`), so a `U` comes out as `T` and a hyphen (NCBI4na 15)
 /// as `N`; a protein is NCBIeaa, whose `*` and `-` are `X` in IUPACaa.
 ///
-/// The letters are made in the buffer of the residues the reader stored (a delta's
-/// `residues`, a protein's data, or for a raw nucleotide sequence the residues it packed,
-/// `FastaReader::take_raw_residues`), each residue replaced by the letter it reads back as
+/// The letters are made in the buffer of the residues the reader stored (a protein's data, or
+/// the residues of a nucleotide sequence, `FastaReader::take_raw_residues` and
+/// `FastaReader::take_delta_residues`), each residue replaced by the letter it reads back as
 /// ([`IUPACNA_FROM`]): the sequence is held once.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector.cpp:1281-1284
@@ -482,23 +482,19 @@ pub(crate) fn iupac_letters<R: Read>(inst: SeqInst, reader: &mut FastaReader<R>)
             seq_data: SeqData::Iupacaa(_) | SeqData::Ncbistdaa(_) | SeqData::Iupacna(_),
             ..
         } => unreachable!("the FASTA reader makes no IUPACaa, NCBIstdaa or IUPACna data"),
-        SeqInst::Delta {
-            length,
-            residues,
-            pieces,
-        } if pieces
-            .iter()
-            .any(|piece| !matches!(piece, DeltaSeq::Literal(_))) =>
+        SeqInst::Delta { length, pieces }
+            if pieces
+                .iter()
+                .any(|piece| !matches!(piece, DeltaSeq::Literal(_))) =>
         {
+            let residues = reader.take_delta_residues();
             gapped_letters(length, &residues, &pieces, reader.is_protein())
         }
-        SeqInst::Delta {
-            residues, pieces, ..
-        } => {
+        SeqInst::Delta { pieces, .. } => {
             // The literals are in order and do not overlap, so each one's letters move to
             // the end of the letters before it (they are already there when the literals
             // cover the residues, as without `fParseGaps`).
-            let mut letters = residues;
+            let mut letters = reader.take_delta_residues();
             let mut end = 0;
             for piece in pieces {
                 if let DeltaSeq::Literal(segment) = piece {

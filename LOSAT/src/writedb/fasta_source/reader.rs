@@ -384,14 +384,11 @@ pub(crate) enum SeqInst {
     Virtual,
     /// `repr raw`: a delta of one piece, whose `Seq-data` became the sequence's.
     Raw { length: u64, seq_data: SeqData },
-    /// `repr delta` of more than one piece over the IUPACna `residues`. Past 2^32 letters
+    /// `repr delta` of more than one piece over the IUPACna residues that the reader keeps
+    /// until it reads the next record (`FastaReader::residues`). Past 2^32 letters
     /// (`assemble_seq`) gaps that stay pieces can make the pieces longer than `length`, and
     /// their residues repeat or skip residues where the gaps' wrapped positions do.
-    Delta {
-        length: u64,
-        residues: Vec<u8>,
-        pieces: Vec<DeltaSeq>,
-    },
+    Delta { length: u64, pieces: Vec<DeltaSeq> },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
     /// rejects by its length before it reads the sequence data: LOSAT does not build it.
     /// `length` is NCBI's, the record's count modulo 2^32 (`assemble_seq`).
@@ -601,7 +598,8 @@ fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
 /// The state of the record being read (`ReadOneSeq` resets it).
 struct RecordState {
     flags: ReaderFlags,
-    /// `m_SeqData` up to `m_CurrentPos`: the raw residues, in upper case.
+    /// `m_SeqData` up to `m_CurrentPos`: the raw residues, in upper case. The buffer is the
+    /// reader's from record to record (`FastaReader::residues`).
     seq_data: Vec<u8>,
     /// `m_Gaps`.
     gaps: Vec<Gap>,
@@ -727,15 +725,28 @@ impl<R: Read> FastaReader<R> {
         std::mem::take(&mut self.state.masks)
     }
 
-    /// The residues (IUPACna, upper case) that the record `read_one_seq` returned last was
-    /// packed from when it is a `SeqInst::Raw` of NCBI2na or NCBI4na data, which the reader
-    /// keeps until it reads the next record (a delta takes them along as its `residues`).
-    /// They are handed over with their buffer, so that a masking program holds its letters
-    /// without a second copy of the sequence; the next record is read into a buffer of the
-    /// same capacity, as before.
+    /// The residues (upper case) of the record that `read_one_seq` returned last when it is a
+    /// `SeqInst::Delta`, whose literals index them, or a `SeqInst::Raw` of NCBI2na or NCBI4na
+    /// data, packed from them (IUPACna). The reader keeps them in one buffer, which the next
+    /// record clears and reads into, so that a record's buffer grows only past the capacity
+    /// that the records before it left; a masking program takes them with the buffer
+    /// (`take_raw_residues`, `take_delta_residues`).
+    pub(crate) fn residues(&self) -> &[u8] {
+        &self.state.seq_data
+    }
+
+    /// `residues` of a `SeqInst::Raw`, handed over with their buffer, so that a masking
+    /// program holds its letters without a second copy of the sequence; the next record is
+    /// read into a buffer of the same capacity.
     pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
         let capacity = self.state.seq_data.len();
         std::mem::replace(&mut self.state.seq_data, Vec::with_capacity(capacity))
+    }
+
+    /// `residues` of a `SeqInst::Delta`, handed over with their buffer as `take_raw_residues`
+    /// hands them over, without a buffer for the next record, which grows its own.
+    pub(crate) fn take_delta_residues(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.state.seq_data)
     }
 
     /// `GetLineReader().AtEOF()`.
@@ -1635,15 +1646,8 @@ impl RecordState {
             };
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
-        let residues = std::mem::take(&mut self.seq_data);
-        Ok((
-            SeqInst::Delta {
-                length,
-                residues,
-                pieces,
-            },
-            is_aa,
-        ))
+        // The residues stay in `seq_data`, whose buffer the next record reads into.
+        Ok((SeqInst::Delta { length, pieces }, is_aa))
     }
 
     /// `AssembleSeq` without `fParseGaps` (protein input, and every input of the mask readers):

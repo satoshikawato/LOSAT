@@ -878,7 +878,6 @@ fn read_error_ends_the_reading() {
 fn a_delta_that_cannot_be_allocated_is_an_error() {
     let delta = |gap: u64| SeqInst::Delta {
         length: 1 + gap,
-        residues: b"A".to_vec(),
         pieces: vec![
             DeltaSeq::Literal(pack::Segment {
                 coding: pack::Coding::Ncbi4na,
@@ -889,13 +888,13 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
         ],
     };
     assert_eq!(
-        fix_bioseq_deltas(delta(2)).unwrap(),
+        fix_bioseq_deltas(delta(2), b"A").unwrap(),
         (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])), None)
     );
     // NCBI converts as many letters as the `TSeqPos` of the size of `seq8na`, the sum modulo 2^32,
     // and makes it the length; LOSAT makes only those letters.
     assert_eq!(
-        fix_bioseq_deltas(delta((1 << 32) + 1)).unwrap(),
+        fix_bioseq_deltas(delta((1 << 32) + 1), b"A").unwrap(),
         (
             (1 << 32) + 2,
             Some(SeqData::Ncbi4na(vec![0x1f])),
@@ -905,6 +904,43 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     let error = SourceError::out_of_memory();
     assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
     assert_eq!(error.message, b"BLAST ran out of memory");
+}
+
+/// The reader keeps its residue buffer from record to record (`FastaReader::residues`): each
+/// record of an input, after a delta or a raw sequence, longer or shorter, is the sequence that it
+/// is when it is the input's only record, records without residues and the last record included.
+#[test]
+fn each_record_after_a_delta_is_as_when_read_alone() {
+    let long = random_bases(5000, 0x2545_f491_4f6c_dd1d);
+    let with = |parts: &[&[u8]]| fasta_lines(&parts.concat(), 60);
+    let records = [
+        with(&[&long[..], &[b'N'; 30][..], &long[..]]),
+        with(&[&long[..300]]),
+        b">r\nACGTACGTAC\n>?10\nACGT--ACGTA\n-\nGGCC\n".to_vec(),
+        with(&[&long[..40], &b"RYKM"[..], &long[..17]]),
+        with(&[
+            &long[..],
+            &[b'N'; 7][..],
+            &long[..],
+            &[b'N'; 4096][..],
+            &long[..],
+        ]),
+        b">r\n".to_vec(),
+        with(&[&long[..1000]]),
+        b">r\n>?25\n".to_vec(),
+        with(&[&long[..2000], &[b'N'; 100][..], &long[..10]]),
+    ];
+    let input = records.concat();
+    let mut source = FastaBioseqSource::with_parse_ids(&input[..], false, false);
+    for (index, record) in records.iter().enumerate() {
+        let mut bioseq = source
+            .next_bioseq(&mut |_| ())
+            .expect("no error")
+            .expect("a sequence");
+        bioseq.local_id = "1".to_string();
+        assert_eq!(bioseq, one(record, false), "record {index}");
+    }
+    assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
 }
 
 /// NCBIstdaa: the residue at position `i` has the code `i`

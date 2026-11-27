@@ -1044,6 +1044,13 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
         assert!(frames(&calls).is_empty(), "{label}: no files");
     }
 
+    fn assert_status_zero(calls: &[(u32, Vec<u8>)]) {
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+        );
+    }
+
     // Output file (-out) and -logfile (including shared -out/-logfile).
     for outfmt in ["8", "9", "12"] {
         let out_path = dir.join(format!("out_{outfmt}.dat"));
@@ -1075,10 +1082,7 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
         ])
         .unwrap();
         let calls = emitted();
-        assert_eq!(
-            calls.last().unwrap(),
-            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
-        );
+        assert_status_zero(&calls);
         assert_eq!(joined(&calls, STREAM_PRINTED), expected_out);
         assert_eq!(joined(&calls, STREAM_DIAGNOSTICS), expected_err);
         let got_files = files(&frames(&calls));
@@ -1118,10 +1122,7 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
     ])
     .unwrap();
     let calls = emitted();
-    assert_eq!(
-        calls.last().unwrap(),
-        &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
-    );
+    assert_status_zero(&calls);
     assert_eq!(
         files(&frames(&calls)),
         vec![(b"shared.out".to_vec(), expected_shared)]
@@ -1186,9 +1187,7 @@ fn blast_formatter_validate_and_self_ref_refusals() {
         calls.last().unwrap(),
         &(STREAM_RESPONSE, b"{\"status\":1}".to_vec())
     );
-    assert_eq!(
-        joined(&calls, STREAM_DIAGNOSTICS),
-        format!("{log_err}\n").as_bytes()
-    );
+    let err_out = joined(&calls, STREAM_DIAGNOSTICS);
+    assert_eq!(err_out, format!("{log_err}\n").as_bytes());
     assert!(frames(&calls).is_empty());
 }

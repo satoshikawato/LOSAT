@@ -224,7 +224,7 @@ of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver q
 of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
 of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
 of7_two_ids	-archive in/two_ids.asn -outfmt 7
-# Rows from of7_ver_db on (line RG item F3 PR 3a, review R1, agent E3 of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and databases by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tmp/e3/tools/fixE3.py (rows of7_ver_* and *_self_lcl_db*) and fixE3b.py (the others), every NCBI run under unshare -rn. New inputs: in/vq.fa, vs.fa, vq2.fa, vs2.fa, vq3.fa, vs3.fa (accessions with and without a version) and in/vdb, vdb2, vdb3 (makeblastdb -parse_seqids -blastdb_version 4 of in/vs.fa, vs2.fa, vs3.fa); in/ver_db.asn, ver_db2.asn, ver_db3.asn (blastn -query in/vq*.fa -db in/vdb*/v* -parse_deflines -outfmt 11) and in/ver_subj.asn, ver_subj2.asn, ver_subj3.asn (the same with -subject in/vs*.fa); in/m3.faa (in/ps.faa, a copy with a change every 7 residues under a swissprot id, and its residues 6-40 with MKVL) and in/m3db (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 4), in/self_lcl_db.asn (blastp -query in/m3.faa -db in/m3db/m3 -parse_deflines -outfmt 11); in/qlen_huge.asn, qlen_big.asn, qlen_short.asn and in/slen_huge.asn, slen_big.asn, slen_short.asn: in/bn.asn with its query Bioseq's or its -subject Bioseq's length 4294967295, 4294967294 or 1500 (it holds 120 and 400 letters); in/ps_none.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2 -evalue 1e-50 -outfmt 11: no hits) and in/ps_none_step_str.asn (its Web_StepNumber a string). The rows refused_tabular_qlen_short, refused_tabular_slen_short_legacy_sseq and refused_tabular_slen_huge_legacy keep NCBI's record of the rows of6_qlen_short, of6_slen_short_legacy_sseq and of6_slen_huge_legacy of fixE3b.py.
+# Rows from of7_ver_db on (line RG item F3 PR 3a, review R1, agent E3 of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and databases by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tmp/e3/tools/fixE3.py (rows of7_ver_* and *_self_lcl_db*) and fixE3b.py (the others), every NCBI run under unshare -rn. New inputs: in/vq.fa, vs.fa, vq2.fa, vs2.fa, vq3.fa, vs3.fa (accessions with and without a version) and in/vdb, vdb2, vdb3 (makeblastdb -parse_seqids -blastdb_version 4 of in/vs.fa, vs2.fa, vs3.fa); in/ver_db.asn, ver_db2.asn, ver_db3.asn (blastn -query in/vq*.fa -db in/vdb*/v* -parse_deflines -outfmt 11) and in/ver_subj.asn, ver_subj2.asn, ver_subj3.asn (the same with -subject in/vs*.fa); in/m3.faa (in/ps.faa, a copy with a change every 7 residues under a swissprot id, and its residues 6-40 with MKVL) and in/m3db (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 4), in/self_lcl_db.asn (blastp -query in/m3.faa -db in/m3db/m3 -parse_deflines -outfmt 11); in/qlen_huge.asn, qlen_big.asn, qlen_short.asn and in/slen_huge.asn, slen_big.asn, slen_short.asn: in/bn.asn with its query Bioseq's or its -subject Bioseq's length 4294967295, 4294967294 or 1500 (it holds 120 and 400 letters); in/ps_none.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2 -evalue 1e-50 -outfmt 11: no hits) and in/ps_none_step_str.asn (its Web_StepNumber a string). The row refused_tabular_slen_huge_legacy keeps NCBI's record of the row of6_slen_huge_legacy of fixE3b.py; the rows of6_qlen_short and of6_slen_short_legacy_sseq were refused_tabular_qlen_short and refused_tabular_slen_short_legacy_sseq until agent E3t of ad-RG-F3-13, 2026-11-27 (NCBI's bytes unchanged).
 of7_ver_db	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
 of7_ver_db_pd	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
 of7_ver_subj	-archive in/ver_subj.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
@@ -266,8 +266,8 @@ of7_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 7
 of6_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 6
 of20_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 20
 of8_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 8
-refused_tabular_qlen_short	-archive in/qlen_short.asn -outfmt '6 std qlen qseq'
-refused_tabular_slen_short_legacy_sseq	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt '6 std slen sseq'
+of6_qlen_short	-archive in/qlen_short.asn -outfmt '6 std qlen qseq'
+of6_slen_short_legacy_sseq	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt '6 std slen sseq'
 refused_tabular_slen_huge_legacy	BL2SEQ_LEGACY=1 -archive in/slen_huge.asn -outfmt '6 std slen'
 of8_db_bin	-archive in/db.asnb -outfmt 8
 of9_db_bin	-archive in/db.asnb -outfmt 9
@@ -299,3 +299,84 @@ of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
 bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
 bad_title_2_xml	-archive in/bad2.xml -outfmt 8
 of8_bom	-archive in/bom.asn -outfmt 8
+# Rows from of6_lp_2048_3000 on (line RG item F3 PR 3a, the P2 re-check of review R1: NCBI's reads instead of refusals; probes probe3.py, probe4.py and probe5.py of agent E3 of ad-RG-F3-12, 2026-11-27, frozen by agent E3t of ad-RG-F3-13): NCBI BLAST+ 2.17.0, the official release build on the local machine, every NCBI run under unshare -rn. in/lp_*.asn and in/lm_*.asn: blastn -query <the first 2048 letters of a random 3000-letter subject, or their reverse complement> -subject <that subject> -outfmt 11 with the subject Bioseq made a raw iupacna of <length> letters that holds <held> (lp_<held>_<length>, lm_<held>_<length>); in/lq_*.asn: the same of the query Bioseq of in/lp's archive; in/s_*.asn (residues outside NCBIstdaa's 28 codes and IUPACaa letters), in/c_*.asn (Seq-data codings that do not convert), in/g_gap.asn (a delta gap): in/bp_subject.asn or in/bn.asn with one -subject Bioseq's inst changed; in/d*.asn, in/r1m.asn, in/dq*.asn: deltas (literals short of their length, segments that end before the length or pass it, a literal of 4294967295 letters, a gap) in the subject of in/lp, in/lm or in/bn.asn and the query of in/bn.asn; in/s_empty.asn and in/e_*.asn: a -subject Bioseq of 0 letters (titled, untitled, without data, virtual, one of two). The rows of BL2SEQ_LEGACY with a -subject Bioseq of 4294967295 letters of the same probes (of6_p_*, of10_p_std, of20_p_std, of6_t*) are frozen apart.
+of6_lp_2048_3000	BL2SEQ_LEGACY=1 -archive in/lp_2048_3000.asn -outfmt '6 std sstrand sseq'
+of6_lm_2048_3000	BL2SEQ_LEGACY=1 -archive in/lm_2048_3000.asn -outfmt '6 std sstrand sseq'
+of6_lp_2100_3000	BL2SEQ_LEGACY=1 -archive in/lp_2100_3000.asn -outfmt '6 std sstrand sseq'
+of6_lm_2100_3000	BL2SEQ_LEGACY=1 -archive in/lm_2100_3000.asn -outfmt '6 std sstrand sseq'
+of6_lp_3000_3000	BL2SEQ_LEGACY=1 -archive in/lp_3000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lm_3000_3000	BL2SEQ_LEGACY=1 -archive in/lm_3000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lp_2048_2048	BL2SEQ_LEGACY=1 -archive in/lp_2048_2048.asn -outfmt '6 std sstrand sseq'
+of6_lm_2048_2048	BL2SEQ_LEGACY=1 -archive in/lm_2048_2048.asn -outfmt '6 std sstrand sseq'
+of6_lp_2000_3000	BL2SEQ_LEGACY=1 -archive in/lp_2000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lm_2000_3000	BL2SEQ_LEGACY=1 -archive in/lm_2000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lp_1000_3000	BL2SEQ_LEGACY=1 -archive in/lp_1000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lm_1000_3000	BL2SEQ_LEGACY=1 -archive in/lm_1000_3000.asn -outfmt '6 std sstrand sseq'
+of6_lq_2048_3000	-archive in/lq_2048_3000.asn -outfmt '6 std qlen qseq'
+of6_lq_2048_3000_btop	-archive in/lq_2048_3000.asn -outfmt '6 std btop'
+of6_lq_2048_2048	-archive in/lq_2048_2048.asn -outfmt '6 std qlen qseq'
+of6_lq_2048_2048_btop	-archive in/lq_2048_2048.asn -outfmt '6 std btop'
+of6_lq_2000_3000	-archive in/lq_2000_3000.asn -outfmt '6 std qlen qseq'
+of6_lq_2000_3000_btop	-archive in/lq_2000_3000.asn -outfmt '6 std btop'
+of6_s_hash	-archive in/s_hash.asn -outfmt '6 std sseq'
+of8_s_hash	-archive in/s_hash.asn -outfmt 8
+of6_s_lower	-archive in/s_lower.asn -outfmt '6 std sseq'
+of8_s_lower	-archive in/s_lower.asn -outfmt 8
+of6_s_digit	-archive in/s_digit.asn -outfmt '6 std sseq'
+of8_s_digit	-archive in/s_digit.asn -outfmt 8
+of6_s_ojub	-archive in/s_ojub.asn -outfmt '6 std sseq'
+of8_s_ojub	-archive in/s_ojub.asn -outfmt 8
+of6_s_many	-archive in/s_many.asn -outfmt '6 std sseq'
+of8_s_many	-archive in/s_many.asn -outfmt 8
+of6_s_punct	-archive in/s_punct.asn -outfmt '6 std sseq'
+of8_s_punct	-archive in/s_punct.asn -outfmt 8
+of6_s_std28	-archive in/s_std28.asn -outfmt '6 std sseq'
+of6_s_std255	-archive in/s_std255.asn -outfmt '6 std sseq'
+of6_s_iupacaa	-archive in/s_iupacaa.asn -outfmt '6 std sseq'
+of6_c_n_eaa	-archive in/c_n_eaa.asn -outfmt '6 std'
+of6_c_n_eaa_na	-archive in/c_n_eaa_na.asn -outfmt '6 std'
+of6_c_n_8na	-archive in/c_n_8na.asn -outfmt '6 std'
+of6_c_n_pna	-archive in/c_n_pna.asn -outfmt '6 std'
+of6_c_n_4na	-archive in/c_n_4na.asn -outfmt '6 std'
+of6_c_p_na	-archive in/c_p_na.asn -outfmt '6 std'
+of8_c_p_na	-archive in/c_p_na.asn -outfmt 8
+of6_c_p_na_aa	-archive in/c_p_na_aa.asn -outfmt '6 std'
+of8_c_p_na_aa	-archive in/c_p_na_aa.asn -outfmt 8
+of6_c_p_8aa	-archive in/c_p_8aa.asn -outfmt '6 std'
+of8_c_p_8aa	-archive in/c_p_8aa.asn -outfmt 8
+of6_c_p_paa	-archive in/c_p_paa.asn -outfmt '6 std'
+of8_c_p_paa	-archive in/c_p_paa.asn -outfmt 8
+of6_g_gap	-archive in/g_gap.asn -outfmt '6 std sseq'
+of6_g_gap_legacy	BL2SEQ_LEGACY=1 -archive in/g_gap.asn -outfmt '6 std sseq btop positive'
+of6_d1	BL2SEQ_LEGACY=1 -archive in/d1.asn -outfmt '6 std sstrand slen sseq'
+of6_d2	BL2SEQ_LEGACY=1 -archive in/d2.asn -outfmt '6 std sstrand slen sseq'
+of6_d7	BL2SEQ_LEGACY=1 -archive in/d7.asn -outfmt '6 std sstrand slen sseq'
+of6_d8	BL2SEQ_LEGACY=1 -archive in/d8.asn -outfmt '6 std sstrand slen sseq'
+of6_d9	BL2SEQ_LEGACY=1 -archive in/d9.asn -outfmt '6 std sstrand slen sseq'
+of6_d3	BL2SEQ_LEGACY=1 -archive in/d3.asn -outfmt '6 std sstrand slen sseq'
+of6_d4	BL2SEQ_LEGACY=1 -archive in/d4.asn -outfmt '6 std sstrand slen sseq'
+of6_d4p	BL2SEQ_LEGACY=1 -archive in/d4p.asn -outfmt '6 std sstrand slen sseq'
+of6_d5	BL2SEQ_LEGACY=1 -archive in/d5.asn -outfmt '6 std sstrand slen sseq'
+of6_d5m	BL2SEQ_LEGACY=1 -archive in/d5m.asn -outfmt '6 std sstrand slen sseq'
+of6_d6	BL2SEQ_LEGACY=1 -archive in/d6.asn -outfmt '6 std sstrand slen sseq'
+of6_d6m	BL2SEQ_LEGACY=1 -archive in/d6m.asn -outfmt '6 std sstrand slen sseq'
+of6_d10	BL2SEQ_LEGACY=1 -archive in/d10.asn -outfmt '6 std sstrand slen sseq'
+of6_d10m	BL2SEQ_LEGACY=1 -archive in/d10m.asn -outfmt '6 std sstrand slen sseq'
+of6_d11m	BL2SEQ_LEGACY=1 -archive in/d11m.asn -outfmt '6 std sstrand slen sseq'
+of6_r1m	BL2SEQ_LEGACY=1 -archive in/r1m.asn -outfmt '6 std sstrand slen sseq'
+of6_dq2	-archive in/dq2.asn -outfmt '6 std qlen qseq'
+of6_dq2_std	-archive in/dq2.asn -outfmt '6 std qlen'
+of6_dq7	-archive in/dq7.asn -outfmt '6 std qlen qseq'
+of6_dq7_std	-archive in/dq7.asn -outfmt '6 std qlen'
+of6_dq5	-archive in/dq5.asn -outfmt '6 std qlen qseq'
+of6_dq5_std	-archive in/dq5.asn -outfmt '6 std qlen'
+of6_s_iupacaa_star	-archive in/s_iupacaa_star.asn -outfmt '6 std sseq'
+of6_s_iupacaa_dash	-archive in/s_iupacaa_dash.asn -outfmt '6 std sseq'
+of6_s_iupacaa_lower	-archive in/s_iupacaa_lower.asn -outfmt '6 std sseq'
+of6_s_empty	-archive in/s_empty.asn -outfmt '6 std'
+of6_s_empty_legacy	BL2SEQ_LEGACY=1 -archive in/s_empty.asn -outfmt '6 std'
+of8_s_empty	-archive in/s_empty.asn -outfmt 8
+of6_e_notitle	-archive in/e_notitle.asn -outfmt '6 std'
+of6_e_nodata	-archive in/e_nodata.asn -outfmt '6 std'
+of6_e_virtual	-archive in/e_virtual.asn -outfmt '6 std'
+of6_e_two	-archive in/e_two.asn -outfmt '6 std sseq'

@@ -184,9 +184,10 @@ fn long_sequences_are_written_in_blocks_as_whole() {
 /// its 8 letters, `reference out of range`) after room for the letters that its Seq-data hold,
 /// not for the length it declares (review R1 of PR 1683, finding 5: no reserve of 4 GiB, which
 /// aborts under a memory limit and overflows the capacity on wasm32); one that declares 2^32 - 1
-/// (`kInvalidSeqPos`) gives the sequence map's `Invalid sequence length`, as a delta literal of
-/// that length does where the read reaches it; a delta's room is its gaps and the letters that
-/// its Seq-data hold.
+/// (`kInvalidSeqPos`) gives the sequence map's `Invalid sequence length`; a delta's room is its
+/// gaps and the letters that its Seq-data hold, and a row over a delta whose second literal
+/// declares `kInvalidSeqPos` letters ends at the read's range check, which moves to that literal
+/// (probe4 `of6_d6` of agent E3: `cannot get seq-data in range`).
 #[test]
 fn a_declared_length_past_the_data_reserves_the_letters_held() {
     let read = |text: &str| {
@@ -270,16 +271,23 @@ fn a_declared_length_past_the_data_reserves_the_letters_held() {
     let bioseq = Bioseq::of(entry.choice().1);
     let pieces = sequence_map(bioseq.value().field("inst"), 1600).expect("a map");
     assert_eq!(written_letters(&pieces, 1600), 5);
-    assert_eq!(message(bioseq), b"Invalid sequence length");
+    assert_eq!(
+        message(bioseq),
+        b"CSeqVector_CI::GetSeqData: cannot get seq-data in range: 0-1600"
+    );
 }
 
-/// The read of a `-subject` Bioseq by the formatter's setup (`check_setup_letters`): NCBI's
-/// exceptions of the read from the first letter, and LOSAT's refusals of what the setup reads
-/// otherwise (a residue past NCBIstdaa's 28 codes, a coding to convert); the row reads of the
-/// tabular formats (`bioseq_letters`) refuse an error that depends on the row's range and keep
-/// those of any read.
+/// The read of a `-subject` Bioseq by the formatter's setup (`check_setup_letters`, NCBI's
+/// `SetupSubjects_OMF` from the first letter) and a row's read of all its letters on the plus
+/// strand (`check_bioseq_letters`, `seq_vector::RowVector`): NCBI's exceptions of each (probes
+/// `probe3.py` and `probe4.py` of agent E3, 2026-11-27): the sequence map's, a fill past the data
+/// (`of6_slen_short`), a coding that does not convert to the setup's NCBI4na or NCBIstdaa
+/// (`of6_c_*`: `Incompatible sequence codings: 8 -> 4`, which the row's ncbieaa reads), a
+/// protein residue past NCBIstdaa's 28 codes (`of6_s_*`: `Invalid residues found at positions`,
+/// which the row reads); a Bioseq of 0 letters is the setup's `SubjectSetup::Empty` (`of6_s_empty`:
+/// its warning, the rows kept).
 #[test]
-fn the_setup_reads_a_subject_whole_and_the_rows_keep_only_range_free_errors() {
+fn the_setup_reads_a_subject_whole_and_a_row_its_letters() {
     let bioseq_of = |inst: &str| {
         let text = format!(
             "Bioseq-set ::= {{ seq-set {{ seq {{ id {{ local str \"s\" }}, inst {{ {inst} }} }} }} }}"
@@ -309,13 +317,13 @@ fn the_setup_reads_a_subject_whole_and_the_rows_keep_only_range_free_errors() {
         (setup, rows)
     };
     let out_of_range = "reference out of range of Seq-inst data: 1024";
-    let range = "refused: letters that do not all read (NCBI's error depends on the row's range)";
+    let ok = || ("ok".to_string(), "ok".to_string());
     assert_eq!(
         check(
             "repr raw, mol na, length 8, seq-data iupacna \"ACGTACGT\"",
             false
         ),
-        ("ok".into(), "ok".into())
+        ok()
     );
     assert_eq!(
         check(
@@ -332,51 +340,70 @@ fn the_setup_reads_a_subject_whole_and_the_rows_keep_only_range_free_errors() {
             "repr raw, mol na, length 1500, seq-data iupacna \"ACGT\"",
             false
         ),
-        (out_of_range.into(), range.into())
+        (out_of_range.into(), out_of_range.into())
     );
     assert_eq!(
         check(
             "repr raw, mol na, length 8, seq-data ncbi2na '1B1B'H",
             false
         ),
-        ("ok".into(), "ok".into())
+        ok()
     );
-    // A protein Bioseq in a search of nucleotide subjects: the setup's NCBI4na is not probed;
-    // the rows read it in ncbieaa.
-    let (setup, rows) = check(
-        "repr raw, mol aa, length 4, seq-data ncbieaa \"MKLV\"",
-        false,
+    assert_eq!(
+        check("repr raw, mol aa, length 0, seq-data ncbieaa \"\"", true),
+        ("empty".into(), "ok".into())
     );
-    assert!(setup.starts_with("refused: a Seq-data coding"), "{setup}");
-    assert_eq!(rows, "ok");
+    // A protein Bioseq in a search of nucleotide subjects: the setup reads it in NCBI4na
+    // (`of6_c_n_eaa`); the rows read it in ncbieaa.
+    assert_eq!(
+        check(
+            "repr raw, mol aa, length 4, seq-data ncbieaa \"MKLV\"",
+            false
+        ),
+        ("Incompatible sequence codings: 8 -> 4".into(), "ok".into())
+    );
     assert_eq!(
         check(
             "repr raw, mol aa, length 4, seq-data ncbieaa \"MKLV\"",
             true
         ),
-        ("ok".into(), "ok".into())
+        ok()
     );
-    // NCBIstdaa codes 0 (`-`) and 27 (`J`) are residues; 28 is none.
+    // NCBIstdaa codes 0 (`-`) and 27 (`J`) are residues; 28 is none (`of6_s_std28`), nor an
+    // ncbieaa `#` (`of6_s_hash`).
     assert_eq!(
         check(
             "repr raw, mol aa, length 2, seq-data ncbistdaa '001B'H",
             true
         ),
-        ("ok".into(), "ok".into())
+        ok()
     );
-    let (setup, rows) = check(
-        "repr raw, mol aa, length 2, seq-data ncbistdaa '011C'H",
-        true,
+    assert_eq!(
+        check(
+            "repr raw, mol aa, length 2, seq-data ncbistdaa '011C'H",
+            true
+        ),
+        ("Invalid residues found at positions 1".into(), "ok".into())
     );
-    assert!(setup.starts_with("refused: a residue"), "{setup}");
-    assert_eq!(rows, "ok");
-    // A delta whose second literal holds fewer letters than it declares: the setup's read from
-    // the first letter throws at its fill; a row's range may not reach it.
-    let (setup, rows) = check(
-        "repr delta, mol na, length 9, ext delta { literal { length 4, seq-data iupacna \"ACGT\" }, \
-         literal { length 5, seq-data iupacna \"AC\" } }",
-        false,
+    assert_eq!(
+        check(
+            "repr raw, mol aa, length 6, seq-data ncbieaa \"MK#VA#\"",
+            true
+        ),
+        (
+            "Invalid residues found at positions 2, 5".into(),
+            "ok".into()
+        )
     );
-    assert_eq!(setup, "reference out of range of Seq-inst data: 5");
-    assert_eq!(rows, range);
+    // A delta whose second literal holds fewer letters than it declares: the fill of that
+    // literal throws at its end, counted from the literal's start, in both reads.
+    let fill = "reference out of range of Seq-inst data: 5".to_string();
+    assert_eq!(
+        check(
+            "repr delta, mol na, length 9, ext delta { literal { length 4, seq-data iupacna \"ACGT\" }, \
+             literal { length 5, seq-data iupacna \"AC\" } }",
+            false,
+        ),
+        (fill.clone(), fill)
+    );
 }

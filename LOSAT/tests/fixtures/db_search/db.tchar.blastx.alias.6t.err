@@ -1,0 +1,39 @@
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 20
+a1 alphaéone
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 19
+b1 betaéone
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x1] in string at byte 25
+a3 bta two hsps
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x7F] in string at byte 25
+a3 b#ta two hsps
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x7F] in string at byte 21
+b3 betathree
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xC3] in string at byte 18
+a4 gammaÃ©
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xA9] in string at byte 18
+a4 gamma#©
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x1B] in string at byte 17
+a6 first
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x80] in string at byte 142
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end€
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x7F] in string at byte 21
+b3 betathree
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 19
+b1 betaéone
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 19
+b1 betaéone
+Error: (803.7) [blastx] Blast-def-line-set.E.title
+Bad char [0x7F] in string at byte 21
+b3 betathree

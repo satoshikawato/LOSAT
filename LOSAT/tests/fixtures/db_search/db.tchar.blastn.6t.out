@@ -1,0 +1,14 @@
+q1	a1	100.000	180	0	0	1	180	1	180	1.00e-95	333	a1 alpha#one
+q1	a2	98.837	172	2	0	1	172	1	172	6.07e-88	307	a2 clean two
+q1	a3	97.110	173	3	2	1	172	1	172	6.11e-83	291	a3 b#t#a two hsps
+q1	a3	100.000	135	0	0	1	135	301	435	1.04e-70	250	a3 b#t#a two hsps
+q1	a4	100.000	124	0	0	1	124	1	124	1.35e-64	230	a4 gamma##
+q1	#a6	100.000	99	0	0	1	99	1	99	1.07e-50	183	#a6 first
+q1	a7	100.000	87	0	0	1	87	1	87	5.00e-44	161	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a2	98.889	180	2	0	1	180	1	180	2.17e-92	322	a2 clean two
+q2	a1	100.000	172	0	0	1	172	1	172	2.80e-91	318	a1 alpha#one
+q2	a3	97.238	181	3	2	1	180	1	180	2.18e-87	305	a3 b#t#a two hsps
+q2	a3	92.818	181	11	2	1	180	301	480	4.79e-74	261	a3 b#t#a two hsps
+q2	a4	90.055	181	16	2	1	180	1	180	1.04e-65	233	a4 gamma##
+q2	#a6	100.000	99	0	0	1	99	1	99	1.07e-50	183	#a6 first
+q2	a7	100.000	87	0	0	1	87	1	87	5.00e-44	161	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#

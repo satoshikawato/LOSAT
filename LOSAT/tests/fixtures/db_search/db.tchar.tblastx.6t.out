@@ -1,0 +1,90 @@
+q1	a1	100.000	60	0	0	1	180	1	180	8.36e-44	158	a1 alpha#one
+q1	a1	100.000	60	0	0	180	1	180	1	1.71e-40	147	a1 alpha#one
+q1	a1	100.000	59	0	0	3	179	3	179	1.71e-40	147	a1 alpha#one
+q1	a1	100.000	59	0	0	178	2	178	2	4.43e-40	145	a1 alpha#one
+q1	a1	100.000	59	0	0	2	178	2	178	4.09e-39	142	a1 alpha#one
+q1	a1	100.000	59	0	0	179	3	179	3	4.80e-37	135	a1 alpha#one
+q1	a2	96.610	59	2	0	1	177	1	177	9.05e-41	148	a2 clean two
+q1	a2	98.246	57	1	0	172	2	172	2	1.04e-38	141	a2 clean two
+q1	a2	96.610	59	2	0	177	1	177	1	5.08e-38	138	a2 clean two
+q1	a2	98.246	57	1	0	2	172	2	172	4.80e-37	135	a2 clean two
+q1	a2	96.491	57	2	0	3	173	3	173	9.06e-37	134	a2 clean two
+q1	a2	96.552	58	2	0	176	3	176	3	2.69e-34	126	a2 clean two
+q1	a3	93.220	59	4	0	1	177	1	177	1.46e-38	140	a3 b#t#a two hsps
+q1	a3	93.220	59	4	0	177	1	177	1	2.30e-36	133	a3 b#t#a two hsps
+q1	a3	88.136	59	7	0	1	177	301	477	1.15e-35	131	a3 b#t#a two hsps
+q1	a3	91.228	57	5	0	172	2	172	2	4.00e-35	129	a3 b#t#a two hsps
+q1	a3	100.000	50	0	0	3	152	3	152	1.85e-33	123	a3 b#t#a two hsps
+q1	a3	92.982	57	4	0	2	172	2	172	2.54e-33	123	a3 b#t#a two hsps
+q1	a3	88.136	59	7	0	177	1	477	301	1.67e-32	120	a3 b#t#a two hsps
+q1	a3	89.655	58	6	0	176	3	176	3	5.50e-31	115	a3 b#t#a two hsps
+q1	a3	82.456	57	10	0	172	2	472	302	1.32e-29	111	a3 b#t#a two hsps
+q1	a3	87.719	57	7	0	2	172	302	472	1.85e-29	110	a3 b#t#a two hsps
+q1	a3	100.000	44	0	0	3	134	303	434	1.85e-29	110	a3 b#t#a two hsps
+q1	a3	84.483	58	9	0	176	3	476	303	1.22e-28	107	a3 b#t#a two hsps
+q1	a4	84.746	59	9	0	1	177	1	177	5.20e-34	125	a4 gamma##
+q1	a4	84.746	59	9	0	177	1	177	1	1.96e-30	113	a4 gamma##
+q1	a4	84.211	57	9	0	2	172	2	172	2.98e-27	103	a4 gamma##
+q1	a4	81.034	58	11	0	176	3	176	3	5.50e-27	102	a4 gamma##
+q1	a4	100.000	41	0	0	3	125	3	125	7.73e-27	101	a4 gamma##
+q1	a4	100.000	41	0	0	124	2	124	2	3.70e-26	99.6	a4 gamma##
+q1	a4	57.143	7	3	0	100	80	127	107	0.65	15.7	a4 gamma##
+q1	a4	23.810	21	16	0	169	107	142	80	4.3	13.0	a4 gamma##
+q1	#a6	77.966	59	13	0	1	177	1	177	6.60e-29	108	#a6 first
+q1	#a6	77.966	59	13	0	177	1	177	1	3.70e-26	99.6	#a6 first
+q1	#a6	72.414	58	16	0	176	3	176	3	7.56e-23	88.6	#a6 first
+q1	#a6	73.684	57	15	0	2	172	2	172	4.80e-21	82.6	#a6 first
+q1	#a6	100.000	32	0	0	3	98	3	98	2.35e-20	80.3	#a6 first
+q1	#a6	82.927	41	7	0	124	2	124	2	1.54e-19	77.6	#a6 first
+q1	a7	74.576	59	15	0	1	177	1	177	1.46e-26	100	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a7	74.576	59	15	0	177	1	177	1	3.16e-24	93.2	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a7	67.241	58	19	0	176	3	176	3	2.30e-20	80.3	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a7	70.175	57	17	0	2	172	2	172	7.73e-19	75.3	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a7	90.625	32	3	0	3	98	3	98	1.06e-18	74.8	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a7	75.610	41	10	0	124	2	124	2	6.45e-17	68.9	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q1	a5	66.667	6	2	0	27	44	78	95	2.3	13.9	a5 nohit#
+q2	a2	98.333	60	1	0	1	180	1	180	1.15e-43	157	a2 clean two
+q2	a2	98.333	60	1	0	180	1	180	1	4.43e-40	145	a2 clean two
+q2	a2	98.305	59	1	0	178	2	178	2	6.09e-40	145	a2 clean two
+q2	a2	98.305	59	1	0	2	178	2	178	1.06e-38	141	a2 clean two
+q2	a2	98.305	59	1	0	3	179	3	179	1.06e-38	141	a2 clean two
+q2	a2	98.305	59	1	0	179	3	179	3	6.09e-36	132	a2 clean two
+q2	a1	98.305	59	1	0	1	177	1	177	2.75e-42	153	a1 alpha#one
+q2	a1	100.000	57	0	0	172	2	172	2	2.91e-39	143	a1 alpha#one
+q2	a1	98.305	59	1	0	177	1	177	1	5.50e-39	142	a1 alpha#one
+q2	a1	100.000	57	0	0	2	172	2	172	5.19e-38	138	a1 alpha#one
+q2	a1	98.246	57	1	0	3	173	3	173	1.35e-37	137	a1 alpha#one
+q2	a1	98.276	58	1	0	176	3	176	3	2.12e-35	130	a1 alpha#one
+q2	a3	95.000	60	3	0	1	180	1	180	1.85e-41	150	a3 b#t#a two hsps
+q2	a3	90.000	60	6	0	1	180	301	480	1.46e-38	140	a3 b#t#a two hsps
+q2	a3	95.000	60	3	0	180	1	180	1	2.00e-38	140	a3 b#t#a two hsps
+q2	a3	91.525	59	5	0	178	2	178	2	2.35e-36	133	a3 b#t#a two hsps
+q2	a3	91.525	59	5	0	3	179	3	179	2.98e-35	129	a3 b#t#a two hsps
+q2	a3	93.220	59	4	0	2	178	2	178	5.62e-35	128	a3 b#t#a two hsps
+q2	a3	90.000	60	6	0	180	1	480	301	1.46e-34	127	a3 b#t#a two hsps
+q2	a3	91.525	59	5	0	179	3	179	3	1.24e-32	121	a3 b#t#a two hsps
+q2	a3	88.136	59	7	0	2	178	302	478	4.10e-31	116	a3 b#t#a two hsps
+q2	a3	83.051	59	10	0	178	2	478	302	7.73e-31	115	a3 b#t#a two hsps
+q2	a3	83.051	59	10	0	3	179	303	479	7.73e-31	115	a3 b#t#a two hsps
+q2	a3	86.441	59	8	0	179	3	479	303	2.75e-30	113	a3 b#t#a two hsps
+q2	a4	86.667	60	8	0	1	180	1	180	6.59e-37	135	a4 gamma##
+q2	a4	86.667	60	8	0	180	1	180	1	1.67e-32	120	a4 gamma##
+q2	a4	84.746	59	9	0	2	178	2	178	6.60e-29	108	a4 gamma##
+q2	a4	83.051	59	10	0	179	3	179	3	1.22e-28	107	a4 gamma##
+q2	a4	77.966	59	13	0	178	2	178	2	2.12e-27	103	a4 gamma##
+q2	a4	100.000	41	0	0	3	125	3	125	7.73e-27	101	a4 gamma##
+q2	a4	57.143	7	3	0	100	80	127	107	0.65	15.7	a4 gamma##
+q2	a4	23.810	21	16	0	169	107	142	80	4.3	13.0	a4 gamma##
+q2	#a6	80.000	60	12	0	1	180	1	180	8.37e-32	118	#a6 first
+q2	#a6	80.000	60	12	0	180	1	180	1	3.23e-28	106	#a6 first
+q2	#a6	74.576	59	15	0	179	3	179	3	1.71e-24	94.1	#a6 first
+q2	#a6	74.576	59	15	0	2	178	2	178	1.06e-22	88.1	#a6 first
+q2	#a6	66.102	59	20	0	178	2	178	2	9.07e-21	81.7	#a6 first
+q2	#a6	100.000	32	0	0	3	98	3	98	2.35e-20	80.3	#a6 first
+q2	a7	76.667	60	14	0	1	180	1	180	1.85e-29	110	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a7	76.667	60	14	0	180	1	180	1	2.75e-26	100	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a7	69.492	59	18	0	179	3	179	3	5.20e-22	85.8	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a7	71.186	59	17	0	2	178	2	178	1.71e-20	80.8	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a7	90.625	32	3	0	3	98	3	98	1.06e-18	74.8	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a7	61.017	59	23	0	178	2	178	2	3.79e-18	73.0	a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end#
+q2	a5	66.667	6	2	0	27	44	78	95	2.3	13.9	a5 nohit#

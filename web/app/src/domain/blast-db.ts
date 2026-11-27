@@ -396,35 +396,27 @@ function classifyBlastDbFile(
 /**
  * Synchronous, name-only BLAST database discovery shared by Subject Database (`-db`),
  * BLASTN Repeats database (`-filtering_db`), and WindowMasker (`-infmt blastdb`).
- * Matches NCBI `FindBlastDBs` case-sensitive `.nal`/`.nin`/`.pal`/`.pin` extensions,
- * prefers aliases over index volumes of the same stem, and hides numbered volume stems
- * (`foo.00`) when an alias `foo` of the same molecule type exists: the volumes of one multi-volume
- * database are not choices of their own. A database that an alias lists in its `DBLIST` stays a
- * choice, as `blastdbcmd -list` shows it.
+ * Matches NCBI `FindBlastDBs` case-sensitive `.nal`/`.nin`/`.pal`/`.pin` extensions and
+ * prefers aliases over index volumes of the same stem. Every database is listed, as
+ * `blastdbcmd -list` lists them; `discoverBlastDatabases` hides the volumes of one database
+ * after it has read the aliases (`DBLIST`).
  */
 export function discoverBlastDatabaseNames(fileNames: readonly string[]): readonly BlastDbCandidate[] {
   const byKey = new Map<string, { readonly name: string; readonly kind: SequenceKind; readonly entry: 'alias' | 'volume' }>();
-  const aliasStems = new Set<string>();
 
   for (const name of fileNames) {
     const classified = classifyBlastDbFile(name);
     if (classified === undefined) continue;
     const key = `${classified.kind}:${classified.stem}`;
-    if (classified.entry === 'alias') aliasStems.add(key);
     const existing = byKey.get(key);
     if (existing === undefined || (existing.entry === 'volume' && classified.entry === 'alias')) {
       byKey.set(key, { name: classified.stem, kind: classified.kind, entry: classified.entry });
     }
   }
 
-  const databases: BlastDbCandidate[] = [];
-  for (const item of byKey.values()) {
-    if (item.entry === 'volume') {
-      const numbered = /^(.*)\.\d{2,}$/.exec(item.name);
-      if (numbered !== null && aliasStems.has(`${item.kind}:${numbered[1]!}`)) continue;
-    }
-    databases.push(Object.freeze({ name: item.name, kind: item.kind, entry: item.entry }));
-  }
+  const databases: BlastDbCandidate[] = [...byKey.values()].map((item) =>
+    Object.freeze({ name: item.name, kind: item.kind, entry: item.entry }),
+  );
 
   databases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
   return Object.freeze(databases);
@@ -487,26 +479,38 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     }
   }
 
+  // A database an alias of its kind lists in its DBLIST. A listed `A.NN` of alias `A` is a volume of
+  // that one database (what makeblastdb writes): not a choice of its own. Any other listed database
+  // stays a choice, and a `foo.NN` that no alias lists is a database like any other.
+  const known = new Set(initial.map((db) => `${db.kind}:${db.name}`));
   const listed = new Set<string>();
+  const volumes = new Set<string>();
   for (const [key, meta] of aliasMeta) {
-    const dir = parentDir(key.slice(key.indexOf(':') + 1));
     const kind = key.slice(0, key.indexOf(':'));
+    const alias = key.slice(key.indexOf(':') + 1);
+    const dir = parentDir(alias);
     for (const token of meta.dblist) {
-      listed.add(`${kind}:${token}`);
-      listed.add(`${kind}:${joinPath(dir, token)}`);
+      for (const member of [token, joinPath(dir, token)]) {
+        if (!known.has(`${kind}:${member}`)) continue;
+        listed.add(`${kind}:${member}`);
+        if (member.startsWith(`${alias}.`) && /^\d{2,}$/.test(member.slice(alias.length + 1))) volumes.add(`${kind}:${member}`);
+      }
     }
   }
 
-  const databases = initial.map((db) => {
-    const item = listed.has(`${db.kind}:${db.name}`) ? Object.freeze({ ...db, listed: true as const }) : db;
-    const meta = aliasMeta.get(`${item.kind}:${item.name}`);
-    if (meta === undefined) return item;
-    return Object.freeze({
-      ...item,
-      ...(meta.title === undefined ? {} : { title: meta.title }),
-      ...(meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
+  const databases = initial
+    .filter((db) => !volumes.has(`${db.kind}:${db.name}`))
+    .map((db) => {
+      // The default skips the databases that an alias lists, not the aliases that another alias lists.
+      const item = db.entry === 'volume' && listed.has(`${db.kind}:${db.name}`) ? Object.freeze({ ...db, listed: true as const }) : db;
+      const meta = aliasMeta.get(`${item.kind}:${item.name}`);
+      if (meta === undefined) return item;
+      return Object.freeze({
+        ...item,
+        ...(meta.title === undefined ? {} : { title: meta.title }),
+        ...(meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
+      });
     });
-  });
 
   return Object.freeze({
     ...(folder === undefined ? {} : { folder }),
@@ -550,9 +554,12 @@ export function matchingDatabases(discovery: BlastDbDiscovery | undefined, kind:
   return discovery.databases.filter((db) => db.kind === kind);
 }
 
-/** The database a pick starts with: the first that no alias of the pick lists, else the first. */
-export function defaultDatabase(matches: readonly BlastDbCandidate[]): BlastDbCandidate | undefined {
-  return matches.find((db) => db.listed !== true) ?? matches[0];
+/**
+ * The database a pick starts with: the one chosen before a reload (`remembered`) when the pick has it,
+ * else the first that no alias of the pick lists, else the first.
+ */
+export function defaultDatabase(matches: readonly BlastDbCandidate[], remembered?: string): BlastDbCandidate | undefined {
+  return matches.find((db) => db.name === remembered) ?? matches.find((db) => db.listed !== true) ?? matches[0];
 }
 
 /** Clear user-facing message when picked files hold no BLAST database of the required molecule type. */

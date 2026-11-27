@@ -164,6 +164,48 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(nested.databases.map((db) => db.name)).toEqual(['d/sub/na', 'd/top']);
   });
 
+  it('hides a listed numbered volume of its own alias only; other foo.NN names and listed databases stay choices (S4-1 R1)', async () => {
+    // refseq.2023 and refseq.2024 are databases an alias lists, not numbered volumes of refseq: 2023 is a year here
+    // but `refseq.2023` is `refseq.NN` by name, which is what makeblastdb writes; the alias lists them, so they are
+    // the volumes of refseq. An unlisted foo.01 beside alias foo is a database, as `blastdbcmd -list` shows it.
+    const discovery = await discoverBlastDatabases([
+      fileWithRelPath('d/refseq.2023.nin', 'x'),
+      fileWithRelPath('d/refseq.2024.nin', 'x'),
+      fileWithRelPath('d/refseq.nal', 'DBLIST refseq.2023 refseq.2024\n'),
+      fileWithRelPath('d/foo.nal', 'DBLIST bar\n'),
+      fileWithRelPath('d/bar.nin', 'x'),
+      fileWithRelPath('d/foo.01.nin', 'x'),
+      fileWithRelPath('d/other.nal', 'DBLIST bar.07 foo.01\n'),
+      fileWithRelPath('d/bar.07.nin', 'x'),
+    ]);
+    // refseq.2023/2024: `refseq.NN` with two or more digits and listed by refseq: volumes. foo.01: listed by `other`, not by
+    // foo, so a database of its own (and a listed one: not the default). bar.07: listed by other, not by bar: a database.
+    expect(discovery.databases.map((db) => db.name)).toEqual(['d/bar', 'd/bar.07', 'd/foo', 'd/foo.01', 'd/other', 'd/refseq']);
+    expect(discovery.databases.filter((db) => db.listed).map((db) => db.name)).toEqual(['d/bar', 'd/bar.07', 'd/foo.01']);
+    expect(defaultDatabase(discovery.databases)?.name).toBe('d/foo');
+  });
+
+  it('keeps dev\'s default for an alias that another alias lists (S4-1 R1)', async () => {
+    const discovery = await discoverBlastDatabases([
+      diskFile('a.nin', 'x'),
+      diskFile('b.nin', 'x'),
+      diskFile('ab.nal', 'DBLIST a b\n'),
+      diskFile('zall.nal', 'DBLIST ab\n'),
+    ]);
+    expect(discovery.databases.map((db) => db.name)).toEqual(['a', 'ab', 'b', 'zall']);
+    expect(defaultDatabase(discovery.databases)?.name).toBe('ab');
+  });
+
+  it('starts on the database chosen before a reload when the pick has it', () => {
+    const matches = [
+      { name: 'x/a', kind: 'nucleotide' as const, entry: 'volume' as const },
+      { name: 'x/b', kind: 'nucleotide' as const, entry: 'volume' as const, listed: true as const },
+    ];
+    expect(defaultDatabase(matches, 'x/b')?.name).toBe('x/b');
+    expect(defaultDatabase(matches, 'x/zzz')?.name).toBe('x/a');
+    expect(defaultDatabase(matches)?.name).toBe('x/a');
+  });
+
   it('says what the user picked: a folder or files (S4-5)', () => {
     expect(pickedFolder([fileWithRelPath('nuc5/a.nin'), fileWithRelPath('nuc5/b.nhr')])).toBe('nuc5');
     expect(pickedFolder([fileWithRelPath('nuc5/a.nin'), fileWithRelPath('other/b.nhr')])).toBeUndefined();
@@ -627,6 +669,52 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.readiness()).toBe('Reading the database files.');
     release('DBLIST nuc5\n');
     await picking;
+  });
+
+  it('selects the database chosen before the reload again after the re-pick (S4-5 R1)', async () => {
+    const memory = memoryStore({ subject: { name: 'alias/nb', folder: 'alias' } });
+    const { draft } = setup(memory);
+    await draft.idle();
+    await draft.setSubjectDatabaseFiles([
+      fileWithRelPath('alias/na.nin', 'x'),
+      fileWithRelPath('alias/nb.nin', 'x'),
+      fileWithRelPath('alias/nab.nal', 'DBLIST na nb\n'),
+    ]);
+    await draft.idle();
+    expect(draft.state.get().database.selected).toBe('alias/nb');
+    expect(memory.data.subject).toEqual({ name: 'alias/nb', folder: 'alias' });
+    // A pick without the remembered name starts on the default.
+    await draft.setSubjectDatabaseFiles([diskFile('na.nin', 'x'), diskFile('other.nin', 'x')]);
+    await draft.idle();
+    expect(draft.state.get().database.selected).toBe('na');
+  });
+
+  it('says files or folder for the repeats database after a reload and while it is read (S4-5 R1)', async () => {
+    const cases = [
+      { remembered: { name: 'rep' }, again: 'Choose the files again.', reading: 'Reading the repeats database files.', pick: [diskFile('rep.nin', 'x'), diskFile('rep.nal', 'DBLIST x\n')] },
+      {
+        remembered: { name: 'rep/r', folder: 'rep' },
+        again: 'Choose the folder again.',
+        reading: 'Reading the repeats database folder.',
+        pick: [fileWithRelPath('rep/r.nin', 'x'), fileWithRelPath('rep/r.nal', 'DBLIST x\n')],
+      },
+    ];
+    for (const { remembered, again, reading, pick } of cases) {
+      const { draft } = setup(memoryStore({ filtering: remembered }));
+      pasteQuery(draft);
+      pasteSubject(draft);
+      await draft.idle();
+      expect(draft.state.get().filteringDb.remembered).toEqual(remembered);
+      expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe(true);
+      expect(draft.readiness()).toBe(again);
+
+      let release!: (text: string) => void;
+      pick[1]!.text = () => new Promise<string>((resolve) => (release = resolve));
+      const picking = draft.setFilteringDbFiles(pick);
+      expect(draft.readiness()).toBe(reading);
+      release('DBLIST x\n');
+      await picking;
+    }
   });
 
   it('says folder in the same places when a folder was chosen (S4-5)', async () => {

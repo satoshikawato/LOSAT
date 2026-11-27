@@ -670,6 +670,7 @@ export class SearchDraft {
   /** Inspects picked folder/files for valid local BLAST databases (`-db`) without reading binary volumes. */
   async setSubjectDatabaseFiles(files: readonly File[]): Promise<void> {
     if (files.length === 0) return;
+    const rememberedName = this.state.get().database.remembered?.name;
     const generation = this.nextGeneration('subject-db');
     this.set({
       subjectSource: 'database',
@@ -689,7 +690,7 @@ export class SearchDraft {
       const { discovery } = outcome;
       const { program, subjectSource } = this.state.get();
       const matches = matchingDatabases(discovery, programById(program).subject);
-      const selected = defaultDatabase(matches)?.name;
+      const selected = defaultDatabase(matches, rememberedName)?.name;
       if (selected !== undefined && subjectSource === 'database') {
         this.rememberDb('subject', selected, discovery.folder);
       }
@@ -796,6 +797,7 @@ export class SearchDraft {
   /** Inspects picked folder/files for a nucleotide repeats database for BLASTN `-filtering_db`. */
   async setFilteringDbFiles(files: readonly File[]): Promise<void> {
     if (files.length === 0) return;
+    const rememberedName = this.state.get().filteringDb.remembered?.name;
     const generation = this.nextGeneration('filtering-db');
     this.set({
       filteringDb: Object.freeze({ scanning: databasePickKind(files) }),
@@ -815,7 +817,7 @@ export class SearchDraft {
       }
       const { discovery } = outcome;
       const matches = matchingDatabases(discovery, 'nucleotide');
-      const selected = defaultDatabase(matches)?.name;
+      const selected = defaultDatabase(matches, rememberedName)?.name;
       if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
       this.set({
         filteringDb: Object.freeze({

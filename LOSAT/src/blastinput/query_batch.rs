@@ -687,6 +687,26 @@ impl<'a> BatchQueries<'a> {
             None => BatchQueries::Generated(GeneratedQueries::new(make, later)),
         }
     }
+
+    /// The result `checked` of the check of the batch's reported sequences against these queries
+    /// (`report::query_bioseq::check`), as its caller gives it. A refusal of a sequence found by a
+    /// generated id is held (`Ok(Some)`): the caller gives it after the batch's prefetch, whose
+    /// error or refusal comes first, as NCBI's prefetch (`LoadSequencesToScope`) runs before the
+    /// formatter that takes the query for the sequence: a lookup that fails on a file there stops
+    /// the run with NCBI's error (`db.ldo.*.q1two.6`), and LOSAT's refusal of a stop that NCBI may
+    /// not make keeps its place (`db.ldo.*.query.6`). A `-parse_deflines` refusal comes at once,
+    /// in its place before the prefetch (line RG-KB item 12), whose notes (`QueryBioseqs`) the
+    /// batch's later checks read.
+    pub(crate) fn held(
+        &self,
+        checked: anyhow::Result<()>,
+    ) -> anyhow::Result<Option<anyhow::Error>> {
+        match (self, checked) {
+            (_, Ok(())) => Ok(None),
+            (BatchQueries::Generated(_), Err(refusal)) => Ok(Some(refusal)),
+            (BatchQueries::Shown(_), Err(refusal)) => Err(refusal),
+        }
+    }
 }
 
 /// The generated local ids that NCBI's scope holds for a batch's reports (`BatchQueries`), made

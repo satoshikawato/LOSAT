@@ -1563,8 +1563,9 @@ pub(super) fn reported_batch(
     // The check of line RG item X7: under `-parse_deflines` the run's scopes; else the generated
     // ids of the reader batch's records, in outfmt 5, whose scope the formatter keeps, those of
     // the run's queries (`run_queries`: the batches before and after this one, which the reader
-    // has not read yet; every `Query_N` where the caller has not counted them).
-    {
+    // has not read yet; every `Query_N` where the caller has not counted them). A generated id's
+    // refusal is held until after the batch's prefetch (`BatchQueries::held`).
+    let found_refusal = {
         let first = query_scopes.map_or(queries_before, |scopes| scopes.first());
         let record = |query: usize| {
             let record = queries.get(query.checked_sub(first)?)?;
@@ -1596,8 +1597,13 @@ pub(super) fn reported_batch(
             &generated,
             (options.outfmt == 5).then(|| 1..run_queries.map_or(usize::MAX, |queries| queries + 1)),
         );
-        reported.refuse_ids_of_queries(results, options.gapped, (first, &queries), &run)?;
-    }
+        queries.held(reported.refuse_ids_of_queries(
+            results,
+            options.gapped,
+            (first, &queries),
+            &run,
+        ))?
+    };
     reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // Before the reports of a batch NCBI fetches every subject that the batch
@@ -1625,21 +1631,28 @@ pub(super) fn reported_batch(
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
     let taxdb_found = database.taxdb_found();
-    if prefetches_subjects(Some(prefetch_format)) && (taxdb_found || database.parsed_seqids()) {
-        if !unfetched {
-            // A lookup that fails on a file stops the run here, after the reports of the
-            // batches before and this batch's reader messages (`shared::batch_prefetch`).
-            let messages = reported
-                .batch_prefetch(
-                    database,
-                    results,
-                    options.gapped,
-                    &prefetch_queries
-                        .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
-                )
-                .map_err(reported_error)?;
-            messages.write(diagnostics, None)?;
-        }
+    let prefetches =
+        prefetches_subjects(Some(prefetch_format)) && (taxdb_found || database.parsed_seqids());
+    if prefetches && !unfetched {
+        // A lookup that fails on a file stops the run here, after the reports of the batches
+        // before and this batch's reader messages (`shared::batch_prefetch`).
+        let messages = reported
+            .batch_prefetch(
+                database,
+                results,
+                options.gapped,
+                &prefetch_queries
+                    .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
+            )
+            .map_err(reported_error)?;
+        messages.write(diagnostics, None)?;
+    }
+    // The held refusal of a sequence found by a generated id (above), after the prefetch's error
+    // or refusal and its posts, before the batch's reports and their reads.
+    if let Some(refusal) = found_refusal {
+        return Err(refusal);
+    }
+    if prefetches {
         // Where the batch's reports load the subjects one by one (`read`, the one answer: the
         // prefetch is off, or failed, after its posts above; review 1 of line DBID pf7, H1), each
         // query's report fetches the subjects it shows, after the query's own warnings

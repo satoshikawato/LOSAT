@@ -2031,6 +2031,10 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
+        // The first batch's refusal of a sequence found by a generated id (line RG item X7), held
+        // until the stop of the prefetches is known (`BatchQueries::held`): the batch's first
+        // query and the refusal.
+        let mut found_refusal: Option<(usize, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
@@ -2245,7 +2249,8 @@ fn search(
             }
             // LOSAT's refusal of a reported sequence with the id of a query of its scope (line RG
             // item X7: a `-parse_deflines` id, or a generated one), after NCBI's own errors of the
-            // batch: the reports would show it (the prefetch's error above comes first).
+            // batch: the reports would show it (the prefetch environment's error above comes
+            // first; a generated id's refusal waits for the stop of the prefetches, `found_refusal`).
             if let Some(database) = database {
                 // The batch's searched queries (`range`), the scope's span.
                 let record = |query: usize| {
@@ -2286,7 +2291,7 @@ fn search(
                 };
                 let batch_queries =
                     crate::blastinput::query_batch::BatchQueries::of(scopes, &generated, None);
-                crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                let checked = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
                         .iter()
@@ -2302,7 +2307,10 @@ fn search(
                     &mut query_bioseqs,
                     &run,
                     "TBLASTN",
-                )?;
+                );
+                if let Some(refusal) = batch_queries.held(checked)? {
+                    found_refusal.get_or_insert((range.start, refusal));
+                }
             }
             results.append(&mut batch_results);
             if let Some(all_lengths) = &mut lengths {
@@ -2320,6 +2328,11 @@ fn search(
             let skipped = batch_validity.iter().all(|&valid| !valid);
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
+            // A held refusal ends the search: NCBI formats this batch before it searches the next,
+            // so only a stop of the prefetches of the batches searched so far comes before it.
+            if found_refusal.is_some() {
+                break;
+            }
         }
         // A run without a searched query has no parameters of a query set.
         let mut lengths = lengths.unwrap_or(LocalSubjectParameters {
@@ -2391,6 +2404,14 @@ fn search(
                 span.clone(),
                 anyhow::anyhow!("the prefetch of the batch stops (its error is made below)"),
             ));
+        }
+        // The held refusal of a sequence found by a generated id (above), before any byte, where
+        // NCBI formats its batch: a batch whose prefetch stops, or that a database file failed, is
+        // not formatted (its error or refusal comes below), nor are the batches after it.
+        if let Some((first, refusal)) = found_refusal {
+            if failed.as_ref().is_none_or(|(range, _)| first < range.start) {
+                return Err(refusal);
+            }
         }
         // A batch that a database file failed is not reported, nor are the batches after it.
         let queries = match &failed {

@@ -3655,7 +3655,8 @@ fn x_pipe_plan(
 /// searched query records; `ranged`: a `-query_loc` range cuts them) whose hits are `ordered`,
 /// against the queries that NCBI's scope holds for the batch: under `-parse_deflines` the run's
 /// scopes (`BatchReports::query_scopes`), then `refuse_tblastx_qseq_past_seen_query_len`; else the
-/// generated ids of the batch's input records (`generated`).
+/// generated ids of the batch's input records (`generated`), whose refusal is held (`Ok(Some)`)
+/// for the caller to give after the batch's prefetch (`BatchQueries::held`).
 fn check_found_queries(
     database: &super::super::database::TblastxDatabase,
     outputs: &[crate::api::local_blast::FormatOutput<'_>],
@@ -3664,7 +3665,7 @@ fn check_found_queries(
     generated: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ordered: &[super::TblastxHsp],
     prefetch_format: crate::algorithm::common::database::PrefetchFormat,
-) -> Result<()> {
+) -> Result<Option<anyhow::Error>> {
     let formats: Vec<report::TblastxOutputFormat> = outputs
         .iter()
         .map(|format| report::output_format(format.outfmt))
@@ -3693,20 +3694,23 @@ fn check_found_queries(
         writers: &writers,
         taxdb: database.taxdb_found(),
     };
-    crate::algorithm::common::database::refuse_reported_ids_of_queries(
-        &reports.titles.borrow(),
-        ordered
-            .iter()
-            .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
-        database.oid_map(),
-        &crate::blastinput::query_batch::BatchQueries::of(scopes, generated, None),
-        super::super::database::parsed_shown(&formats, prefetch_format),
-        &mut reports.seen.borrow_mut(),
-        &run,
-        "TBLASTX",
+    let queries = crate::blastinput::query_batch::BatchQueries::of(scopes, generated, None);
+    let held = queries.held(
+        crate::algorithm::common::database::refuse_reported_ids_of_queries(
+            &reports.titles.borrow(),
+            ordered
+                .iter()
+                .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+            database.oid_map(),
+            &queries,
+            super::super::database::parsed_shown(&formats, prefetch_format),
+            &mut reports.seen.borrow_mut(),
+            &run,
+            "TBLASTX",
+        ),
     )?;
     let Some(scopes) = scopes else {
-        return Ok(());
+        return Ok(held);
     };
     refuse_tblastx_qseq_past_seen_query_len(
         &formats,
@@ -3722,7 +3726,8 @@ fn check_found_queries(
         }),
         scopes,
         |ordinal| database.oid_map().oid(ordinal),
-    )
+    )?;
+    Ok(held)
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:288-310
@@ -4316,7 +4321,7 @@ fn run_batch_loop(
         }
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let ordered = batch.hits.as_slice();
-            check_found_queries(
+            let found_refusal = check_found_queries(
                 database,
                 &outputs.formats,
                 reports,
@@ -4599,6 +4604,11 @@ fn run_batch_loop(
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
                 database.reset_scope();
+            }
+            // The held refusal of a sequence found by a generated id (above), after the prefetch's
+            // error or refusal and its posts, before the batch's reports.
+            if let Some(refusal) = found_refusal {
+                return Err(refusal);
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the

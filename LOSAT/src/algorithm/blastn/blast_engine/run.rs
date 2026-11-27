@@ -9281,8 +9281,10 @@ fn run_in_pool(
         }
         // LOSAT's refusal of a reported sequence with the id of a query of its scope (line RG
         // item X7: a `-parse_deflines` id, or a generated one), after NCBI's own errors of the
-        // batch (the prefetch's above): the warnings of the batches read so far, as for a refusal
-        // of a title (above).
+        // batch (the prefetch environment's above): the warnings of the batches read so far, as
+        // for a refusal of a title (above). A generated id's refusal is held (`found_refusal`)
+        // until after the batch's prefetch (`BatchQueries::held`).
+        let mut found_refusal = None;
         if let SubjectSource::Database(database) = source {
             let searched = batch_records.searched();
             let record = |query: usize| {
@@ -9347,14 +9349,17 @@ fn run_in_pool(
                 &run,
                 "BLASTN",
             );
-            if let Err(error) = refused {
-                // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written with
-                // their reports.
-                let written = if stream.acting() { start } else { 0 };
-                for query_warnings in &warnings[written..=start] {
-                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
+            match batch_queries.held(refused) {
+                Ok(held) => found_refusal = held,
+                Err(error) => {
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
+                    // with their reports.
+                    let written = if stream.acting() { start } else { 0 };
+                    for query_warnings in &warnings[written..=start] {
+                        query_warnings.write(&mut *outputs.diagnostics, archive)?;
+                    }
+                    return Err(error);
                 }
-                return Err(error);
             }
         }
         if let SubjectSource::Database(database) = source {
@@ -9582,7 +9587,9 @@ fn run_in_pool(
                 }
                 Some(Err(error)) => Some(error),
             };
-            if let Some(error) = prefetch_error {
+            // The held refusal of a sequence found by a generated id (above), after the prefetch's
+            // error or refusal and its posts, before the batch's reports.
+            if let Some(error) = prefetch_error.or(found_refusal) {
                 let written = if stream.acting() { start } else { 0 };
                 for query_warnings in &warnings[written..=start] {
                     query_warnings.write(&mut *outputs.diagnostics, archive)?;

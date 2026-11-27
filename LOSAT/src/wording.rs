@@ -911,20 +911,17 @@ fn tag(text: &[u8]) -> Option<(usize, &[u8])> {
         if text[i..f].ends_with(b"::operator") && text[f..].starts_with(b"()") {
             f += 2;
         }
-        // The place ends with `()` after a function, or with `::` where the report names a module
-        // (or a class) but no function (`BLAST:: - `: `SDiagMessage::x_OldWrite`).
-        let place = if text[i..f].ends_with(b"::") {
-            Some(f)
-        } else {
-            literal(&text[f..], b"()").map(|end| f + end)
-        };
-        if let Some(p) = place {
-            if let Some(end) = literal(&text[p..], b" - ") {
-                i = p + end;
-            } else if let Some(end) = literal(&text[p..], b" -") {
-                if matches!(text.get(p + end), None | Some(b'\n')) {
-                    i = p + end;
-                }
+        let sep = literal(&text[f..], b"() - ").or_else(|| {
+            text[i..f]
+                .ends_with(b"::")
+                .then(|| literal(&text[f..], b" - "))
+                .flatten()
+        });
+        if let Some(end) = sep {
+            i = f + end;
+        } else if let Some(end) = literal(&text[f..], b"() -") {
+            if matches!(text.get(f + end), None | Some(b'\n')) {
+                i = f + end;
             }
         }
     }

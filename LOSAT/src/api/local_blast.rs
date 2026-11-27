@@ -60,7 +60,9 @@ pub use crate::algorithm::blastx::run_local_database as run_local_database_blast
 pub enum OutputSink<'a> {
     /// Standard output, buffered (the CLI without `-out`, NCBI's default `-`).
     Stdout,
-    /// A file named by `-out`, created when the report is written.
+    /// A file named by `-out`. A run sees it as `Kept` (`ReportOutputs::run_records`): the file is
+    /// created where the run first writes it and kept until the run ends, and the sinks of a run
+    /// that name one file write it through one handle, in the order written (`KeptFile`).
     File(&'a Path),
     /// A writer provided by the caller. It is not buffered here, so that every byte a
     /// formatter has written reaches it before each `FormatObserver` call.
@@ -77,6 +79,8 @@ pub enum OutputSink<'a> {
         &'a mut (dyn Write + Send),
         crate::report::blast_xml2::SideFileSink,
     ),
+    /// A `File` sink while a run writes it (`ReportOutputs::run_records`, `KeptFile`).
+    Kept(&'a mut KeptFile),
     /// The command line's report stream (`-out` or standard output), which writes as NCBI's
     /// stream does (`report::ostream::ReportStream`); otherwise as `Writer`.
     Report(&'a mut crate::report::ostream::ReportStream),
@@ -84,16 +88,20 @@ pub enum OutputSink<'a> {
 
 impl OutputSink<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-    // NCBI opens the `-out` stream while it processes the arguments, before the search.
-    // LOSAT has always created the file when the report is written, after the search;
-    // this routing keeps that existing timing unchanged.
-    /// Opens the sink for writing the report.
-    pub fn open(&mut self) -> io::Result<Box<dyn Write + '_>> {
+    // NCBI opens the `-out` stream while it processes the arguments, before the search. A
+    // library `File` sink is created where its run first opens it (`KeptFile`): with outfmt 0 to
+    // 4 at the prolog, before the search, where every program writes it; otherwise with the report.
+    /// Opens the sink for writing the report. A run opens a `File` sink as its `KeptFile`
+    /// (`Kept`; every program's run goes through `ReportOutputs::run_records`), never as itself.
+    pub(crate) fn open(&mut self) -> io::Result<Box<dyn Write + '_>> {
         Ok(match self {
             OutputSink::Stdout => Box::new(BufWriter::new(io::stdout())),
-            OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
+            OutputSink::File(_) => {
+                unreachable!("a File sink is opened as its run's KeptFile (run_records)")
+            }
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
             OutputSink::Out(out) => Box::new(&mut **out),
+            OutputSink::Kept(kept) => Box::new(kept.open()?),
             OutputSink::Report(stream) => Box::new(&mut **stream),
         })
     }
@@ -129,6 +137,12 @@ impl OutputSink<'_> {
         )
     }
 
+    /// Whether the output is a file that the call creates (`File`, or `Kept` while a run writes
+    /// it), not a stream or a writer of the caller.
+    pub(crate) fn is_file(&self) -> bool {
+        matches!(self, OutputSink::File(_) | OutputSink::Kept(_))
+    }
+
     /// The same sink, borrowed for a view of the outputs (`ViewParts::view`).
     fn reborrow(&mut self) -> OutputSink<'_> {
         match self {
@@ -138,7 +152,125 @@ impl OutputSink<'_> {
             OutputSink::Out(out) => OutputSink::Out(out),
             OutputSink::Report(stream) => OutputSink::Report(stream),
             OutputSink::Files(writer, side) => OutputSink::Files(&mut **writer, side.clone()),
+            OutputSink::Kept(kept) => OutputSink::Kept(kept),
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480 (cited at
+// `OutputSink::open`): NCBI's one `-out` stream for the whole run.
+/// The file of a library `File` sink while a run writes it (`OutputSink::Kept`,
+/// `ReportOutputs::run_records`): created at the run's first `open` (or, through the block search
+/// of BLASTP, `XBlockSink`, at its first write or flush) and kept until the run ends, so that what
+/// the run writes before the search (the outfmt 0 to 4 prolog of every program, `PrintProlog`)
+/// and its reports go to one file, in order. The sinks of a run that name one file share it
+/// (`KeptFile::of`): the file holds what each of them writes, in the order written, as NCBI's one
+/// `-out` stream holds a run's. Each `open` ends as the file of an `open` that created it ended:
+/// what it wrote reaches the file when it is dropped (`KeptOpen`).
+pub struct KeptFile {
+    /// The file and its path, shared by the sinks of the run that name it.
+    shared: std::sync::Arc<std::sync::Mutex<KeptState>>,
+}
+
+/// The file of a `KeptFile`: its path and, from the first write on, the file.
+struct KeptState {
+    path: std::path::PathBuf,
+    /// The path's folder resolved (`kept_key`), which tells the sinks that name one file.
+    key: std::path::PathBuf,
+    file: Option<BufWriter<File>>,
+}
+
+/// The key by which the sinks of a run share a file (`KeptFile::of`): the path with its folder
+/// resolved (`fs::canonicalize`: its `.` and `..` parts and its links), so that `out.txt` and
+/// `./out.txt` name one file; the path as given where the folder cannot be resolved (it does not
+/// exist, and the file cannot be created).
+fn kept_key(path: &Path) -> std::path::PathBuf {
+    let folder = match path.parent() {
+        Some(folder) if !folder.as_os_str().is_empty() => folder,
+        _ => Path::new("."),
+    };
+    match (std::fs::canonicalize(folder), path.file_name()) {
+        (Ok(folder), Some(name)) => folder.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+impl KeptFile {
+    /// The kept file of `path` for a run whose sinks before it have the kept files `before`:
+    /// theirs where one names the same file (`kept_key`), else a new one.
+    fn of(path: &Path, before: &[Option<KeptFile>]) -> Self {
+        let key = kept_key(path);
+        let shared = before
+            .iter()
+            .flatten()
+            .find(|kept| kept.state().key == key)
+            .map(|kept| std::sync::Arc::clone(&kept.shared));
+        KeptFile {
+            shared: shared.unwrap_or_else(|| {
+                std::sync::Arc::new(std::sync::Mutex::new(KeptState {
+                    path: path.to_path_buf(),
+                    key,
+                    file: None,
+                }))
+            }),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, KeptState> {
+        // A panic while a write held the lock leaves the buffer as the write left it.
+        self.shared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// `write` on the file, created at the first call.
+    fn with_file<R>(
+        &self,
+        write: impl FnOnce(&mut BufWriter<File>) -> io::Result<R>,
+    ) -> io::Result<R> {
+        let mut state = self.state();
+        let state = &mut *state;
+        if state.file.is_none() {
+            state.file = Some(BufWriter::new(File::create(&state.path)?));
+        }
+        write(state.file.as_mut().expect("the file was created above"))
+    }
+
+    /// The file for one `OutputSink::open`, created at the first.
+    fn open(&mut self) -> io::Result<KeptOpen<'_>> {
+        self.with_file(|_| Ok(()))?;
+        Ok(KeptOpen(self))
+    }
+}
+
+impl Write for KeptFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.with_file(|file| file.write(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.with_file(BufWriter::flush)
+    }
+}
+
+/// One `OutputSink::open` of a `KeptFile`, which flushes the file when it is dropped, as the
+/// buffered file of an `open` that created it did.
+struct KeptOpen<'k>(&'k mut KeptFile);
+
+impl Write for KeptOpen<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Drop for KeptOpen<'_> {
+    fn drop(&mut self) {
+        // As `BufWriter`'s drop: an error here is not reported.
+        let _ = self.0.flush();
     }
 }
 
@@ -929,7 +1061,8 @@ impl<'a> ReportOutputs<'a> {
     /// takes them: where LOSAT refuses the strategy file at NCBI's first request
     /// (`strategy::check_report_stream`), what a format was written before that point (NCBI's
     /// prolog) stays before the refusal, and a run that NCBI ends before it keeps what each format
-    /// was written.
+    /// was written. The run sees each `File` sink as its file, kept from the run's first write to
+    /// its end (`with_kept_files`).
     pub(crate) fn run_records(
         &mut self,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
@@ -937,15 +1070,65 @@ impl<'a> ReportOutputs<'a> {
         no_query: bool,
         run: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        let result = match archive {
-            Some(handle) => self.with_archive_diagnostics(handle.clone(), run),
-            None => run(self),
-        };
-        let result = crate::report::archive::strategy::end_run(strategy, result);
-        match archive {
-            Some(handle) => self.finish_archive(handle, no_query, result),
-            None => result,
+        self.with_kept_files(|outputs| {
+            let result = match archive {
+                Some(handle) => outputs.with_archive_diagnostics(handle.clone(), run),
+                None => run(outputs),
+            };
+            let result = crate::report::archive::strategy::end_run(strategy, result);
+            match archive {
+                Some(handle) => outputs.finish_archive(handle, no_query, result),
+                None => result,
+            }
+        })
+    }
+
+    /// Runs `f` with the same outputs, each `File` sink seen as its file kept for the run
+    /// (`OutputSink::Kept`): created where the run first writes it, so a run writes the outfmt 0
+    /// to 4 prolog of a file before the search as of every other sink (each program's prologs
+    /// before the search, `PrintProlog`) and its reports after it into the same file. Sinks that
+    /// name one file share its handle (`KeptFile::of`). The files end with `f`.
+    fn with_kept_files<R>(&mut self, f: impl FnOnce(&mut ReportOutputs<'_>) -> R) -> R {
+        if !self
+            .formats
+            .iter()
+            .any(|format| matches!(format.sink, OutputSink::File(_)))
+        {
+            return f(self);
         }
+        let (formats, diagnostics, mut parts) = self.split();
+        let mut kept: Vec<Option<KeptFile>> = Vec::with_capacity(formats.len());
+        for format in formats.iter() {
+            let file = match format.sink {
+                OutputSink::File(path) => Some(KeptFile::of(path, &kept)),
+                _ => None,
+            };
+            kept.push(file);
+        }
+        let (result, refusals) = {
+            let mut view = parts.view(
+                formats
+                    .iter_mut()
+                    .zip(kept.iter_mut())
+                    .map(|(format, kept)| FormatOutput {
+                        outfmt: format.outfmt,
+                        sink: match kept {
+                            Some(kept) => OutputSink::Kept(kept),
+                            None => format.sink.reborrow(),
+                        },
+                        // Moved into the view and back after `f` (a format that fails alone).
+                        refusal: std::mem::take(&mut format.refusal),
+                    })
+                    .collect(),
+                diagnostics,
+            );
+            let result = f(&mut view);
+            (result, view.into_refusals())
+        };
+        FormatOutput::take_back(formats, refusals);
+        // The files end here (what a write left in a buffer reaches its file).
+        drop(kept);
+        result
     }
 }
 

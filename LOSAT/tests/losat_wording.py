@@ -119,15 +119,15 @@ def _tag(text: bytes, i: int) -> tuple[int, bytes] | None:
     if f > k:
         if text[k:f].endswith(b"::operator") and text.startswith(b"()", f):
             f += 2
-        place = f if text[k:f].endswith(b"::") else _literal(text, f, b"()")
-        if place is not None:
-            end = _literal(text, place, b" - ")
-            if end is not None:
+        end = _literal(text, f, b"() - ")
+        if end is None and text[k:f].endswith(b"::"):
+            end = _literal(text, f, b" - ")
+        if end is not None:
+            k = end
+        else:
+            end = _literal(text, f, b"() -")
+            if end is not None and (end == len(text) or text[end : end + 1] == b"\n"):
                 k = end
-            else:
-                end = _literal(text, place, b" -")
-                if end is not None and (end == len(text) or text[end : end + 1] == b"\n"):
-                    k = end
     return k, code
 
 

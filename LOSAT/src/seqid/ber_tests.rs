@@ -402,3 +402,42 @@ fn fix_visible_chars_replaces_and_counts() {
         }
     }
 }
+
+#[test]
+fn replaced_char_posts_and_negative_length_eof_match_ncbi() {
+    // Minimal Blast-def-line-set with one Blast-def-line whose title holds 0x01 and 0x80,
+    // followed by a missing mandatory `seqid` member (simulating a truncated header record).
+    let mut truncated = vec![
+        0x30, 0x80, // Blast-def-line-set SEQUENCE (indefinite)
+        0x30, 0x80, // Blast-def-line SEQUENCE (indefinite)
+        0xa0, 0x80, // [0] title
+        0x1a, 0x05, b'a', 0x01, 0x80, b'h', b'a', // VisibleString "a\x01\x80ha"
+        0x00, 0x00, // end title
+        0x00, 0x00, // end Blast-def-line (missing mandatory seqid!)
+        0x00, 0x00, // end set
+    ];
+    let posts = super::replaced_char_posts(&truncated);
+    assert_eq!(posts.len(), 2);
+    assert_eq!(posts[0].trace, "Blast-def-line-set.E.title");
+    assert_eq!(posts[0].byte, 0x01);
+    assert_eq!(posts[0].string.as_ref(), b"a\x01\x80ha");
+    assert_eq!(posts[1].trace, "Blast-def-line-set.E.title");
+    assert_eq!(posts[1].byte, 0x80);
+    assert_eq!(posts[1].string.as_ref(), b"a#\x80ha");
+
+    // Clean title has no posts.
+    truncated[9] = b'l';
+    truncated[10] = b'p';
+    assert!(super::replaced_char_posts(&truncated).is_empty());
+
+    // Negative header length EOF exception matches NCBI's strbuffer.cpp:358 + objistr.cpp:604.
+    let eof = super::negative_length_eof();
+    let text = String::from_utf8(eof.ncbi_what()).unwrap();
+    assert!(text.contains("strbuffer.cpp\", line 358"), "{text}");
+    assert!(text.contains("CEofException::eEof"), "{text}");
+    assert!(text.contains("objistr.cpp\", line 604"), "{text}");
+    assert!(
+        text.contains("Frame type= eFrameNamed, Object type= Blast-def-line-set"),
+        "{text}"
+    );
+}

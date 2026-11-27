@@ -407,3 +407,205 @@ negtax	put	neg.pog	negtax/neg.pog
 negtax	put	neg.psd	negtax/neg.psd
 negtax	put	neg.psi	negtax/neg.psi
 negtax	put	neg.psq	negtax/neg.psq
+c_noloo	tax	good
+c_noloo	put	db.aux	cdd/db.aux
+c_noloo	put	db.freq	cdd/db.freq
+c_noloo	put	db.pdb	cdd/db.pdb
+c_noloo	put	db.phr	cdd/db.phr
+c_noloo	put	db.pin	cdd/db.pin
+c_noloo	put	db.pos	cdd/db.pos
+c_noloo	put	db.pot	cdd/db.pot
+c_noloo	put	db.psq	cdd/db.psq
+c_noloo	put	db.ptf	cdd/db.ptf
+c_noloo	put	db.pto	cdd/db.pto
+c_noloo	put	db.rps	cdd/db.rps
+c_noloo	cp	db.freq	db.wcounts
+c_noloo	cp	db.freq	db.obsr
+c_norps	tax	good
+c_norps	put	db.aux	cdd/db.aux
+c_norps	put	db.freq	cdd/db.freq
+c_norps	put	db.loo	cdd/db.loo
+c_norps	put	db.pdb	cdd/db.pdb
+c_norps	put	db.phr	cdd/db.phr
+c_norps	put	db.pin	cdd/db.pin
+c_norps	put	db.pos	cdd/db.pos
+c_norps	put	db.pot	cdd/db.pot
+c_norps	put	db.psq	cdd/db.psq
+c_norps	put	db.ptf	cdd/db.ptf
+c_norps	put	db.pto	cdd/db.pto
+c_norps	cp	db.freq	db.wcounts
+c_norps	cp	db.freq	db.obsr
+c_noobsr	tax	good
+c_noobsr	put	db.aux	cdd/db.aux
+c_noobsr	put	db.freq	cdd/db.freq
+c_noobsr	put	db.loo	cdd/db.loo
+c_noobsr	put	db.pdb	cdd/db.pdb
+c_noobsr	put	db.phr	cdd/db.phr
+c_noobsr	put	db.pin	cdd/db.pin
+c_noobsr	put	db.pos	cdd/db.pos
+c_noobsr	put	db.pot	cdd/db.pot
+c_noobsr	put	db.psq	cdd/db.psq
+c_noobsr	put	db.ptf	cdd/db.ptf
+c_noobsr	put	db.pto	cdd/db.pto
+c_noobsr	put	db.rps	cdd/db.rps
+c_noobsr	cp	db.freq	db.wcounts
+c_loomagic	tax	good
+c_loomagic	put	db.aux	cdd/db.aux
+c_loomagic	put	db.freq	cdd/db.freq
+c_loomagic	put	db.loo	cdd/db.loo
+c_loomagic	put	db.pdb	cdd/db.pdb
+c_loomagic	put	db.phr	cdd/db.phr
+c_loomagic	put	db.pin	cdd/db.pin
+c_loomagic	put	db.pos	cdd/db.pos
+c_loomagic	put	db.pot	cdd/db.pot
+c_loomagic	put	db.psq	cdd/db.psq
+c_loomagic	put	db.ptf	cdd/db.ptf
+c_loomagic	put	db.pto	cdd/db.pto
+c_loomagic	put	db.rps	cdd/db.rps
+c_loomagic	cp	db.freq	db.wcounts
+c_loomagic	cp	db.freq	db.obsr
+c_loomagic	poke	db.loo	0	3412
+c_rpsmagic	tax	good
+c_rpsmagic	put	db.aux	cdd/db.aux
+c_rpsmagic	put	db.freq	cdd/db.freq
+c_rpsmagic	put	db.loo	cdd/db.loo
+c_rpsmagic	put	db.pdb	cdd/db.pdb
+c_rpsmagic	put	db.phr	cdd/db.phr
+c_rpsmagic	put	db.pin	cdd/db.pin
+c_rpsmagic	put	db.pos	cdd/db.pos
+c_rpsmagic	put	db.pot	cdd/db.pot
+c_rpsmagic	put	db.psq	cdd/db.psq
+c_rpsmagic	put	db.ptf	cdd/db.ptf
+c_rpsmagic	put	db.pto	cdd/db.pto
+c_rpsmagic	put	db.rps	cdd/db.rps
+c_rpsmagic	cp	db.freq	db.wcounts
+c_rpsmagic	cp	db.freq	db.obsr
+c_rpsmagic	poke	db.rps	0	3412
+c_wcmagic	tax	good
+c_wcmagic	put	db.aux	cdd/db.aux
+c_wcmagic	put	db.freq	cdd/db.freq
+c_wcmagic	put	db.loo	cdd/db.loo
+c_wcmagic	put	db.pdb	cdd/db.pdb
+c_wcmagic	put	db.phr	cdd/db.phr
+c_wcmagic	put	db.pin	cdd/db.pin
+c_wcmagic	put	db.pos	cdd/db.pos
+c_wcmagic	put	db.pot	cdd/db.pot
+c_wcmagic	put	db.psq	cdd/db.psq
+c_wcmagic	put	db.ptf	cdd/db.ptf
+c_wcmagic	put	db.pto	cdd/db.pto
+c_wcmagic	put	db.rps	cdd/db.rps
+c_wcmagic	cp	db.freq	db.wcounts
+c_wcmagic	cp	db.freq	db.obsr
+c_wcmagic	poke	db.wcounts	0	3412
+c_obsrmagic	tax	good
+c_obsrmagic	put	db.aux	cdd/db.aux
+c_obsrmagic	put	db.freq	cdd/db.freq
+c_obsrmagic	put	db.loo	cdd/db.loo
+c_obsrmagic	put	db.pdb	cdd/db.pdb
+c_obsrmagic	put	db.phr	cdd/db.phr
+c_obsrmagic	put	db.pin	cdd/db.pin
+c_obsrmagic	put	db.pos	cdd/db.pos
+c_obsrmagic	put	db.pot	cdd/db.pot
+c_obsrmagic	put	db.psq	cdd/db.psq
+c_obsrmagic	put	db.ptf	cdd/db.ptf
+c_obsrmagic	put	db.pto	cdd/db.pto
+c_obsrmagic	put	db.rps	cdd/db.rps
+c_obsrmagic	cp	db.freq	db.wcounts
+c_obsrmagic	cp	db.freq	db.obsr
+c_obsrmagic	poke	db.obsr	0	3412
+c_rps2	tax	good
+c_rps2	put	db.aux	cdd/db.aux
+c_rps2	put	db.freq	cdd/db.freq
+c_rps2	put	db.loo	cdd/db.loo
+c_rps2	put	db.pdb	cdd/db.pdb
+c_rps2	put	db.phr	cdd/db.phr
+c_rps2	put	db.pin	cdd/db.pin
+c_rps2	put	db.pos	cdd/db.pos
+c_rps2	put	db.pot	cdd/db.pot
+c_rps2	put	db.psq	cdd/db.psq
+c_rps2	put	db.ptf	cdd/db.ptf
+c_rps2	put	db.pto	cdd/db.pto
+c_rps2	put	db.rps	cdd/db.rps
+c_rps2	cp	db.freq	db.wcounts
+c_rps2	cp	db.freq	db.obsr
+c_rps2	trunc	db.rps	2
+c_freq2	tax	good
+c_freq2	put	db.aux	cdd/db.aux
+c_freq2	put	db.freq	cdd/db.freq
+c_freq2	put	db.loo	cdd/db.loo
+c_freq2	put	db.pdb	cdd/db.pdb
+c_freq2	put	db.phr	cdd/db.phr
+c_freq2	put	db.pin	cdd/db.pin
+c_freq2	put	db.pos	cdd/db.pos
+c_freq2	put	db.pot	cdd/db.pot
+c_freq2	put	db.psq	cdd/db.psq
+c_freq2	put	db.ptf	cdd/db.ptf
+c_freq2	put	db.pto	cdd/db.pto
+c_freq2	put	db.rps	cdd/db.rps
+c_freq2	cp	db.freq	db.wcounts
+c_freq2	cp	db.freq	db.obsr
+c_freq2	trunc	db.freq	2
+c_rps0	tax	good
+c_rps0	put	db.aux	cdd/db.aux
+c_rps0	put	db.freq	cdd/db.freq
+c_rps0	put	db.loo	cdd/db.loo
+c_rps0	put	db.pdb	cdd/db.pdb
+c_rps0	put	db.phr	cdd/db.phr
+c_rps0	put	db.pin	cdd/db.pin
+c_rps0	put	db.pos	cdd/db.pos
+c_rps0	put	db.pot	cdd/db.pot
+c_rps0	put	db.psq	cdd/db.psq
+c_rps0	put	db.ptf	cdd/db.ptf
+c_rps0	put	db.pto	cdd/db.pto
+c_rps0	put	db.rps	cdd/db.rps
+c_rps0	cp	db.freq	db.wcounts
+c_rps0	cp	db.freq	db.obsr
+c_rps0	trunc	db.rps	0
+c_two_diff	tax	good
+c_two_diff	put	a1.aux	cdd/db.aux
+c_two_diff	put	a1.freq	cdd/db.freq
+c_two_diff	put	a1.loo	cdd/db.loo
+c_two_diff	put	a1.pdb	two/a1.pdb
+c_two_diff	put	a1.phr	cdd/db.phr
+c_two_diff	put	a1.pin	two/a1.pin
+c_two_diff	put	a1.pos	cdd/db.pos
+c_two_diff	put	a1.pot	cdd/db.pot
+c_two_diff	put	a1.psq	cdd/db.psq
+c_two_diff	put	a1.ptf	cdd/db.ptf
+c_two_diff	put	a1.pto	cdd/db.pto
+c_two_diff	put	a1.rps	cdd/db.rps
+c_two_diff	cp	a1.freq	a1.wcounts
+c_two_diff	cp	a1.freq	a1.obsr
+c_two_diff	put	b2.aux	cdd/db.aux
+c_two_diff	put	b2.freq	cdd/db.freq
+c_two_diff	put	b2.loo	cdd/db.loo
+c_two_diff	put	b2.pdb	two/b2.pdb
+c_two_diff	put	b2.phr	cdd/db.phr
+c_two_diff	put	b2.pin	two/b2.pin
+c_two_diff	put	b2.pos	cdd/db.pos
+c_two_diff	put	b2.pot	cdd/db.pot
+c_two_diff	put	b2.psq	cdd/db.psq
+c_two_diff	put	b2.ptf	cdd/db.ptf
+c_two_diff	put	b2.pto	cdd/db.pto
+c_two_diff	put	b2.rps	cdd/db.rps
+c_two_diff	cp	b2.freq	b2.wcounts
+c_two_diff	cp	b2.freq	b2.obsr
+c_two_diff	poke	b2.rps	12	26
+c_two_diff	poke	b2.freq	12	26
+c_two_diff	poke	b2.wcounts	12	26
+d_p4_nonasc_seq	db	p4
+d_p4_nonasc_seq	tax	good
+d_p4_nonasc_seq	poke	p4.pin	106	01f4
+d_p4_nonasc_hdr	db	p4
+d_p4_nonasc_hdr	tax	good
+d_p4_nonasc_hdr	poke	p4.pin	68	00000000
+d_p4_badchar	db	p4
+d_p4_badchar	tax	good
+d_p4_badchar	poke	p4.phr	9	0180
+d_p4_utf8	db	p4
+d_p4_utf8	tax	good
+d_p4_utf8	poke	p4.phr	6	0c
+a_msk1	db	p5
+a_msk1	tax	good
+a_msk1	text	a.msk	x
+a_msk1	text	a.pal	TITLE short msk\nDBLIST p5\nOIDLIST a.msk\n

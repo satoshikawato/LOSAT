@@ -57,16 +57,22 @@ import {
   NO_TAXID_EXPANSION_FLAG,
   NO_TAXID_EXPANSION_WM_CONFLICT,
   assembleSearchDirectory,
+  chooseAgainMessage,
+  databasePickKind,
   databaseTaxonomy,
   dbMaskMissingMessage,
   dbMaskState,
+  defaultDatabase,
   discoverBlastDatabases,
   isWindowMaskerTaxidActive,
   matchingDatabases,
   noMatchingDatabaseMessage,
   normalizeRunPath,
+  readingDatabaseMessage,
+  rememberedPickKind,
   type AssembledSearchDirectory,
   type BlastDbDiscovery,
+  type DatabasePickKind,
   type DbMaskMode,
 } from '../domain/blast-db';
 import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart, QueryFileSnapshot } from '../domain/run';
@@ -111,7 +117,8 @@ export interface QueryFileDraft {
 export interface DatabasePickDraft {
   readonly discovery?: BlastDbDiscovery;
   readonly selected?: string;
-  readonly scanning?: true;
+  /** While a pick is read: what the user chose (the words of the status say it). */
+  readonly scanning?: DatabasePickKind;
   /** Database remembered across a page reload when folder handles could not be retained. */
   readonly remembered?: RememberedDatabase;
   /** The files are a makeblastdb run's database (`made`), which a reload cannot open again: never remembered. */
@@ -673,10 +680,11 @@ export class SearchDraft {
    */
   async setSubjectDatabaseFiles(files: readonly File[], relativeNames?: readonly string[], options: DatabaseFilesOptions = {}): Promise<void> {
     if (files.length === 0) return;
+    const rememberedName = this.state.get().database.remembered?.name;
     const generation = this.nextGeneration('subject-db');
     this.set({
       subjectSource: 'database',
-      database: this.subjectDatabaseWith({ scanning: true as const }),
+      database: this.subjectDatabaseWith({ scanning: databasePickKind(files) }),
       message: undefined,
     });
     const work = this.scanDatabaseFiles(files, relativeNames).then((outcome) => {
@@ -692,7 +700,7 @@ export class SearchDraft {
       const { discovery } = outcome;
       const { program, subjectSource } = this.state.get();
       const matches = matchingDatabases(discovery, programById(program).subject);
-      const selected = matches[0]?.name;
+      const selected = defaultDatabase(matches, rememberedName)?.name;
       if (subjectSource === 'database') {
         if (options.made === true) this.forgetSubjectDb();
         else if (selected !== undefined) this.rememberDb('subject', selected, discovery.folder);
@@ -804,9 +812,10 @@ export class SearchDraft {
   /** Inspects picked folder/files for a nucleotide repeats database for BLASTN `-filtering_db` (`relativeNames`: as `setSubjectDatabaseFiles`). */
   async setFilteringDbFiles(files: readonly File[], relativeNames?: readonly string[], options: DatabaseFilesOptions = {}): Promise<void> {
     if (files.length === 0) return;
+    const rememberedName = this.state.get().filteringDb.remembered?.name;
     const generation = this.nextGeneration('filtering-db');
     this.set({
-      filteringDb: Object.freeze({ scanning: true as const }),
+      filteringDb: Object.freeze({ scanning: databasePickKind(files) }),
       ...(this.state.get().program === 'blastn' ? { message: undefined } : {}),
     });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
@@ -823,7 +832,7 @@ export class SearchDraft {
       }
       const { discovery } = outcome;
       const matches = matchingDatabases(discovery, 'nucleotide');
-      const selected = matches[0]?.name;
+      const selected = defaultDatabase(matches, rememberedName)?.name;
       if (options.made === true) this.deps.databaseMemory?.write('filtering', undefined);
       else if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
       this.set({
@@ -1721,11 +1730,11 @@ export class SearchDraft {
       for (const field of section.fields) {
         if (field.kind === 'database') {
           if (values[program][field.flag] === true) {
-            if (filteringDb.scanning === true) return 'Reading the repeats database folder.';
+            if (filteringDb.scanning !== undefined) return readingDatabaseMessage('repeats database', filteringDb.scanning);
             if (filteringDb.discovery !== undefined && filteringDb.selected === undefined) {
               return noMatchingDatabaseMessage(filteringDb.discovery, field.database?.kind ?? 'nucleotide', field.label);
             }
-            if (filteringDb.remembered !== undefined) return 'Choose the folder again.';
+            if (filteringDb.remembered !== undefined) return chooseAgainMessage(rememberedPickKind(filteringDb.remembered));
             return field.database?.missing ?? `Choose a database for ${field.label}.`;
           }
           continue;
@@ -1815,12 +1824,15 @@ export class SearchDraft {
     }
     if (role === 'subject' && this.state.get().subjectSource === 'database') {
       const { database, program } = this.state.get();
-      if (database.scanning === true) {
-        const message = 'Reading the database folder.';
+      if (database.scanning !== undefined) {
+        const message = readingDatabaseMessage('database', database.scanning);
         return { message, short: message };
       }
       if (database.discovery === undefined) {
-        const message = database.remembered !== undefined ? 'Choose the folder again.' : 'Choose a local BLAST database folder or files.';
+        const message =
+          database.remembered !== undefined
+            ? chooseAgainMessage(rememberedPickKind(database.remembered))
+            : 'Choose a local BLAST database folder or files.';
         return { message, short: message };
       }
       if (database.selected === undefined) {
@@ -2581,7 +2593,7 @@ function reselectDatabaseForKind(database: SubjectDatabaseDraft, kind: SequenceK
   if (database.discovery === undefined) return database;
   const matches = matchingDatabases(database.discovery, kind);
   if (database.selected !== undefined && matches.some((db) => db.name === database.selected)) return database;
-  const nextSelected = matches[0]?.name;
+  const nextSelected = defaultDatabase(matches)?.name;
   const { selected: _prev, ...rest } = database;
   void _prev;
   return Object.freeze(nextSelected === undefined ? rest : { ...rest, selected: nextSelected });

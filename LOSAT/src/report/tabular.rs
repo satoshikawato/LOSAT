@@ -1188,27 +1188,6 @@ pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
     failed_lookup_stop(spec, LookupFailure::thrown(), true) == Some(FAILED_LOOKUP_NULL_POINTER)
 }
 
-/// Whether a tabular report of `spec` (`None`: the default fields) for `program` can stop at a row
-/// whose subject lookup throws (`sacc`, `saccver`, default fields, `staxid`, or empty-handle
-/// sequence/frame fields), apart from a lineless-only definition line
-/// (`stops_at_lineless_accession`).
-pub fn stops_at_lookup_failure_for(
-    spec: Option<&TabularSpec>,
-    program: crate::blastinput::app::Program,
-) -> bool {
-    spec.is_none_or(|spec| {
-        spec.writes_rows()
-            && (spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
-                || spec.empty_handle_throws(program))
-    })
-}
-
-/// Whether a tabular report of `spec` (`None`: the default fields) stops at a subject that has a
-/// definition line without a Seq-id (`LookupFailure::lineless`, `failed_lookup_stop`: `sallacc`).
-pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
-    spec.is_some_and(|spec| spec.writes_rows() && spec.has(SubjectAllAccessions))
-}
-
 /// A row at which NCBI has no result (`failed_lookup_stop_for`: a null pointer or alignment
 /// exception that ends its run, or an uninitialised number), which its writer
 /// (`TabularWriter::row`, `TabularRows::default_stop`) wrote up to the field where NCBI stops: the

@@ -107,12 +107,11 @@ fn one_scope(fasta: &[u8], program: &'static str) -> Result<(), String> {
     let config = ReaderConfig::query(program, false, false).with_parse_deflines(true);
     let mut source = FastaInputSource::from_bytes(fasta, config);
     let records = read_all(&mut source, &mut |_| Ok(())).map_err(|e| e.to_string())?;
-    crate::blastinput::query_batch::QueryScopes::of_records(
+    crate::blastinput::query_batch::QueryScopes::new(
         crate::blastinput::query_batch::QueryScopeSpan::Batch,
         program,
-        &records,
     )
-    .map(drop)
+    .add_batch(&records, &vec![false; records.len()], 0)
     .map_err(|error| error.to_string())
 }
 

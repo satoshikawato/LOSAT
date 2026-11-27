@@ -589,18 +589,6 @@ impl TaxDb {
         Ok(false)
     }
 
-    /// Whether [`Self::lookup`] faults (`Err`) for some taxid (the report streams' check before
-    /// the search, `algorithm::common::database::reports_may_refuse`, whose prefetch writes no
-    /// name): only where `taxdb.btd` is empty (NCBI maps it as a null pointer, [`Self::maps_null`])
-    /// and a lookup reads a record of positive size ([`Self::any_lookup_may_fail`], whose mapping is
-    /// then empty); `Ok(false)` for a `taxdb.btd` that is not empty.
-    pub fn any_lookup_faults(&self) -> Result<bool, SeqDbError> {
-        if !self.maps_null() {
-            return Ok(false);
-        }
-        self.any_lookup_may_fail()
-    }
-
     /// Whether NCBI maps `taxdb.btd` as a null pointer (an empty file): a lookup that reads a
     /// record faults ([`Self::lookup`]). Only then can a lookup whose names reach no output (the
     /// texts of a `GetBioseq`) fail; otherwise it writes at most the offset error of
@@ -815,12 +803,6 @@ impl LazyTaxDb {
     /// [`TaxDb::entry_count`] of the lazily opened database (this opens it).
     pub fn entry_count(&self) -> Result<u64, SeqDbError> {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
-    }
-
-    /// [`TaxDb::any_lookup_faults`] of the lazily opened database (this opens it). An open that
-    /// was refused or a file that cannot be read is an `Err`.
-    pub fn any_lookup_faults(&self) -> Result<bool, SeqDbError> {
-        self.open_into(&mut Vec::new())?.any_lookup_faults()
     }
 
     /// [`TaxDb::any_lookup_may_fail`] of the lazily opened database (this opens it). An open that

@@ -2272,35 +2272,6 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
             refused,
             "{name} {taxdb:?}"
         );
-        // TBLASTX's check before the search (`report_stream`) for outfmt 0 and for a report
-        // that shows no title (outfmt 5 of a nucleotide database): only a source that LOSAT
-        // refuses is refused.
-        if seq_type == SeqType::Nucleotide {
-            let pool = crate::utils::threading::SearchPool::x_serial();
-            let shown = |pairwise| ParsedShown {
-                pairwise,
-                ..Default::default()
-            };
-            let found = db.taxdb_found();
-            let refusal = |pairwise| {
-                reports_may_refuse(
-                    &db,
-                    shown(pairwise),
-                    false,
-                    found,
-                    (false, false),
-                    None,
-                    &pool,
-                    "TBLASTX",
-                )
-            };
-            assert_eq!(
-                refusal(true),
-                refused.then_some(ReportRefusal::Headers),
-                "{taxdb:?}"
-            );
-            assert_eq!(refusal(false), None, "{taxdb:?}");
-        }
     }
 }
 

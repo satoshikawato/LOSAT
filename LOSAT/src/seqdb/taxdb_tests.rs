@@ -545,12 +545,9 @@ fn record_reaching_past_the_end_reads_page_padding_and_then_memory_past_the_mapp
             ..
         })
     ));
-    // Neither faults for certain, nor does the pass over the index say so; an empty
-    // taxdb.btd does.
-    assert!(!db.any_lookup_faults().unwrap());
+    // An empty taxdb.btd is mapped as a null pointer; this one is not.
     assert!(!db.maps_null());
     let empty = open_fixture("btd_empty").unwrap();
-    assert!(empty.any_lookup_faults().unwrap());
     assert!(empty.maps_null());
 }
 
@@ -712,55 +709,6 @@ fn regular_layout(db: &TaxDb) -> bool {
     entries
         .windows(2)
         .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 <= pair[1].1)
-}
-
-/// The pass over the index answers as the lookups do on every fixture variant: never `false`
-/// where the lookup of a taxid of the index, of a taxid next to one, or of the extremes fails;
-/// and exactly the lookups' answer on the taxids of the index when the index is sorted. Of the
-/// variants, `btd_empty` fails (every record past the mapped end); a record cut by the end of
-/// the file inside its last page does not (`btd_truncated`, `offset_next_past_end`).
-#[test]
-fn the_pass_over_the_index_agrees_with_the_failing_lookups_on_every_variant() {
-    let (mut failing, mut clean) = (Vec::new(), 0);
-    let mut dirs: Vec<_> = std::fs::read_dir(fixture_dir())
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.is_dir())
-        .collect();
-    dirs.sort();
-    for dir in dirs {
-        let variant = dir.file_name().unwrap().to_string_lossy().to_string();
-        let Ok(db) = open_fixture(&variant) else {
-            continue;
-        };
-        let pass = db.any_lookup_faults().unwrap();
-        let fails = |taxid: i32| db.lookup(taxid, &mut Vec::new()).is_err();
-        let indexed: Vec<i32> = db.files.as_ref().map_or(Vec::new(), |files| {
-            (0..files.count)
-                .map(|i| TaxDb::entry(files, i).unwrap().0)
-                .collect()
-        });
-        let near = indexed
-            .iter()
-            .flat_map(|&taxid| [taxid.wrapping_sub(1), taxid.wrapping_add(1)])
-            .chain([i32::MIN, -1, 0, 1, i32::MAX]);
-        assert!(
-            pass || !indexed.iter().copied().chain(near).any(fails),
-            "{variant}: the pass says no, a lookup fails"
-        );
-        if regular_layout(&db) {
-            assert_eq!(pass, indexed.iter().copied().any(fails), "{variant}");
-        }
-        if pass {
-            failing.push(variant);
-        } else {
-            clean += 1;
-        }
-    }
-    assert!(
-        failing.iter().any(|variant| variant == "btd_empty") && clean >= 20,
-        "{failing:?} {clean}"
-    );
 }
 
 /// The one pass over the files answers as the lookup of every taxid does on every fixture

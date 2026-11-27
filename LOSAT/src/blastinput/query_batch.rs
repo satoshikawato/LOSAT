@@ -1171,18 +1171,6 @@ impl QueryScopes {
         believed.then(|| Self::new(QueryScopeSpan::of(subject, xml), program))
     }
 
-    /// The scopes of `records`, the input records of one call of a search whose queries
-    /// (searched from the first, `-query_loc` cuts included) they all are: one batch.
-    pub(crate) fn of_records(
-        span: QueryScopeSpan,
-        program: &'static str,
-        records: &[FastaRecord],
-    ) -> anyhow::Result<Self> {
-        let mut scopes = Self::new(span, program);
-        scopes.add_batch(records, &vec![false; records.len()], 0)?;
-        Ok(scopes)
-    }
-
     /// Adds the batch of the input records `records`, whose first searched query is
     /// `first_searched` (a new scope, or with `Run` the one scope), or LOSAT's refusal of a
     /// record with the id of another of the scope (`ScopeRefusal`). The batch is NCBI's

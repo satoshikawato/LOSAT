@@ -129,11 +129,10 @@ impl ReportSequences for AnchoredSequences<'_> {
 /// display id (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's
 /// and BLASTX's): NCBI shows the query in its place. With the stream of `report_stream` a call is
 /// one query batch (NCBI's scope is the batch's), so the refusal of a generated id comes after the
-/// reports of the batches before; a description line that LOSAT refuses turns that stream off
-/// (`common::database::reports_may_refuse`), as does, under `-parse_deflines`, a database sequence
-/// with the id of a query of the run (`TblastxDatabase::reports_may_refuse`), whose refusal
-/// (`common::database::refuse_reported_ids_of_queries`, in the batch loop) comes before the first
-/// batch's reports, as outfmt 0's.
+/// reports of the batches before, and so does that of a description line that LOSAT refuses and,
+/// under `-parse_deflines`, of a database sequence with the id of a query of the run
+/// (`common::database::refuse_reported_ids_of_queries`, in the batch loop), as outfmt 0's (line RG
+/// series D, D-SO-5).
 ///
 /// A query whose own record is one of its `-subject` records (`-parse_deflines`) has no refusal
 /// here: its section is NCBI's (`query_anchored::aln_mix`), also where NCBI's merge throws, which

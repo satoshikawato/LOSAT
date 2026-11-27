@@ -1043,10 +1043,6 @@ fn a_load_that_throws_writes_the_kept_row() {
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, false).is_none());
     assert!(failed_lookup_stop(Some(&spec("staxid")), thrown, true).is_some());
     assert!(failed_lookup_stop(Some(&spec("qseqid sseqid")), thrown, true).is_none());
-    assert!(stops_at_lookup_failure_for(
-        Some(&spec("staxid ssciname")),
-        crate::blastinput::app::Program::Blastp
-    ));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
@@ -1319,14 +1315,6 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
-    assert!(!stops_at_lookup_failure_for(
-        Some(&spec("qseqid sseqid sallseqid evalue")),
-        crate::blastinput::app::Program::Blastp
-    ));
-    assert!(stops_at_lookup_failure_for(
-        None,
-        crate::blastinput::app::Program::Blastp
-    ));
     // The field of the stop (`row_stop_field`): the first that NCBI has no result for.
     let field = |fields: Option<&str>, failure, first| {
         row_stop_field(fields.map(spec).as_ref(), failure, first).map(|(at, _)| at)
@@ -1377,11 +1365,6 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         .is_none());
         assert!(failed_lookup_stop(None, lineless, first).is_none());
     }
-    assert!(stops_at_lineless_accession(Some(&spec("qseqid sallacc"))));
-    assert!(!stops_at_lookup_failure_for(
-        Some(&spec("qseqid sallacc")),
-        crate::blastinput::app::Program::Blastp
-    ));
     let all_ids = [
         DeflineIds {
             id: b"gb|AAA00001.1|".to_vec(),
@@ -1824,12 +1807,4 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
     // Standalone `sframe`/`frames` never open the alignment block.
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastn));
-    assert!(stops_at_lookup_failure_for(
-        Some(&spec("qseqid sseq")),
-        Program::Blastp
-    ));
-    assert!(!stops_at_lookup_failure_for(
-        Some(&spec("qseqid evalue")),
-        Program::Blastp
-    ));
 }

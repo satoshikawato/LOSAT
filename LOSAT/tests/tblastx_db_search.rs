@@ -418,15 +418,15 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// Line DBID, ID4t fix 2b (formats 1 to 4 too since line RG T3c fix 1): the loop writes each query
-// batch's reports when it takes the batch where no refusal of LOSAT's can come after the first
-// batch (`report_stream::check`, shown by
-// `[X_STATS] TBXRPTSTREAM off=`), and those reports are the bytes of the reports written after the
-// loop (here: a `LOSAT_DEBUG*` variable, which no code reads, keeps them after the loop; the
-// db_search rows db.id.tblastx.stream.* compare them with NCBI's). A refusal in the second batch
-// finds nothing written, as with one batch.
+// Line DBID, ID4t fix 2b (formats 1 to 4 too since line RG T3c fix 1; every refusal since line RG
+// series D, D-SO-5): the loop writes each query batch's reports when it takes the batch
+// (`report_stream::check`, shown by `[X_STATS] TBXRPTSTREAM off=`), and those reports are the bytes
+// of the reports written after the loop (here: a `LOSAT_DEBUG*` variable, which no code reads,
+// keeps them after the loop and writes them one batch at a time; the db_search rows
+// db.id.tblastx.stream.* compare them with NCBI's). A refusal comes in the batch that meets it, after
+// the reports of the batches before, in both paths.
 #[test]
-fn each_query_batch_is_reported_where_no_refusal_can_follow() {
+fn each_query_batch_is_reported_as_the_loop_takes_it() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let ids = |name: &str| {
         manifest
@@ -438,7 +438,7 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
     };
     let qnucl = manifest.join("tests/seqid/fasta/qnucl.fa");
     let queries = manifest.join("tests/db_search/ids/nucl.fna");
-    let run = |query: &Path, db: &str, outfmt: &str, env: &[(&str, &str)]| {
+    let run = |query: &Path, db: &str, outfmt: &str, extra: &[&str], env: &[(&str, &str)]| {
         let mut command = losat();
         command
             .arg("tblastx")
@@ -446,6 +446,7 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
             .arg(query)
             .args(["-db", &ids(db), "-max_hsps", "1", "-max_target_seqs", "5"])
             .args(["-outfmt", outfmt])
+            .args(extra)
             .env("LOSAT_X_STATS", "1")
             .current_dir(manifest);
         for (name, value) in env {
@@ -461,13 +462,38 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
             .to_string();
         (off, output)
     };
+    let other_lines = |stderr: &[u8]| -> Vec<String> {
+        String::from_utf8_lossy(stderr)
+            .lines()
+            .filter(|line| !line.starts_with("[X_STATS] TBXRPTSTREAM "))
+            .map(str::to_string)
+            .collect()
+    };
+    // The streamed run and the run that keeps the reports after the loop: the same exit status,
+    // stdout and stderr (but the X_STATS line).
+    let both = |query: &Path, db: &str, outfmt: &str, extra: &[&str], env: &[(&str, &str)]| {
+        let what = format!("{} {db} outfmt {outfmt} {extra:?} {env:?}", query.display());
+        let (off, streamed) = run(query, db, outfmt, extra, env);
+        assert_eq!(off, "none", "{what}");
+        let debug = [env, &[("LOSAT_DEBUG_REPORT_STREAM_TEST", "1")][..]].concat();
+        let (after_loop, kept) = run(query, db, outfmt, extra, &debug);
+        assert_eq!(after_loop, "debug", "{what}");
+        assert_eq!(streamed.status.code(), kept.status.code(), "{what}");
+        assert_eq!(streamed.stdout, kept.stdout, "{what}");
+        assert_eq!(
+            other_lines(&streamed.stderr),
+            other_lines(&kept.stderr),
+            "{what}"
+        );
+        streamed
+    };
     let batches = [("BATCH_SIZE", "1500")];
     let taxdb = [
         ("BATCH_SIZE", "1500"),
         ("BLASTDB", "tests/seqdb/taxdb/good"),
     ];
     // NCBI's messages of a taxonomy database with a bad magic number, with each batch's prefetch;
-    // a taxonomy record that LOSAT refuses (`btd_empty`) keeps the reports after the loop.
+    // a taxonomy record that LOSAT refuses (`btd_empty`), in the first batch's report.
     let messages = [
         ("BATCH_SIZE", "1500"),
         ("BLASTDB", "tests/seqdb/taxdb/bad_magic"),
@@ -476,77 +502,128 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
         ("BATCH_SIZE", "1500"),
         ("BLASTDB", "tests/seqdb/taxdb/btd_empty"),
     ];
-    for (db, outfmt, env, expected) in [
-        ("nucl_v5", "0", &batches[..], "none"),
-        ("nucl_v5", "6", &batches[..], "none"),
-        ("nucl_v5", "7", &batches[..], "none"),
-        ("nucl_v4", "0", &batches[..], "none"),
-        ("nucl_v5", "7", &taxdb[..], "none"),
-        ("nucl_v5", "7", &messages[..], "none"),
+    for (db, outfmt, env, expected, status) in [
+        ("nucl_v5", "0", &batches[..], "none", 0),
+        ("nucl_v5", "6", &batches[..], "none", 0),
+        ("nucl_v5", "7", &batches[..], "none", 0),
+        ("nucl_v4", "0", &batches[..], "none", 0),
+        ("nucl_v5", "7", &taxdb[..], "none", 0),
+        ("nucl_v5", "7", &messages[..], "none", 0),
         // Where the taxonomy database names its taxid, outfmt 0 writes the title NCBI makes from it
         // (`ParsedSubject::with_source`; line RG T5, the RefSeq `NC_000019.1` without a title among
-        // them), so no refusal can follow and the batches are written as they come; one with a
-        // bad magic number names none (line DBID N1b L1).
-        ("nucl_v5", "0", &taxdb[..], "none"),
-        ("nucl_v5", "0", &messages[..], "none"),
-        ("nucl_v5", "7", &refused[..], "database_taxonomy"),
-        ("njoined", "6", &batches[..], "none"),
-        ("njoined", "0", &batches[..], "database_joined"),
-        ("nrefuse_v5", "6", &batches[..], "database_headers"),
+        // them); one with a bad magic number names none (line DBID N1b L1).
+        ("nucl_v5", "0", &taxdb[..], "none", 0),
+        ("nucl_v5", "0", &messages[..], "none", 0),
+        ("nucl_v5", "7", &refused[..], "none", 1),
+        ("njoined", "6", &batches[..], "none", 0),
+        ("njoined", "0", &batches[..], "none", 1),
+        ("nrefuse_v5", "6", &batches[..], "none", 1),
         // Formats 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1).
-        ("nucl_v5", "1", &batches[..], "none"),
-        ("nucl_v4", "4", &batches[..], "none"),
-        ("njoined", "2", &batches[..], "database_joined"),
-        ("nucl_v5", "5", &batches[..], "format"),
+        ("nucl_v5", "1", &batches[..], "none", 0),
+        ("nucl_v4", "4", &batches[..], "none", 0),
+        ("njoined", "2", &batches[..], "none", 1),
+        ("nucl_v5", "5", &batches[..], "format", 0),
         (
             "nucl_v5",
             "6",
             &[("BATCH_SIZE", "1000000")][..],
             "one_batch",
+            0,
         ),
     ] {
         let what = format!("{db} outfmt {outfmt} {env:?}");
-        let (off, streamed) = run(&queries, db, outfmt, env);
-        assert_eq!(off, expected, "{what}");
-        if off != "none" {
+        if expected != "none" {
+            assert_eq!(run(&queries, db, outfmt, &[], env).0, expected, "{what}");
             continue;
         }
-        let debug = [env, &[("LOSAT_DEBUG_REPORT_STREAM_TEST", "1")][..]].concat();
-        let (after_loop, kept) = run(&queries, db, outfmt, &debug);
-        assert_eq!(after_loop, "debug", "{what}");
-        assert_eq!(streamed.status.code(), Some(0), "{what}");
-        assert!(streamed.stdout.len() > 1000, "{what}");
-        assert_eq!(streamed.stdout, kept.stdout, "{what}");
-        let other_lines = |stderr: &[u8]| -> Vec<String> {
-            String::from_utf8_lossy(stderr)
-                .lines()
-                .filter(|line| !line.starts_with("[X_STATS] TBXRPTSTREAM "))
-                .map(str::to_string)
-                .collect()
-        };
-        assert_eq!(
-            other_lines(&streamed.stderr),
-            other_lines(&kept.stderr),
-            "{what}"
-        );
+        let streamed = both(&queries, db, outfmt, &[], env);
+        assert_eq!(streamed.status.code(), Some(status), "{what}");
+        if status == 0 {
+            assert!(streamed.stdout.len() > 1000, "{what}");
+        }
     }
-    // The query without hits first: the subject that the reports refuse is reported by the
-    // second batch, and nothing of the first is written.
+    // The query without hits at -evalue 1 first: the subject that the reports refuse is reported
+    // by the second batch, whose refusal comes after the first batch's report.
     let dir = temp_dir("stream");
     let text = std::fs::read_to_string(&qnucl).unwrap();
     let second = text.find("\n>").unwrap() + 1;
     let reversed = dir.join("reversed.fa");
     std::fs::write(&reversed, format!("{}{}", &text[second..], &text[..second])).unwrap();
-    let (off, output) = run(&reversed, "nrefuse_v5", "6", &[("BATCH_SIZE", "1")]);
-    assert_eq!(off, "database_headers");
+    let output = both(
+        &reversed,
+        "nrefuse_v5",
+        "7",
+        &["-evalue", "1"],
+        &[("BATCH_SIZE", "1")],
+    );
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        output.stdout.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!(
+            "# TBLASTX (LOSAT 0.2.0)\n# Query: qn2 unrelated nucleotide (no hits expected)\n# Database: {}\n# 0 hits found\n",
+            ids("nrefuse_v5")
+        )
     );
     assert!(String::from_utf8_lossy(&output.stderr)
         .contains("by which NCBI BLAST+'s formatters do not find the sequence"));
+    // The first batch two letters long (no valid context: NCBI's warning and a report without
+    // hits), then a batch that LOSAT refuses: in the window that only the second batch's
+    // concatenated query takes past 2^30, and in the read of a database whose sequence file is cut
+    // short (the first batch with a valid context reads it). The first batch's report, the batch's
+    // warning, then the refusal.
+    let window = dir.join("window.fa");
+    std::fs::write(
+        &window,
+        format!(">tiny two letters\nAC\n{}", &text[..second]),
+    )
+    .unwrap();
+    let unreadable = dir.join("unreadable");
+    std::fs::create_dir_all(&unreadable).unwrap();
+    for entry in std::fs::read_dir(manifest.join("tests/db_search/ids")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        if name.starts_with("nucl_v5.") {
+            let mut bytes = std::fs::read(&path).unwrap();
+            if name.ends_with(".nsq") {
+                bytes.truncate(bytes.len() / 2);
+            }
+            std::fs::write(unreadable.join(&name), bytes).unwrap();
+        }
+    }
+    let size = ((1 << 30) - 100).to_string();
+    let cut = unreadable.join("nucl_v5").to_str().unwrap().to_string();
+    for (db, extra, refusal) in [
+        (
+            "nucl_v5",
+            &["-window_size", size.as_str()][..],
+            format!("a -window_size of {size} "),
+        ),
+        (
+            cut.as_str(),
+            &[][..],
+            "passes the end of the file".to_string(),
+        ),
+    ] {
+        for outfmt in ["7", "0"] {
+            let what = format!("{db} outfmt {outfmt}");
+            let output = both(&window, db, outfmt, extra, &[("BATCH_SIZE", "1")]);
+            assert_eq!(output.status.code(), Some(1), "{what}");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("tiny two letters"), "{what}: {stdout}");
+            assert!(!stdout.contains("qn1"), "{what}: {stdout}");
+            let stderr = other_lines(&output.stderr);
+            assert_eq!(stderr.len(), 2, "{what}: {stderr:?}");
+            assert!(
+                stderr[0].starts_with("Warning: [tblastx] Query_1 tiny two letters"),
+                "{what}: {stderr:?}"
+            );
+            assert!(
+                stderr[1].contains(&refusal)
+                    && stderr[1].ends_with("is not supported by LOSAT's TBLASTX"),
+                "{what}: {stderr:?}"
+            );
+        }
+    }
     // A search space overflow in a later batch (`aliaskeys/n_nseq1_l62p3` with `alln_q.fna`,
     // `BATCH_SIZE=1`) streams (`off=none`) and writes the exact bytes of the off path (reports of
     // earlier batches, then the overflow refusal).

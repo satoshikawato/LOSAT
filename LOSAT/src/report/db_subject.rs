@@ -3225,76 +3225,6 @@ impl ParsedSubject {
         }
     }
 
-    // No NCBI counterpart: the keys of LOSAT's own check before a search whether any load can be
-    // given another sequence (`common::database::reports_may_refuse`).
-    /// The keys by which NCBI's places can find the blob that a load of this subject loads
-    /// ([`ParsedSubject::loaded_blob_ref`]: each line's exact handles, and the scope's keys of the
-    /// line of its Bioseq), each with that blob's ordinal id (`held`), and those by which a load of
-    /// its Seq-align id looks for one: its handle in `m_Ids` (`sought`), and the keys of the
-    /// scope's index (`scope_sought`, which only a load one by one reads, `ScopeWalk::bulk`): one
-    /// key space, so that a key held by a blob that is neither the subject's nor its lookup's
-    /// means that a load may give another sequence (a key of 64 bits: two keys that share one only
-    /// make the check refuse more).
-    pub fn place_keys(
-        &self,
-        held: &mut Vec<(u64, u32)>,
-        (sought, scope_sought): (&mut Vec<u64>, &mut Vec<u64>),
-    ) {
-        fn tagged(tag: u64, key: u64) -> u64 {
-            key.rotate_left(17 * tag as u32) ^ tag.wrapping_mul(0x9e37_79b9_7f4a_7c15)
-        }
-        if let Some(blob) = self.loaded_blob_ref() {
-            let ordinal = blob.sequence().ordinal();
-            let line = blob.line();
-            match blob {
-                LoadedBlobRef::Own { .. } => {
-                    for (at, defline) in self.set.deflines.iter().enumerate() {
-                        for id in &defline.ids {
-                            if let Some(h) = handle_key(id) {
-                                held.push((tagged(0, h as u64), ordinal));
-                            }
-                            if at == line {
-                                let mut scope = Vec::new();
-                                crate::seqid::defline_set::scope_keys(id, &mut scope);
-                                held.extend(scope.into_iter().map(|k| (tagged(1, k), ordinal)));
-                                let mut kinds = Vec::new();
-                                crate::seqid::id_scope::kind_keys(id, &mut kinds);
-                                held.extend(kinds.into_iter().map(|k| (tagged(2, k), ordinal)));
-                            }
-                        }
-                    }
-                }
-                LoadedBlobRef::External { blob, .. } => {
-                    held.extend(
-                        blob.all_handles()
-                            .iter()
-                            .map(|&h| (tagged(0, h as u64), ordinal)),
-                    );
-                    held.extend(
-                        blob.line_scope(line)
-                            .iter()
-                            .map(|&k| (tagged(1, k), ordinal)),
-                    );
-                    held.extend(
-                        blob.line_kinds(line)
-                            .iter()
-                            .map(|&k| (tagged(2, k), ordinal)),
-                    );
-                }
-            }
-        }
-        let keys = self.id_keys();
-        sought.extend(keys.handle.map(|h| tagged(0, h as u64)));
-        scope_sought.extend(keys.scope.iter().map(|&k| tagged(1, k)));
-        scope_sought.extend(keys.weak.iter().map(|&k| tagged(2, k)));
-    }
-
-    /// The ordinal id of the sequence that the lookup of this subject's Seq-align id gives
-    /// first where it is another one (`ScopeResolution::gives`).
-    pub fn lookup_gives_ordinal(&self) -> Option<u32> {
-        self.resolution.gives.map(DbSequence::ordinal)
-    }
-
     /// Whether this subject's Seq-align id has no `CSeq_id_Handle` key that LOSAT knows
     /// (`seqid::mask_handle::mask_handle_key`: a giim id, or a Textseq-id with neither accession
     /// nor name), so that the stop of a prefetch takes any load for one that may register it.
@@ -4010,7 +3940,7 @@ impl ParsedSubject {
     }
 
     /// Whether some definition line has an id that `seq_id_list` replaces by the first word of
-    /// the generated title (`replaces_an_id`; `all_tabular_ids`, `lookup_failure`).
+    /// the generated title (`replaces_an_id`; `all_tabular_ids`).
     fn has_replaced_id(&self) -> bool {
         self.set
             .deflines
@@ -4069,7 +3999,7 @@ impl ParsedSubject {
     /// there (the title is then not made). `Err` where NCBI's `x_CleanAndCompress` reads past the
     /// end of the title (NCBI crashes) and the other refusals of `generated_title_word`.
     /// `Ok(None)` where `GenerateDefline` throws for that title (a title in no encoding that
-    /// `CUtf8::GuessEncoding` recognises): `GetSeqIdList` makes no ids (`lookup_failure`).
+    /// `CUtf8::GuessEncoding` recognises): `GetSeqIdList` makes no ids.
     fn title_word(&self, protein: bool) -> Result<Option<Vec<u8>>, &'static str> {
         if !replaces_an_id(&self.target().ids) {
             return Ok(Some(Vec::new()));
@@ -4158,7 +4088,7 @@ impl ParsedSubject {
     }
 
     /// The tabular `sseqid`, `sacc` and `saccver` (`tabular_id` of the subject Bioseq's ids after
-    /// `seq_id_list`); `Ok(None)` where `SetSubjectId`'s `GetSeqIdList` throws (`lookup_failure`).
+    /// `seq_id_list`); `Ok(None)` where `SetSubjectId`'s `GetSeqIdList` throws.
     pub fn tabular_ids(&self, protein: bool) -> Result<Option<[Vec<u8>; 3]>, &'static str> {
         let Some(word) = self.title_word(protein)? else {
             return Ok(None);
@@ -4174,32 +4104,6 @@ impl ParsedSubject {
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
         ]))
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
-    /// Which of NCBI's lookups of the subject's tabular ids throw (`report::tabular::FailedLookup`):
-    /// `SetSubjectId` where the subject Bioseq's ids hold one that `GetSeqIdList` replaces
-    /// (`lcl|Subject_`, `gnl|BL_ORD_ID`) and `GenerateDefline` throws, `x_SetSubjectIds` where a
-    /// definition line holds one (a `-subject` record's ids are not looked up there), with
-    /// whether a definition line has no Seq-id (`LookupFailure::lineless`, at which `sallacc`
-    /// stops); `None` where neither throws and every line has a Seq-id. `Err` as `tabular_ids`'.
-    pub fn lookup_failure(
-        &self,
-        protein: bool,
-    ) -> Result<Option<super::tabular::LookupFailure>, &'static str> {
-        let subject_id = replaces_an_id(&self.target().ids);
-        let all_ids = !self.record && self.has_replaced_id();
-        let lineless = self.has_lineless_line();
-        let failed = (subject_id || all_ids) && self.generated_title_word(protein)?.is_none();
-        Ok(
-            (failed || lineless).then_some(super::tabular::LookupFailure {
-                subject_id: failed && subject_id,
-                all_ids: failed && all_ids,
-                bioseq: false,
-                length: false,
-                lineless,
-            }),
-        )
     }
 
     /// The Seq-align id as `sallseqid` and `sallacc` print it (`tabular_id` of the id alone,
@@ -4368,7 +4272,7 @@ impl ParsedSubject {
     /// Whether some definition line has no Seq-id (a hand-edited database; makeblastdb writes
     /// none such). NCBI's formatters take the best id of its empty list, a null reference, where
     /// they walk the lines: each format's `catch` decides what it writes (`description_line`,
-    /// `heading`, `xml_hit`, `SubjectNames::of_parsed`, `lookup_failure`, `tax_deflines`).
+    /// `heading`, `xml_hit`, `SubjectNames::of_parsed`, `tax_deflines`).
     pub fn has_lineless_line(&self) -> bool {
         self.set
             .deflines
@@ -6725,14 +6629,6 @@ impl RunLoads {
             walk.as_mut().expect("set above")
         })
     }
-}
-
-// No NCBI counterpart: LOSAT's check that no two sequences of a database are joined
-// (`common::database::reports_may_refuse`).
-/// Adds to `keys` the keys of the Seq-align id of `subject` (`defline_set::match_keys`): two
-/// subjects that the reports join (`joined_in_reports`) share one.
-pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
-    crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
 }
 
 /// The keys of the Seq-align id of `subject` as NCBI's scope finds it

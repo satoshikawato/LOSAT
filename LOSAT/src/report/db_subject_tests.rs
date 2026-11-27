@@ -2111,16 +2111,6 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
     assert_eq!(bad.tabular_saccver(false).unwrap(), None);
     assert!(bad.check_tabular_ids(false).is_ok());
     assert_eq!(
-        bad.lookup_failure(false).unwrap(),
-        Some(crate::report::tabular::LookupFailure {
-            subject_id: true,
-            all_ids: false,
-            bioseq: false,
-            length: false,
-            lineless: false,
-        })
-    );
-    assert_eq!(
         bad.alignment_tabular_ids(),
         [b"Subject_9".to_vec(), b"Subject_9".to_vec()]
     );
@@ -2128,8 +2118,6 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
     let all = bad.all_tabular_ids(false).unwrap();
     assert!(!all.failed);
     assert_eq!(text(&all.ids[0].id), "Subject_9");
-    // A record of a decodable title has no failure.
-    assert_eq!(decodable.lookup_failure(false).unwrap(), None);
 }
 
 // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `DI7/ws/pd_sub.py`, 2026-11-01): `sseqid`,
@@ -3945,15 +3933,6 @@ fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops()
     assert!(!all.failed);
     assert_eq!(text(&all.ids[1].id), "Unknown");
     assert_eq!(all.ids[1].gi, 0);
-    assert_eq!(
-        subject.lookup_failure(true).unwrap(),
-        Some(crate::report::tabular::LookupFailure {
-            lineless: true,
-            ..Default::default()
-        })
-    );
-    let plain = titled(vec![(vec![gb("A00001", 1)], Some("a"))]);
-    assert_eq!(plain.lookup_failure(true).unwrap(), None);
 }
 
 // The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused

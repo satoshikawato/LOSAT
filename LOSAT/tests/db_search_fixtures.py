@@ -159,7 +159,9 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   row, or has empty stdout cells where LOSAT writes nothing before it refuses. A rejection row whose `covers`
   cell has a part ` | ncbi-first: N bytes` expects the first N bytes of NCBI's run of its own command, the
   bytes before a value that NCBI's run leaves undetermined (line RG-KB item 18b: the uninitialised `staxid`
-  of a query's first row, a different number in each run, which LOSAT refuses after the bytes before it);
+  of a query's first row, a different number in each run, which LOSAT refuses after the bytes before it), or
+  the reports of the query batches before the batch that LOSAT refuses where NCBI's run goes on (line RG series D,
+  D-SO-5: tblastx's reports of a sequence that NCBI writes with other names or whose count NCBI's heap moves);
   `freeze` keeps only those N bytes (`own_cut`), and stops where NCBI wrote fewer. A rejection row whose
   `covers` cell has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the
   refusal) must be NCBI's stderr of the row's own command up to its exception report
@@ -721,7 +723,8 @@ def near_row(row: dict[str, str]) -> tuple[str, int | None] | None:
 
 def own_cut(row: dict[str, str]) -> int | None:
     """The N of a ` | ncbi-first: N bytes` part of the covers cell: a rejection row whose stdout is the first N bytes
-    of NCBI's run of its own command (the bytes before a value that NCBI leaves undetermined); None without it."""
+    of NCBI's run of its own command (the bytes before a value that NCBI leaves undetermined, or the reports of the
+    query batches before the one that LOSAT refuses); None without it."""
     for part in row["covers"].split(" | ")[1:]:
         words = part.split()
         if words[:1] != ["ncbi-first:"]:

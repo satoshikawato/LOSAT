@@ -3106,8 +3106,7 @@ impl SeqDb {
 
     /// Notes that a reader read a title that holds a byte outside ' ' ..= '~' (a reported
     /// sequence's, `algorithm::common::database::HeaderReader`; a failed read's,
-    /// `ErrorAfterBatchReports::title_posts`; any sequence's in the check before a search,
-    /// `reports_may_refuse`): the reads of NCBI's cache of header records are modelled from here
+    /// `ErrorAfterBatchReports::title_posts`): the reads of NCBI's cache of header records are modelled from here
     /// on (`read_header_record`).
     #[cold]
     #[inline(never)]

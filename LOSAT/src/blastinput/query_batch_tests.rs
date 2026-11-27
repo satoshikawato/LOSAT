@@ -170,14 +170,14 @@ fn query_scopes_number_the_searched_queries_of_each_batch() {
     // The ids of every query before the batches add theirs; a read ahead adds nothing again.
     let whole = QueryScopes::new(QueryScopeSpan::Run, "BLASTP").with_whole_run_of(&records);
     assert!(whole.of_query(0).has_key(&local_keys("c")));
-    let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[1..])
-        .unwrap()
-        .read_ahead(Vec::new());
+    let mut ahead = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
+    ahead.add_batch(&records[1..], &[false; 3], 0).unwrap();
+    let mut ahead = ahead.read_ahead(Vec::new());
     ahead.add_batch(&records[1..], &[false; 3], 0).unwrap();
     // A refusal that the read met comes with the search's add of its batch (the second here).
-    let mut ahead = QueryScopes::of_records(QueryScopeSpan::Run, "BLASTP", &records[..2])
-        .unwrap()
-        .read_ahead(vec![(1, anyhow::anyhow!("refused"))]);
+    let mut ahead = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
+    ahead.add_batch(&records[..2], &[false; 2], 0).unwrap();
+    let mut ahead = ahead.read_ahead(vec![(1, anyhow::anyhow!("refused"))]);
     ahead.add_batch(&records[..2], &[false; 2], 0).unwrap();
     let refused = ahead.add_batch(&records[2..3], &[false], 2).unwrap_err();
     assert_eq!(refused.to_string(), "refused");

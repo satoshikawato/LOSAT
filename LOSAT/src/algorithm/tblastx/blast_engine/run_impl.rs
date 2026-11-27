@@ -3264,6 +3264,7 @@ fn run_in_pool(
                 }),
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
+        writes: std::cell::Cell::default(),
         reads: std::cell::RefCell::default(),
         seen: std::cell::RefCell::default(),
         query_scopes: std::cell::RefCell::default(),
@@ -3408,18 +3409,12 @@ fn run_in_pool(
         ),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
-    // The loop writes each batch's reports when it takes the batch where no refusal of LOSAT's
-    // can come after the first batch (`report_stream`); otherwise after the loop.
+    // The loop writes each batch's reports when it takes the batch where one format of the
+    // command line's kind is written (`report_stream`); otherwise after the loop, one batch at a
+    // time where only the debugging output keeps them there (`report_stream::held`).
     let x_check = Instant::now();
-    let stream = report_stream::check(
-        &args,
-        outputs,
-        query_runs,
-        subjects,
-        stores_error.is_some(),
-        sizes.current(),
-        parallel_pool,
-    );
+    let stream = report_stream::check(outputs, query_runs.input, sizes.current());
+    reports.writes.set(report_stream::Writes::of(stream));
     // Diagnostic (LOSAT_X_STATS): whether the loop writes each batch's reports, or why not. No NCBI
     // counterpart.
     if std::env::var_os("LOSAT_X_STATS").is_some() {
@@ -3638,7 +3633,7 @@ fn run_batch_loop(
     // The posts written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Posts> = vec![Posts::new(); query_records.len()];
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
-    // loop reads the batches. A streamed run has none that refuses (`report_stream::check`).
+    // loop reads the batches; a batch's refusal comes after the reports of the batches before.
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`).
     let subject_records = matches!(subjects.shown, ShownSubjects::Fasta { .. });
     let xml = args.parse_deflines
@@ -3747,20 +3742,8 @@ fn run_batch_loop(
             )
         }),
     );
-    // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
-    // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
-    // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
-    let rows = outputs
-        .formats
-        .first()
-        .map_or(SubjectFetch::Every, |format| {
-            match report::output_format(format.outfmt) {
-                report::TblastxOutputFormat::CustomTabular(spec) => {
-                    spec.subject_fetch(crate::blastinput::app::Program::Tblastx)
-                }
-                _ => SubjectFetch::Every,
-            }
-        });
+    // Which rows of the first format's report read the subjects' Bioseqs (`first_format_rows`).
+    let rows = first_format_rows(outputs);
     // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
     // know (`BatchReports::xml_matrix_failure`; `None` for a name it knows).
     let xml_matrix_failure = reports.xml_matrix_failure(outputs);
@@ -4043,11 +4026,17 @@ fn run_batch_loop(
                         .take()
                         .expect("unreadable subjects keep their read error"),
                 };
-                let read_error =
-                    error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
+                // LOSAT's refusal comes where NCBI's read error of the batch comes (line RG
+                // series D, D-SO-5).
+                let error = match error
+                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
+                {
+                    Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
+                    Err(refusal) => refusal,
+                };
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
+                return Err(error);
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -4059,9 +4048,30 @@ fn run_batch_loop(
                     batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(error);
                 }
-                Err(error) => return Err(error),
+                // LOSAT's other refusals of the batch's search: after the reports of the batches
+                // before (`write_before_refusal`).
+                Err(error) => {
+                    reports.write_before_refusal(outputs, done, &warnings)?;
+                    return Err(error);
+                }
             },
         };
+        // LOSAT's refusals that the batch meets from here to its reports (the titles' posts, the
+        // ids of the queries, the reported sequences' reads, the prefetch, the reports' loads and
+        // texts): after the reports of the batches before (`write_before_refusal`), as the report
+        // call of the batch refuses where the loop writes each batch's reports (`report_stream`).
+        macro_rules! refused {
+            ($result:expr) => {{
+                let result = $result;
+                match result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        reports.write_before_refusal(outputs, done, &warnings)?;
+                        return Err(error);
+                    }
+                }
+            }};
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
@@ -4107,12 +4117,12 @@ fn run_batch_loop(
                         batch_warnings.append(posts);
                     }
                     // NCBI's posts of the titles that the batch's Seq-aligns read.
-                    let titled = crate::algorithm::common::database::batch_title_posts(
+                    let titled = refused!(crate::algorithm::common::database::batch_title_posts(
                         &database.db,
                         aligned(),
                         utf8.is_some(),
                         "TBLASTX",
-                    )?;
+                    ));
                     warnings[start].append(&titled);
                     batch_warnings.append(&titled);
                 }
@@ -4129,8 +4139,11 @@ fn run_batch_loop(
                                 &database.db,
                                 args.app().ncbi_name(),
                             );
-                            let titled =
-                                failure.title_posts(&database.db, utf8.is_some(), "TBLASTX")?;
+                            let titled = refused!(failure.title_posts(
+                                &database.db,
+                                utf8.is_some(),
+                                "TBLASTX"
+                            ));
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
@@ -4139,7 +4152,10 @@ fn run_batch_loop(
                             }
                             return Err(failure.error);
                         }
-                        Err(error) => return Err(error),
+                        Err(error) => {
+                            reports.write_before_refusal(outputs, done, &warnings)?;
+                            return Err(error);
+                        }
                     }
                 }
             }
@@ -4183,19 +4199,21 @@ fn run_batch_loop(
                     record: &record,
                     protein: false,
                 };
-                crate::algorithm::common::database::refuse_reported_ids_of_queries(
-                    &reports.titles.borrow(),
-                    ordered
-                        .iter()
-                        .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
-                    database.oid_map(),
-                    scopes,
-                    super::super::database::parsed_shown(&formats, prefetch_format),
-                    &mut reports.seen.borrow_mut(),
-                    &run,
-                    "TBLASTX",
-                )?;
-                refuse_tblastx_qseq_past_seen_query_len(
+                refused!(
+                    crate::algorithm::common::database::refuse_reported_ids_of_queries(
+                        &reports.titles.borrow(),
+                        ordered
+                            .iter()
+                            .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
+                        database.oid_map(),
+                        scopes,
+                        super::super::database::parsed_shown(&formats, prefetch_format),
+                        &mut reports.seen.borrow_mut(),
+                        &run,
+                        "TBLASTX",
+                    )
+                );
+                refused!(refuse_tblastx_qseq_past_seen_query_len(
                     &formats,
                     reports,
                     ordered.iter().map(|hsp| {
@@ -4209,7 +4227,7 @@ fn run_batch_loop(
                     }),
                     scopes,
                     |ordinal| database.oid_map().oid(ordinal),
-                )?;
+                ));
             }
             // The sequences that the batch reports, read once each where NCBI fetches them before
             // the batch's reports (`BlastFormatter_PreFetchSequenceData`, below), when a report
@@ -4236,10 +4254,11 @@ fn run_batch_loop(
                     )
                 };
                 if let Err(error) = read {
-                    let XReadError(error) = error.downcast::<XReadError>()?;
-                    let read_error = error
-                        .downcast::<crate::algorithm::common::database::PreliminaryReadError>(
-                    )?;
+                    let read_error = refused!(error.downcast::<XReadError>().and_then(
+                        |XReadError(error)| {
+                            error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()
+                        }
+                    ));
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
                     batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
@@ -4273,7 +4292,10 @@ fn run_batch_loop(
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                             return Err(failure.error);
                         }
-                        Err(error) => return Err(error),
+                        Err(error) => {
+                            reports.write_before_refusal(outputs, done, &warnings)?;
+                            return Err(error);
+                        }
                     }
                 }};
             }
@@ -4289,10 +4311,8 @@ fn run_batch_loop(
                 // fetches a subject: in such a report, or in the prefetch of a batch with
                 // Seq-aligns (one without them loads no id, `BlastFormatter_PreFetchSequenceData`).
                 // The run's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`)
-                // is asked only there: the report stream is off for a run with that refusal
-                // (`report_stream::Off::TaxonomyCache`), so every report is then written after
-                // the loop and a later batch that fetches still refuses before any report (outfmt
-                // 0's prolog is written before the search).
+                // is asked only there, in the batch that fetches: after the reports of the
+                // batches before (`refused!`, `BatchReports::write_before_refusal`).
                 // The reports load the batch's subjects one by one where its prefetch is off or
                 // fails at a subject whose lookup throws on the id (the one answer,
                 // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts,
@@ -4364,12 +4384,12 @@ fn run_batch_loop(
                     // The rows of a batch whose reports load one by one open it with each
                     // query's reads (below).
                     if !batch_read.one_by_one {
-                        super::super::database::open_for_rows(
+                        refused!(super::super::database::open_for_rows(
                             database,
                             row_lookups,
                             ordered.iter(),
                             &reports.titles.borrow(),
-                        )?;
+                        ));
                     }
                     warnings[start].append(&messages);
                 }
@@ -4441,12 +4461,12 @@ fn run_batch_loop(
                                         crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                                     ),
                                 );
-                                let texts = super::super::database::subject_read_texts(
+                                let texts = refused!(super::super::database::subject_read_texts(
                                     database,
                                     ordinals,
                                     &titles,
                                     row_lookups,
-                                )?;
+                                ));
                                 drop(titles);
                                 let mut reads = reports.reads.borrow_mut();
                                 let index = start + query as usize;
@@ -4456,23 +4476,23 @@ fn run_batch_loop(
                                 reads[index] = texts;
                                 Vec::new()
                             } else {
-                                super::super::database::prefetch_messages(
+                                refused!(super::super::database::prefetch_messages(
                                     database,
                                     shown,
                                     &reports.titles.borrow(),
-                                )?
+                                ))
                             });
                             // Only a row whose subject a report loads looks a name up: a row
                             // whose load throws keeps the names of the rows before (review 1 of
                             // line DBID pfoff-2, H1).
-                            super::super::database::open_for_rows(
+                            refused!(super::super::database::open_for_rows(
                                 database,
                                 row_lookups,
                                 ordered[from..to]
                                     .iter()
                                     .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize)),
                                 &reports.titles.borrow(),
-                            )?;
+                            ));
                         }
                     }
                 }
@@ -4556,18 +4576,8 @@ fn run_batch_loop(
             // The batch's reports, written now, as NCBI's loop prints a batch's result sets
             // (`report_stream`), from its lists numbered from its first query as it made them.
             // Its lists and its queries' warnings are not kept: a later batch's stop does not find
-            // its hits among those the loop holds (the prefetches' `before`), so the run records
-            // what NCBI's data loader loaded for the batch (`database::note_loaded`; nothing for
-            // a database that cannot stop).
-            if let ShownSubjects::Database { database, .. } = &subjects.shown {
-                super::super::database::note_loaded(
-                    database,
-                    &batch.hits,
-                    (start, 0..end - start),
-                    &reports.titles.borrow(),
-                    (prefetch_format, rows),
-                );
-            }
+            // its hits among those the loop holds (the prefetches' `before`), so the report call
+            // records what NCBI's data loader loaded for the batch (`database::batch_loads_before`).
             debug_assert_eq!(reports.queries_written.get(), start);
             let count = end - start;
             let batch_done = SearchedBatches {
@@ -4611,7 +4621,24 @@ fn run_batch_loop(
         reports.write_before_failed_batch(outputs, done, &warnings)?;
         return Err(crate::report::blast_xml::matrix::unsupported_score_matrix());
     }
-    reports.write(outputs, done, &warnings, true)
+    reports.write_batches(outputs, done, &warnings, true)
+}
+
+/// Which rows of the first format's report of `outputs` read the subjects' Bioseqs, which NCBI's
+/// formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a custom
+/// tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
+fn first_format_rows(outputs: &ReportOutputs<'_>) -> SubjectFetch {
+    outputs
+        .formats
+        .first()
+        .map_or(SubjectFetch::Every, |format| {
+            match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => {
+                    spec.subject_fetch(crate::blastinput::app::Program::Tblastx)
+                }
+                _ => SubjectFetch::Every,
+            }
+        })
 }
 
 /// NCBI's `CODON_LENGTH`: a query shorter than one codon has no frame of positive length.
@@ -4627,6 +4654,39 @@ struct SearchedBatches {
     searched: Vec<bool>,
     /// The queries of each batch searched, in order: the batches of the BLAST archive (outfmt 11).
     spans: Vec<std::ops::Range<usize>>,
+}
+
+impl SearchedBatches {
+    /// These results one batch at a time (`spans`, in order), each numbered from its first query
+    /// as the batch made them (as the loop's stream takes them, `run_batch_loop`): the hits of a
+    /// batch follow those of the batch before, numbered from the first span's start.
+    fn into_batches(self) -> Vec<SearchedBatches> {
+        let Some(base) = self.spans.first().map(|span| span.start) else {
+            return Vec::new();
+        };
+        let mut hits = self.hits.into_iter().peekable();
+        let mut query_stats = self.query_stats.into_iter();
+        let mut searched = self.searched.into_iter();
+        self.spans
+            .into_iter()
+            .map(|span| {
+                let count = span.len();
+                let first = u32::try_from(span.start - base).expect("a query index fits u32");
+                let end = u32::try_from(span.end - base).expect("a query index fits u32");
+                let mut batch_hits = Vec::new();
+                while let Some(mut hsp) = hits.next_if(|hsp| hsp.hit.q_idx < end) {
+                    hsp.hit.q_idx -= first;
+                    batch_hits.push(hsp);
+                }
+                SearchedBatches {
+                    hits: batch_hits,
+                    query_stats: query_stats.by_ref().take(count).collect(),
+                    searched: searched.by_ref().take(count).collect(),
+                    spans: vec![0..count],
+                }
+            })
+            .collect()
+    }
 }
 
 /// What the reports of the batches searched so far need besides their results.
@@ -4653,8 +4713,11 @@ struct BatchReports<'a> {
     /// (`TblastxReportRun::x_pool`).
     x_search_pool: &'a crate::utils::threading::SearchPool<'a>,
     /// The queries whose reports were written: those of the batches that the loop wrote when it
-    /// took them (`report_stream`), which the next call follows.
+    /// took them (`report_stream`), or one batch at a time after it (`write_batches`), which the
+    /// next call follows.
     queries_written: std::cell::Cell<usize>,
+    /// How the loop writes the batches' reports (`report_stream::Writes`, set before the loop).
+    writes: std::cell::Cell<report_stream::Writes>,
     /// The texts of the subjects that each query's report reads one by one (its batch's prefetch
     /// off), by query, where the first format places them (`TblastxReportRun::query_reads`).
     reads: std::cell::RefCell<Vec<crate::report::query_warnings::QueryReads>>,
@@ -4742,6 +4805,19 @@ impl BatchReports<'_> {
                     crate::utils::genetic_code::GeneticCode::from_id(self.args.query_gencode),
                     crate::utils::genetic_code::GeneticCode::from_id(self.args.db_gencode),
                 );
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-205
+                // The loads of NCBI's data loader before this call's reports: those of the
+                // batches before where each batch's reports are a call of their own (the stream,
+                // or the held writes), which this call then records for the next
+                // (`database::batch_loads_before`).
+                let before = super::super::database::batch_loads_before(
+                    database,
+                    &hits,
+                    (first, done.searched.len()),
+                    &self.titles.borrow(),
+                    (prefetch_format, first_format_rows(outputs)),
+                    self.writes.get() != report_stream::Writes::Whole,
+                );
                 reported_subjects = super::super::database::reported_subjects(
                     database,
                     &self.titles.borrow(),
@@ -4771,9 +4847,10 @@ impl BatchReports<'_> {
                             &db_code,
                         )
                     },
-                    done.searched.len(),
+                    (done.searched.len(), first),
                     &done.spans,
                     seen.numbered_from(first),
+                    before,
                 )?;
                 // The texts of the reads, made before the hits named the subjects by rank, by
                 // rank as the writers name them.
@@ -4946,8 +5023,55 @@ impl BatchReports<'_> {
             }
             Ok(())
         } else {
-            self.write(outputs, done, warnings, false)
+            self.write_batches(outputs, done, warnings, false)
         }
+    }
+
+    /// Writes what comes before LOSAT's refusal of a query batch that met it in its search or
+    /// between its search and its reports (`run_batch_loop`): the reports of the batches before
+    /// (`done`), where the loop writes each batch's reports as its own call (the stream wrote them
+    /// already; the held writes write them now, `write_batches`), so that the refusal comes after
+    /// them in both, as NCBI's error of a later batch (the Owner's decision of 2026-11-16 on line
+    /// RG's Q-X2c: "the results of the query batches before are written"). Nothing of the refused
+    /// batch, and nothing in a search whose reports are one call after the loop
+    /// (`report_stream::Writes::Whole`), whose refusals come before its first byte.
+    fn write_before_refusal(
+        &self,
+        outputs: &mut ReportOutputs<'_>,
+        done: SearchedBatches,
+        warnings: &[Posts],
+    ) -> Result<()> {
+        if self.writes.get() == report_stream::Writes::Held
+            && self.queries_written.get() == 0
+            && !done.searched.is_empty()
+        {
+            self.write_batches(outputs, done, warnings, false)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Writes the reports of the batches searched (`done`, numbered from the first query not yet
+    /// written), with the epilog when `epilog`: one batch at a time where the loop held them
+    /// (`report_stream::Writes::Held`: the calls the stream makes, the epilog with the last), so
+    /// that a batch whose report call refuses comes after the reports of the batches before, as
+    /// with the stream; else in one call.
+    fn write_batches(
+        &self,
+        outputs: &mut ReportOutputs<'_>,
+        done: SearchedBatches,
+        warnings: &[Posts],
+        epilog: bool,
+    ) -> Result<()> {
+        if self.writes.get() != report_stream::Writes::Held || done.spans.len() < 2 {
+            return self.write(outputs, done, warnings, epilog);
+        }
+        let batches = done.into_batches();
+        let last = batches.len() - 1;
+        for (index, batch) in batches.into_iter().enumerate() {
+            self.write(outputs, batch, warnings, epilog && index == last)?;
+        }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121 (cited at
@@ -5254,7 +5378,13 @@ fn search_query_batch<S: TbxScore>(
         },
         x_pair_lut_batch,
         x_board,
-    )?;
+    )
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+    // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_diag_table_window`), in
+    // the batch whose concatenated query is too long: after the reports of the batches before and
+    // the batch's reader messages (`ErrorAfterBatchReports`), as blastn's (line RG series D,
+    // D-SO-5).
+    .map_err(ErrorAfterBatchReports::new)?;
     // EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board on every return of this search
     // (`XEndBatch`).
     let _x_board_end = x_board_batch

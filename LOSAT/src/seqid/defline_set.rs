@@ -483,9 +483,8 @@ pub fn compare(a: &ParsedSeqId, b: &ParsedSeqId) -> Sic {
     }
 }
 
-// No NCBI counterpart: a necessary condition of `compare`'s `Yes`, for LOSAT's check that no two
-// sequences of a database can be taken for one where a report joins following hits
-// (`report::db_subject::join_keys`).
+// No NCBI counterpart: a necessary condition of `compare`'s `Yes`, to find the sequences of a
+// database that can be taken for one where a report joins following hits.
 /// Adds to `keys` the keys of `id`: two ids that `compare` finds the same (`Sic::Yes`) share at
 /// least one key, so ids that share none never do (ids that share one need not). A text Seq-id
 /// has its accession and its name in upper case, whatever its alternative (a superset of the

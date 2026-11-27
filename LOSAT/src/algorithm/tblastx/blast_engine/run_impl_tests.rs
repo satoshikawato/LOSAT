@@ -980,3 +980,110 @@ fn wide_offset_exit_handles_negative_chunk_length_and_long_subject_carry() {
     offset.exit(window, &mut cells, 5_000_000);
     assert_eq!(offset.get(), -105 + 5_000_000 - 40);
 }
+
+// Line RG series D, D-SO-5: the held writes after the loop (`BatchReports::write_batches`) take
+// the batches as the stream takes them: each batch's hits, query statistics and flags, its hits
+// numbered from its first query (the loop numbers the held hits from the run's first query,
+// `run_batch_loop`), for batches with and without hits, of one query and of several.
+#[test]
+fn held_results_are_split_into_the_batches_the_stream_takes() {
+    fn hsp(q_idx: u32, s_idx: u32, raw_score: i32) -> TblastxHsp {
+        TblastxHsp {
+            hit: crate::common::Hit {
+                identity: 100.0,
+                length: 10,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end: 30,
+                s_start: 1,
+                s_end: 30,
+                e_value: 1e-9,
+                bit_score: 50.0,
+                num_ident: 10,
+                query_frame: 1,
+                query_length: 0,
+                q_idx,
+                s_idx,
+                raw_score,
+                sort_query_offset: 0,
+                sort_query_end: 10,
+                sort_subject_offset: 0,
+                sort_subject_end: 10,
+                has_sort_offsets: true,
+                gap_info: None,
+                num_positives: 10,
+            },
+            subject_frame: 1,
+            num: 1,
+        }
+    }
+    let key = |hsp: &TblastxHsp| (hsp.hit.q_idx, hsp.hit.s_idx, hsp.hit.raw_score);
+    // The batches as the search returns them: queries counted from 0 in each batch.
+    let mut state = 0x2545_f491_u32;
+    let mut next = |bound: u32| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state % bound
+    };
+    for counts in [vec![1, 1], vec![3, 1, 2], vec![2, 4, 1, 3], vec![5, 5]] {
+        let batches: Vec<(Vec<TblastxHsp>, Vec<bool>)> = counts
+            .iter()
+            .map(|&count| {
+                let mut hits = Vec::new();
+                for query in 0..count {
+                    for _ in 0..next(4) {
+                        hits.push(hsp(query, next(50), next(1000) as i32));
+                    }
+                }
+                let searched = (0..count).map(|_| next(2) == 0).collect();
+                (hits, searched)
+            })
+            .collect();
+        // What the loop holds: every batch's hits numbered from the run's first query.
+        let mut done = SearchedBatches::default();
+        let mut start = 0;
+        for (hits, searched) in &batches {
+            let count = searched.len();
+            done.hits.extend(hits.iter().cloned().map(|mut hsp| {
+                hsp.hit.q_idx += start as u32;
+                hsp
+            }));
+            done.query_stats
+                .extend((0..count).map(|query| TblastxQueryStats {
+                    eff_searchsp: (start + query) as i64,
+                    ..TblastxQueryStats::default()
+                }));
+            done.searched.extend(searched);
+            done.spans.push(start..start + count);
+            start += count;
+        }
+        let split = done.into_batches();
+        assert_eq!(split.len(), batches.len(), "{counts:?}");
+        let mut start = 0;
+        for ((hits, searched), batch) in batches.iter().zip(&split) {
+            let count = searched.len();
+            assert_eq!(
+                batch.hits.iter().map(key).collect::<Vec<_>>(),
+                hits.iter().map(key).collect::<Vec<_>>(),
+                "{counts:?}"
+            );
+            assert_eq!(&batch.searched, searched, "{counts:?}");
+            assert_eq!(
+                batch
+                    .query_stats
+                    .iter()
+                    .map(|stats| stats.eff_searchsp)
+                    .collect::<Vec<_>>(),
+                (start..start + count)
+                    .map(|query| query as i64)
+                    .collect::<Vec<_>>(),
+                "{counts:?}"
+            );
+            assert_eq!(batch.spans, vec![0..count], "{counts:?}");
+            start += count;
+        }
+    }
+    assert!(SearchedBatches::default().into_batches().is_empty());
+}

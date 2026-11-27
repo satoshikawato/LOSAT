@@ -79,3 +79,7 @@ that NCBI's `-outfmt 11` stops at the element in its three streams (ASN.1 text, 
 probe `c3c/probeA2/`).
 
 `ps7b_allx_ratios.asn`: a 10-residue all-X protein query with frequency ratios only (`intermediateData.freqRatios`, no `finalData`), hand-written for `db.ps7b.inpssm.allx_ratios.B45.6` and `db.ps7b.tbn.allx_ratios.B45.6` (line PS, item PS7b) to test NCBI's ungapped-before-gapped score-block error order in `PsiBlastComputePssmScores` when `-matrix BLOSUM45` does not support 11/1.
+
+`ps_sw_tk_scores.asn.gz`: `ps4_tk_paja.asn.gz` without the Pssm member `intermediateData` (scores only, no frequency
+ratios), gzipped without a name or time by `../db_search/pssw/make_pssw.py`; the PSSM query of rows `db.sw.scores.*`
+(line PS-SW, PSIBLAST `-use_sw_tback` with a PSSM of scores only).

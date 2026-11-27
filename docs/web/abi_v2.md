@@ -603,8 +603,8 @@ candidates), alias lists, GI-mask files and each volume's component files — `t
 the search path, or `windowmasker`'s `-in`, `-fa_list true` listed entries, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`
 that names an existing file or a missing input the command line reads after opening `-out` (`-in` of
-`-mk_counts`, including `-fa_list true` listed entries and the files of an `-infmt blastdb` database, and
-`-ustat` of masking), are refused (in both `validate` and `run`/`losat_web2_tool`, exit status 1 in tools);
+`-mk_counts`, including `-fa_list true` listed entries and the lookup candidates and alias lists of an
+`-infmt blastdb` database, and `-ustat` of masking), are refused (in both `validate` and `run`/`losat_web2_tool`, exit status 1 in tools);
 `windowmasker -logfile /dev/stdout` writes diagnostic messages into stream 11 in the command line's byte
 order; stream 8 entries (searches) and stream 12 `BEGIN` frames (tools, for both `-logfile` and `-out`)
 carry the command line's normalized file name (`run.log` for ` run.log` and `./run.log`, `logs` for

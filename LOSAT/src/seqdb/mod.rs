@@ -1355,6 +1355,11 @@ pub(crate) struct DbReadPaths {
     /// volume's component files (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`, and for protein
     /// databases, `rps::RPS_EXTENSIONS`).
     pub(crate) files: Vec<Vec<u8>>,
+    /// How many of the first `files` the resolution and `ComputeMasks` check or open: the files
+    /// whose presence decides what the opening reads, so a file made there changes the run. The
+    /// rest are the files of what they found, which a run that only reads the sequences may
+    /// never open (`windowmasker -out`, `windowmasker::read_files`).
+    pub(crate) looked_up: usize,
     /// The error that ends the opening: that of the resolution, when the name does not resolve
     /// (`files` then holds what the resolution checked up to it, and `volumes` is empty), or that
     /// of `ComputeMasks`, which comes after the volumes are read.
@@ -1623,6 +1628,7 @@ impl SeqDb {
             Err(error) => {
                 return DbReadPaths {
                     volumes: Vec::new(),
+                    looked_up: recorded.len(),
                     files: recorded,
                     error: Some(error),
                 }
@@ -1633,11 +1639,13 @@ impl SeqDb {
             Self::sort_volume_set(std::mem::take(&mut tree.volumes).into_iter().collect());
         let found = Self::found_files(&tree, &volumes, seqtype, path);
         let seen: std::collections::HashSet<Vec<u8>> = recorded.iter().cloned().collect();
+        let looked_up = recorded.len();
         let mut files = recorded;
         files.extend(found.into_iter().filter(|file| !seen.contains(file)));
         DbReadPaths {
             volumes,
             files,
+            looked_up,
             error: masks.err(),
         }
     }

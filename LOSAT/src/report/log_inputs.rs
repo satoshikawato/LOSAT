@@ -20,7 +20,7 @@ use crate::blastinput::ncbi_environment::{
     Preparsed,
 };
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
-use crate::seqdb::{DbReadPaths, SearchPath, SeqDb, SeqType};
+use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
 /// Data files that `rpsbproc` reads from its `-d` directory (default `data`).
@@ -515,15 +515,14 @@ fn matches_any_input(
     let seqtypes = db_seqtypes(program, inputs.dbtype);
     let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::with_capacity(inputs.databases.len());
     for db in &inputs.databases {
-        let read = database_read_paths(db, seqtypes, &search_path);
-        if read
-            .files
+        let (files, volumes) = database_read_paths(db, seqtypes, &search_path);
+        if files
             .iter()
             .any(|file| matches_bytes_path(candidates, file))
         {
             return true;
         }
-        volumes_of.push((db.as_os_str(), read.volumes));
+        volumes_of.push((db.as_os_str(), volumes));
     }
     inputs
         .mb_index
@@ -551,13 +550,14 @@ fn db_seqtypes(program: &str, dbtype: Option<SeqType>) -> &'static [SeqType] {
 
 /// The files that reading BLAST database `db_name` checks or opens (`SeqDb::read_paths`) for each
 /// of `seqtypes` that the run tries, in the order and with the rule of `SeqDb::open_guessing`,
-/// and the volumes of the type that opens. A database that does not resolve gives the files
-/// that its resolution checked, which `-logfile` would create and the run then read.
+/// and the volumes of the type that opens: `(files, volumes)`. A database that does not resolve
+/// gives the files that its resolution checked, which `-logfile` would create and the run then
+/// read.
 fn database_read_paths(
     db_name: &OsStr,
     seqtypes: &[SeqType],
     search_path: &SearchPath,
-) -> DbReadPaths {
+) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let db_bytes = crate::utils::os_bytes::os_str_bytes(db_name);
     let mut files = Vec::new();
     let volumes = SeqDb::open_guessing(seqtypes, |seqtype| {
@@ -569,11 +569,7 @@ fn database_read_paths(
         }
     })
     .unwrap_or_default();
-    DbReadPaths {
-        volumes,
-        files,
-        error: None,
-    }
+    (files, volumes)
 }
 
 /// Whether any candidate `-logfile` path matches a file of the MegaBLAST index that the loader

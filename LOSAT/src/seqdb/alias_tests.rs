@@ -532,6 +532,31 @@ fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
     for file in [vols.join("o.msk"), dir.join("mk.gnd"), vols.join("v.pin")] {
         assert!(!has(&file), "{} in {got:?}", file.display());
     }
+    // The files whose presence the resolution checks come apart from those of what it found
+    // (`windowmasker -out` counts only the former).
+    let split = super::database_files(
+        dir.join("m").as_os_str().as_encoded_bytes(),
+        SeqType::Nucleotide,
+        Some(vols.as_os_str().as_encoded_bytes()),
+    );
+    let within = |files: &[Vec<u8>], path: std::path::PathBuf| {
+        files
+            .iter()
+            .any(|p| p.as_slice() == path.as_os_str().as_encoded_bytes())
+    };
+    for file in [dir.join("m.nal"), dir.join("o.msk"), dir.join("index.alx")] {
+        assert!(within(&split.looked_up, file.clone()), "{}", file.display());
+        assert!(!within(&split.found, file.clone()), "{}", file.display());
+    }
+    for file in [vols.join("v.nog"), vols.join("v.ndb"), dir.join("mk.gni")] {
+        assert!(within(&split.found, file.clone()), "{}", file.display());
+        assert!(
+            !within(&split.looked_up, file.clone()),
+            "{}",
+            file.display()
+        );
+    }
+    assert_eq!(split.looked_up.len() + split.found.len(), got.len());
 }
 
 #[test]

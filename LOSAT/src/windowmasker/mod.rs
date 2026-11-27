@@ -138,13 +138,14 @@ pub(crate) fn check_in(
 /// `(for_logfile, for_out)`.
 /// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
 ///   `-in` (split via `counts::file_list` for `-mk_counts`, including the `-fa_list true` list file
-///   and every entry read from it; for `-infmt blastdb`, the database lookup files from
-///   `seqdb::alias::database_lookup_files`), `-ustat` (in masking mode), `-ids` and `-exclude_ids`
-///   (when not `-convert`).
+///   and every entry read from it; for `-infmt blastdb`, the files that reading each database
+///   checks or opens, `seqdb::alias::database_files`), `-ustat` (in masking mode), `-ids` and
+///   `-exclude_ids` (when not `-convert`).
 /// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
 ///   that changes the run when the file is missing: every input/database entry of `-mk_counts`
-///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
-///   masking.
+///   (comma-separated or read from `-fa_list true`, FASTA, or for `-infmt blastdb` the files
+///   whose presence the database's resolution checks, `DatabaseFiles::looked_up`), and `-ustat`
+///   of masking.
 pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let (log_paths, out_paths, databases, databases_for_out) =
         crate::report::log_inputs::windowmasker_read_parts(words);
@@ -163,18 +164,20 @@ pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>,
                 .ok()
                 .and_then(|s| s.blastdb);
         for db in databases {
-            for path in crate::seqdb::alias::database_lookup_files(
+            let files = crate::seqdb::alias::database_files(
                 &crate::utils::os_bytes::os_str_bytes(&db),
                 crate::seqdb::SeqType::Nucleotide,
                 blastdb.as_deref(),
-            ) {
-                if !path.is_empty() {
-                    if databases_for_out {
-                        for_out.push(path.clone());
-                    }
-                    for_log.push(path);
+            );
+            // A missing component, GI-mask or alias LMDB file that `-out` makes is never read by
+            // the run's reading of the sequences, so only the looked-up files count for `-out`.
+            for path in files.looked_up.into_iter().filter(|path| !path.is_empty()) {
+                if databases_for_out {
+                    for_out.push(path.clone());
                 }
+                for_log.push(path);
             }
+            for_log.extend(files.found.into_iter().filter(|path| !path.is_empty()));
         }
     }
     (for_log, for_out)

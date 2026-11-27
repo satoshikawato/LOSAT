@@ -971,29 +971,63 @@ pub(super) fn strip_dir_prefix<'a>(path: &'a [u8], dir: &[u8]) -> Option<&'a [u8
 // No NCBI counterpart: LOSAT Web reads `-logfile` and `windowmasker -out` against the files that
 // reading `dbname` checks or opens, so a write name equal to a missing alias/index/group-alias or
 // component file is refused instead of diverging from the command line, which creates the file
-// and then reads it back (line WQA D19b); the command line refuses the same files (line WQA D23,
-// `report::log_inputs`), both from `SeqDb::read_paths` (line WQA D26).
+// and then reads it back (line WQA D19b); the command line refuses the same files for `-logfile`
+// (line WQA D23, `report::log_inputs`), both from `SeqDb::read_paths` (line WQA D26).
+/// The files that reading a BLAST database checks or opens ([`database_files`]), each once.
+#[derive(Debug, Default)]
+pub(crate) struct DatabaseFiles {
+    /// The files whose presence the resolution and `ComputeMasks` check, a file made there
+    /// changing what the opening reads (`DbReadPaths::looked_up`).
+    pub(crate) looked_up: Vec<Vec<u8>>,
+    /// The other files that reading the database opens: those of the alias files, the GI masks
+    /// and the volumes found.
+    pub(crate) found: Vec<Vec<u8>>,
+}
+
 /// The files that reading `dbname` (`seqtype`) along the engine's own
 /// [`SearchPath::from_environment`] checks or opens ([`super::SeqDb::read_paths`]), with the paths
 /// inside the working directory relative to it so `run_files` matches them without making missing
 /// parent folders present.
+pub(crate) fn database_files(
+    dbname: &[u8],
+    seqtype: SeqType,
+    blastdb: Option<&[u8]>,
+) -> DatabaseFiles {
+    let search = SearchPath::from_environment(blastdb);
+    let read = super::SeqDb::read_paths(dbname, seqtype, &search);
+    let cwd = fix_delimiters(&search.cwd);
+    let norm_cwd = normalize_path(&cwd);
+    let mut seen = std::collections::HashSet::with_capacity(read.files.len());
+    let mut files = DatabaseFiles::default();
+    for (index, path) in read.files.iter().enumerate() {
+        let relative = strip_dir_prefix(path, &norm_cwd)
+            .or_else(|| strip_dir_prefix(path, &cwd))
+            .unwrap_or(path.as_slice())
+            .to_vec();
+        if !seen.insert(relative.clone()) {
+            continue;
+        }
+        if index < read.looked_up {
+            files.looked_up.push(relative);
+        } else {
+            files.found.push(relative);
+        }
+    }
+    files
+}
+
+/// Every file of [`database_files`] for `dbname`, the looked-up ones first.
 pub(crate) fn database_lookup_files(
     dbname: &[u8],
     seqtype: SeqType,
     blastdb: Option<&[u8]>,
 ) -> Vec<Vec<u8>> {
-    let search = SearchPath::from_environment(blastdb);
-    let raw = super::SeqDb::read_paths(dbname, seqtype, &search).files;
-    let cwd = fix_delimiters(&search.cwd);
-    let norm_cwd = normalize_path(&cwd);
-    let mut out = Vec::with_capacity(raw.len());
-    for path in raw {
-        let stripped = strip_dir_prefix(&path, &norm_cwd)
-            .or_else(|| strip_dir_prefix(&path, &cwd))
-            .unwrap_or(path.as_slice());
-        push_unique(&mut out, stripped.to_vec());
-    }
-    out
+    let DatabaseFiles {
+        mut looked_up,
+        found,
+    } = database_files(dbname, seqtype, blastdb);
+    looked_up.extend(found);
+    looked_up
 }
 
 fn collect_volumes(node: &AliasNode, out: &mut Vec<Vec<u8>>) {

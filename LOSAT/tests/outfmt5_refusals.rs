@@ -63,15 +63,15 @@ fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
     fs::write(path, text).expect("write FASTA");
 }
 
-fn refused(output: &Output, program: &str, what: &str) {
+/// The refusal of `title` (`a query title`, `a subject title`) by `program`, exit status 1; `case` names the run.
+fn refused(output: &Output, program: &str, title: &str, case: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
-    assert!(output.stdout.is_empty(), "{what}: nothing is written");
+    assert_eq!(output.status.code(), Some(1), "{case}: {stderr}");
     assert!(
         stderr.contains(&format!(
-            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's {program}"
+            "{title} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's {program}"
         )),
-        "{stderr}"
+        "{case}: {stderr}"
     );
 }
 
@@ -169,21 +169,13 @@ fn a_refusal_in_a_later_batch_comes_after_the_batches_before() {
                     fasta(&subject, &[(PUNCTUATION, &hit)]);
                 }
                 for with_out in [false, true] {
-                    let what = format!(
+                    let case = format!(
                         "{what}, BATCH_SIZE {batch_size:?}, streamed {streamed}, -out {with_out}"
                     );
                     fs::remove_file(&out).ok();
                     let output = run_with(&args_of(with_out), &env);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
-                    let program = "BLASTN";
-                    let title = what.split(',').next().unwrap();
-                    assert!(
-                        stderr.contains(&format!(
-                            "{title} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's {program}"
-                        )),
-                        "{what}: {stderr}"
-                    );
+                    refused(&output, "BLASTN", what, &case);
+                    let what = case;
                     let written = if with_out {
                         assert!(output.stdout.is_empty(), "{what}: output beside -out");
                         fs::read(&out).unwrap_or_default()

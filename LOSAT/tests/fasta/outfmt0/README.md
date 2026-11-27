@@ -41,3 +41,6 @@ letters is kept in the repository; the commit is the one that added the files.
   `seg.blastx.subj.6`, `x2.tblastx.lc.6` and `sml.blastp.mixlc.0`; origin not recorded.
 - `twidth_q.faa`, `twidth_s.fna`: written by `docs/evidence/losat_web_e2a/make_inputs.py` (commit 63ddf7380, 2026-09-29),
   row `width.tblastn`.
+- `dxs_na_pq.fna`, `dxs_na_r.fna`, `dxs_s.fna` (line RG series D, item xml-stream, 2026-11-27): `na` of `xsb_na.fna`
+  then a query of its letters titled `, ,`, or then `r`, 120 letters of a fixed generator that hit only the subject titled `, ,`
+  of `dxs_s.fna` (beside `pa`); rows `db.dxs.blastn.*` of `tests/db_search_manifest/blastn.dxs.tsv`.

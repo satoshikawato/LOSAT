@@ -85,6 +85,7 @@ watchEffect(() => {
   }
 });
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
+const makeblastdbPanel = ref<InstanceType<typeof MakeblastdbPanel>>();
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
 /** Search, Results, WindowMasker, makeblastdb, and Format Archive: tabs, each with its panel (WA2-AX-12). */
@@ -194,6 +195,7 @@ async function useAsRepeatsDatabase(made: MadeDatabase): Promise<void> {
 /** "Use as -mask_data in makeblastdb" on a masking run's mask data: the file joins makeblastdb's `-mask_data`. */
 async function useAsMaskData(data: MaskDataHandover): Promise<void> {
   props.makeblastdbDraft.addMaskData(data.file, data.name, data.origin);
+  makeblastdbPanel.value?.showMessagesAtTop();
   tab.value = 'makeblastdb';
   await nextTick();
   window.scrollTo(0, 0);
@@ -339,6 +341,7 @@ onUnmounted(() => {
       <MakeblastdbPanel
         v-show="tab === 'makeblastdb'"
         :id="MAIN_TABS[3].panel"
+        ref="makeblastdbPanel"
         role="tabpanel"
         :aria-labelledby="MAIN_TABS[3].id"
         :draft="makeblastdbDraft"

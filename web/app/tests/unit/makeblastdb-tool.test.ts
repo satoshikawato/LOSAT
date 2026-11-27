@@ -260,7 +260,7 @@ describe('MakeblastdbDraft', () => {
     expect(queued[0]!.argv).toEqual(['makeblastdb', '-in', 'in/old', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'new']);
   });
 
-  it('writes a typed -in of -input_type blastdb as typed (a list of databases), and quotes only a found name with a space (WW4b2 R1 finding 1)', async () => {
+  it('writes -in of -input_type blastdb as typed (a list of databases), and a found name with a space quoted, in the field too (WW4b2 R1 finding 1)', async () => {
     const { draft, queued } = setup();
     await loaded(draft);
     draft.setField('-input_type', 'blastdb');
@@ -279,7 +279,7 @@ describe('MakeblastdbDraft', () => {
     await loaded(found);
     found.setField('-input_type', 'blastdb');
     found.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `my db.${ext}`)));
-    expect(found.state.get().dbIn).toBe('my db');
+    expect(found.state.get().dbIn).toBe('"my db"');
     expect(found.previewCommandWords().slice(1, 4)).toEqual(['makeblastdb', '-in', '"my db"']);
   });
 

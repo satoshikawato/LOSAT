@@ -283,6 +283,38 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
   await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb');
   await expect(page.getByTestId('mk-run-files')).toContainText('windowmasker-run1.asnb');
   await expect(page.getByTestId('mk-options-changed')).toHaveText('(1 changed)');
+
+  // A later run's mask data under the name of an earlier run's takes its place (WW4b2 R1 finding 4).
+  await page.getByTestId('tab-windowmasker').click();
+  await page.getByTestId('wm-out').fill('wm.asnb');
+  for (const run of [2, 3]) {
+    await page.getByTestId('tab-windowmasker').click();
+    await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+    await page.getByTestId('wm-run-losat').click();
+    await waitStatus(page, run, 'completed');
+    await page.getByTestId('tool-use-as-mask-data').click();
+    await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb,wm.asnb');
+    await expect(page.getByTestId('mk-run-files-list').locator('.source-name')).toHaveText(['windowmasker-run1.asnb', 'wm.asnb']);
+    await expect(page.getByTestId('mk-run-files-error')).toHaveCount(0);
+    await expect(page.getByTestId('mk-message')).toHaveCount(0);
+  }
+
+  // A hand-over that the run directory refuses (a file that the user opened holds the name) says why at the top of the
+  // tab, where it opens, after a run from the bottom Run LOSAT too.
+  await page.getByTestId('mk-run-file-remove-1').click();
+  await page.getByTestId('mk-run-files-input').setInputFiles({ name: 'wm.asnb', mimeType: 'application/octet-stream', buffer: Buffer.from('mine') });
+  await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+  await settled(page);
+  await page.getByTestId('mk-run-losat-bottom').click();
+  await waitStatus(page, 4, 'completed');
+  await page.getByTestId('tab-windowmasker').click();
+  await page.getByTestId('wm-run-losat').click();
+  await waitStatus(page, 5, 'completed');
+  await page.getByTestId('tool-use-as-mask-data').click();
+  await expect(page.getByTestId('mk-message')).toHaveText('A file named "wm.asnb" is already in the run directory.');
+  await expect(page.getByTestId('mk-message-bottom')).toHaveCount(0);
+  await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb');
 });
 
 // --- the real engine, against the native command line ----------------------------------------------------------------

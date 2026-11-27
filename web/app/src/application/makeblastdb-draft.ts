@@ -26,7 +26,11 @@ export interface MakeblastdbDraftState extends ToolFormState {
   readonly fastaPaste: string;
   /** The files that `-in` names for FASTA and ASN.1 input, in the run directory under their names. */
   readonly inputFiles: readonly ToolExtraFile[];
-  /** `-in` for `-input_type blastdb`: the database's name (its files are files of the run). */
+  /**
+   * `-in` for `-input_type blastdb`, as the command line takes it (its files are files of the run): as typed (a list of
+   * databases, a name with a space between double quotes), or the name that the files of the run give, quoted when it
+   * holds a space.
+   */
   readonly dbIn: string;
   /** Whether the user typed `dbIn`; until then the files of the run name it. */
   readonly dbInEdited: boolean;
@@ -201,7 +205,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   protected override runFilesAdded(state: MakeblastdbDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<MakeblastdbDraftState> {
     if (state.dbInEdited && state.dbIn.trim() !== '') return {};
     const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    return detected === undefined ? {} : { dbIn: detected, dbInEdited: false };
+    return detected === undefined ? {} : { dbIn: makeblastdbInputList([detected]), dbInEdited: false };
   }
 
   /**
@@ -239,16 +243,9 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     });
   }
 
-  /**
-   * `-in`'s value for the input type chosen: a database's name as the user typed it (a list of databases, quotes and
-   * all), or the name that the files of the run give, quoted when it holds a space; the files of FASTA and ASN.1 input
-   * as one list.
-   */
+  /** `-in`'s value for the input type chosen: `dbIn` for a BLAST database, the files of FASTA and ASN.1 input as one list. */
   private inputValue(state: MakeblastdbDraftState): string {
-    if (this.inputType(state) === 'blastdb') {
-      const name = state.dbIn.trim();
-      return state.dbInEdited ? name : makeblastdbInputList([name]);
-    }
+    if (this.inputType(state) === 'blastdb') return state.dbIn.trim();
     return makeblastdbInputList(this.inputEntries(state).map((entry) => entry.name));
   }
 

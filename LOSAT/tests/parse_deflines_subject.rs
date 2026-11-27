@@ -10,7 +10,7 @@
 //! places (outfmt 0; probe `DI7/ws/pd_self.py`, DECISIONS 15, 19). The reports that NCBI writes as
 //! LOSAT does are the `pd.*` rows of `tests/outfmt0_manifest.tsv`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod temp_support;
@@ -775,7 +775,8 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
 // rejection row `db.of1.bp.selfseg3.reject`) in the search that reports the query, before its
 // first byte (line RG T3a review 2 D3): a run of many queries takes the block search, which refuses
 // in the query's block, after the reports of the blocks before (NCBI's own bytes before its abort
-// depend on its buffers, so no prefix is NCBI's); the search of all queries refuses before any byte.
+// depend on its buffers, so no prefix is NCBI's); the search of all queries refuses before any byte
+// of a report, after the prolog that BLASTP writes before its first batch (line RG item T4b-f).
 // `BATCH_SIZE=1` and `LOSAT_X_BPQBLOCK=1` make each query a block of its own.
 #[test]
 fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
@@ -785,11 +786,11 @@ fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
     let mut queries = std::fs::read(of1.join("qa.fa")).unwrap();
     queries.extend(std::fs::read(of1.join("selfseg3.fa")).unwrap());
     std::fs::write(&query, queries).unwrap();
-    let run = |blocks: &str, threads: &str| {
+    let run_query = |query: &Path, blocks: &str, threads: &str| {
         let output = losat()
             .arg("blastp")
             .arg("-query")
-            .arg(&query)
+            .arg(query)
             .arg("-subject")
             .arg(of1.join("selfseg3.fa"))
             .args(["-parse_deflines", "-seg", "yes", "-outfmt", "1"])
@@ -804,20 +805,31 @@ fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
+    let run = |blocks: &str, threads: &str| run_query(&query, blocks, threads);
+    // The prolog: the bytes before the first query's report of the run of the first query alone,
+    // which the search writes to its end.
+    let (status, alone, stderr) = run_query(&of1.join("qa.fa"), "0", "1");
+    assert_eq!(status, 0, "the first query alone: {stderr}");
+    let prolog = &alone[..alone.find("\n\nQuery=").expect("the first query's report")];
+    assert!(
+        prolog.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n")),
+        "{alone}"
+    );
     let refusal =
         "the record lcl|selfseg3 is both a query and a subject under -parse_deflines and \
                    NCBI BLAST+ aborts on its query-anchored alignments";
     for threads in ["1", "4"] {
         let (status, stdout, stderr) = run("0", threads);
         assert_eq!(status, 1, "n{threads}: {stderr}");
-        assert!(stdout.is_empty(), "n{threads}: {stdout}");
+        assert_eq!(stdout, prolog, "n{threads}: exactly the prolog");
         assert!(stderr.contains(refusal), "n{threads}: {stderr}");
         let (status, stdout, stderr) = run("1", threads);
         assert_eq!(status, 1, "blocks n{threads}: {stderr}");
         assert!(stderr.contains(refusal), "blocks n{threads}: {stderr}");
         assert!(
-            stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
-                && stdout.contains("\nQuery= qa query protein alpha\n")
+            stdout
+                .strip_prefix(prolog)
+                .is_some_and(|reports| reports.starts_with("\n\nQuery= qa query protein alpha\n"))
                 && !stdout.contains("Query= selfseg3"),
             "blocks n{threads}: {stdout}"
         );
@@ -890,7 +902,7 @@ fn blastn_query_anchored_abort_is_refused_after_the_prolog() {
 // `lcl|Query_1`) or display id (`bnqgi`: `gi|777|lcl|Query_1`) is the id NCBI BLAST+ gives the first
 // query read without `-parse_deflines`: NCBI's formats 1 to 4 show that query's title in its
 // description line (and its letters in the rows of the Seq-align id; probes `bn.t3b.d.qid.f1`,
-// `bn.t3b.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.126): so does its outfmt 0 (NCBI
+// `bn.t3b.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.127): so does its outfmt 0 (NCBI
 // BLAST+ 2.17.0, exit 0: `Query_1 bnq query` in the description line and the alignment's title,
 // identities of 299 of 299 where the sequence's own letters give 274 of 299; probe `bn.qid.f0` of
 // `x71/probe2` and `x71/fix2/of0`; rows `db.x7.bn.qid.f0.reject`, `db.x7.bn.qgi.f0.reject` hold
@@ -926,7 +938,7 @@ fn blastn_query_anchored_refuses_a_database_sequence_named_as_a_query() {
 // Line RG T3c (PD-LOSAT-NCBI-DEFECTS 1.39): the same database sequences for BLASTX (`bxqid`, `bxqgi`:
 // proteins) and TBLASTX (`txqid`, `txqgi`). NCBI's merge of the Seq-align id throws (exit 255, probes
 // `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`), and for the display id its description line shows the query's
-// title (`tx.t3c.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.126): their outfmt 0 shows
+// title (`tx.t3c.d.qgi.f1`). Line RG item X7-1 (PD-LOSAT-NCBI-DEFECTS 1.127): their outfmt 0 shows
 // the query in the sequence's place (NCBI BLAST+ 2.17.0, exit 0: BLASTX `Query_1 bxq coding query
 // in six frames`, `Length=1229` for the protein of 125 letters; TBLASTX the query's title; probes
 // `bx.qid.f0`, `tx.qid.f0` of `x71/probe2` and `x71/fix2/of0`; rows `db.x7.bx.qid.f0.reject`,

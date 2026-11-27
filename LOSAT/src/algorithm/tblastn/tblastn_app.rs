@@ -1449,11 +1449,21 @@ fn run_local_formats(
     )
 }
 
-/// The outfmt 0 prologs of a run that fails in its first query batch: NCBI writes the prolog
-/// (`formatter.PrintProlog()`) before it reads the first batch. `subject_path` names a
-/// FASTA subject set of `num_subjects` records (`subject_letters`); a database search shows
-/// its `Database:` lines (`database`).
-fn write_first_batch_prologs(
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-280
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+/// The prologs of the formats (`formatter.PrintProlog()`). `before_search`: the outfmt 0 to 4
+/// prolog of every sink (a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`), where NCBI writes it: before it reads the first query batch and
+/// writes its search strategy request, so that the prolog's error (a malformed `./.ncbirc` under
+/// `-html`) and a failed write end the run there, before LOSAT's refusal of a strategy file on
+/// the report stream; written through `cli::NcbiOstream::sink`, whose `NcbiEndl` pair flushes
+/// NCBI's stream. Otherwise, for a run that fails in its first query batch, the prologs that come
+/// with the first report, written and flushed: the start of the XML2 and JSON documents, and
+/// outfmt 20's line of the field names with its formatter's warning. `subject_path` names a FASTA
+/// subject set of `num_subjects` records (`subject_letters`); a database search shows its
+/// `Database:` lines (`database`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write_first_batch_prologs(
     outputs: &mut ReportOutputs<'_>,
     subject_path: Option<&std::path::Path>,
     num_subjects: usize,
@@ -1464,6 +1474,7 @@ fn write_first_batch_prologs(
     program: &str,
     // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
     html: Option<&crate::report::html_ids::HtmlLinks>,
+    before_search: bool,
 ) -> Result<()> {
     let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -1475,6 +1486,9 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
+            if !before_search {
+                continue;
+            }
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
@@ -1493,6 +1507,8 @@ fn write_first_batch_prologs(
                 }),
             )?;
             writer.flush()?;
+        } else if before_search {
+            // The other formats' prologs come with the first report.
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
@@ -1621,6 +1637,95 @@ fn scope_of_batch(
     }
     let input = xml_end.map_or(input, |end| 0..end.min(input_records.len()));
     crate::blastinput::query_batch::QueryScope::of_shown_records(&input_records[input])
+}
+
+/// The check of line RG item X7 in a TBLASTN database search: what every batch's check reads.
+struct FoundCheck<'a, 'f> {
+    database: &'a TblastnDatabase,
+    /// The `-parse_deflines` scopes of the batches (`QueryScopes`).
+    scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
+    formats: &'a [crate::api::local_blast::FormatOutput<'f>],
+    /// `-query_loc`.
+    ranged: bool,
+    pssm: Option<&'a crate::algorithm::pssm_search::PsiSearch>,
+    input_records: &'a [FastaRecord],
+    titles: &'a super::database::DatabaseTitles,
+}
+
+impl FoundCheck<'_, '_> {
+    /// LOSAT's refusal of a sequence that the batch reports with the id of a query of its scope (a
+    /// `-parse_deflines` id, or a generated one): the reports would show that query in its place.
+    /// `batch`: its searched queries and its input records. A `-parse_deflines` id's refusal is
+    /// the error; a generated id's comes back held (`BatchQueries::held`), to be given once the
+    /// stop of the prefetches is known.
+    fn check(
+        &self,
+        batch: (std::ops::Range<usize>, std::ops::Range<usize>),
+        queries: &[FastaRecord],
+        batch_results: &[super::stage_d_results::KappaResultHitList],
+        query_bioseqs: &mut crate::report::query_bioseq::QueryBioseqs,
+    ) -> Result<Option<anyhow::Error>> {
+        let (range, batch_input) = batch;
+        let database = self.database;
+        // The batch's searched queries (`range`), the scope's span.
+        let record = |query: usize| {
+            crate::report::query_bioseq::QueryRecordRef::of(
+                queries.get(query).filter(|_| query < range.end)?,
+            )
+        };
+        let formats =
+            super::stage_e_report::found_formats(self.formats.iter().map(|format| format.outfmt));
+        let writers = super::stage_e_report::found_writers(&formats);
+        let run = crate::report::query_bioseq::SeenRun {
+            shows: writers.shows_shown() && !self.ranged && !database.loads_write_texts(),
+            known: range.start..match self.scopes {
+                Some(scopes) if scopes.span_of(range.start).end != usize::MAX => range.end,
+                _ => usize::MAX,
+            },
+            record: &record,
+            protein: true,
+            writers: &writers,
+            taxdb: database.taxdb_found(),
+            load_texts: database.loads_write_texts(),
+            // A protein query is never compared with the nucleotide sequence.
+            found: crate::report::query_bioseq::NOT_COMPARED,
+        };
+        let xml = crate::blastinput::query_batch::outfmts_have_xml(
+            self.formats.iter().map(|format| format.outfmt),
+        );
+        let generated = || {
+            scope_of_batch(
+                self.pssm,
+                self.input_records,
+                batch_input.clone(),
+                xml.then_some(usize::MAX),
+            )
+        };
+        let batch_queries =
+            crate::blastinput::query_batch::BatchQueries::of(self.scopes, &generated, None);
+        let checked = crate::algorithm::common::database::refuse_reported_ids_of_queries(
+            self.titles,
+            batch_results
+                .iter()
+                .enumerate()
+                .flat_map(|(index, hitlist)| {
+                    hitlist.lists().iter().filter_map(move |list| {
+                        Some((
+                            range.start + index,
+                            u32::try_from(list.oid).ok()?,
+                            Vec::<std::ops::Range<usize>>::new,
+                        ))
+                    })
+                }),
+            database.oid_map(),
+            &batch_queries,
+            super::database::parsed_shown(self.formats),
+            query_bioseqs,
+            &run,
+            "TBLASTN",
+        );
+        batch_queries.held(checked)
+    }
 }
 
 fn search(
@@ -1756,6 +1861,25 @@ fn search(
                 .context("TBLASTN subject file missing")?,
         ),
     };
+    // The program line of outfmt 0 (`PSITBLASTN` with `-in_pssm`).
+    let program = if pssm.is_some() {
+        super::in_pssm::PROGRAM
+    } else {
+        "TBLASTN"
+    };
+    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
+    // (`write_first_batch_prologs`), as in every program.
+    write_first_batch_prologs(
+        outputs,
+        subject_path.map(|path| path.as_path()),
+        subjects.len(),
+        subject_letters,
+        pairwise_database.as_ref(),
+        args.tabular_taxdb.unwrap_or(false),
+        program,
+        resolved.html.as_deref(),
+        true,
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-278
     // NCBI reads the query batches one at a time after the outfmt 0 prolog. The run stops at
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
@@ -1783,8 +1907,9 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            super::in_pssm::PROGRAM,
+            program,
             resolved.html.as_deref(),
+            false,
         )?;
         // The request of the one PSSM query, which NCBI wrote before its constructor failed.
         if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
@@ -1883,9 +2008,22 @@ fn search(
         )
     });
     if batches.searched_done == 0 && batches.stop.is_some() {
-        // A first batch whose set-up fails has its search strategy request, written before the
-        // prolog (NCBI's posts of the bytes replaced in it follow the batch's reader messages,
-        // before its error, below).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // The first batch fails after the prologs (`formatter.PrintProlog()`; those of the first
+        // report here). A first batch whose set-up fails has its search strategy request (NCBI's
+        // posts of the bytes replaced in it follow the batch's reader messages, before its error,
+        // below).
+        write_first_batch_prologs(
+            outputs,
+            subject_path.map(|path| path.as_path()),
+            subjects.len(),
+            subject_letters,
+            pairwise_database.as_ref(),
+            args.tabular_taxdb.unwrap_or(false),
+            program,
+            resolved.html.as_deref(),
+            false,
+        )?;
         if let (Some(strategy), Some(requests), Some(span)) = (
             args.strategy.as_ref(),
             requests.as_ref(),
@@ -1898,20 +2036,6 @@ fn search(
                 query_input.placements.get(span.start),
             )?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-285
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`), which
-        // names `PSITBLASTN` for a PSSM query (`-in_pssm`).
-        write_first_batch_prologs(
-            outputs,
-            subject_path.map(|path| path.as_path()),
-            subjects.len(),
-            subject_letters,
-            pairwise_database.as_ref(),
-            args.tabular_taxdb.unwrap_or(false),
-            pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
-            resolved.html.as_deref(),
-        )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
         // `-db`: the database's sequences, checked once for every batch (`XDbStream::new`)
@@ -2088,7 +2212,9 @@ fn search(
             Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
-        // NCBI's prolog comes before the first batch's request (`StrategyExport::refused`).
+        // NCBI's prologs come before the first batch's request (`StrategyExport::refused`): outfmt
+        // 0 to 4 was written before the search above; `false` writes the remaining formats'
+        // (XML2/JSON, 20).
         let refused = crate::report::archive::strategy::StrategyExport::refused;
         if searched_done > 0 && args.strategy.as_ref().is_some_and(refused) {
             write_first_batch_prologs(
@@ -2100,6 +2226,7 @@ fn search(
                 args.tabular_taxdb.unwrap_or(false),
                 pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
                 resolved.html.as_deref(),
+                false,
             )?;
         }
         // The batches, made here only (review 3 of line DBID loadord, M1): the loop's and the
@@ -2246,72 +2373,22 @@ fn search(
                 break;
             }
             // LOSAT's refusal of a reported sequence with the id of a query of its scope (line RG
-            // item X7: a `-parse_deflines` id, or a generated one), after NCBI's own errors of the
-            // batch: the reports would show it (the prefetch environment's error above comes
-            // first; a generated id's refusal waits for the stop of the prefetches, `found_refusal`).
+            // item X7), after NCBI's own errors of the batch (the prefetch environment's error
+            // above comes first); a generated id's refusal waits for the stop of the prefetches.
             if let Some(database) = database {
-                // The batch's searched queries (`range`), the scope's span.
-                let record = |query: usize| {
-                    crate::report::query_bioseq::QueryRecordRef::of(
-                        queries.get(query).filter(|_| query < range.end)?,
-                    )
+                let found = FoundCheck {
+                    database,
+                    scopes: batches.query_scopes.as_ref(),
+                    formats: &outputs.formats,
+                    ranged: resolved.query_range.is_some(),
+                    pssm: pssm.as_deref(),
+                    input_records,
+                    titles: &titles,
                 };
-                let formats = super::stage_e_report::found_formats(
-                    outputs.formats.iter().map(|format| format.outfmt),
-                );
-                let writers = super::stage_e_report::found_writers(&formats);
-                let scopes = batches.query_scopes.as_ref();
-                let run = crate::report::query_bioseq::SeenRun {
-                    shows: writers.shows_shown()
-                        && resolved.query_range.is_none()
-                        && !database.loads_write_texts(),
-                    known: range.start..match scopes {
-                        Some(scopes) if scopes.span_of(range.start).end != usize::MAX => range.end,
-                        _ => usize::MAX,
-                    },
-                    record: &record,
-                    protein: true,
-                    writers: &writers,
-                    taxdb: database.taxdb_found(),
-                    load_texts: database.loads_write_texts(),
-                    // A protein query is never compared with the nucleotide sequence.
-                    found: crate::report::query_bioseq::NOT_COMPARED,
-                };
-                let xml = crate::blastinput::query_batch::outfmts_have_xml(
-                    outputs.formats.iter().map(|format| format.outfmt),
-                );
-                let generated = || {
-                    scope_of_batch(
-                        pssm.as_deref(),
-                        input_records,
-                        batch_input.clone(),
-                        xml.then_some(usize::MAX),
-                    )
-                };
-                let batch_queries =
-                    crate::blastinput::query_batch::BatchQueries::of(scopes, &generated, None);
-                let checked = crate::algorithm::common::database::refuse_reported_ids_of_queries(
-                    &titles,
-                    batch_results
-                        .iter()
-                        .enumerate()
-                        .flat_map(|(index, hitlist)| {
-                            hitlist.lists().iter().filter_map(move |list| {
-                                Some((
-                                    range.start + index,
-                                    u32::try_from(list.oid).ok()?,
-                                    Vec::<std::ops::Range<usize>>::new,
-                                ))
-                            })
-                        }),
-                    database.oid_map(),
-                    &batch_queries,
-                    super::database::parsed_shown(&outputs.formats),
-                    &mut query_bioseqs,
-                    &run,
-                    "TBLASTN",
-                );
-                if let Some(refusal) = batch_queries.held(checked)? {
+                let batch = (range.clone(), batch_input.clone());
+                if let Some(refusal) =
+                    found.check(batch, queries, &batch_results, &mut query_bioseqs)?
+                {
                     found_refusal.get_or_insert((range.start, refusal));
                 }
             }
@@ -3045,7 +3122,7 @@ fn search(
     }
     // A batch whose set-up fails (every query without letters) has its search strategy request:
     // NCBI made its query factory before the search (`QueryBatches::stop_batch`), after the
-    // batches above (a first batch's was written before the prolog).
+    // batches above (a first batch's was written after the prologs).
     if let (Some(strategy), Some(requests), Some(span)) = (
         args.strategy.as_ref(),
         requests.as_ref(),

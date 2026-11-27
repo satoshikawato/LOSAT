@@ -300,7 +300,8 @@ impl PhiSearch<'_> {
             },
         );
         hsps.sort_by(score_compare);
-        // `hsp->evalue > cutoff` frees the HSP.
+        // The reap frees an HSP whose linked e-value is above the preliminary cutoff; an equal
+        // e-value (and a NaN, which compares false) stays.
         hsps.retain(|hsp| {
             hsp.evalue.partial_cmp(&link.prelim_evalue) != Some(std::cmp::Ordering::Greater)
         });

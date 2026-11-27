@@ -12,7 +12,7 @@ import { standInWakeLock } from '../support/test';
 import { makeFixtures, type FixtureLibrary } from './fixtures';
 import { createRandom, type PlannedStep, type WalkKind } from './plan';
 import { shrinkWalk } from './shrink';
-import { check, Draws, open, STEPS, StepFailure, watch, type RecordedStep, type Walker } from './steps';
+import { check, drain, Draws, open, STEPS, StepFailure, watch, type RecordedStep, type Walker } from './steps';
 
 /** LOSAT_WEB_WALK_TRACE=1 prints each step as it ends. */
 const TRACE = process.env['LOSAT_WEB_WALK_TRACE'] === '1';
@@ -78,6 +78,13 @@ export async function runSteps(
       if (recorded.length === index) recorded.push({ kind: step.kind, args: [...draws.taken], note: 'failed' });
       return fail(index, step.kind, error);
     }
+  }
+  // Sweep 2: the runs that 'start' left are checked at the end of the walk.
+  try {
+    await drain(walker);
+    await check(walker);
+  } catch (error) {
+    return fail(steps.length - 1, steps.at(-1)?.kind ?? 'run', error);
   }
   return { steps: recorded, notes: walker.notes, counts: walker.counts };
 }

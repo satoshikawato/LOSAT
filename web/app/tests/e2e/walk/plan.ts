@@ -42,6 +42,17 @@ export const WALK_KINDS = Object.freeze([
   'run',
   'twice',
   'cancel',
+  // Sweep 2 (not on dev): Run LOSAT without waiting, so that the next steps act while it runs; the
+  // results' filters and sorting; accessions fetched from stubbed sources; the tab hidden and shown.
+  'start',
+  'filter',
+  'fetch',
+  'hide',
+  // Sweep 3: a run that fails on a later batch (D10/D15: the outputs written before the error are kept), a
+  // help or version word (D14), a -logfile name (D11).
+  'failrun',
+  'printed',
+  'logfile',
   // The page: the Search and Results tabs, the views of the results, the window's width, a reload.
   'tab',
   'view',

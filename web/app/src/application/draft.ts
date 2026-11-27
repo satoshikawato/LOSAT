@@ -373,6 +373,11 @@ export class SearchDraft {
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
+  /**
+   * The Additional options' words (`extraKey`) that the latest answer of the engine's start was made for: the answer is for
+   * these words and no others (`runCount`). With no word typed the argv prints nothing, which the first state says.
+   */
+  private answeredExtra: string | undefined = '[]';
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   /** The validation that runs, or the last one: the next waits for it (validateInTurn). */
@@ -1396,9 +1401,15 @@ export class SearchDraft {
   /**
    * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
    * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
-   * 2026-11-23).
+   * 2026-11-23). While the Additional options' words are not yet answered for, it says 1 (no number on the button) and not
+   * the count of an older argv (line WQA's D33, S4-8, 2026-11-28).
    */
   runCount(): number {
+    // The words that make the argv print are the user's own (the Additional options): the form builds the others. Until the
+    // engine has answered for these words (an edit is on its way to its answer), whether the run prints is not known, so the
+    // button names no count (one run is the label without a number) instead of the count of an older argv (S4-8).
+    const extra = this.extraKey();
+    if (extra !== undefined && extra !== this.answeredExtra) return 1;
     if (this.printsKind() !== null) return 1;
     const { querySource, subjectSource } = this.state.get();
     const queryCount = querySource !== 'fasta' ? 1 : Math.max(1, this.inputGroups('query').length);
@@ -1627,7 +1638,8 @@ export class SearchDraft {
    * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
    * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
    * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
-   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
+   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23). The run count does not
+   * take the older answer for other words (`runCount`).
    */
   printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();
@@ -2314,8 +2326,18 @@ export class SearchDraft {
     return turn;
   }
 
+  /** The words of the Additional options as one key; undefined where they cannot be read (an unclosed quote, a word that the form sets). */
+  private extraKey(): string | undefined {
+    try {
+      return JSON.stringify(this.extraWords());
+    } catch {
+      return undefined;
+    }
+  }
+
   private async validate(): Promise<void> {
     const generation = this.generations.get('validate');
+    const extraKey = this.extraKey();
     const { program, querySource, queryFile, subjectSource, database } = this.state.get();
     let argv: readonly string[];
     try {
@@ -2341,6 +2363,7 @@ export class SearchDraft {
       });
     } catch (error) {
       // No argv, so no start of one: the -conffile row goes with the words that named the file.
+      this.answeredExtra = extraKey;
       this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
@@ -2382,6 +2405,7 @@ export class SearchDraft {
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
+    this.answeredExtra = extraKey;
     this.set({ validation, start });
     this.setReaderSettings(dataLoaders, parseDeflines);
     this.prepareEngine();

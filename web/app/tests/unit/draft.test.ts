@@ -1549,6 +1549,43 @@ describe('SearchDraft submit', () => {
     expect(draft.runCount()).toBe(3);
   });
 
+  // Line WQA's D33 (S4-8): between an edit of the Additional options and the engine's answer for its words, the count is not that
+  // of the older argv: it names no number (one run), then the answer's.
+  it('does not show the run count of an older argv between a print word and its answer', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // A word that prints: no window with the old count 2.
+    draft.setExtra('-version');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+    expect(draft.printsKind()).toBe('version');
+    // The word taken out: the older answer's 1 does not stand either; the count of the search comes with the answer.
+    draft.setExtra('');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // A word that does not print: the same, then 2.
+    draft.setExtra('-outfmt 17');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // An edit that leaves the extra words (another input) keeps the count of the answer.
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    await draft.idle();
+    expect(draft.runCount()).toBe(3);
+  });
+
   // Line WQA's D20 round 4: Run LOSAT reads whether the argv prints after the validation is idle, so a word typed just before
   // the press (a pasted accession is not refused with the accession message) or taken out (the accession check is not
   // skipped) decides as the engine's answer for the argv says.
@@ -2119,7 +2156,7 @@ describe('SearchDraft submit', () => {
     const runId = (result as { runIds: readonly string[] }).runIds[0]!;
     expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints).toBe('help');
     // A search needs its inputs again.
-    draft.setExtra('-evalue 1');
+    draft.setExtra('-outfmt 17');
     await draft.idle();
     expect(draft.readiness()).toBeDefined();
     expect(await draft.submit()).toMatchObject({ ok: false });

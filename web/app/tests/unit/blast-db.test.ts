@@ -77,6 +77,14 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(pickedFilePath(fileWithRelPath('bad\0name.nin'))).toBeUndefined();
   });
 
+  it('keeps spaces at the start and the end of a name: the file is mounted and named as it is called (S4-3)', () => {
+    expect(normalizeRunPath('ids.txt ')).toBe('ids.txt ');
+    expect(normalizeRunPath(' ids.txt')).toBe(' ids.txt');
+    expect(normalizeRunPath('./ my db / nt.nin ')).toBe(' my db / nt.nin ');
+    expect(normalizeRunPath('')).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath(' db/nt.nin '))).toBe(' db/nt.nin ');
+  });
+
   it('uses case-sensitive NCBI FindBlastDBs extensions in sync discovery and primaryBlastDbName', () => {
     expect(discoverBlastDatabaseNames(['db/nt.nin', 'db/NT.NIN', 'db/prot.pin', 'db/PROT.PIN'])).toEqual([
       { name: 'db/nt', kind: 'nucleotide', entry: 'volume' },
@@ -741,6 +749,34 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       expect(submitted.message).toContain("Incompatible with argument:  'no_taxid_expansion'");
     }
     expect(draft.state.get().message?.text).toContain("Incompatible with argument:  'no_taxid_expansion'");
+  });
+
+  it('names every list file as the file is called, also with a space at its start or end, in the argv and in the run directory (S4-3)', async () => {
+    const names = new Map<string, string>([
+      ['-seqidlist', 'seq.txt '],
+      ['-negative_seqidlist', ' neg seq.txt'],
+      ['-taxidlist', ' tax.txt '],
+      ['-negative_taxidlist', 'neg_tax.txt '],
+      ['-gilist', ' gi.txt'],
+      ['-negative_gilist', 'neg_gi.txt '],
+      ['-ipglist', ' ipg.txt'],
+      ['-negative_ipglist', 'neg_ipg.txt '],
+    ]);
+    const { draft, runCalls, coordinator } = setup();
+    draft.setProgram('blastp');
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('protdb/p.pin', 'pin'), fileWithRelPath('protdb/p.phr', 'phr'), fileWithRelPath('protdb/p.psq', 'psq')]);
+    for (const [flag, name] of names) draft.setDatabaseFilterFile(flag, diskFile(name, `${name}\n`));
+    await draft.idle();
+    for (const [flag, name] of names) expect(draft.parameters(), flag).toContainEqual([flag, name]);
+    draft.setPaste('query', '>q1\nMKVLAAGIVGLLLAQPSWA\n');
+    await submitAndWait(draft, coordinator);
+    const request = runCalls[0]!;
+    for (const [flag, name] of names) {
+      const at = request.argv.indexOf(flag);
+      expect(request.argv[at + 1], flag).toBe(name);
+      expect(request.files?.map((f) => f.name), flag).toContain(name);
+    }
   });
 
   it('pins explicit argv order of all database filter text, boolean, and list-file flags in parameters() (WW4)', async () => {

@@ -76,8 +76,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
      stops LOSAT with a message and exit 4, and a failed write to its standard error
      (NCBI: SIGPIPE) with exit 4 and no message (exception 9); a closed pipe in
-     `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, and version/help/argument
-     errors stops with exit 0 or ignores the closed pipe (exception 10); on a terminal, the command line's
+     `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, makeblastdb's
+     log, `makembindex`, `makeprofiledb`, and version/help/argument errors stops with exit 0 or
+     ignores the closed pipe (exception 10); on a terminal, the command line's
      `blastn` draws a progress bar on the standard error while it searches with `-num_threads` 2
      or more against two subjects or more and clears it when each batch's search ends; a standard
      error sent to a file or a pipe gets none of it (exception 11); messages use
@@ -510,7 +511,7 @@ bash tests/compare_long_sequences_debug.sh
 ```
 LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 ├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
-├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
+├── build.rs               # Writes NCBI's argument tables (build/ncbi_args.rs); wasm32 without `no-web-abi-v1`: sets `losat_web_abi_v1`; WASI targets: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
 │   ├── lib.rs             # Module list; `api` is the public surface, the others are `pub(crate)` but the hidden `web_adapter` and `main_entry`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
@@ -533,8 +534,8 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
-│   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
-│   ├── web_v1_argv.rs     # ABI v1's frozen clap builder (wasm32 and its native tests), the only clap left: a new option reads `Args` in its type's `from_args`
+│   ├── web_api.rs         # wasm32 only, not the WASI command line (`no-web-abi-v1`): Wasm ABI v1 exports and their dispatch to the programs
+│   ├── web_v1_argv.rs     # ABI v1's frozen clap builder (wasm32 builds except the WASI command line, and its native tests), the only clap left: a new option reads `Args` in its type's `from_args`
 │   ├── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 │   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each named on its own
 └── tests/

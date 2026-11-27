@@ -40,6 +40,13 @@ import {
 } from '../../../packages/losat/src/infra/reactor/abi';
 import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
 
+/** The adapter's reading of an argv (web/adapter/src/lib.rs `words`): NUL-separated words, the empty one after the last NUL dropped. */
+function words(argv: string): string[] {
+  const split = argv.split('\0');
+  if (split.at(-1) === '') split.pop();
+  return split;
+}
+
 /** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
 const NO_LINKS: MainLinks = {
   link: () => {
@@ -172,7 +179,7 @@ function fakeExports(
     },
     losat_web2_last_error_len: () => encode(error).length,
     losat_web2_start: (ptr: number, len: number) => {
-      log.push(`start ${text(ptr, len).split('\0').join(' ')}`);
+      log.push(`start ${words(text(ptr, len)).join(' ')}`);
       if (options.start === 'fail') {
         error = 'psiblast is not available in the browser (ABI v2)';
         return -1;
@@ -181,7 +188,7 @@ function fakeExports(
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
-      log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
+      log.push(`validate ${words(text(ptr, len)).join(' ')}`);
       if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
       if (options.validate === undefined) {
         respond('{"data_loaders":true,"parse_deflines":false}');

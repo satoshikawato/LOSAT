@@ -2,7 +2,7 @@
 // changes; what actually happened is appended to the RunRecord.
 import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, SequenceKind, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
-import type { ToolId, WindowMaskerStage } from './tools';
+import type { ToolId, ToolStage } from './tools';
 
 export type RunStatus =
   | 'queued'
@@ -248,6 +248,7 @@ export type ToolFileOrigin =
   | { readonly kind: 'inflated'; readonly from: string }
   | { readonly kind: 'combined'; readonly parts: readonly string[] }
   | { readonly kind: 'made'; readonly runNumber: number }
+  | { readonly kind: 'archive'; readonly runNumber: number }
   | { readonly kind: 'saved'; readonly taxid: number };
 
 /** Metadata of one file placed in a tool run's working directory (for Run details). */
@@ -276,7 +277,7 @@ export interface ToolRunSnapshot {
   /** 1-based position in this working session, shared with search runs. */
   readonly number: number;
   readonly tool: ToolId;
-  readonly stage: WindowMaskerStage;
+  readonly stage: ToolStage;
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryEntry[];
   readonly prints?: PrintedKind;

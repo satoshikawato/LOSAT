@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::ostream::CutBuffer;
 use crate::seqid::BlastDefline;
 
 fn defline(ids: Vec<ParsedSeqId>, title: Option<&str>) -> BlastDefline {
@@ -120,6 +121,46 @@ fn a_front_line_without_ids_writes_no_short_header() {
 }
 
 #[test]
+fn sequence_lines_are_the_width_with_a_shorter_last() {
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTACGT", 3, &[], &mut out);
+    assert_eq!(out.bytes, b"ACG\nTAC\nGT\n");
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTAC", 3, &[], &mut out);
+    assert_eq!(out.bytes, b"ACG\nTAC\n");
+}
+
+// NCBI 2.17.0 blastdbcmd `-line_length 1000` and 10000 (line RG T8 survey `out/wpat/`, probe
+// `T/t8/impl/probe/u/`): a line across letter 1024 (and each multiple) is two insertions.
+#[test]
+fn a_line_across_the_iterator_cache_is_two_insertions() {
+    let letters = vec![b'A'; 2100];
+    let mut out = CutBuffer::default();
+    write_sequence(&letters, 1000, &[], &mut out);
+    assert_eq!(
+        out_ends(&out),
+        [1000, 1001, 1025, 2001, 2002, 2050, 2102, 2103]
+    );
+}
+
+// A mask's start and end split the line there (`x_GetMaskingStates`).
+#[test]
+fn mask_changes_split_the_lines() {
+    let changes = mask_changes(&[(2, 4), (4, 6)], None, 10, false);
+    assert_eq!(changes, [2, 6]);
+    assert_eq!(mask_changes(&[(2, 4)], None, 10, true), [6, 8]);
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTACGTAC", 5, &changes, &mut out);
+    assert_eq!(out.bytes, b"ACGTA\nCGTAC\n");
+    assert_eq!(out_ends(&out), [2, 5, 6, 7, 11, 12]);
+}
+
+/// The ends of the insertions and `put`s of `out`.
+fn out_ends(out: &CutBuffer) -> Vec<usize> {
+    out.cuts.ends()
+}
+
+#[test]
 fn split_keeps_empty_pieces() {
     assert_eq!(
         split_by_pattern(b"a >b > >c", b" >"),
@@ -127,4 +168,65 @@ fn split_keeps_empty_pieces() {
     );
     assert_eq!(split_by_pattern(b" >x", b" >"), [&b""[..], b"x"]);
     assert_eq!(split_by_pattern(b"", b" >"), [&b""[..]]);
+}
+
+#[derive(Clone, Default)]
+struct WriteLog(std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+
+impl std::io::Write for WriteLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        let mut combined = Vec::new();
+        for buf in bufs {
+            combined.extend_from_slice(buf);
+        }
+        let len = combined.len();
+        self.0.lock().unwrap().push(combined);
+        Ok(len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn write_sequence_direct_matches_cut_buffer_write_boundaries() {
+    use crate::report::ostream::{with_stream_inserter, CutBuffer, ReportStream};
+    for width in [60u32, 80, 1000] {
+        for len in [0usize, 1, 79, 80, 1500, 4050, 8100, 8190, 16_500] {
+            let letters: Vec<u8> = (0..len).map(|i| b"ACGT"[i % 4]).collect();
+            let changes = if len > 100 {
+                vec![50, 120, len.min(4090)]
+            } else {
+                Vec::new()
+            };
+            let mut cuts = CutBuffer::default();
+            cuts.insertion(b">hdr\n");
+            write_sequence(&letters, width, &changes, &mut cuts);
+            let ref_log = WriteLog::default();
+            let mut ref_stream = ReportStream::tool_file(Box::new(ref_log.clone()), "");
+            cuts.write_to(&mut ref_stream).unwrap();
+            ref_stream.finish_tool().unwrap();
+
+            let dir_log = WriteLog::default();
+            let mut dir_stream = ReportStream::tool_file(Box::new(dir_log.clone()), "");
+            with_stream_inserter(&mut dir_stream, &mut |ins| {
+                ins.insert(b">hdr\n")?;
+                write_sequence_direct(&letters, width, || changes.clone(), ins)
+            })
+            .unwrap();
+            dir_stream.finish_tool().unwrap();
+
+            assert_eq!(
+                *dir_log.0.lock().unwrap(),
+                *ref_log.0.lock().unwrap(),
+                "width {width} len {len}"
+            );
+        }
+    }
 }

@@ -284,17 +284,6 @@ impl<'a> SeenFrom<'a> {
         self.seen.is_some()
     }
 
-    /// The subject index by which a check of the rows of the call's query `query` takes the
-    /// subject `index` of the database sequence `ordinal` (`None`: not a database's): `SEEN_ROW`
-    /// where the scope finds a query for it, whose lookups do not fail, else `index`.
-    #[inline]
-    pub fn row(&self, query: usize, ordinal: Option<u32>, index: usize) -> usize {
-        match ordinal {
-            Some(ordinal) if self.of(query, ordinal).is_some() => SEEN_ROW,
-            _ => index,
-        }
-    }
-
     /// Whether every reporting query (in the call's numbering) in `queries` resolves `ordinal` to
     /// a noted query Bioseq (`QueryBioseqs::hides_ordinal`).
     pub fn hides_ordinal(&self, queries: impl IntoIterator<Item = usize>, ordinal: u32) -> bool {
@@ -334,11 +323,6 @@ pub fn ncbi_frame(plus: bool, start1: i32, bioseq_len: usize) -> i32 {
 pub fn tblastx_qseq_throws(plus: bool, start0: usize, end: usize, seen_len: usize) -> bool {
     plus && start0 < seen_len && seen_len < end && !(seen_len - start0).is_multiple_of(3)
 }
-
-/// The subject index of a row whose subject the scope finds as a query in a check of the rows of
-/// a report (`report::tabular::check_failed_lookups`, [`SeenFrom::row`]): no lookup of the
-/// query's Bioseq fails, so the check's `failure` gives `None` for it.
-pub(crate) const SEEN_ROW: usize = usize::MAX;
 
 /// Whether `program`'s tabular report of `spec` (`None`: the default fields; the organism report
 /// too) shows NCBI's bytes for a database sequence that the scope finds as a query:

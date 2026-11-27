@@ -83,3 +83,11 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
     `negzero`); aliases `n`, `r_head`, `r_tail`, `r_pre`; lists none/GI lists; 1, 2 and 4
     threads. NCBI stops the scan at an OID of the empty file that starts at 0 and crashes
     (`SIGSEGV`) at any other start; LOSAT matches all 192 rows (52 refused, 140 identical).
+- `p2db` (RG-D2 tail R2, review finding 8, 2026-11-28): two protein volumes `pv0` (GIs
+  7001-7003) and `pv1` (7004-7006), made with NCBI `makeblastdb`; the test
+  `nonasc_protein_scan_stop_before_empty_or_missing_sequence_file` adds the alias `p` and a GI
+  list. `p2_<case>_t<T>.{out,err,rc}`: NCBI `blastp` at 1 and 2 threads. `gapstop`: OID 1 of `pv0`
+  of length -1 (its end set to its start), left out by the list before the block of `pv1`; with
+  `pv1.psq` empty or missing, NCBI's 2-thread scan stops before `pv1` and completes. `v1gap`: the
+  negative OID is OID 1 of `pv1`, after its first OID (a missing file is NCBI's memory map error).
+  `emptyv1_skipfirst`: no stop before the empty `pv1.psq` (`SIGSEGV`). LOSAT matches every row.

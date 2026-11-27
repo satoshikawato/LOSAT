@@ -55,8 +55,7 @@ use super::super::extension::{
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
-    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, ReevalParams,
+    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
 };
 use super::super::hsp::{
     adjust_blastn_offsets, evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
@@ -429,11 +428,12 @@ fn calculate_blastn_context_statistics(
     } else {
         raw_score
     };
-    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        -1.0
-    } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
-    };
+    let e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+        evalue_score,
+        params,
+        log_k,
+        eff_searchsp as f64,
+    );
     (bit_score, e_value)
 }
 
@@ -6560,6 +6560,16 @@ fn open_search_database(
                 crate::report::db_subject::FormatThrow::record_keeps_scope(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
+            );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let word_size =
+                crate::algorithm::blastn::coordination::determine_effective_word_size(args);
+            let database = database.with_mt_mode(
+                args.num_threads,
+                args.mt_mode,
+                word_size,
+                Some(args.query.as_path()),
             );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),

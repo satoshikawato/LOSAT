@@ -270,16 +270,17 @@ fn the_cut_does_not_act_at_one_thread() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// A damaged database (its `.psq` cut short by 500 bytes) through the command line: the search fails
-// with the error of the one-thread order, so standard error and the exit code are the same at one
-// thread and, with the switch off and on, at 4 threads. The unit test compares
-// the texts of the errors; this one also pins their type, which the message of the error maps to.
+// A damaged database (its `.psq` cut short by 5000 bytes, past the last 4 KiB page) through the
+// command line: the search fails with the error of the one-thread order, so standard error and the
+// exit code are the same at one thread and, with the switch off and on, at 4 threads. The unit test
+// compares the texts of the errors; this one also pins their type, which the message of the error
+// maps to.
 #[test]
 fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
     let db = subject_database("damaged");
     let psq = db.with_extension("psq");
     let bytes = std::fs::read(&psq).unwrap();
-    std::fs::write(&psq, &bytes[..bytes.len() - 500]).unwrap();
+    std::fs::write(&psq, &bytes[..bytes.len() - 5000]).unwrap();
     let one_thread = blastp_any_exit("blastp", &db, 1, &[], &[], "6");
     assert!(
         one_thread.code.is_some_and(|code| code != 0),

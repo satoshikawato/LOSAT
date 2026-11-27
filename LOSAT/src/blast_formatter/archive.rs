@@ -1,9 +1,11 @@
 //! blast_formatter's run over the objects of a BLAST archive (`-archive`): NCBI's
 //! `CBlastFormatterApp::Run` with `CRemoteBlast::LoadFromArchive` and `PrintFormattedOutput`
 //! (c++/src/app/blast/blast_formatter.cpp:329-531) over the archive reader
-//! (`report::archive::read`), and the formats 8, 9 and 12, which write each query's Seq-aligns as
+//! (`report::archive::read`): the formats 8, 9 and 12, which write each query's Seq-aligns as
 //! the archive holds them, cut to the hit list size, inside the one Seq-annot wrapper of the
-//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG).
+//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG), and
+//! the format 11, which writes the archive again with the search programs' writer
+//! (`archive_out`, `report::archive::writer::write_archive_document`).
 //!
 //! The object loop keeps what NCBI's `CRemoteBlast` keeps from one object to the next: the
 //! options of the first search object (`GetSearchOptions` builds them once: the program, the
@@ -19,6 +21,7 @@ use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use super::archive_out;
 use super::formatting::{extract_formatting, sam_check};
 use super::refusals::{self, Refusal};
 use super::search_program::{blast_type, program_type};
@@ -35,8 +38,10 @@ use crate::cli::{command_line_argument_error, NativeError};
 use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::archive::fields;
+use crate::report::archive::options::{ParamValue, RemoteOptions};
 use crate::report::archive::read::options::{archive_request, BuiltOptions};
-use crate::report::archive::read::request::{Queries, Subject};
+use crate::report::archive::read::request::{ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
@@ -85,8 +90,10 @@ pub(crate) fn format_archive(
             posts: Posts::default(),
         },
         search_options: None,
+        algorithm_options: None,
         hitlist: 0,
         database: None,
+        psi_step: None,
         opened: None,
         buf: Vec::new(),
     };
@@ -105,14 +112,21 @@ struct Run<'r, 'o> {
     /// The options of the first search object (`m_CBOH`, `m_TaxidList`,
     /// `m_DbFilteringAlgorithmId`, `m_Task`), which every later object is formatted with.
     search_options: Option<BuiltOptions>,
+    /// The remote options of `m_CBOH` (`-outfmt 11`), built once on the first search object
+    /// (`RemoteOptions::built`, `GetSearchOptions`) and set across objects (`HitlistSize`, RPS
+    /// `MatrixName`).
+    algorithm_options: Option<RemoteOptions>,
     /// The options' hit list size: the first object's, then what `ExtractAlgorithmOptions` set
     /// for the last formatted object (`opts.SetHitlistSize` on the kept options).
     hitlist: i32,
     /// `m_Dbs`: the name and residue type of the database of the last database object.
     database: Option<(Vec<u8>, bool)>,
+    /// `Web_StepNumber` of `m_FormatOpts` (`remote_blast.cpp:1733-1737`), updated whenever a
+    /// search object has `service == "psi"`; `Err(())` when the value is not an `integer`.
+    psi_step: Option<Result<i32, ()>>,
     /// The database opened for an earlier object (`opened_database`).
     opened: Option<OpenedDatabase>,
-    /// The encoder's buffer of one Seq-annot.
+    /// The encoder's buffer of one output document.
     buf: Vec<u8>,
 }
 
@@ -122,7 +136,7 @@ struct Run<'r, 'o> {
 /// object's formatter sets to throw while it lives, `begin_object`, `end_object`), or the
 /// caller's writer of a library run's or LOSAT Web's standard output, the tools' caller stream
 /// that throws (`files::formatter_standard_output`).
-struct Output<'o> {
+pub(super) struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
     /// The run's files, where `-out` is opened (`OpenFiles::create`).
@@ -317,23 +331,24 @@ impl<'o> Output<'o> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:689-698
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1051-1063
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:310-323
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
-    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
-    /// takes the format, then the Seq-annot), as the search programs insert theirs
-    /// (`report::serial::seqalign::write_query_to`): one object of NCBI's object stream
-    /// (`Site::Serial`), its bytes (`write_streamed`, in parts of LOSAT's), then
-    /// `~CObjectOStream`'s flush. Where a device write fails, NCBI's pieces of the object
-    /// (`document_pieces`) decide NCBI's end: `Close`'s 802.4 and the end of the run, or the 802.4
-    /// alone where only `Close`'s flush fails (the run goes on with the failed stream, whose next
-    /// formatter throws); on standard output tied to `cerr`, `std::terminate`.
-    fn write_annot(
+    /// The insertion of one serial object (a query's Seq-annot, `write_annot`, or the
+    /// Blast4-archive of the format 11, `archive_out::write_archive`) into the stream, as the
+    /// search programs insert theirs (`report::serial::seqalign::write_query_to`,
+    /// `report::archive::writer::write_archive`): one object of NCBI's object stream
+    /// (`Site::Serial`), its bytes (`write`, given the stream and the diagnostics, in parts of
+    /// LOSAT's), then `~CObjectOStream`'s flush. Where a device write fails, NCBI's pieces of the
+    /// object (`pieces`, a second encoding through `Traced`) decide NCBI's end: `Close`'s 802.4
+    /// and the end of the run, or the 802.4 alone where only `Close`'s flush fails (the run goes
+    /// on with the failed stream, whose next formatter throws); on standard output tied to
+    /// `cerr`, `std::terminate`.
+    pub(super) fn write_object(
         &mut self,
-        format: SerialFormat,
-        desc: AnnotDesc<'_>,
-        aligns: &[V<'_>],
-        buf: &mut Vec<u8>,
         diag: &mut Diag,
+        write: impl FnOnce(&mut dyn Write, &mut dyn Write) -> anyhow::Result<()>,
+        pieces: impl FnOnce() -> Vec<usize>,
     ) -> anyhow::Result<()> {
         let report = self.report(diag);
         let writer = self.writer();
@@ -342,24 +357,40 @@ impl<'o> Output<'o> {
             diag: &mut *diag,
             report: report.as_ref(),
         };
-        let written = write_streamed(format, desc, aligns, buf, &mut *writer, &mut diagnostics)
-            .and_then(|()| Ok(writer.ncbi_flush()?));
+        let written = write(&mut *writer, &mut diagnostics).and_then(|()| Ok(writer.ncbi_flush()?));
         let ended = match written {
             Err(error) if is_undecided(&error) => {
-                let document = ArchiveDocument {
-                    desc,
-                    aligns,
-                    spill: None,
-                };
-                writer
-                    .resolve_object(&document_pieces(format, &document))
-                    .map_err(Into::into)
+                writer.resolve_object(&pieces()).map_err(Into::into)
             }
             written => written,
         }
         .and_then(|()| Ok(writer.site(Site::Report)?));
         self.drain_posts(diag);
         ended
+    }
+
+    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
+    /// takes the format, then the Seq-annot; `write_object`).
+    fn write_annot(
+        &mut self,
+        format: SerialFormat,
+        desc: AnnotDesc<'_>,
+        aligns: &[V<'_>],
+        buf: &mut Vec<u8>,
+        diag: &mut Diag,
+    ) -> anyhow::Result<()> {
+        self.write_object(
+            diag,
+            |out, diagnostics| write_streamed(format, desc, aligns, buf, out, diagnostics),
+            || {
+                let document = ArchiveDocument {
+                    desc,
+                    aligns,
+                    spill: None,
+                };
+                document_pieces(format, &document)
+            },
+        )
     }
 }
 
@@ -437,9 +468,20 @@ impl<'r, 'o> Run<'r, 'o> {
         if let Subject::Database(name) = &search.request.subject {
             self.database = Some((name.clone(), search.request.db_is_protein()));
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1733-1737
+        if search.request.service == b"psi" {
+            self.psi_step = search
+                .request
+                .param(ParamSet::Format, b"Web_StepNumber")
+                .map(|param| match param.value().choice() {
+                    ("integer", value) => Ok(value.int() as i32),
+                    _ => Err(()),
+                });
+        }
         if self.search_options.is_none() {
             let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
             self.hitlist = options.hitlist_size();
+            self.algorithm_options = Some(RemoteOptions::built(&options));
             self.search_options = Some(options);
         }
         let printed = self.print(&search, diag);
@@ -489,10 +531,12 @@ impl<'r, 'o> Run<'r, 'o> {
     /// warnings), the check of SAM, the queries (`check_queries`), the database or the subject
     /// sequences (`subject_database`), the formatter's constructor (`Output::begin_object`), the
     /// check of the XInclude formats (13 and 14 without `-out`); the output formats that LOSAT
-    /// does not write are refused there, after NCBI's errors that come before any output. Then
-    /// the results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
-    /// variable, and the Seq-annot of each query that has alignments (`x_PrintStructuredReport`,
-    /// `Output::write_annot`).
+    /// does not write are refused there, after NCBI's errors that come before any output. The
+    /// format 11 then writes the archive of the object with the hit list size set in its algorithm
+    /// options (`CBlastFormat::WriteArchive`, `archive_out::write_archive`); the others read the
+    /// results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
+    /// variable, and write the Seq-annot of each query that has alignments
+    /// (`x_PrintStructuredReport`, `Output::write_annot`).
     fn print(&mut self, search: &Search, diag: &mut Diag) -> anyhow::Result<()> {
         self.output.open(&self.options.out, diag.is_cerr())?;
         // A negative hit list size (an archive that NCBI's searches do not write, probes
@@ -500,7 +544,8 @@ impl<'r, 'o> Run<'r, 'o> {
         // posts its warning (`hitlist_size < 5`) as for 0, which the handler reads in its place.
         let formatting = extract_formatting(self.options, self.hitlist.max(0) as usize)?;
         post_line(&mut self.output, diag, &formatting.warnings);
-        if self.hitlist >= 0 || self.options_set_hitlist(formatting.choice.number) {
+        let set_hitlist = self.options_set_hitlist(formatting.choice.number);
+        if self.hitlist >= 0 || set_hitlist {
             self.hitlist = i32::try_from(formatting.counts.hitlist_size)
                 .expect("a hit list size that the handler read from an int");
         }
@@ -538,6 +583,27 @@ impl<'r, 'o> Run<'r, 'o> {
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
             return Err(refusal.into());
+        }
+        if formatting.choice.number == output_format::ARCHIVE_FORMAT {
+            let algo = self
+                .algorithm_options
+                .as_mut()
+                .expect("the options of the first search object");
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2978
+            // `ExtractAlgorithmOptions` sets the hit list size in the options of every object
+            // (`SetHitlistSize`), which only this format writes.
+            algo.set(fields::HITLIST_SIZE, ParamValue::Integer(self.hitlist));
+            let database = self.database.as_ref().map(|(name, _)| name.as_slice());
+            return archive_out::write_archive(
+                search,
+                search_options,
+                algo,
+                database,
+                self.psi_step,
+                &mut self.output,
+                &mut self.buf,
+                diag,
+            );
         }
         let format = match formatting.choice.number {
             output_format::ASN_TEXT => SerialFormat::AsnText,
@@ -637,7 +703,7 @@ impl SeqAnnotDocument for ArchiveDocument<'_> {
 /// formats keep the last `SPILL_LAG` bytes back (`lag`): a Seq-annot that their plain encoder
 /// stops on is written again through `Traced` behind the `written` bytes (`write_streamed`), and
 /// NCBI's buffer (4096 bytes) had written more than those when it posted the first replaced byte.
-struct Spill<'w> {
+pub(super) struct Spill<'w> {
     out: &'w mut dyn Write,
     lag: usize,
     /// The final bytes held back.
@@ -649,12 +715,26 @@ struct Spill<'w> {
 }
 
 /// The bytes that `Spill` keeps back for the ASN.1 text and binary formats.
-const SPILL_LAG: usize = 2 * crate::cli::NCBI_BUFSIZ;
+pub(super) const SPILL_LAG: usize = 2 * crate::cli::NCBI_BUFSIZ;
 
-impl Spill<'_> {
-    /// After an element of the Seq-annot's list: the encoder's final bytes handed on, once it
+impl<'w> Spill<'w> {
+    pub(super) fn new(out: &'w mut dyn Write, lag: usize) -> Self {
+        Spill {
+            out,
+            lag,
+            held: Vec::new(),
+            written: 0,
+            error: None,
+        }
+    }
+
+    pub(super) fn into_parts(self) -> (Vec<u8>, usize, Option<std::io::Error>) {
+        (self.held, self.written, self.error)
+    }
+
+    /// After an element of a long list: the encoder's final bytes handed on, once it
     /// holds `FLUSH_BYTES` and has met no error.
-    fn after_element<E: Encoder>(&mut self, enc: &mut E) {
+    pub(super) fn after_element<E: Encoder>(&mut self, enc: &mut E) {
         if self.error.is_some() || enc.error().is_some() || enc.buffered() < FLUSH_BYTES {
             return;
         }
@@ -700,9 +780,9 @@ impl Write for Counted<'_> {
 }
 
 /// A writer that drops the first `skip` bytes it is given (those that `Spill` handed on).
-struct SkipWriter<'w> {
-    inner: &'w mut dyn Write,
-    skip: usize,
+pub(super) struct SkipWriter<'w> {
+    pub(super) inner: &'w mut dyn Write,
+    pub(super) skip: usize,
 }
 
 impl Write for SkipWriter<'_> {
@@ -1052,7 +1132,7 @@ fn remote_database(error: &SeqDbError, name: &str) -> anyhow::Error {
 /// `Invalid input format for BLAST Archive.`: the `CInputException` that `Run` throws for an
 /// input of another format and for a `CSerialException` of the loop (`BLAST query/options
 /// error`, exit status 1).
-fn invalid_archive() -> anyhow::Error {
+pub(super) fn invalid_archive() -> anyhow::Error {
     options_error_bytes(b"Invalid input format for BLAST Archive.")
 }
 
@@ -1074,7 +1154,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
 /// of a CHOICE or an unset member are `invalid_archive` (the loop's `catch`); an exception is
 /// `exception_error`'s; a null pointer (an element stated as `NULL` in a list too), an `abort`
 /// and a read of memory the input does not decide are refused.
-fn stop_error(stop: Stop) -> anyhow::Error {
+pub(super) fn stop_error(stop: Stop) -> anyhow::Error {
     match stop {
         Stop::Exception(exception) => exception_error(&exception),
         Stop::InvalidSelection { .. } | Stop::Unassigned { .. } => invalid_archive(),

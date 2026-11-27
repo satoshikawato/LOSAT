@@ -259,9 +259,11 @@ fn a_damaged_database_fails_the_same_batch_with_the_same_error() {
         ),
         ("remainder", Some(remainder), None),
         (
+            // Dropping ~12 bytes stays inside the last 4 KiB page, so NCBI reads zero-filled
+            // trailing ambiguity words and completes without error.
             "cut in the ambiguity data",
             Some(original[..ambiguity + 8].to_vec()),
-            Some("passes the end of the file"),
+            None,
         ),
         (
             "cut in the 2-bit data",

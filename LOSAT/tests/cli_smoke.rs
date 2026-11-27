@@ -194,8 +194,18 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .args(["-evalue", "1.7976931348623157e308"])
         .output()
         .expect("run unsupported blastp");
+    // The same run without `-use_sw_tback`, whose report starts with the same prolog.
+    let searched = clean_losat_command()
+        .args(["blastp", "-query"])
+        .arg(&query)
+        .arg("-subject")
+        .arg(&subject)
+        .args(["-comp_based_stats", "0"])
+        .output()
+        .expect("run blastp without -use_sw_tback");
     let _ = std::fs::remove_file(&query);
     let _ = std::fs::remove_file(&subject);
+    assert!(searched.status.success(), "blastp without -use_sw_tback");
     assert!(!output.status.success(), "unsupported blastp should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -203,7 +213,30 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
             && stderr.contains("not supported by LOSAT's BLASTP"),
         "unsupported error should name program, option, and reason: {stderr}"
     );
-    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+    // The refusal comes where NCBI starts the search, after the outfmt 0 prolog that BLASTP writes
+    // before its first batch (line RG item T4b-f): exactly the prolog of the run without the
+    // option (its bytes before the first query's report), and no report.
+    let prolog = prolog_of(&searched.stdout);
+    assert!(
+        prolog.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n").as_bytes()),
+        "the run without the option starts with the prolog: {}",
+        String::from_utf8_lossy(&searched.stdout)
+    );
+    assert!(
+        output.stdout == prolog,
+        "only the prolog is written: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+/// The outfmt 0 prolog of a report: its bytes before the line feeds that open the first query's
+/// report (`\n\nQuery=`).
+fn prolog_of(report: &[u8]) -> &[u8] {
+    let start = report
+        .windows(b"\n\nQuery=".len())
+        .position(|window| window == b"\n\nQuery=")
+        .expect("a report with a query");
+    &report[..start]
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (cited at

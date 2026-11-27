@@ -10,3 +10,7 @@
   written. An error that NCBI reports with a standard library message (for example
   `Error: vector::reserve` of an object that asks for more elements than a list can hold) now keeps
   the volumes written so far, as NCBI's does; they were removed before.
+- A `makeblastdb` build that LOSAT refuses now leaves no file of the build, whatever the input
+  (FASTA, ASN.1, or a database with `-input_type blastdb`) and wherever the refusal comes, the lock
+  files of the version 5 lookup tables included; before, a `-gi_mask` refusal kept its GI-mask files
+  and alias file.

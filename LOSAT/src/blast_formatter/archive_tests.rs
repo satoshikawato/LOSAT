@@ -203,7 +203,7 @@ fn a_failed_standard_output_ends_the_run_as_ncbi_s_runtime_does() {
     // The diagnostics on `cerr`: the close's post flushes `cout` through the tie, which throws
     // inside the destructor (`std::terminate`, exit status 134 in a shell; the library returns
     // -6 and the command line aborts).
-    for outfmt in ["8", "9", "12"] {
+    for outfmt in ["8", "9", "11", "12"] {
         assert_eq!(
             run_archive_full(&["-outfmt", outfmt]),
             (

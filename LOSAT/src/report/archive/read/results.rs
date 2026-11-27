@@ -36,7 +36,6 @@ pub(crate) struct MaskRange<'a> {
 /// The Karlin-Altschul parameters of the results: (lambda, K, H), ungapped and gapped, 0.0 where
 /// the reply has no block of the kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct KarlinBlocks {
     pub(crate) ungapped: (f64, f64, f64),
     pub(crate) gapped: (f64, f64, f64),
@@ -44,7 +43,6 @@ pub(crate) struct KarlinBlocks {
 
 /// What `GetResultSet` reads of the search statistics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct SearchStats {
     pub(crate) effective_search_space: i64,
     pub(crate) length_adjustment: i64,
@@ -187,7 +185,6 @@ impl Results {
     /// The Karlin-Altschul blocks as `GetResultSet` takes them: in order, a gapped block sets
     /// the gapped parameters and another the ungapped ones, until both kinds are found.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2218-2238
-    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn karlin_blocks(&self) -> KarlinBlocks {
         let mut out = KarlinBlocks::default();
         let (mut gapped, mut ungapped) = (false, false);
@@ -220,7 +217,6 @@ impl Results {
     /// has one gives it); for `rpsblast` and `rpstblastn`, the first string (as left) with
     /// "Matrix: " gives the matrix, the rest after the text is removed.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2215
-    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
         let mut out = SearchStats::default();
         let mut stats: Vec<Vec<u8>> = match self.reply().get("search-stats") {
@@ -253,7 +249,6 @@ impl Results {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
 // (`start_pos` 0 and `max_replace` 0 by default; the search was found, so the first test
 // does not return.)
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 fn replace_all(text: &mut Vec<u8>, search: &[u8]) -> bool {
     let mut from = 0;
     let mut found = false;

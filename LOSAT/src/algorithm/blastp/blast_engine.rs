@@ -2131,20 +2131,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // frequency ratios, `score_block`; the contexts' Karlin blocks, `pssm_hooks::psi_contexts`;
     // the positives, `pssm_search::traceback0::final_hsp`; and the table's gapped block): every
     // matrix of NCBI's tables but IDENTITY, which psiblast's options handler refuses as NCBI's
-    // does (`std_matrix_only`). A PSSM query (`-in_pssm`, `psi_search` before the search) keeps
-    // BLOSUM62 11/1 (line PS, PS7b).
-    if args.psi_search.is_some()
-        && (args.scoring.matrix != ScoringMatrix::Blosum62
-            || args.scoring.gap_open != 11
-            || args.scoring.gap_extend != 1)
-    {
-        bail!(
-            "the matrix {} with gap costs {}/{} is not supported by LOSAT's {program}",
-            args.matrix_name,
-            args.scoring.gap_open,
-            args.scoring.gap_extend
-        );
-    }
+    // does (`std_matrix_only`). `-in_pssm` and `-in_msa` run with every supported matrix and gap
+    // pair too (line PS, PS7b): `PssmReader` carries the options' matrix and gap costs for
+    // frequency-ratios-only PSSMs, and the search's contexts, cutoffs, traceback, redo and later
+    // rounds read them.
     // Unified P-values (a `u` after the mode, BLASTP only) run in the composition-based redo
     // (`kappa::evalue_adjust_contexts`: each query's E-values take the lengths and the search
     // space that NCBI 2.17.0 reads, the next query's of the batch; item X5 of line RG). A search

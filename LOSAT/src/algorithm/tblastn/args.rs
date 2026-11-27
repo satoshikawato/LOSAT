@@ -631,6 +631,8 @@ impl TblastnArgs {
             Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
                 path,
                 &matrix_name,
+                gap_open,
+                gap_extend,
                 self.export_search_strategy.is_some(),
                 self.db.is_some(),
                 self.archive.as_ref(),

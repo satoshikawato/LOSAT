@@ -5,6 +5,7 @@
 use super::*;
 use crate::seqdb::alias::SearchPath;
 use crate::seqdb::SeqType;
+use crate::utils::test_dir::TempDir;
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
@@ -15,7 +16,7 @@ fn root() -> PathBuf {
 /// the files looked for later), which is removed with it.
 struct Opened {
     db: SeqDb,
-    cwd: PathBuf,
+    _cwd: TempDir,
 }
 
 impl std::ops::Deref for Opened {
@@ -26,40 +27,24 @@ impl std::ops::Deref for Opened {
     }
 }
 
-impl Drop for Opened {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.cwd);
-    }
-}
-
 /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
 /// (`None`: not set), from an empty current directory.
 fn database(name: &str, taxdb: Option<&Path>) -> Opened {
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat_prepass_cwd_{}_{}",
-        crate::utils::test_dir::process_id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("prepass-cwd");
     let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
     let path = root().join("fixtures/outfmt16/db").join(name);
     let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
-    Opened { db, cwd }
+    Opened { db, _cwd: cwd }
 }
 
 fn variant(name: &str) -> PathBuf {
     root().join("seqdb/taxdb").join(name)
 }
 
-/// An empty current directory of the test `tag`, which the test removes at its end.
-fn empty_cwd(tag: &str) -> PathBuf {
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat_{tag}_cwd_{}",
-        crate::utils::test_dir::process_id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
-    cwd
+/// An empty current directory of the test `tag`, of its own for each call, which is removed
+/// with what it holds when it is dropped, at the end of the test, passed or failed.
+fn empty_cwd(tag: &str) -> TempDir {
+    TempDir::unique(&format!("{tag}-cwd"))
 }
 
 /// The subject of each sequence of a database with parsed Seq-ids, by ordinal id.
@@ -111,7 +96,6 @@ fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
             (got, _) => panic!("{name}: {got:?}"),
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1447-1455 (quoted
@@ -130,10 +114,9 @@ fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
 fn a_later_volume_whose_isam_does_not_open_is_not_read_where_the_lookup_returns_before_it() {
     use crate::report::db_subject::FoundInstead;
     use std::os::unix::fs::PermissionsExt;
-    // Made empty: a file of mode 000 left by a run before cannot be copied over.
+    // A directory of its own, made empty: a file of mode 000 left by a run before cannot be
+    // copied over.
     let cwd = empty_cwd("v4late");
-    std::fs::remove_dir_all(&cwd).unwrap();
-    std::fs::create_dir_all(&cwd).unwrap();
     let source = root().join("db_search/multidb");
     // `l5a`: a copy of l5e, whose name sorts before l5c's (the volumes of a list are in the order
     // of their names, as NCBI's).
@@ -155,7 +138,6 @@ fn a_later_volume_whose_isam_does_not_open_is_not_read_where_the_lookup_returns_
     }
     if std::fs::File::open(cwd.join("l5e.psi")).is_ok() {
         // A user that reads every file (root): nothing fails to open.
-        std::fs::remove_dir_all(&cwd).unwrap();
         return;
     }
     let open = |list: &str, taxdb: Option<&str>| {
@@ -249,7 +231,6 @@ fn a_later_volume_whose_isam_does_not_open_is_not_read_where_the_lookup_returns_
             assert_eq!(blob, Some(ordinal), "{taxdb} {ordinal}");
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -376,7 +357,6 @@ fn the_same_record_with_other_taxids_is_shown_apart_by_the_reports_of_taxids_onl
             ),
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -481,7 +461,6 @@ fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
         }
     }
     assert!(differ.is_empty(), "{}", differ.join("\n"));
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -616,7 +595,6 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     };
     assert_eq!(prefetch(false), b"");
     assert_eq!(prefetch(true), warning);
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -626,12 +604,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     // which a version 4 database does not look up (no Bioseq), 0 `gb|AF000070.1|`; every
     // sequence with taxid 99990, whose lookup in `offset_last_past_end` writes the offset
     // error.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-batch-prefetch-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("batch-prefetch");
     let taxdb = root().join("seqdb/taxdb/offset_last_past_end");
     let open = |name: &str, taxdb: Option<&Path>| {
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
@@ -792,7 +765,6 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
         &stop_queries(0),
     );
     assert_eq!(text(plus.unwrap()), "");
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -800,12 +772,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // Line DBID loadord (tests/db_search/make_multidb.py --loadord-only): `ldp` holds
     // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|`; the unparsed `qp1` is
     // `gnl|BL_ORD_ID|0` beside it in `lda ldp`, `|1` in `ldb ldp` and `|2` in `ldp ldu`.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-load-order-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("load-order");
     let open = |names: &[&str]| {
         let search = SearchPath::new(&cwd, None, None);
         let list: Vec<String> = names
@@ -1204,7 +1171,6 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     assert!(!scope_refuses(&|| QueryScope::of_bioseq_ids(&[local(
         "Query_01"
     )])));
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 // Review 3 of line DBID loadord, H1 (its kit's `R.*` cases): NCBI's loads end at the first
@@ -1218,12 +1184,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
     // `multidb` (make_multidb.py --loadord-only): `lda` (no accession table) beside `ldp`'s
     // `ref|NP_000002.1|` (packed 2) and `ref|NP_000900.1|` (packed 900), `ldq`'s
     // `lcl|Query_1` (not packed), `ldg`'s `gi|1|ref|NP_000002.1|` and the unparsed `ldu`.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-two-stops-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("two-stops");
     let open = |names: &[&str], taxdb: Option<&Path>| {
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
@@ -1419,7 +1380,6 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         ));
         assert!(why.contains("the run loaded that sequence"), "{why}");
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-758 (cited at
@@ -1441,12 +1401,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
     // `ldp`'s stopping `ref|NP_000002.1|`), `lda`'s OID 0 (`|0`, after it), `ldu`'s OID 2
     // (`|2`, the same packed number), `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the
     // stopping accession) and `lds`'s stopping `ref|NP_000003.1|`.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-e2-placed-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("e2-placed");
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
     let open = |names: &[&str]| {
         let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
@@ -1684,7 +1639,6 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         )),
         (1, format!("{open_text}{error}"))
     );
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 // Review 6 of line DBID loadord (its kit's `n6.ps.H.*` and `n6.*.K.cut.hold.5`): the run's
@@ -1701,12 +1655,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
     // `multidb` (make_multidb.py --loadord-only): `ldb`'s unparsed OID 1 (`gnl|BL_ORD_ID|1`),
     // `ldd`'s `gi|9000|ref|NP_000002.1|` (a holder of the stopping accession), `ldp`'s
     // stopping `ref|NP_000002.1|` (no accession table); taxid 9606, BLASTDB=bad_magic.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-record-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("record");
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
     let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
     let list: Vec<String> = ["ldb", "ldd", "ldp"]
@@ -1858,7 +1807,6 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
     refused(stop(&record(&both, Some(1), uncut), &stop_queries(1)));
     // A cut does not touch a batch whose prefetch ran: it loaded both before the report.
     assert_eq!(record(&both, None, cuts), [1, holder]);
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// The batch whose stop names the query `query` and whose scope holds no query (a run whose
@@ -1873,12 +1821,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
     // table), whose parsed Seq-ids' lookups fail with NCBI's `DB contains no accession
     // info.`, and `taxfilter/tfu_n` (-input_type blastdb: the table of its ordinal ids; taxids
     // 7955 and 9606), whose loads look the taxonomy up.
-    let cwd = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-prefetch-stop-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = TempDir::unique("prefetch-stop");
     let open = |names: &[&str], taxdb: Option<&Path>| {
         let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
@@ -2092,7 +2035,6 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             "{refused}"
         );
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -2179,7 +2121,6 @@ fn a_weak_match_is_shown_where_ncbi_reads_the_holder_one_by_one_before() {
             }
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -2244,7 +2185,6 @@ fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
             crate::seqdb::SequenceHeader::Ordinal(_)
         ));
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -2372,7 +2312,6 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
             assert_eq!(refusal(false), None, "{taxdb:?}");
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -2396,11 +2335,7 @@ fn a_record_past_the_last_page_holds_where_a_written_name_comes_from_past_it() {
     // tabs are inside the mapping (its scientific name too): nothing holds. From 4096 the
     // record lies wholly past the mapping: its names, which XML2 and JSON write, hold (the
     // check does not tell the formats apart: a run whose loads write no name holds too).
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat_prepass_btd_{}",
-        crate::utils::test_dir::process_id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::unique("prepass-btd");
     std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
     let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
     let next = 24 + 8 * 4 + 4;
@@ -2417,7 +2352,6 @@ fn a_record_past_the_last_page_holds_where_a_written_name_comes_from_past_it() {
         // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
         assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir))));
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -2605,7 +2539,6 @@ fn a_sequential_run_follows_the_volume_cache_at_every_read() {
         run.lookup(&db, 9606, &mut Vec::new()),
         Ok(crate::seqdb::taxdb::TaxLookup::Named(_))
     ));
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `PrefetchTexts::of`, the one producer of what a run's lookups can write, for the search's
@@ -2649,7 +2582,6 @@ fn the_search_and_the_readers_refuse_a_null_mapping_whose_last_lookup_faults() {
     // The OIDs 0 and 1 have no taxid; OID 2 is 9606, whose record (68..105) faults.
     assert_eq!(first_refused, Some(2));
     assert_eq!(readers.texts.get(), Some(&want));
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `prefetch_messages`: the open texts at the run's first lookup, a volume's lookup once per
@@ -2701,7 +2633,6 @@ fn the_prefetch_writes_each_text_once_without_a_cache_collision() {
             assert_eq!(String::from_utf8(text).unwrap(), expected, "{order:?}");
         }
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `prefetch_messages` (the reads of a report, in their order): a run whose volume holds the offset
@@ -2744,7 +2675,6 @@ fn a_cache_collision_with_the_offset_error_follows_the_slot_through_the_reads() 
     // The two volumes of tm_2vol hold 99990 alone.
     let db = db_search("tm_2vol", Some(&variant("offset_last_past_end")), &cwd);
     assert!(!TaxdbRun::default().cache_may_refuse(&db));
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `unordered_boundary_misses` against every order of up to seven loads of the four kinds, from a
@@ -2873,7 +2803,6 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
             "{name}"
         );
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `read_reported_taxonomy` (XML2 and JSON) makes no load of a reported subject: those formats
@@ -2936,7 +2865,6 @@ fn the_xml2_lookups_leave_the_cache_slot_to_the_loads() {
         );
         assert!(result.is_ok(), "{ranks:?}");
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `VolumeLookups::offset_slot`: the slot of the offset error's taxid L = 99990 (slot 150) of
@@ -3363,7 +3291,6 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
         loads("tm_cache151", &[0, 1, 0, 2], Some(2)).unwrap(),
         offset
     );
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -3447,7 +3374,6 @@ fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
         assert_eq!(names(&db, &holders.loader), loader, "{list}: loader");
         assert_eq!(names(&db, &holders.scope), scope, "{list}: scope");
     }
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -3507,7 +3433,6 @@ fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
             && refused.contains("may load before or not at all"),
         "{refused}"
     );
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// NCBI's `CATCH_ALL` takes the `CEofException` of a record that ends before its read enters
@@ -3850,7 +3775,6 @@ fn scope_lifetime_audit_invariants_hold() {
         assert!(lookups.slot_blobs[&0][0].in_scope);
     }
     assert!(run_batch(1).text().is_empty());
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// Secondary XML2/JSON (`separate_xml2 = true`) shares the run's taxonomy handle, open state,
@@ -3960,7 +3884,6 @@ fn separate_xml2_shares_open_and_non_collision_state_and_refuses_collision() {
     );
     // Primary `volume_lookups` still keeps its scope from batch 1 -> primary batch 2 writes nothing.
     assert!(primary_batch(1).text().is_empty());
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 /// `prefetch_slot_plan` pins only the prefix of segments preceding the first empty
@@ -4069,8 +3992,6 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     );
     prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, "BLASTP").unwrap();
     assert!(!pinned_blob(&run_d, 0));
-
-    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -4130,6 +4051,4 @@ fn one_by_one_query_reads_stops_at_throw_and_collapses_joined_copies() {
         one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, false, false),
         vec![0, 1, 2, 3]
     );
-
-    std::fs::remove_dir_all(&cwd).unwrap();
 }

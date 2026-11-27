@@ -52,7 +52,8 @@
 //!   so a rank among one block's sequences writes the same bytes as one among all. A query's
 //!   warnings come before its part in both (`QueryWarnings`, the block's reader messages).
 //! - what is not per query: the outfmt 0 prolog (the program, the `Database:` header of the
-//!   subject set or the database: fixed inputs) is written by the first block only
+//!   subject set or the database: fixed inputs) is written before the search, as on the reference
+//!   path (`write_pairwise_prologs`), and the other formats' prologs by the first block only
 //!   (`BlastpReports::x_prolog`); the outfmt 0 epilog (the database lines, the gapped
 //!   Karlin-Altschul and Gumbel blocks of the scoring and the database length, the options: fixed
 //!   inputs) by the last block only, as before; outfmt 7's last line counts the queries formatted
@@ -241,11 +242,10 @@
 //!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
 //!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
 //!   the sinks are the caller's writers, unbuffered. Several outputs need writers: the search of
-//!   all queries writes each output's whole report in turn, so two outputs on standard output would
-//!   get each block's formats in turn, two outputs to one file would write over each other, and a
-//!   file that cannot be created would stop the run after the first block's part of the outputs
-//!   before it (`x_query_block_plan`); one output may also be standard output or a file, as
-//!   above. The checks of the refusals that depend on the hits are made for every kind of report
+//!   all queries writes each output's whole report in turn, so two outputs on standard output or to
+//!   one file (one handle, `KeptFile`) would get each block's formats in turn, and a file that
+//!   cannot be created would stop the run after the first block's part of the outputs before it
+//!   (`x_query_block_plan`); one output may also be standard output or a file, as above. The checks of the refusals that depend on the hits are made for every kind of report
 //!   among the outputs before the first block. The warnings go with the first
 //!   output, query by query, in every block.
 //! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
@@ -305,10 +305,8 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-56
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
 
-use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::ops::Range;
-use std::path::Path;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
@@ -538,15 +536,11 @@ pub(crate) fn x_query_blocks(
     Some(blocks)
 }
 
-/// The output of the block search: the one sink of the format, opened once for all blocks.
-/// A file is created at its first write or flush, which the first block's report makes, as
-/// the reference path creates it when its report is written.
+/// The output of the block search: the one sink of the format, opened once for all blocks. A
+/// library `File` sink is its run's file (`OutputSink::Kept`, `api::local_blast::KeptFile`),
+/// created at its first write or flush: the prolog before the search or the first block's report.
 pub(crate) enum XBlockSink<'a> {
     Stdout(BufWriter<io::Stdout>),
-    File {
-        path: &'a Path,
-        file: Option<BufWriter<File>>,
-    },
     Writer(&'a mut (dyn Write + Send)),
     /// The command line's report stream, which every block's output writes as NCBI's
     /// (`OutputSink::Report`: its regions and flushes).
@@ -560,12 +554,15 @@ impl<'a> XBlockSink<'a> {
     pub(crate) fn new(sink: &'a mut OutputSink<'_>) -> Self {
         match sink {
             OutputSink::Stdout => Self::Stdout(BufWriter::new(io::stdout())),
-            OutputSink::File(path) => Self::File { path, file: None },
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
                 Self::Writer(&mut **writer)
             }
             OutputSink::Out(out) => Self::Out(out),
             OutputSink::Report(stream) => Self::Report(stream),
+            OutputSink::Kept(kept) => Self::Writer(&mut **kept),
+            // The block search runs inside its run (`ReportOutputs::run_records`), which gives it
+            // every `File` sink as `Kept`.
+            OutputSink::File(_) => unreachable!("a run sees a File sink as Kept (run_records)"),
         }
     }
 
@@ -583,29 +580,23 @@ impl<'a> XBlockSink<'a> {
         }
     }
 
-    fn writer(&mut self) -> io::Result<&mut dyn Write> {
-        Ok(match self {
+    fn writer(&mut self) -> &mut dyn Write {
+        match self {
             Self::Stdout(stdout) => stdout,
-            Self::File { path, file } => {
-                if file.is_none() {
-                    *file = Some(BufWriter::new(File::create(*path)?));
-                }
-                file.as_mut().expect("file created above")
-            }
             Self::Writer(writer) => &mut **writer,
             Self::Report(stream) => &mut **stream,
             Self::Out(out) => &mut **out,
-        })
+        }
     }
 }
 
 impl Write for XBlockSink<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.writer()?.write(buf)
+        self.writer().write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.writer()?.flush()
+        self.writer().flush()
     }
 }
 

@@ -1451,11 +1451,21 @@ fn run_local_formats(
     )
 }
 
-/// The outfmt 0 prologs of a run that fails in its first query batch: NCBI writes the prolog
-/// (`formatter.PrintProlog()`) before it reads the first batch. `subject_path` names a
-/// FASTA subject set of `num_subjects` records (`subject_letters`); a database search shows
-/// its `Database:` lines (`database`).
-fn write_first_batch_prologs(
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-280
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+/// The prologs of the formats (`formatter.PrintProlog()`). `before_search`: the outfmt 0 to 4
+/// prolog of every sink (a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`), where NCBI writes it: before it reads the first query batch and
+/// writes its search strategy request, so that the prolog's error (a malformed `./.ncbirc` under
+/// `-html`) and a failed write end the run there, before LOSAT's refusal of a strategy file on
+/// the report stream; written through `cli::NcbiOstream::sink`, whose `NcbiEndl` pair flushes
+/// NCBI's stream. Otherwise, for a run that fails in its first query batch, the prologs that come
+/// with the first report, written and flushed: the start of the XML2 and JSON documents, and
+/// outfmt 20's line of the field names with its formatter's warning. `subject_path` names a FASTA
+/// subject set of `num_subjects` records (`subject_letters`); a database search shows its
+/// `Database:` lines (`database`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn write_first_batch_prologs(
     outputs: &mut ReportOutputs<'_>,
     subject_path: Option<&std::path::Path>,
     num_subjects: usize,
@@ -1466,6 +1476,7 @@ fn write_first_batch_prologs(
     program: &str,
     // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
     html: Option<&crate::report::html_ids::HtmlLinks>,
+    before_search: bool,
 ) -> Result<()> {
     let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -1477,6 +1488,9 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
+            if !before_search {
+                continue;
+            }
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
@@ -1495,6 +1509,8 @@ fn write_first_batch_prologs(
                 }),
             )?;
             writer.flush()?;
+        } else if before_search {
+            // The other formats' prologs come with the first report.
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
@@ -1621,6 +1637,73 @@ fn pairwise_reading(
             alignments: resolved.num_alignments,
         },
     ))
+}
+
+/// What the first of a TBLASTN run's formats reads of the subjects of a query's report that loads
+/// them one by one (`search`'s loads of the query batches, `TblastnDatabase::subject_read_texts`
+/// and `TblastnDatabase::open_for_rows`).
+#[derive(Clone, Copy)]
+struct FirstReads {
+    /// The first format's report.
+    report: Option<crate::blastinput::app::ReportFormat>,
+    /// Whether its writer writes the texts of those reads where it reads each subject
+    /// (`ReportFormat::places_subject_reads`).
+    places_reads: bool,
+    /// The order in which the pairwise report (outfmt 0 to 4) reads its subjects (its
+    /// `-sorthits`).
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    /// The taxonomy lookups of its rows (`shared::RowLookups`).
+    row_lookups: crate::algorithm::common::database::RowLookups,
+    /// Whether a load that throws ends its report or the run (`database::after_throw`).
+    ends_on_throw: bool,
+}
+
+impl FirstReads {
+    /// Of the run's formats `formats` (with `call`, the call's other `-outfmt` values and whether
+    /// it has `-html`; `pairwise`, `pairwise_reading`), where `taxdb_found` says that `taxdb.bti`
+    /// is found.
+    fn of(
+        formats: &[crate::api::local_blast::FormatOutput<'_>],
+        call: (&[&str], bool),
+        pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        taxdb_found: bool,
+    ) -> Self {
+        let first = formats.first();
+        let report = first.and_then(crate::api::local_blast::FormatOutput::report_format);
+        // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
+        // too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the prefetch does
+        // not: the rows of a batch with hits may open the taxonomy database before a later
+        // batch's prefetch (`shared::RowLookups`).
+        let row_lookups = if taxdb_found {
+            let spec = first.and_then(|format| super::tabular::tabular_spec(format.outfmt));
+            crate::algorithm::common::database::RowLookups::of_first_format(
+                report,
+                spec.as_ref()
+                    .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid),
+            )
+        } else {
+            crate::algorithm::common::database::RowLookups::None
+        };
+        let ends_on_throw = super::database::after_throw(formats, call)
+            .run()
+            .is_some_and(|run| {
+                matches!(
+                    run.after,
+                    crate::report::db_subject::AfterThrow::EndsReport
+                        | crate::report::db_subject::AfterThrow::EndsRun
+                )
+            });
+        FirstReads {
+            report,
+            places_reads: report
+                .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads),
+            pairwise: report
+                .and_then(crate::report::pairwise::PairwiseView::of)
+                .and(pairwise),
+            row_lookups,
+            ends_on_throw,
+        }
+    }
 }
 
 fn search(
@@ -1756,6 +1839,25 @@ fn search(
                 .context("TBLASTN subject file missing")?,
         ),
     };
+    // The program line of outfmt 0 (`PSITBLASTN` with `-in_pssm`).
+    let program = if pssm.is_some() {
+        super::in_pssm::PROGRAM
+    } else {
+        "TBLASTN"
+    };
+    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
+    // (`write_first_batch_prologs`), as in every program.
+    write_first_batch_prologs(
+        outputs,
+        subject_path.map(|path| path.as_path()),
+        subjects.len(),
+        subject_letters,
+        pairwise_database.as_ref(),
+        args.tabular_taxdb.unwrap_or(false),
+        program,
+        resolved.html.as_deref(),
+        true,
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-278
     // NCBI reads the query batches one at a time after the outfmt 0 prolog. The run stops at
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
@@ -1783,8 +1885,9 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            super::in_pssm::PROGRAM,
+            program,
             resolved.html.as_deref(),
+            false,
         )?;
         // The request of the one PSSM query, which NCBI wrote before its constructor failed.
         if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
@@ -1883,9 +1986,22 @@ fn search(
         )
     });
     if batches.searched_done == 0 && batches.stop.is_some() {
-        // A first batch whose set-up fails has its search strategy request, written before the
-        // prolog (NCBI's posts of the bytes replaced in it follow the batch's reader messages,
-        // before its error, below).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // The first batch fails after the prologs (`formatter.PrintProlog()`; those of the first
+        // report here). A first batch whose set-up fails has its search strategy request (NCBI's
+        // posts of the bytes replaced in it follow the batch's reader messages, before its error,
+        // below).
+        write_first_batch_prologs(
+            outputs,
+            subject_path.map(|path| path.as_path()),
+            subjects.len(),
+            subject_letters,
+            pairwise_database.as_ref(),
+            args.tabular_taxdb.unwrap_or(false),
+            program,
+            resolved.html.as_deref(),
+            false,
+        )?;
         if let (Some(strategy), Some(requests), Some(span)) = (
             args.strategy.as_ref(),
             requests.as_ref(),
@@ -1898,20 +2014,6 @@ fn search(
                 query_input.placements.get(span.start),
             )?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-285
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`), which
-        // names `PSITBLASTN` for a PSSM query (`-in_pssm`).
-        write_first_batch_prologs(
-            outputs,
-            subject_path.map(|path| path.as_path()),
-            subjects.len(),
-            subject_letters,
-            pairwise_database.as_ref(),
-            args.tabular_taxdb.unwrap_or(false),
-            pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
-            resolved.html.as_deref(),
-        )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
         // `-db`: the database's sequences, checked once for every batch (`XDbStream::new`)
@@ -2084,7 +2186,9 @@ fn search(
             Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
-        // NCBI's prolog comes before the first batch's request (`StrategyExport::refused`).
+        // NCBI's prologs come before the first batch's request (`StrategyExport::refused`): outfmt
+        // 0 to 4 was written before the search above; `false` writes the remaining formats'
+        // (XML2/JSON, 20).
         let refused = crate::report::archive::strategy::StrategyExport::refused;
         if searched_done > 0 && args.strategy.as_ref().is_some_and(refused) {
             write_first_batch_prologs(
@@ -2096,6 +2200,7 @@ fn search(
                 args.tabular_taxdb.unwrap_or(false),
                 pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
                 resolved.html.as_deref(),
+                false,
             )?;
         }
         for range in query_input
@@ -2584,50 +2689,20 @@ fn search(
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
             if first_prefetches && (taxdb_found || database.parsed_seqids() || has_nullb) {
-                // A custom tabular report with a plural name looks every taxid of its rows up,
-                // taxid 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the
-                // prefetch does not: the rows of a batch with hits may open the taxonomy database
-                // before a later batch's prefetch (`shared::RowLookups`).
-                let first_spec = outputs
-                    .formats
-                    .first()
-                    .and_then(|format| super::tabular::tabular_spec(format.outfmt));
-                // Whether the first format's writer writes the texts of the subjects that a
-                // query's report reads one by one where it reads each
-                // (`ReportFormat::places_subject_reads`).
-                let first_report = outputs
-                    .formats
-                    .first()
-                    .and_then(crate::api::local_blast::FormatOutput::report_format);
-                let places_reads = first_report
-                    .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-                // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
-                // `-sorthits`.
-                let pairwise = first_report
-                    .and_then(crate::report::pairwise::PairwiseView::of)
-                    .and(pairwise_reading(&resolved, &outputs.formats));
-                let row_lookups = if taxdb_found {
-                    crate::algorithm::common::database::RowLookups::of_first_format(
-                        first_report,
-                        first_spec
-                            .as_ref()
-                            .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid),
-                    )
-                } else {
-                    crate::algorithm::common::database::RowLookups::None
-                };
-                let ends_on_throw = super::database::after_throw(
+                // What the first format reads of the subjects of a report that loads them one by
+                // one (`FirstReads`).
+                let FirstReads {
+                    report: first_report,
+                    places_reads,
+                    pairwise,
+                    row_lookups,
+                    ends_on_throw,
+                } = FirstReads::of(
                     &outputs.formats,
                     (outputs.other_outfmts, resolved.html.is_some()),
-                )
-                .run()
-                .is_some_and(|run| {
-                    matches!(
-                        run.after,
-                        crate::report::db_subject::AfterThrow::EndsReport
-                            | crate::report::db_subject::AfterThrow::EndsRun
-                    )
-                });
+                    pairwise_reading(&resolved, &outputs.formats),
+                    taxdb_found,
+                );
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList],
                                  stop_on_throw| {
                     database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)
@@ -3051,7 +3126,7 @@ fn search(
     }
     // A batch whose set-up fails (every query without letters) has its search strategy request:
     // NCBI made its query factory before the search (`QueryBatches::stop_batch`), after the
-    // batches above (a first batch's was written before the prolog).
+    // batches above (a first batch's was written after the prologs).
     if let (Some(strategy), Some(requests), Some(span)) = (
         args.strategy.as_ref(),
         requests.as_ref(),

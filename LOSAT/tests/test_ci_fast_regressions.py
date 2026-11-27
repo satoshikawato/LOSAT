@@ -190,6 +190,12 @@ class DbSearchFixtureTests(unittest.TestCase):
                     else:
                         self.assertLessEqual(cut, int(source["stdout_bytes"]), r["row_id"])
                         self.assertEqual(r["stdout_bytes"], str(cut), r["row_id"])
+                # A rejection row that expects the first N bytes of NCBI's run of its own command
+                # (`ncbi-first: N bytes`) has those N bytes as its own frozen stdout.
+                own = db_fixtures.own_cut(r)
+                if own is not None:
+                    self.assertEqual((r["kind"], near, r["stdout_bytes"]), ("losat-rejection", None, str(own)),
+                                     r["row_id"])
                 # A rejection row's frozen stderr is NCBI's up to its exception report (`ncbi-stderr`), or none.
                 err = db_fixtures.FROZEN / f"{r['row_id']}.err"
                 self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
@@ -207,6 +213,8 @@ class DbSearchFixtureTests(unittest.TestCase):
                 # Its stderr, where NCBI writes one, is a warning of the arguments that names no copy.
                 err = db_fixtures.FROZEN / f"{r['row_id']}.err"
                 self.assertFalse(err.exists() and db_fixtures.COPY_PREFIX.encode() in err.read_bytes(), r["row_id"])
+            # An ncbi row takes all of its own run's bytes (`ncbi-first:` is a rejection row's).
+            self.assertIsNone(db_fixtures.own_cut(r), r["row_id"])
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
             # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
@@ -244,6 +252,19 @@ class DbSearchFixtureTests(unittest.TestCase):
                     "ncbi-near: db.x.1 first -1 bytes", "ncbi-near: db.x.1 (the first 349 bytes)", "ncbi-near: | x"):
             with self.assertRaises(SystemExit, msg=bad):
                 near(bad)
+
+    def test_own_first_bytes_marker_is_a_part_of_covers(self):
+        def own(covers):
+            return db_fixtures.own_cut({"row_id": "r", "covers": covers})
+        self.assertIsNone(own("staxid, expect: an uninitialised staxid"))
+        self.assertEqual(own("staxid, expect: x | ncbi-first: 12 bytes"), 12)
+        self.assertEqual(own("a | ncbi-first: 0 bytes | expect: b"), 0)
+        # Only a part after a ` | `; any other words in that part stop the tool.
+        self.assertIsNone(own("ncbi-first: 12 bytes"))
+        for bad in ("a | ncbi-first: 12", "a | ncbi-first: twelve bytes", "a | ncbi-first: -1 bytes",
+                    "a | ncbi-first: 12 byte"):
+            with self.assertRaises(SystemExit, msg=bad):
+                own(bad)
 
     def test_valgrind_marker_is_a_part_of_covers(self):
         self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
@@ -906,12 +927,16 @@ class XincludeFixtureTests(unittest.TestCase):
                     continue
                 found += 1
                 row_id, outfmt = row[key], row["outfmt"]
-                master = (frozen / f"{row_id}.out").read_bytes()
+                # a rejection row's files are its near row's (`ncbi-near: ROW_ID first N bytes`): the first N
+                # bytes of its master and all its side files (`db_search_fixtures.rejection_side_problems`)
+                near = db_fixtures.near_row_id(row) if row.get("kind") == "losat-rejection" else None
+                source = near or row_id
+                master = (frozen / f"{source}.out").read_bytes()[:db_fixtures.near_cut(row) if near else None]
                 self.assertEqual(xinclude.sha256(master), row["stdout_sha256"], row_id)
                 self.assertEqual(str(len(master)), row["stdout_bytes"], row_id)
                 hashes = row["side_sha256"].split(",") if row["side_sha256"] else []
-                names = [xinclude.side_name(row_id, n, outfmt) for n in range(1, len(hashes) + 1)]
-                self.assertEqual(sorted(path.name for path in frozen.glob(f"{row_id}.out_*")), sorted(names), row_id)
+                names = [xinclude.side_name(source, n, outfmt) for n in range(1, len(hashes) + 1)]
+                self.assertEqual(sorted(path.name for path in frozen.glob(f"{source}.out_*")), sorted(names), row_id)
                 self.assertEqual([xinclude.sha256((frozen / name).read_bytes()) for name in names], hashes, row_id)
                 # a run that NCBI stops (rc other than 0) writes the side files of the batches before
                 # and no master, whose list comes after the last query's file: a batch's prefetch

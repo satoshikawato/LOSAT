@@ -260,36 +260,66 @@ impl AsnTextDocument for BioseqDocument<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
-/// The ASN.1 text of `document` as NCBI's stream writes it to the output: written whole, or,
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:843-908 (the object stream's buffer
+// writes to the output when it is full and at `Close`, which does not flush the output)
+/// The ASN.1 text of `document` as NCBI's stream writes it to the output: the writes of its
+/// buffer (`Traced::pieces`, each one insertion; a document that fits the buffer is one), or,
 /// where a VisibleString holds a byte that NCBI's stream replaces by `#` (a name of the taxonomy
-/// database outside ' ' ..= '~'), written again through `Traced`, which gives `diag` NCBI's post
+/// database outside ' ' ..= '~'), written again through `Traced`, which gives `post` NCBI's post
 /// of each replaced byte after the bytes NCBI's buffer had written to `out` by then (`cerr` is
-/// tied to `cout`). Err: the closed pipe of a write, or LOSAT's refusal of another error of the
-/// stream.
+/// tied to `cout`; `Err` from `post` where that met a closed pipe). Err: the closed pipe of a
+/// write, or LOSAT's refusal of another error of the stream.
 pub(super) fn write_asn_text<D: AsnTextDocument>(
     document: &D,
     out: &mut dyn std::io::Write,
-    mut post: impl FnMut(&ReplacedChar),
+    mut post: impl FnMut(&ReplacedChar) -> std::io::Result<()>,
 ) -> Result<(), Stop> {
     let mut buf = Vec::new();
     let mut enc = AsnTextEncoder::new(&mut buf);
     document.write(&mut enc);
     match enc.error() {
-        None => return out.write_all(&buf).map_err(Stop::write),
+        None if buf.len() <= OBJECT_BUFFER => return out.write_all(&buf).map_err(Stop::write),
+        None => return write_pieces(document, &buf, out).map_err(Stop::write),
         Some(SerialError::NonVisibleChar(_)) => {}
         Some(error) => return Err(serial_refusal(error)),
     }
     buf.clear();
-    let mut enc =
-        Traced::new(AsnTextEncoder::new(&mut buf), 0).posting(|replaced: &ReplacedChar| {
-            post(replaced);
-            Ok(())
-        });
+    let mut enc = Traced::new(AsnTextEncoder::new(&mut buf), 0)
+        .posting(|replaced: &ReplacedChar| post(replaced));
     document.write(&mut enc);
     if let Some(error) = enc.error() {
         return Err(serial_refusal(error));
     }
     enc.flush_to(out, true).map_err(Stop::write)
+}
+
+/// The size of NCBI's object stream's buffer (`COStreamBuffer`): a document of at most this many
+/// bytes reaches the output in one write, at `Close`.
+const OBJECT_BUFFER: usize = 4096;
+
+/// The document `document`, whose text is `text`, larger than the object stream's buffer: the
+/// writes of NCBI's buffer to `out` (`Traced::pieces`, from a second encoding), then the rest at
+/// `Close`.
+#[cold]
+#[inline(never)]
+fn write_pieces<D: AsnTextDocument>(
+    document: &D,
+    text: &[u8],
+    out: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    let mut again = Vec::new();
+    let mut enc = Traced::new(AsnTextEncoder::new(&mut again), 0);
+    document.write(&mut enc);
+    let mut at = 0;
+    for piece in enc.pieces() {
+        let end = (at + piece.size).min(text.len());
+        out.write_all(&text[at..end])?;
+        at = end;
+    }
+    if at < text.len() {
+        out.write_all(&text[at..])?;
+    }
+    Ok(())
 }
 
 /// LOSAT's refusal of an error of the text stream that NCBI's stream does not raise.

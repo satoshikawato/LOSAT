@@ -193,3 +193,24 @@ d_p4_pin_nucl_prot	d_p4_pin_nucl	-	-	-db p4 -dbtype prot -verbosity 3 -ends 1
 d_p4_pin_nucl_dir	d_p4_pin_nucl	-	-	-dir . -verbosity 3 -ends 1
 negtax	negtax	-	-	-db neg -must_have_taxids -full -verbosity 4
 negtax_v3	negtax	-	-	-db neg -must_have_taxids -full -verbosity 3
+c_nucl	t	-	-	-db ../../in/n4 -cdd_delta -ends 1 -verbosity 3
+c_noloo	c_noloo	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_norps	c_norps	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_noobsr	c_noobsr	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_loomagic	c_loomagic	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_rpsmagic	c_rpsmagic	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_wcmagic	c_wcmagic	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_obsrmagic	c_obsrmagic	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_rps2	c_rps2	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_freq2	c_freq2	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_rps0	c_rps0	-	-	-db db -cdd_delta -ends 1 -verbosity 3
+c_two_diff	c_two_diff	-	-	-dir . -cdd_delta -ends 1 -verbosity 3
+ends_intmin	t	-	-	-db ../../in/p5 -ends -2147483648 -verbosity 4
+ends_intmin_near	t	-	-	-db ../../in/p5 -ends -2147483638 -verbosity 4
+stride_intmax	t	-	-	-db ../../in/p5 -stride 2147483647 -verbosity 4
+d_p4_nonasc_seq	d_p4_nonasc_seq	-	-	-db p4 -full -verbosity 4
+d_p4_nonasc_hdr	d_p4_nonasc_hdr	-	-	-db p4 -full -verbosity 4
+d_p4_badchar	d_p4_badchar	-	-	-db p4 -full -verbosity 4
+d_p4_badchar_lf	d_p4_badchar	-	-	-db p4 -full -verbosity 4 -logfile lf_bc.txt
+d_p4_utf8	d_p4_utf8	-	-	-db p4 -full -verbosity 4
+a_msk1	a_msk1	-	-	-db a -ends 1 -verbosity 3

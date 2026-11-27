@@ -139,16 +139,10 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which searches all
 /// batches together and then the batches before the failing one again alone, so it needs
 /// `query`). Any other refusal of a batch's search comes before the run's first byte. A
-/// tabular row at which NCBI stops in a batch's report (`report::tabular::FailedLookupRefusal`)
-/// comes after the reports of the batches before too, then what NCBI writes to stderr of the
-/// failing batch before that row (its reader messages, its search strategy posts, its UTF8String
-/// warning, its prefetch texts, and for each of its queries up to the row's the query's own
-/// warnings, its formatter's taxdb warning and its subject reads up to the row:
-/// `FailedLookupRefusal::posts_before_stop`): TBLASTN, TBLASTX and BLASTN off its report stream,
-/// which check every batch's rows at once, write those reports first
-/// (`FailedLookupRefusal::batch_start`), then those posts; BLASTP and PSIBLAST fail that query's
-/// batch (`ErrorAfterBatchReports`, whose `common::database::ErrorAfterPosts` holds the posts after
-/// the batch's own); BLASTX and BLASTN on its stream check each batch's rows when they write them.
+/// tabular row at which NCBI stops (`report::tabular::FailedLookupRefusal`) does not use this
+/// type: every program's tabular writer meets the stop while writing that batch's report, after
+/// the reports and posts of the batches before and that batch's posts and report bytes up to
+/// the stopping field, and ends the run there (`report::tabular::row_stop_end`).
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports {
     pub(crate) error: anyhow::Error,

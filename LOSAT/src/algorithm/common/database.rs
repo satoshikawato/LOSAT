@@ -23,6 +23,134 @@ use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:620-621
+/// Parses Linux `/sys/devices/system/cpu/online` CPU lists (for example `0`, `0-31`, `0,2-5`).
+#[cfg(any(target_os = "linux", test))]
+fn parse_linux_cpu_list(text: &str) -> Option<usize> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut total = 0usize;
+    for part in trimmed.split(',') {
+        let part = part.trim();
+        let count = if let Some((lo, hi)) = part.split_once('-') {
+            let lo = lo.trim().parse::<usize>().ok()?;
+            let hi = hi.trim().parse::<usize>().ok()?;
+            hi.checked_sub(lo)?.checked_add(1)?
+        } else {
+            let _ = part.parse::<usize>().ok()?;
+            1usize
+        };
+        total = total.checked_add(count)?;
+    }
+    (total > 0).then_some(total)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:616-630
+/// Counts `cpu<N>` entries in Linux `/proc/stat`, matching glibc's `_SC_NPROCESSORS_ONLN`
+/// fallback when `/sys/devices/system/cpu/online` is unavailable.
+#[cfg(any(target_os = "linux", test))]
+fn parse_linux_proc_stat_cpus(text: &str) -> Option<usize> {
+    let count = text
+        .lines()
+        .filter(|line| {
+            line.strip_prefix("cpu")
+                .is_some_and(|rest| rest.as_bytes().first().is_some_and(u8::is_ascii_digit))
+        })
+        .count();
+    (count > 0).then_some(count)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-639
+/// Online CPU count matching NCBI's `CSystemInfo::GetCpuCount` (process-cached as in NCBI).
+///
+/// On Linux, `std::thread::available_parallelism` caps by `sched_getaffinity` (`taskset`) and
+/// cgroup quotas, whereas NCBI calls `sysconf` with `_SC_NPROCESSORS_ONLN`. Match glibc by reading
+/// `/sys/devices/system/cpu/online`, falling back to `/proc/stat` and then `available_parallelism`.
+#[cfg(not(target_arch = "wasm32"))]
+fn ncbi_online_cpu_count() -> usize {
+    static ONLINE_CPUS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *ONLINE_CPUS.get_or_init(|| {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(n) = std::fs::read_to_string("/sys/devices/system/cpu/online")
+                .ok()
+                .and_then(|s| parse_linux_cpu_list(&s))
+            {
+                return n;
+            }
+            if let Some(n) = std::fs::read_to_string("/proc/stat")
+                .ok()
+                .and_then(|s| parse_linux_proc_stat_cpus(&s))
+            {
+                return n;
+            }
+        }
+        std::thread::available_parallelism().map_or(1, usize::from)
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-638
+/// Requested `-num_threads` capped at the host's online CPU count, matching NCBI's
+/// `CMTArgs::x_ExtractAlgorithmOptions` (`CSystemInfo::GetCpuCount`).
+///
+/// On `wasm32` (WASI Preview 1), `wasi-libc` hardcodes `sysconf` for `_SC_NPROCESSORS_ONLN` to 1
+/// while `validate_threads` and the host cap already bound `num_threads`, so keep `num_threads`
+/// uncapped there to match native CLI DB-split behavior.
+pub(crate) fn ncbi_effective_threads(num_threads: usize) -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        num_threads
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        num_threads.min(ncbi_online_cpu_count())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+/// Whether NCBI's application runs this search in multithreaded DB-split mode (positive
+/// `m_NumThreads` on `CSeqDB`, so `CSeqDBImpl::x_FillSeqBuffer` stops scanning at the first OID
+/// whose `GetSequence` length is negative).
+///
+/// With effective threads `<= 1` (after capping `-num_threads` at the host's CPU count) or
+/// `-mt_mode 1` (split by queries), each search node runs with 1 thread on `CSeqDB`
+/// (`m_NumThreads` stays zero). With `-mt_mode 0` (auto), NCBI splits by queries only when
+/// `total_length < max_db_size` and the query file size exceeds `min_q_size`.
+pub(crate) fn ncbi_mt_splits_db(
+    num_threads: usize,
+    mt_mode: Option<u8>,
+    total_length: u64,
+    query_file: Option<&std::path::Path>,
+    max_db_size: u64,
+    min_q_size: u64,
+) -> bool {
+    if ncbi_effective_threads(num_threads) <= 1 {
+        return false;
+    }
+    match mt_mode {
+        Some(1) => false,
+        Some(2) => true,
+        _ => {
+            if total_length >= max_db_size {
+                return true;
+            }
+            let query_size = query_file
+                .filter(|path| path.as_os_str() != "-")
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|meta| meta.len())
+                .unwrap_or(0);
+            query_size <= min_q_size
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
 /// Opens the database `name` (the `-db` value as NCBI keeps it, `seqdb::db_argument_name`)
 /// of the sequence type `seqtype` for a search: the one function through which a search
@@ -711,43 +839,6 @@ impl std::fmt::Display for PreliminaryReadError {
 
 impl std::error::Error for PreliminaryReadError {}
 
-/// The error of an `ErrorAfterBatchReports` whose batch NCBI's run stops in after more of the
-/// batch's posts than a failed search writes (the batch's reader messages, its search strategy
-/// request's posts and its UTF8String warning, which the caller writes): a tabular row at which
-/// NCBI stops in the batch's report (`report::tabular::FailedLookupRefusal`), after the batch's
-/// prefetch texts and the own warnings of its queries up to that row's query (`posts`), which
-/// NCBI writes before each query's report.
-#[derive(Debug)]
-pub(crate) struct ErrorAfterPosts {
-    pub(crate) posts: crate::report::diag_log::Posts,
-    pub(crate) error: anyhow::Error,
-}
-
-impl ErrorAfterPosts {
-    /// The error of a batch's failure (`ErrorAfterBatchReports::error`), its posts written first
-    /// to `diagnostics` (and the archive's messages) where it is an `ErrorAfterPosts`.
-    pub(crate) fn written(
-        error: anyhow::Error,
-        diagnostics: &mut dyn std::io::Write,
-        archive: Option<&crate::report::archive::ArchiveHandle>,
-    ) -> Result<anyhow::Error> {
-        match error.downcast::<Self>() {
-            Ok(after) => {
-                after.posts.write(diagnostics, archive)?;
-                Ok(after.error)
-            }
-            Err(error) => Ok(error),
-        }
-    }
-}
-
-impl std::fmt::Display for ErrorAfterPosts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for ErrorAfterPosts {}
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
 /// NCBI's first read, in a run of reported sequences' headers (`HeaderReader`), of a record that
 /// holds a UTF8String where a VisibleString is expected: the query whose hit list reached it
@@ -3553,19 +3644,6 @@ fn reported_header(
         _ => {}
     }
     match header {
-        // No NCBI counterpart: LOSAT's refusal. makeprofiledb writes no definition line without a
-        // Seq-id, and NCBI's reports of a profile database with one were not probed (line RG
-        // D1c-1c-b, survey 4.3): RPS-BLAST and RPS-tBLASTn refuse such a profile as before.
-        Ok(crate::seqdb::SequenceHeader::Parsed(set))
-            if matches!(program, "RPSBLAST" | "RPSTBLASTN")
-                && set.deflines.iter().any(|defline| defline.ids.is_empty()) =>
-        {
-            Err(parsed_refusal(
-                db.oid(ordinal),
-                "has a definition line without a Seq-id",
-                program,
-            ))
-        }
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
@@ -4275,7 +4353,7 @@ pub(crate) struct ParsedShown {
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
     /// Whether a tabular format can stop at a row whose subject lookup throws
-    /// (`report::tabular::stops_at_lookup_failure`: `sacc`, `saccver`, the default fields, a
+    /// (`report::tabular::stops_at_lookup_failure_for`: `sacc`, `saccver`, the default fields, a
     /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
     pub(crate) stops_at_failed_lookup: bool,
     /// Whether a tabular format stops at a subject that has a definition line without a Seq-id
@@ -4424,6 +4502,8 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(|(rank, (record, &ordinal))| {
             let id = match parsed.get(rank).and_then(Option::as_deref) {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                Some(subject) if subject.scope_finds_none() => Ok(None),
                 Some(subject) => subject.tabular_saccver(protein).map_err(|problem| {
                     parsed_refusal(oids.oid(ordinal), &format!("has {problem}"), program)
                 }),
@@ -5289,6 +5369,10 @@ pub(crate) fn x_check_protein_stores(
             }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        if block.stopped_at_negative() {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }
@@ -6913,6 +6997,27 @@ impl TaxdbRun {
             }),
             ..TaxdbRun::default()
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:218-222 (one
+    // `CTaxDBFileInfo` per process, made at the first `GetTaxNames`)
+    /// A sequential run ([`TaxdbRun::sequential`]) of another `CSeqDB` of the process of this run:
+    /// the taxonomy database is the one this run opened (NCBI's one per process), so its texts of
+    /// opening are not written again; the volumes' caches are the new database's, whose lookups
+    /// write their texts again (NCBI 2.17.0, windowmasker `-mk_counts -infmt blastdb`, line RG
+    /// T8 survey W1: the open error once in three passes, the offset error in each).
+    pub(crate) fn sequential_after(&self) -> Self {
+        let run = TaxdbRun::sequential();
+        if let Some(lazy) = self.lazy.get() {
+            let _ = run.lazy.set(std::sync::Arc::clone(lazy));
+        }
+        if let Some(&texts) = self.texts.get() {
+            let _ = run.texts.set(texts);
+        }
+        if let Some(&found) = self.found.get() {
+            let _ = run.found.set(found);
+        }
+        run
     }
 
     /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its

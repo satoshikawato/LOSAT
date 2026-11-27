@@ -1,13 +1,10 @@
 //! The parts of a masking program's `Run` that dustmasker and segmasker share around their
 //! reader and writer: what a failed write, a failed read and a closed pipe become, and the end
-//! of the run (the writer's object, the flush before the diagnostics, the serial stream's
-//! report of a failed write). Each program keeps its own failure type ([`RunFailure`]), as
+//! of the run (the writer's object, the serial stream's report of a failed write). Each program keeps its own failure type ([`RunFailure`]), as
 //! NCBI's programs report their exceptions differently (dustmasker through `AppMain`,
 //! segmasker in the `catch` of its `Run`).
 
-use std::io::Write;
-
-use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
+use crate::ncbi_app::files::{ends_like_sigpipe, OutputFile};
 use crate::ncbi_app::Diag;
 
 use super::fasta_reader::ios_failure_what;
@@ -17,8 +14,8 @@ use super::writer::{writes_serial_objects, MaskWriter, WriteError};
 pub(crate) trait RunFailure: Sized {
     /// LOSAT's refusal: the whole message.
     fn refused(message: String) -> Self;
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
-    /// run ends at once, exit status 0, no message.
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`):
+    /// the run ends at once, exit status 0, no message.
     fn closed_pipe() -> Self;
     /// A `std::exception` that leaves NCBI's `Run` (`AppMain`'s error post `ERR_POST_X` with
     /// subcode 7, exit status 3), with its `what()`.
@@ -57,23 +54,18 @@ pub(crate) fn read_failure<F: RunFailure>(error: std::io::Error, program: &str) 
 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-49
 // `GetBioseq` posts the taxonomy database's texts (`ERR_POST`, severity Error, no prefix in
 // dustmasker and segmasker) while it reads a sequence, before the writer prints it; `cerr` is tied
-// to `cout`, so each text comes after the output written so far, and on a closed pipe SIGPIPE
-// ends NCBI's process before it.
+// to `cout`, so each text comes after NCBI's writes of the output so far, and on a closed pipe
+// SIGPIPE ends NCBI's process at that write, before the text.
 /// Posts `texts`, the taxonomy database's texts of reading a database sequence
-/// (`bdb_reader::BdbRecord::texts`), before the sequence is written: for each the output `out`
-/// is flushed (a closed pipe ends the run there, without the text), then `Error: <text>` goes to
-/// the diagnostics (`-logfile`).
-pub(crate) fn post_read_texts<F: RunFailure>(
-    texts: &[String],
-    out: &mut Ostream<'_>,
-    diag: &mut Diag,
-) -> Result<(), F> {
+/// (`bdb_reader::BdbRecord::texts`), before the sequence is written: `Error: <text>` to the
+/// diagnostics (`-logfile`), NCBI's writes of the output made first (`Diag`'s tie); a closed pipe
+/// ends the run there, without the text.
+pub(crate) fn post_read_texts<F: RunFailure>(texts: &[String], diag: &mut Diag) -> Result<(), F> {
     for text in texts {
-        let _ = out.flush();
-        if out.closed() {
+        diag.err_post(text);
+        if diag.closed() {
             return Err(F::closed_pipe());
         }
-        diag.err_post(text);
     }
     Ok(())
 }
@@ -86,14 +78,23 @@ pub(crate) fn post_read_texts<F: RunFailure>(
 /// 3, 0 or 134 by the case, segmasker with 1 or 134). The `interval`, `acclist` and `fasta`
 /// writers write to the `ostream` itself and go on silently, as here.
 pub(crate) fn serial_write_failure<F: RunFailure>(
-    out: &Ostream<'_>,
+    out: &OutputFile<'_>,
     outfmt: &str,
     program: &str,
 ) -> Result<(), F> {
     if out.closed() {
         return Err(F::closed_pipe());
     }
-    if out.bad() && writes_serial_objects(outfmt) {
+    if !writes_serial_objects(outfmt) {
+        return Ok(());
+    }
+    // NCBI's writes so far are made: whether one failed.
+    let bad = match out.bad() {
+        Ok(bad) => bad,
+        Err(error) if ends_like_sigpipe(&error) => return Err(F::closed_pipe()),
+        Err(_) => true,
+    };
+    if bad {
         return Err(F::refused(unsupported(
             &format!(
                 "a failed write of the -outfmt {outfmt} output (NCBI's serial stream reports it)"
@@ -106,12 +107,13 @@ pub(crate) fn serial_write_failure<F: RunFailure>(
 
 /// The end of the run whose masking ended with `result`: the writer writes its object (a
 /// `maskinfo_*` writer's destructor writes it also when an exception leaves NCBI's `Run`)
-/// unless the run stopped writing; the output is flushed (NCBI's `cerr` is tied to `cout`, so
-/// the output comes before the diagnostics of a failure, and a closed pipe ends the run there,
-/// without them); then the failure, or the serial stream's report of a failed write.
+/// unless the run stopped writing; then the failure, or the serial stream's report of a failed
+/// write. The diagnostics of a failure come after NCBI's writes of the output (`Diag`'s tie; a
+/// closed pipe ends the run there, without them), and the stream ends after the run
+/// (`OpenFiles::finish_streams`).
 pub(crate) fn finish<F: RunFailure>(
     writer: MaskWriter,
-    out: &mut Ostream<'_>,
+    out: &mut OutputFile<'_>,
     diag: &mut Diag,
     mut result: Result<(), F>,
     outfmt: &str,
@@ -122,7 +124,6 @@ pub(crate) fn finish<F: RunFailure>(
             result = Err(write_failure(error, program));
         }
     }
-    let _ = out.flush();
     if out.closed() {
         return Err(F::closed_pipe());
     }

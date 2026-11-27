@@ -15,6 +15,11 @@
 //! record of another `taxdb.btd` reaches past NCBI's mapping of the file
 //! (`tests/db_search/t5b/taxdb/<variant>`, make_t5b.py --taxdb), NCBI reads memory past its mapping
 //! and LOSAT refuses only a written name that comes from there (the same line and status).
+//!
+//! With `-out /dev/stdout` and standard error in the same pipe (line RG item T8a, Linux), the
+//! report is NCBI's file stream (an 8,191-byte buffer, its writes at a flush or where an insertion
+//! does not fit) and no tie makes it write before a text: each text lands after NCBI's last write
+//! of the report, which can be inside a record or a line (`PIPE_CASES`).
 
 use std::process::{Command, Stdio};
 
@@ -400,6 +405,355 @@ fn a_lookup_ncbi_crashes_on_is_refused() {
             words,
             "../../seqdb/taxdb/btd_empty",
             "reaches past the mapped end",
+        );
+    }
+}
+
+/// The cases of a report written to `-out /dev/stdout` (line RG item T8a, Linux): name
+/// (`<mode>.<case>.<variant>`), directory under `tests/db_search`, taxonomy database (under
+/// `tests/seqdb/taxdb`), program, words and NCBI's exit status. Mode `pipe`: standard output a
+/// pipe, standard error into it, and the bytes read from it are NCBI's (`<name>.txt`); `split`: no
+/// `-out`, standard output and standard error two pipes (`<name>.out`, `<name>.err`: windowmasker's
+/// texts of a taxonomy database that does not open come once, W1); `closed`: standard output a pipe
+/// whose reader closed before the start, where SIGPIPE ends NCBI's process at its first write of the
+/// report: LOSAT's standard error is NCBI's (`<name>.err`, the texts before that write) and its exit
+/// status 0 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). The inputs of `t8`:
+/// `tests/db_search/t8/make_t8.py`; `long_*` read records longer than NCBI's buffer, so that the
+/// offset error lands inside a record; `unit_*` lands where a piece of 1,024 letters of NCBI's
+/// sequence reader does not fit the buffer; `long_cmd_ll1` where a line feed (a `put`) does not.
+#[cfg(target_os = "linux")]
+const PIPE_CASES: &[(&str, &str, &str, &str, &[&str], i32)] = &[
+    (
+        "pipe.dust_fasta.bad_magic",
+        "t5b",
+        "bad_magic",
+        "dustmasker",
+        DUST,
+        0,
+    ),
+    (
+        "pipe.dust_interval.bad_magic",
+        "t5b",
+        "bad_magic",
+        "dustmasker",
+        DUST_INTERVAL,
+        0,
+    ),
+    (
+        "pipe.dust_acclist.bad_magic",
+        "t5b",
+        "bad_magic",
+        "dustmasker",
+        DUST_ACCLIST,
+        0,
+    ),
+    (
+        "pipe.seg_fasta.bad_magic",
+        "t5b",
+        "bad_magic",
+        "segmasker",
+        SEG,
+        0,
+    ),
+    (
+        "pipe.cmd_all.bad_magic",
+        "t5b",
+        "bad_magic",
+        "blastdbcmd",
+        ALL,
+        0,
+    ),
+    (
+        "pipe.cmd_fmtS.bad_magic",
+        "t5b",
+        "bad_magic",
+        "blastdbcmd",
+        FMT_S,
+        0,
+    ),
+    (
+        "pipe.dust_fasta.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "dustmasker",
+        DUST,
+        0,
+    ),
+    (
+        "pipe.dust_interval.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "dustmasker",
+        DUST_INTERVAL,
+        0,
+    ),
+    (
+        "pipe.dust_acclist.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "dustmasker",
+        DUST_ACCLIST,
+        0,
+    ),
+    (
+        "pipe.seg_fasta.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "segmasker",
+        SEG,
+        0,
+    ),
+    (
+        "pipe.cmd_all.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "blastdbcmd",
+        ALL,
+        0,
+    ),
+    (
+        "pipe.cmd_fmtS.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "blastdbcmd",
+        FMT_S,
+        0,
+    ),
+    (
+        "pipe.cmd_nf_entries.good",
+        "t5b",
+        "good",
+        "blastdbcmd",
+        NOT_FOUND,
+        1,
+    ),
+    (
+        "pipe.cmd_nf_batch.good",
+        "t5b",
+        "good",
+        "blastdbcmd",
+        &["-db", "nmv", "-entry_batch", "../t8/bt.txt"],
+        1,
+    ),
+    (
+        "pipe.wm_counts.bad_magic",
+        "t5b",
+        "bad_magic",
+        "windowmasker",
+        MK_COUNTS,
+        0,
+    ),
+    (
+        "split.wm_counts.bad_magic",
+        "t5b",
+        "bad_magic",
+        "windowmasker",
+        MK_COUNTS,
+        0,
+    ),
+    (
+        "pipe.wm_counts.count_zero",
+        "t5b",
+        "count_zero",
+        "windowmasker",
+        MK_COUNTS,
+        0,
+    ),
+    (
+        "split.wm_counts.count_zero",
+        "t5b",
+        "count_zero",
+        "windowmasker",
+        MK_COUNTS,
+        0,
+    ),
+    (
+        "pipe.c2bm.none",
+        "t8",
+        "good",
+        "convert2blastmask",
+        &[
+            "-in",
+            "wq.fna",
+            "-masking_algorithm",
+            "x",
+            "-masking_options",
+            "y",
+        ],
+        0,
+    ),
+    (
+        "closed.cmd_nf_entries.good",
+        "t5b",
+        "good",
+        "blastdbcmd",
+        NOT_FOUND,
+        0,
+    ),
+    (
+        "closed.dust_acclist.offset_last_past_end",
+        "t5b",
+        OFFSET,
+        "dustmasker",
+        DUST_ACCLIST,
+        0,
+    ),
+    (
+        "pipe.long_cmd_all.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "blastdbcmd",
+        &["-db", "nl", "-entry", "all"],
+        0,
+    ),
+    (
+        "pipe.long_cmd_ll1000.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "blastdbcmd",
+        &["-db", "nl", "-entry", "all", "-line_length", "1000"],
+        0,
+    ),
+    (
+        "pipe.long_dust_fasta.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "dustmasker",
+        &["-in", "nl", "-infmt", "blastdb", "-outfmt", "fasta"],
+        0,
+    ),
+    (
+        "pipe.unit_cmd_ll1000.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "blastdbcmd",
+        &["-db", "nu", "-entry", "all", "-line_length", "1000"],
+        0,
+    ),
+    (
+        "pipe.long_cmd_range.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "blastdbcmd",
+        &[
+            "-db", "nl", "-entry", "all", "-range", "100-9000", "-strand", "minus",
+        ],
+        0,
+    ),
+    (
+        "pipe.long_cmd_ll1.offset_last_past_end",
+        "t8",
+        OFFSET,
+        "blastdbcmd",
+        &["-db", "nl", "-entry", "all", "-line_length", "1"],
+        0,
+    ),
+];
+
+#[cfg(target_os = "linux")]
+const DUST_INTERVAL: &[&str] = &["-in", "nmv", "-infmt", "blastdb", "-outfmt", "interval"];
+#[cfg(target_os = "linux")]
+const DUST_ACCLIST: &[&str] = &["-in", "nmv", "-infmt", "blastdb", "-outfmt", "acclist"];
+#[cfg(target_os = "linux")]
+const NOT_FOUND: &[&str] = &[
+    "-db",
+    "nmv",
+    "-entry",
+    "AB410002.1,XX000001.1,AB410003.1,YY000002.1,AB410004.1",
+];
+#[cfg(target_os = "linux")]
+const MK_COUNTS: &[&str] = &["-mk_counts", "-in", "nmv", "-infmt", "blastdb"];
+
+/// The run of a `PIPE_CASES` case `name` (its mode the first word): the bytes of standard output
+/// (`pipe`: standard output and standard error), of standard error, and the exit status.
+#[cfg(target_os = "linux")]
+fn piped(
+    dir: &RunDir,
+    name: &str,
+    sub: &str,
+    taxdb: &str,
+    program: &str,
+    words: &[&str],
+) -> (Vec<u8>, Vec<u8>, i32) {
+    use std::io::Read;
+    let mode = name.split('.').next().unwrap();
+    let mut command = Command::new(BIN);
+    for (variable, _) in std::env::vars_os() {
+        let text = variable.to_string_lossy();
+        if text.starts_with("LOSAT_") || text.starts_with("NCBI") || text.starts_with("BLAST") {
+            command.env_remove(&variable);
+        }
+    }
+    command
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("db_search")
+                .join(sub),
+        )
+        .arg(program)
+        .args(words)
+        .stdin(Stdio::null())
+        .env("BLASTDB", format!("../../seqdb/taxdb/{taxdb}"))
+        .env("NCBI_CONFIG_PATH", &dir.0)
+        .env("HOME", &dir.0)
+        .env("USERPROFILE", &dir.0);
+    match mode {
+        "pipe" => {
+            let (mut reader, writer) = std::io::pipe().unwrap();
+            command
+                .args(["-out", "/dev/stdout"])
+                .stdout(writer.try_clone().unwrap())
+                .stderr(writer);
+            let mut child = command.spawn().expect("run LOSAT CLI");
+            // The command holds the pipe's writing ends: without them the read ends with the run.
+            drop(command);
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).unwrap();
+            (bytes, Vec::new(), child.wait().unwrap().code().unwrap())
+        }
+        "closed" => {
+            let (reader, writer) = std::io::pipe().unwrap();
+            drop(reader);
+            let output = command
+                .args(["-out", "/dev/stdout"])
+                .stdout(writer)
+                .stderr(Stdio::piped())
+                .output()
+                .expect("run LOSAT CLI");
+            (Vec::new(), output.stderr, output.status.code().unwrap())
+        }
+        _ => {
+            let output = command.output().expect("run LOSAT CLI");
+            (output.stdout, output.stderr, output.status.code().unwrap())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn texts_land_after_ncbi_s_last_write_of_the_out_file() {
+    for &(name, sub, taxdb, program, words, status) in PIPE_CASES {
+        let dir = RunDir::new(name);
+        let (out, err, code) = piped(&dir, name, sub, taxdb, program, words);
+        assert_eq!(code, status, "{name}: {}", String::from_utf8_lossy(&err));
+        let (want_out, want_err) = match name.split('.').next().unwrap() {
+            "pipe" => (fixture(&format!("{name}.txt")), Vec::new()),
+            "closed" => (Vec::new(), fixture(&format!("{name}.err"))),
+            _ => (
+                fixture(&format!("{name}.out")),
+                fixture(&format!("{name}.err")),
+            ),
+        };
+        assert!(
+            out == losat::wording::losat_output_bytes(&want_out).as_ref(),
+            "{name}: standard output\n{}",
+            String::from_utf8_lossy(&out)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&err),
+            String::from_utf8_lossy(&losat::wording::losat_bytes(&want_err)),
+            "{name}: standard error"
         );
     }
 }

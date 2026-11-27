@@ -89,7 +89,9 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   `BLASTN (LOSAT 0.2.0)` where NCBI's is `BLASTN 2.17.0+`, moves the same point of the report that far). Standard
   output must be empty in the last two (`run_on_device`). `stdout-fsize=N`: standard output is that limited file
   (no `-out`); `stdout-stderr-fsize=N`: standard output and standard error are that one file (`> file 2>&1`);
-  `stderr-full`: standard error is /dev/full (standard output is the report); `stdout-closed`, `stderr-closed`: a
+  `stderr-full`: standard error is /dev/full (standard output is the report); `out-stdout-merged` (line RG item
+  T8a): `-out /dev/stdout`, standard output a pipe and standard error into it (`2>&1`), whose merged bytes are the
+  frozen .out (no .err), so the row pins where each message lands in the report; `stdout-closed`, `stderr-closed`: a
   pipe whose reader closed before the start, LOSAT's only (NCBI is ended by SIGPIPE), whose expectation is the
   `ncbi-near` row of the full device (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 5). `check --library` skips these rows (`library-skip`): the library writes
   no standard output or standard error of NCBI's, and the `-out` file of its `run_to_file` (the command line's stream,
@@ -1164,6 +1166,14 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
                 run.stderr = b""
         finally:
             os.close(write)
+        return run
+    if mode == "out-stdout-merged":
+        # `-out /dev/stdout` with standard output a pipe and standard error into it: the report's file and the
+        # messages share one pipe, and the bytes read from it show where each message lands in the report (line RG
+        # item T8a).
+        run = subprocess.run([*command, "-out", "/dev/stdout"], cwd=ENGINE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, timeout=TIMEOUT, env=env, preexec_fn=preexec)
+        run.stderr = b""
         return run
     if mode == "stderr-full":
         with open("/dev/full", "wb") as full:

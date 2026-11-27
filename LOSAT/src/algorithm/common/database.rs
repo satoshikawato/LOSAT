@@ -6840,6 +6840,27 @@ impl TaxdbRun {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:218-222 (one
+    // `CTaxDBFileInfo` per process, made at the first `GetTaxNames`)
+    /// A sequential run ([`TaxdbRun::sequential`]) of another `CSeqDB` of the process of this run:
+    /// the taxonomy database is the one this run opened (NCBI's one per process), so its texts of
+    /// opening are not written again; the volumes' caches are the new database's, whose lookups
+    /// write their texts again (NCBI 2.17.0, windowmasker `-mk_counts -infmt blastdb`, line RG
+    /// T8 survey W1: the open error once in three passes, the offset error in each).
+    pub(crate) fn sequential_after(&self) -> Self {
+        let run = TaxdbRun::sequential();
+        if let Some(lazy) = self.lazy.get() {
+            let _ = run.lazy.set(std::sync::Arc::clone(lazy));
+        }
+        if let Some(&texts) = self.texts.get() {
+            let _ = run.texts.set(texts);
+        }
+        if let Some(&found) = self.found.get() {
+            let _ = run.found.set(found);
+        }
+        run
+    }
+
     /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its
     /// volumes' caches, while the taxonomy database `taxdb` is the process's (NCBI's static
     /// `CTaxDBFileInfo`): blastdbcheck opens each volume as a database of its own. The texts of

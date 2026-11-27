@@ -636,12 +636,15 @@ opens as typed (`-export_search_strategy`, `-out_pssm` and `-out_ascii_pssm` on 
 12) is named by the file that the system opens where a `..` follows a link (`/tmp/s.asn` for `/var/run/../tmp/s.asn`,
 `/var/run` being `/run`), where earlier modules gave the name read lexically (`/var/tmp/s.asn`, another file);
 `-logfile`'s name stays NCBI's lexical reading of it (`/var/tmp/run.log` for `/var/run/../tmp/run.log`). The
-*start*'s `strategy_file`, `out_pssm` and `out_ascii_pssm` change with the entries' names. The host matches a stream
-8 entry against `log_file_name` first, then `strategy_file`, then the PSSM names, and no longer against `log_file`
-(the value as written), as every module of version 16 gives the file of `-logfile` under `log_file_name`; an earlier
-host of version 16 matched `log_file` first, so with this module it labels as the log's a file of another option
-whose name is the `-logfile` value as written (`-export_search_strategy ./-` beside `-logfile -`, which makes no
-file: the strategy file is `-`).
+*start*'s `strategy_file`, `out_pssm` and `out_ascii_pssm` change with the entries' names, and `log_file_name` names
+every log that a run of the argv makes (`/tmp/run.log` for `-logfile /data/../tmp/run.log` beside `-query
+/data/q.fa`, where earlier modules gave null and the entry `/tmp/run.log`). The host matches a stream 8 entry
+without a label (below) against `log_file_name` first, then `strategy_file`, then the PSSM names, and no longer
+against `log_file` (the value as written), as every module since line RG item F1w-r2 gives the file of `-logfile`
+under `log_file_name` (an earlier module of version 16 gives the entry `/tmp/run.log` above with `log_file_name`
+null, which the value as written did not match either); an earlier host of version 16 matched `log_file` first, so
+with this module it labels as the log's a file of another option whose name is the `-logfile` value as written
+(`-export_search_strategy ./-` beside `-logfile -`, which makes no file: the strategy file is `-`).
 
 Its third fix round (2026-11-28), with no version either: each stream 8 entry's comment names the option whose file
 it is (§5), as the run that makes the file knows it. The *start* is read before the run, so its names cannot tell

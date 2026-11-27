@@ -515,24 +515,31 @@ pub(super) fn write_xml(
             messages
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
+    // PHI-BLAST's results (`CLocalBlast`'s) carry the query's masks (`query_record_masks`),
+    // unlike psiblast's other rounds (`result_query_masks`), as in its pairwise report.
+    let result_masks = if phi.is_some() {
+        query_record_masks(query_frames, &ranges.query_input.placements)
+    } else {
+        result_query_masks(args.app, query_frames, &ranges.query_input.placements)
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
     // The result of a batch that NCBI did not search has no masks (rpsblast's merge of several
     // volumes takes volume 0's, rpsblast_local.cpp:174-175): XML2 and JSON list none for its
     // queries, which have an alignment set there (`no_alignment_set`).
-    let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
-        result_query_masks(args.app, query_frames, &ranges.query_input.placements)
-            .into_iter()
-            .zip(query_batch_skipped)
-            .map(|(masks, &skipped)| {
-                if skipped {
-                    return Vec::new();
-                }
-                masks
-                    .into_iter()
-                    .map(|(from, to)| crate::report::blast_xml::QueryMask { from, to, frame: 0 })
-                    .collect()
-            })
-            .collect();
+    let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> = result_masks
+        .into_iter()
+        .zip(query_batch_skipped)
+        .map(|(masks, &skipped)| {
+            if skipped {
+                return Vec::new();
+            }
+            masks
+                .into_iter()
+                .map(|(from, to)| crate::report::blast_xml::QueryMask { from, to, frame: 0 })
+                .collect()
+        })
+        .collect();
     // psiblast `-phi_pattern`: the document writes PHI-BLAST's results, one per pattern occurrence
     // (`phi_xml_results`), in place of the queries' own.
     let mut phi_results =

@@ -1,0 +1,129 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 730 total letters
+
+Results from round 1
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pk1 unrelated kinase                                                  17.9    0.85 
+
+
+> pk1 unrelated kinase
+Length=730
+
+ Score = 17.9 bits (36),  Expect = 0.85, Method: Composition-based stats.
+ Identities = 6/29 (21%), Positives = 12/29 (41%), Gaps = 1/29 (3%)
+
+Query  186  HSVQV-SMMYQYGKFRDAEDEHLDAQALE  213
+             + +V   M     + +   E + + ALE
+Sbjct  411  ETGKVIKFMTDKEMYCEFVFETVFSHALE  439
+
+
+ Score = 17.5 bits (35),  Expect = 1.2, Method: Composition-based stats.
+ Identities = 3/41 (7%), Positives = 10/41 (24%), Gaps = 12/41 (29%)
+
+Query  82   LKLARRLFVTKG------LTAKE------DFPDLAKNYYDA  110
+            L +  +++  +                   F D     + +
+Sbjct  679  LSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQS  719
+
+
+ Score = 17.1 bits (34),  Expect = 1.5, Method: Composition-based stats.
+ Identities = 4/26 (15%), Positives = 7/26 (27%), Gaps = 6/26 (23%)
+
+Query  84   LARRLFVTKGLTAKEDFPDLAKNYYD  109
+             A  ++          F  +    YD
+Sbjct  668  SANSIYTNI------PFLSIVSKMYD  687
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.201    0.696    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0615    0.140     1.90     42.6     43.6 
+
+Effective search space used: 228655
+Results from round 2
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pk1 unrelated kinase                                                  17.3    1.5  
+
+
+> pk1 unrelated kinase
+Length=730
+
+ Score = 17.3 bits (33),  Expect = 1.5, Method: Composition-based stats.
+ Identities = 7/27 (26%), Positives = 13/27 (48%), Gaps = 0/27 (0%)
+
+Query  335  SSPVEFNADRPILFLIVDDTTKTILFP  361
+            S+P  FN ++    + +D+     L P
+Sbjct  96   STPYNFNRNKKKRPITIDENQFATLNP  122
+
+
+ Score = 16.9 bits (32),  Expect = 2.0, Method: Composition-based stats.
+ Identities = 14/49 (29%), Positives = 20/49 (41%), Gaps = 9/49 (18%)
+
+Query  90   VTKGLTAKEDFPDLA-----KNYYDAH---VESVGFAN-PHAAAATINN  129
+            V  G+T +    D       K YY+      +   F+N PH A   IN+
+Sbjct  589  VIDGITGQPKMIDFGLIVPCKKYYNFKCWGTDERFFSNHPHTAPEFINS  637
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.137    0.403    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0418    0.140     1.90     42.6     43.6 
+
+Effective search space used: 228655
+
+Search has CONVERGED!
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 730
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

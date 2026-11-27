@@ -96,7 +96,7 @@ pub(super) struct PrelimRun<'a> {
     pub(super) lookup: &'a BlastpRuntimeLookup,
     pub(super) contexts: &'a [QueryContext],
     /// psiblast `-phi_pattern`: the call's PHI-BLAST searches (`phi_hooks::phi_prelim`).
-    pub(super) phi: Option<&'a super::phi_hooks::PhiCall<'a>>,
+    pub(super) phi: Option<&'a super::phi_hooks::PhiCall>,
     // The statistics and the cutoffs.
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,

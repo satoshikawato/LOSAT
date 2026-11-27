@@ -45,14 +45,28 @@ pub enum BlastpApp {
     Blastp,
     Psiblast,
     Rpsblast,
+    /// deltablast (`algorithm/deltablast`): psiblast's rounds (`is_psi`) whose round 1 searches
+    /// the PSSM of the conserved domains that an RPS search of the query found.
+    Deltablast,
 }
 
 impl BlastpApp {
+    /// Whether the app runs psiblast's rounds and PSSM searches: psiblast and deltablast.
+    pub fn is_psi(self) -> bool {
+        matches!(self, BlastpApp::Psiblast | BlastpApp::Deltablast)
+    }
+
     /// The program's name in NCBI's messages (`Warning: [psiblast] ...`) and reports
     /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
-    /// (`options::RequestKind::application`, the one table of the names).
+    /// (`options::RequestKind::application`, the table of the names), except deltablast's: its
+    /// options handle is psiblast's (`request_kind`), its name its own. The archive and the search
+    /// strategy of deltablast, which LOSAT refuses, will need a `RequestKind` of their own
+    /// (item PS15b-3); until then `request_kind().application()` is not deltablast's name.
     pub fn ncbi_name(self) -> &'static str {
-        self.request_kind().application()
+        match self {
+            BlastpApp::Deltablast => "deltablast",
+            _ => self.request_kind().application(),
+        }
     }
 
     /// The program type of the app's Seq-aligns where BLASTP does not name it
@@ -61,7 +75,7 @@ impl BlastpApp {
         use crate::report::record::ProgramType;
         match self {
             BlastpApp::Blastp => None,
-            BlastpApp::Psiblast => Some(ProgramType::PsiBlast),
+            BlastpApp::Psiblast | BlastpApp::Deltablast => Some(ProgramType::PsiBlast),
             BlastpApp::Rpsblast => Some(ProgramType::RpsBlast),
         }
     }
@@ -71,7 +85,7 @@ impl BlastpApp {
         use crate::report::archive::options::RequestKind;
         match self {
             BlastpApp::Blastp => RequestKind::Blastp,
-            BlastpApp::Psiblast => RequestKind::Psiblast,
+            BlastpApp::Psiblast | BlastpApp::Deltablast => RequestKind::Psiblast,
             BlastpApp::Rpsblast => RequestKind::Rpsblast,
         }
     }
@@ -80,7 +94,10 @@ impl BlastpApp {
     /// that the formatter then cuts (`PruneSeqalign`): psiblast's larger lists, and rpsblast's
     /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
     pub fn prunes_after_traceback(self) -> bool {
-        matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+        matches!(
+            self,
+            BlastpApp::Psiblast | BlastpApp::Rpsblast | BlastpApp::Deltablast
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
@@ -103,7 +120,9 @@ impl BlastpApp {
         match (self, outfmt) {
             _ if !self.prunes_after_traceback() => ListCut::Uncut,
             (_, ARCHIVE_FORMAT | TAX_FORMAT) => ListCut::Uncut,
-            (BlastpApp::Psiblast, XML | JSON..=XML2_S) => ListCut::BeforePssm,
+            (BlastpApp::Psiblast | BlastpApp::Deltablast, XML | JSON..=XML2_S) => {
+                ListCut::BeforePssm
+            }
             _ => ListCut::AfterPssm,
         }
     }
@@ -114,6 +133,7 @@ impl BlastpApp {
             BlastpApp::Blastp => "BLASTP",
             BlastpApp::Psiblast => "PSIBLAST",
             BlastpApp::Rpsblast => "RPSBLAST",
+            BlastpApp::Deltablast => "DELTABLAST",
         }
     }
 
@@ -123,6 +143,7 @@ impl BlastpApp {
             BlastpApp::Blastp => "blastp",
             BlastpApp::Psiblast => "psiblast",
             BlastpApp::Rpsblast => "rpsblast",
+            BlastpApp::Deltablast => "deltablast",
         }
     }
 }
@@ -405,6 +426,22 @@ pub struct BlastpArgs {
     /// rpsblast's options that its RPS engine applies (`algorithm::rps_search`); `None` for
     /// blastp and psiblast.
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
+    /// deltablast's options besides psiblast's (made by `algorithm::deltablast`); `None` for the
+    /// others.
+    pub delta: Option<DeltaOptions>,
+}
+
+/// deltablast's options besides psiblast's (`BlastpArgs::delta`), made by `algorithm::deltablast`
+/// and read by blastp's domain search (`blast_engine::delta_hooks`).
+#[derive(Debug, Clone)]
+pub struct DeltaOptions {
+    /// `-domain_inclusion_ethresh`: the E-value below which a domain hit joins the PSSM.
+    pub domain_inclusion_ethresh: f64,
+    /// `-show_domain_hits` (refused by name, `ncbi_app::args::refusal`: item PS13b).
+    pub show_domain_hits: bool,
+    /// The domain search's arguments: rpsblast's on `-rpsdb`, with the E-value of the domain
+    /// search and the query's lower-case masking.
+    pub domain: Box<BlastpArgs>,
 }
 
 impl BlastpArgs {
@@ -481,6 +518,7 @@ impl BlastpArgs {
             scope_refusal: Default::default(),
             psiblast_pssm: Default::default(),
             rps: Default::default(),
+            delta: Default::default(),
         })
     }
 }
@@ -699,6 +737,13 @@ pub struct ResolvedBlastpArgs {
     /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
     /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
     pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
+    /// deltablast: its options (`BlastpArgs::delta`) and, once the command line has opened them,
+    /// the domain database and its files (`blast_engine::delta_hooks`); `None` for the others.
+    pub(crate) delta: Option<std::sync::Arc<super::blast_engine::DeltaRun>>,
+    /// deltablast's round 1 of `-subject` (`CPsiBl2Seq`): the call searches one subject of the set
+    /// and reads the statistics of the whole set: its letters and its number of sequences
+    /// (`blast_engine::psi_round::run_queries`). `None` for every other call.
+    pub(crate) whole_subject_set: Option<(i64, i32)>,
     /// psiblast `-phi_pattern` (item PS8a): round 1's pattern as compiled
     /// (`phi_search::pattern::PhiPattern::compile`), or why it does not compile: NCBI's error,
     /// which NCBI's engine raises after the prolog (`blast_engine/phi_hooks.rs`), or LOSAT's
@@ -707,7 +752,7 @@ pub struct ResolvedBlastpArgs {
     pub(crate) phi: Option<
         std::sync::Arc<
             Result<
-                crate::algorithm::phi_search::pattern::PhiPattern,
+                std::sync::Arc<crate::algorithm::phi_search::pattern::PhiPattern>,
                 crate::algorithm::phi_search::pattern::PhiError,
             >,
         >,
@@ -726,6 +771,14 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
+    /// Program name for LOSAT's refusal messages: `"DELTABLAST"` during `deltablast`'s domain
+    /// search (`RpsSearch::domain_search`), otherwise `self.app.name()`.
+    pub(crate) fn program_name(&self) -> &'static str {
+        self.rps_search
+            .as_deref()
+            .map_or_else(|| self.app.name(), |rps| rps.program())
+    }
+
     /// Whether the search has a Gumbel block (the finite-size correction): not with `-searchsp`
     /// or `OLD_FSC` (`old_fsc`), and not in an ungapped search, whose score block frees it.
     ///
@@ -785,11 +838,13 @@ impl ResolvedBlastpArgs {
             // PHI-BLAST's handle is not psiblast's (`CPHIBlastProtOptionsHandle`): its traceback
             // keeps `hitlist_size` lists, as blastp's.
             BlastpApp::Psiblast if self.phi.is_some() => self.max_target_seqs,
-            BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-                self.max_target_seqs,
-                self.comp_based_stats.is_enabled(),
-                true,
-            ),
+            BlastpApp::Psiblast | BlastpApp::Deltablast => {
+                crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+                    self.max_target_seqs,
+                    self.comp_based_stats.is_enabled(),
+                    true,
+                )
+            }
         }
     }
 
@@ -801,6 +856,17 @@ impl ResolvedBlastpArgs {
         match self.app {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
             BlastpApp::Psiblast => Ok(1),
+            // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:236-242
+            // deltablast reads `BATCH_SIZE` (an error of its value stops every run) and searches
+            // batches of one query only with more than one round (`-num_iterations` 0 too reads
+            // batches of the size).
+            BlastpApp::Deltablast => {
+                let size = crate::blastinput::app::query_batch_size(10000)?;
+                Ok(match self.psi_rounds.as_ref() {
+                    Some(plan) if plan.num_iterations > 1 => 1,
+                    _ => size,
+                })
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
             BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),
@@ -1108,7 +1174,7 @@ impl BlastpArgs {
                 // holds (the `CPsiBlast` constructor keeps the application's reference to it): after the
                 // constructor's scores, with the round's K/A written back
                 // (`blastp::archive::PsiArchive`).
-                if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
+                if self.app.is_psi() && self.archive.is_some() && file.valid {
                     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248
                     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-396
                     // With `-out_pssm` NCBI writes the object in ASN.1 text as round 1 starts
@@ -1161,7 +1227,8 @@ impl BlastpArgs {
                 let raw = crate::algorithm::phi_search::file::read_pattern(&bytes)
                     .map_err(crate::algorithm::phi_search::file::PatternFileError::into_error)?;
                 Some(std::sync::Arc::new(
-                    crate::algorithm::phi_search::pattern::PhiPattern::compile(&raw),
+                    crate::algorithm::phi_search::pattern::PhiPattern::compile(&raw)
+                        .map(std::sync::Arc::new),
                 ))
             }
             None => None,
@@ -1206,7 +1273,7 @@ impl BlastpArgs {
                 == BlastpLookupTableType::CompressedAaLookupTable,
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
-            psiblast: self.app == BlastpApp::Psiblast,
+            psiblast: self.app.is_psi(),
             psi_tblastn: false,
             phi: has_phi,
             // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
@@ -1312,7 +1379,9 @@ impl BlastpArgs {
             // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
             sort: match self.app {
                 BlastpApp::Blastp => self.formatting.report_sort(),
-                BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
+                BlastpApp::Psiblast | BlastpApp::Deltablast | BlastpApp::Rpsblast => {
+                    Default::default()
+                }
             },
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
@@ -1378,11 +1447,18 @@ impl BlastpArgs {
             psi_search,
             rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
+            delta: self.delta.clone().map(|options| {
+                std::sync::Arc::new(super::blast_engine::DeltaRun::new(
+                    options,
+                    self.lcase_masking,
+                ))
+            }),
             phi,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
+            whole_subject_set: None,
             traceback_hitlist: 0,
             subject_taxdb_found: false,
             subject_taxdb: None,

@@ -18,6 +18,7 @@
 - [tblastn](programs/tblastn.md)
 - [tblastx](programs/tblastx.md)
 - [psiblast](programs/psiblast.md)
+- [deltablast](programs/deltablast.md)
 - [rpsblast](programs/rpsblast.md)
 - [rpstblastn](programs/rpstblastn.md)
 - [rpsbproc](programs/rpsbproc.md)

@@ -12,6 +12,7 @@ use std::io::Write as _;
 use anyhow::Result;
 
 use super::rounds::SetKey;
+use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::pssm_search::in_pssm::{score_block, NCBISTDAA_TO_AMINOACID};
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
@@ -406,7 +407,8 @@ pub(crate) struct QueryPssm {
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
 /// sequence`, `input_msa`), also where the PSSM then fails. `archive`: the run's archive holds the
-/// PSSM's object (`QueryPssm::object`).
+/// PSSM's object (`QueryPssm::object`). `app`: the program (psiblast, or deltablast in its rounds
+/// after the first), which LOSAT's refusals name.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-404
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:131-148
@@ -440,12 +442,21 @@ pub(crate) fn query_pssm(
     ancillary: PssmAncillary,
     unread: &mut Vec<u32>,
     archive: bool,
+    app: BlastpApp,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
     let encoded = crate::algorithm::blastp::encoding::encode_protein_sequence(query.letters);
     let letters = &encoded.aa_seq[1..=encoded.aa_len];
-    let msa = input_msa(letters, alignments, subject, key, inclusion_ethresh, unread)?;
+    let msa = input_msa(
+        letters,
+        alignments,
+        subject,
+        key,
+        inclusion_ethresh,
+        unread,
+        app,
+    )?;
     if request.pseudocount < 0 {
         return Err(blast_options_error(
             "IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0",
@@ -487,6 +498,107 @@ pub(crate) fn query_pssm(
         ascii,
         engine: pssm,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-661
+// NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:101-130 (`s_AddSeqTitleToPssm`)
+/// The files of deltablast's PSSM of the conserved domains (`CPssmEngine::Run` of a
+/// `CCddInputData`, `x_PSIMatrix2Asn1` without the ancillary data): its ASN.1 text carries the
+/// query's Bioseq, with the descriptors `s_AddSeqTitleToPssm` adds only when `-out_pssm` is given
+/// (the FASTA reader's `DefLine` user object, `defline` as read, then the title; `CCddInputData`
+/// itself is given no title, deltablast.cpp:116-125), the pseudocount 0 and the matrix's name; the
+/// ASCII PSSM is the one of a PSSM file (`in_pssm_files::ascii_pssm`).
+pub(crate) fn cdd_query_pssm(
+    request: &PssmRequest,
+    pssm: PsiPssm,
+    letters: &[u8],
+    query: PssmQueryRecord<'_>,
+    defline: &[u8],
+    matrix_name: &str,
+) -> Result<QueryPssm> {
+    let object = (request.asn_path.is_some() || request.ascii_path.is_some()).then(|| {
+        let descr = request.asn_path.is_some().then(|| {
+            vec![
+                fasta_defline_descriptor(defline),
+                Seqdesc::Title(query.title.to_vec()),
+            ]
+        });
+        let entry = SeqEntry::Seq(Box::new(PssmQuery {
+            ids: vec![query.id.clone()],
+            descr,
+            inst: SeqInst::new(
+                ("raw", 2),
+                ("aa", 3),
+                Some(letters.len() as u32),
+                Some(SeqData::Ncbistdaa(letters.to_vec())),
+            ),
+            annot: None,
+        }));
+        msa_pssm_with_parameters(&pssm, letters.len(), Some(entry), matrix_name)
+    });
+    let (asn, asn_posts) = match (&request.asn_path, &object) {
+        (Some(_), Some(value)) => {
+            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(value)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            (Some(asn), posts)
+        }
+        _ => (None, Vec::new()),
+    };
+    let ascii = match (&request.ascii_path, &object) {
+        (Some(_), Some(value)) => Some(super::in_pssm_files::ascii_pssm(value)),
+        _ => None,
+    };
+    Ok(QueryPssm {
+        object: object.map(std::sync::Arc::new),
+        asn,
+        asn_posts,
+        ascii,
+        engine: pssm,
+    })
+}
+
+/// The descriptor that `CFastaReader` adds to a Bioseq: a `user` object of the type
+/// `CFastaReader` with the field `DefLine` holding `NStr::PrintableString` of the definition line
+/// as read.
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:598-602
+fn fasta_defline_descriptor(defline: &[u8]) -> Seqdesc {
+    use crate::report::serial::asn_types::{member_index, members, table::named, Value};
+    let object_id_str = |text: &[u8]| {
+        Value::Choice(
+            member_index(named::OBJECT_ID, "str") as u16,
+            Box::new(Value::Str(text.to_vec())),
+        )
+    };
+    let data_type = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
+    let field = Value::Sequence(vec![
+        (
+            member_index(named::USER_FIELD, "label") as u16,
+            object_id_str(b"DefLine"),
+        ),
+        (
+            member_index(named::USER_FIELD, "data") as u16,
+            Value::Choice(
+                member_index(data_type, "str") as u16,
+                Box::new(Value::Str(
+                    crate::ncbi_str::printable_string(defline).into_owned(),
+                )),
+            ),
+        ),
+    ]);
+    let user = Value::Sequence(vec![
+        (
+            member_index(named::USER_OBJECT, "type") as u16,
+            object_id_str(b"CFastaReader"),
+        ),
+        (
+            member_index(named::USER_OBJECT, "data") as u16,
+            Value::List(vec![field]),
+        ),
+    ]);
+    Seqdesc::Other(Value::Choice(
+        member_index(named::SEQDESC, "user") as u16,
+        Box::new(user),
+    ))
 }
 
 /// The `PssmWithParameters` of a PSSM (`x_PSIMatrix2Asn1` with its query, then
@@ -630,6 +742,7 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::ImpalaScoreRange => "Unknown error code returned from PSSM engine: 1",
         // makeprofiledb refuses the PSSM before this text is written.
         PsiError::ScalingUndefined => "The scaling of the PSSM leaves defined behaviour",
+        PsiError::BadProfile => "Errors in conserved domain profile",
     }
 }
 
@@ -661,6 +774,7 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
 // then ordered by score, so with an inclusion threshold below 1.0e-180 the counted subjects are
 // not shown to come first:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1390-1395,3089-3101 and 3095-3102
+/// `app`: psiblast, or deltablast in its rounds after the first (the refusal's names).
 fn input_msa(
     query: &[u8],
     alignments: &[PssmAlignment<'_>],
@@ -668,6 +782,7 @@ fn input_msa(
     key: &dyn Fn(u32) -> SetKey,
     inclusion_ethresh: f64,
     unread: &mut Vec<u32>,
+    app: BlastpApp,
 ) -> Result<PsiMsa> {
     let qualifying: std::collections::BTreeSet<SetKey> = alignments
         .iter()
@@ -694,7 +809,9 @@ fn input_msa(
             }
             let Some(row) = msa.rows.get_mut(msa_index) else {
                 anyhow::bail!(
-                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s psiblast writes out of bounds) is not supported by LOSAT's PSIBLAST"
+                    "an alignment past the last row of the PSSM's multiple alignment (a subject included by -inclusion_ethresh after one that is not, or a copy of a record after another subject, where NCBI BLAST+'s {} writes out of bounds) is not supported by LOSAT's {}",
+                    app.ncbi_name(),
+                    app.name()
                 );
             };
             match subject(alignment.subject)?
@@ -855,7 +972,7 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
 /// round 1 (`in_pssm_files`) prints its two PSI blocks as the file holds them: NCBI makes that
 /// ancillary data from the PSSM's values without the check (`ExtractPssmAncillaryData`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:296-326
-fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
+pub(crate) fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
     [
         ("Standard Ungapped    ", ancillary.ungapped),
         ("Standard Gapped      ", ancillary.gapped),
@@ -1458,7 +1575,9 @@ impl PssmFiles {
                 return test_device(path, null, asn).map_err(cannot_write)
             }
             TargetKind::Unopenable => return test_device(path, false, asn).map_err(cannot_write),
-            TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
+            TargetKind::Unsupported(kind) => {
+                return Err(unsupported_target(path, kind, "psiblast"))
+            }
             TargetKind::Unreachable(error) => return Err(cannot_write(error)),
         };
         if path.file_name().is_none() {
@@ -1625,10 +1744,12 @@ fn test_device(path: &std::path::Path, null: bool, asn: &[u8]) -> std::io::Resul
     })
 }
 
-fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {
+/// `app`: the program's name (`BlastpApp::ncbi_name`), psiblast or deltablast.
+fn unsupported_target(path: &std::path::Path, kind: &str, app: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's PSIBLAST",
-        path.display()
+        "an -out_pssm file that is {kind} ({}) is not supported by LOSAT's {}",
+        path.display(),
+        app.to_ascii_uppercase()
     )
 }
 
@@ -1649,12 +1770,13 @@ pub(crate) fn check_pssm_files(
     request: &PssmRequest,
     queries: usize,
     out: Option<&std::path::Path>,
+    app: &'static str,
 ) -> Result<()> {
     let is_receiver = matches!(
         request.run_files,
         crate::report::run_files::RunFiles::Receiver(_)
     );
-    let check = (!is_receiver).then(|| PssmFileCheck::new(out));
+    let check = (!is_receiver).then(|| PssmFileCheck::new(out, app));
     for ((option, path), first) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
@@ -1687,15 +1809,23 @@ pub(crate) fn check_pssm_files(
 
 /// `check_pssm_files`' check of one name, also made by the round driver before each write
 /// (`rounds::RoundFiles`), whose numbered names are not known before the search.
+/// `app` is the program's name in the refusals (`BlastpApp::ncbi_name`: psiblast or deltablast).
 pub(crate) struct PssmFileCheck {
     streams: ReportStreams,
+    app: &'static str,
 }
 
 impl PssmFileCheck {
-    pub(crate) fn new(out: Option<&std::path::Path>) -> Self {
+    pub(crate) fn new(out: Option<&std::path::Path>, app: &'static str) -> Self {
         Self {
             streams: ReportStreams::new(out),
+            app,
         }
+    }
+
+    /// The program's name in the refusals.
+    pub(crate) fn app(&self) -> &'static str {
+        self.app
     }
 
     /// The refusal of the file `name` of `option` (`-out_pssm` or `-out_ascii_pssm`) where it
@@ -1704,13 +1834,14 @@ impl PssmFileCheck {
     pub(crate) fn check(&self, option: &str, name: &std::path::Path) -> Result<()> {
         if let Some(stream) = self.streams.stream_of(name) {
             anyhow::bail!(
-                "an {option} file that is also {stream} ({}) is not supported by LOSAT's PSIBLAST",
-                name.display()
+                "an {option} file that is also {stream} ({}) is not supported by LOSAT's {}",
+                name.display(),
+                self.app.to_ascii_uppercase()
             );
         }
         if option == "-out_pssm" {
             if let TargetKind::Unsupported(kind) = target_kind(name) {
-                return Err(unsupported_target(name, kind));
+                return Err(unsupported_target(name, kind, self.app));
             }
         }
         Ok(())

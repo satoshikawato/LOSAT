@@ -10,30 +10,31 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 | `-outfmt` | Format | Written by |
 | --- | --- | --- |
-| `0` | Pairwise | all eight search programs |
+| `0` | Pairwise | all nine search programs |
 | `1` | Query-anchored, showing identities | all eight |
 | `2` | Query-anchored, no identities | all eight |
 | `3` | Flat query-anchored, showing identities | all eight |
 | `4` | Flat query-anchored, no identities | all eight |
 | `5` | BLAST XML | all eight |
-| `6` | Tabular | all eight |
-| `7` | Tabular with comment lines | all eight |
+| `6` | Tabular | all nine search programs |
+| `7` | Tabular with comment lines | all nine search programs |
 | `8` | Seqalign, ASN.1 text | all eight |
 | `9` | Seqalign, ASN.1 binary | all eight |
 | `10` | Comma-separated values | all eight |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
 | `12` | Seqalign, JSON | all eight |
-| `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
-| `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
-| `15` | Single-file BLAST JSON | all but `psiblast` |
-| `16` | Single-file BLAST XML2 | all but `psiblast` |
+| `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` and `deltablast` |
+| `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` and `deltablast` |
+| `15` | Single-file BLAST JSON | all but `psiblast` and `deltablast` |
+| `16` | Single-file BLAST XML2 | all but `psiblast` and `deltablast` |
 | `17` | SAM | `blastn` only |
 | `18` | Organism report | all eight |
 | `20` | Comma-separated values with header lines | all eight |
 
-"All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
+"All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`; `deltablast` is the ninth search program and writes only `0`, `6` and `7`. Some programs write fewer formats than the table shows:
 
 - `psiblast` writes `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round; it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round. Formats `13` to `16` are not yet supported.
+- `deltablast` writes `0`, `6` and `7`, with `6` and `7` taking a custom field list. Its report shows each round, as `psiblast`'s does.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
 `rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
@@ -75,7 +76,7 @@ To change the separator, add `delim=` right after the number (before the field n
 losat blastn -query query.fna -subject genome.fna -outfmt "10 delim=@ qacc sacc score"
 ```
 
-As in NCBI BLAST+, `psiblast`, `rpsblast` and `rpstblastn` read and check `delim=` but keep the tab or comma. In every program, a separator that a listed field uses between its entries (`;` with `sallseqid`, `staxids`, `sscinames`, `scomnames`, `sblastnames` or `sskingdoms`, `/` with `frames`, `<>` with `salltitles`) gets NCBI's error.
+As in NCBI BLAST+, `psiblast`, `deltablast`, `rpsblast` and `rpstblastn` read and check `delim=` but keep the tab or comma. In every program, a separator that a listed field uses between its entries (`;` with `sallseqid`, `staxids`, `sscinames`, `scomnames`, `sblastnames` or `sskingdoms`, `/` with `frames`, `<>` with `salltitles`) gets NCBI's error.
 
 LOSAT ignores a word that is not a field name; a list with no known field gives the default columns.
 
@@ -98,7 +99,7 @@ LOSAT ignores a word that is not a field name; a list with no known field gives 
 | `sstrand` | Subject strand. |
 | `qcovs`, `qcovhsp`, `qcovus` | Query coverage per subject, per HSP, per unique subject (`qcovus` is for `blastn`). |
 
-That is 50 field names. The GI fields print `0` where a sequence has no GI. The tax id fields come from the database (or print `N/A`); the name fields also need NCBI's `taxdb` files, otherwise they print `N/A` with a warning (see [BLAST databases](databases.md)). All the fields work with `psiblast`, `rpsblast` and `rpstblastn` too.
+That is 50 field names. The GI fields print `0` where a sequence has no GI. The tax id fields come from the database (or print `N/A`); the name fields also need NCBI's `taxdb` files, otherwise they print `N/A` with a warning (see [BLAST databases](databases.md)). All the fields work with `psiblast`, `deltablast`, `rpsblast` and `rpstblastn` too.
 
 ## XML, JSON and XML2 (5, 12 to 16)
 

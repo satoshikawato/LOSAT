@@ -78,8 +78,8 @@ impl PhiSetupError {
 }
 
 /// The search of one query: its letters, matrix rows, occurrences and the stage parameters.
-pub(crate) struct PhiSearch<'p> {
-    pub(crate) pattern: &'p PhiPattern,
+pub(crate) struct PhiSearch {
+    pub(crate) pattern: std::sync::Arc<PhiPattern>,
     pub(crate) query: Vec<u8>,
     pub(crate) rows: QueryPssm,
     pub(crate) occurrences: Vec<Occurrence>,
@@ -99,10 +99,10 @@ pub(crate) fn x_dropoffs(lambda: f64, x_drop_bits: f64, x_drop_final_bits: f64) 
     (prelim, last)
 }
 
-/// The parameters of the setup: the pattern (`'p`, which the search keeps) and the query's
-/// values (`'a`, which it copies).
-pub(crate) struct PhiSetup<'p, 'a> {
-    pub(crate) pattern: &'p PhiPattern,
+/// The parameters of the setup: the pattern (shared by `Arc`, which the search keeps) and the
+/// query's values (`'a`, which it copies).
+pub(crate) struct PhiSetup<'a> {
+    pub(crate) pattern: std::sync::Arc<PhiPattern>,
     /// The query's letters (NCBIstdaa, masked as the search sees them).
     pub(crate) query: &'a [u8],
     /// The lookup segments (inclusive ranges of `query`).
@@ -144,9 +144,9 @@ pub(crate) fn occurrences(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:893-907
 /// The query's setup: occurrences (`Blast_SetPHIPatternInfo`), search space, effective count,
 /// cutoff (`5 * -evalue`), X-dropoffs and the matrix rows of the query's letters.
-pub(crate) fn setup<'p>(params: &PhiSetup<'p, '_>) -> Result<PhiSearch<'p>, PhiSetupError> {
-    let pattern = params.pattern;
-    let occurrences = occurrences(pattern, params.query, params.segments)?;
+pub(crate) fn setup(params: &PhiSetup<'_>) -> Result<PhiSearch, PhiSetupError> {
+    let pattern = std::sync::Arc::clone(&params.pattern);
+    let occurrences = occurrences(&pattern, params.query, params.segments)?;
     let search_space = stats::search_space(
         params.db_length,
         params.db_num_seqs,
@@ -197,7 +197,7 @@ pub(crate) fn setup<'p>(params: &PhiSetup<'p, '_>) -> Result<PhiSearch<'p>, PhiS
     })
 }
 
-impl PhiSearch<'_> {
+impl PhiSearch {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:739-835
     /// `PHIGetGappedScore` of one subject (`letters`, then its sentinel at `letters.len()` in
     /// `subject`): every occurrence against every subject hit, kept from the cutoff, sorted by
@@ -208,7 +208,7 @@ impl PhiSearch<'_> {
         subject_length: usize,
         scratch: &mut PssmGapScratch,
     ) -> Result<(Vec<PhiHsp>, usize), PhiError> {
-        let hits = subject_hits(self.pattern, &subject[..subject_length])?;
+        let hits = subject_hits(&self.pattern, &subject[..subject_length])?;
         let mut hsps = Vec::new();
         for (index, occurrence) in self.occurrences.iter().enumerate() {
             for hit in &hits {
@@ -270,7 +270,7 @@ impl PhiSearch<'_> {
                 hsp.s_pattern_offset as usize,
                 occurrence.length as usize,
                 hsp.s_pattern_length as usize,
-                self.pattern,
+                &self.pattern,
                 self.last,
                 scratch,
             )?;

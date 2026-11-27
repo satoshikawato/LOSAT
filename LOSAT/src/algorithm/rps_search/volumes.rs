@@ -917,6 +917,11 @@ pub(crate) struct RpsVolumeSetup {
     /// The `-db` value of a database of one volume, which NCBI's error of a missing `.freq`
     /// names (`with_database`); `None`: each volume's path.
     database_name: Option<Vec<u8>>,
+    /// The volumes (`canonical_volume_path`) whose files `check` or `open` has checked: `open`
+    /// opens them again as `reopen` does (series PR, item PS13a: deltablast's domain search opens
+    /// the volume for each query batch, with this set-up kept from search to search,
+    /// `engine::RpsRunState`).
+    checked: std::collections::BTreeSet<Vec<u8>>,
 }
 
 impl RpsVolumeSetup {
@@ -926,6 +931,7 @@ impl RpsVolumeSetup {
             first_costs: None,
             regrouped: std::collections::BTreeSet::new(),
             database_name: None,
+            checked: std::collections::BTreeSet::new(),
         }
     }
 
@@ -942,17 +948,29 @@ impl RpsVolumeSetup {
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
     /// statistics) after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
     /// files, which the caller reports where NCBI's search raises it; `Err` is LOSAT's refusal.
-    /// The profiles' letters come when the search needs them (`ProfileLetters`).
-    pub(crate) fn open(
+    /// The profiles' letters come when the search needs them (`ProfileLetters`). A volume that this
+    /// set-up has checked opens as `reopen` opens it: its files are those it checked (the run's),
+    /// and NCBI's own errors of them come again where each search opens them.
+    /// Uses `pool` for parallel `.loo` hit checking over the mapping, or reads the overflow array
+    /// through a 1 MiB sliding buffer (`buffered_loo_check`) to keep unused `.loo` pages out of
+    /// the resident set (`RpsVolumeFiles::open_for_in_pool`).
+    pub(crate) fn open_in_pool(
         &mut self,
         volume: &Volume,
         cbs: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        buffered_loo_check: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
-        let files = match self.files(volume, cbs, true)? {
+        let path = canonical_volume_path(volume.base());
+        if self.checked.contains(&path) {
+            return self.reopen(volume, cbs);
+        }
+        let files = match self.files_in_pool(volume, cbs, true, pool, buffered_loo_check)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
+        self.checked.insert(path);
         Ok(Ok(files))
     }
 
@@ -985,6 +1003,7 @@ impl RpsVolumeSetup {
             Err(error) => return Ok(Err(error)),
         };
         self.check_files(volume, &files)?;
+        self.checked.insert(canonical_volume_path(volume.base()));
         Ok(Ok(()))
     }
 
@@ -1008,6 +1027,17 @@ impl RpsVolumeSetup {
         cbs: bool,
         check_hits: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
+        self.files_in_pool(volume, cbs, check_hits, None, false)
+    }
+
+    fn files_in_pool(
+        &self,
+        volume: &Volume,
+        cbs: bool,
+        check_hits: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        buffered_loo_check: bool,
+    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
             .map(|oid| volume.protein_length(oid))
@@ -1016,7 +1046,13 @@ impl RpsVolumeSetup {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
         let opened = if check_hits {
-            RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
+            RpsVolumeFiles::open_for_in_pool(
+                volume.base(),
+                &lengths,
+                self.program,
+                pool,
+                buffered_loo_check,
+            )
         } else {
             let regroup = self
                 .regrouped

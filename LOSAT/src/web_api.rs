@@ -593,6 +593,7 @@ fn parse_blastp_args(
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,
+        delta: None,
     };
 
     let mut index = 0;

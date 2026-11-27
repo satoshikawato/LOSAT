@@ -349,7 +349,37 @@ impl InPssmRounds {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196
-fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
+pub(crate) fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
+    ascii_pssm_with(object, &ascii_ancillary(object))
+}
+
+/// The ancillary data that `ExtractPssmAncillaryData` takes from a PSSM (cited at `ascii_pssm`):
+/// the PSI blocks of its `finalData`, with their labels.
+pub(crate) fn ascii_ancillary(object: &PssmWithParameters) -> [(&'static str, KarlinBlk); 2] {
+    let final_data = object.pssm.final_data.as_ref();
+    let stat = |value: Option<f64>| value.unwrap_or(0.0);
+    let psi_ungapped = KarlinBlk {
+        lambda: stat(final_data.and_then(|data| data.lambda_ungapped)),
+        k: stat(final_data.and_then(|data| data.kappa_ungapped)),
+        h: stat(final_data.and_then(|data| data.h_ungapped)),
+    };
+    let psi_gapped = KarlinBlk {
+        lambda: stat(final_data.map(|data| data.lambda)),
+        k: stat(final_data.map(|data| data.kappa)),
+        h: stat(final_data.map(|data| data.h)),
+    };
+    [
+        ("PSI Ungapped         ", psi_ungapped),
+        ("PSI Gapped           ", psi_gapped),
+    ]
+}
+
+/// `PrintAsciiPssm` of a PSSM with the ancillary data `blocks` (deltablast's `m_AncillaryData`,
+/// which can be another PSSM's or a search's).
+pub(crate) fn ascii_pssm_with(
+    object: &PssmWithParameters,
+    blocks: &[(&str, KarlinBlk)],
+) -> Vec<u8> {
     let pssm = &object.pssm;
     let rows_n = usize::try_from(pssm.num_rows).unwrap_or(0);
     let columns = usize::try_from(pssm.num_columns).unwrap_or(0);
@@ -384,26 +414,7 @@ fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
         }
         _ => None,
     };
-    let stat = |value: Option<f64>| value.unwrap_or(0.0);
-    let psi_ungapped = KarlinBlk {
-        lambda: stat(final_data.and_then(|data| data.lambda_ungapped)),
-        k: stat(final_data.and_then(|data| data.kappa_ungapped)),
-        h: stat(final_data.and_then(|data| data.h_ungapped)),
-    };
-    let psi_gapped = KarlinBlk {
-        lambda: stat(final_data.map(|data| data.lambda)),
-        k: stat(final_data.map(|data| data.kappa)),
-        h: stat(final_data.map(|data| data.h)),
-    };
-    super::pssm::write_ascii_pssm(
-        &scores,
-        &letters,
-        long,
-        &[
-            ("PSI Ungapped         ", psi_ungapped),
-            ("PSI Gapped           ", psi_gapped),
-        ],
-    )
+    super::pssm::write_ascii_pssm(&scores, &letters, long, blocks)
 }
 
 #[cfg(test)]

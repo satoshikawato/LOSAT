@@ -20,7 +20,7 @@ LOSAT Web is an in-browser graphical interface for local sequence searches built
 - **Not available in LOSAT Web:**
   - Remote NCBI options (`-remote`, `-entrez_query`);
   - `psiblast -phi_pattern`;
-  - RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, `blast_formatter`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`).
+  - DELTA-BLAST (`deltablast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, `blast_formatter`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`).
 
 ## Threads in the browser
 

@@ -1,7 +1,7 @@
-//! NCBI's argument reader (`ncbi_app::read`, line RG DECISIONS K4i-2) for the ten programs that
+//! NCBI's argument reader (`ncbi_app::read`, line RG DECISIONS K4i-2) for the eleven programs that
 //! read their arguments into their own option types (`options`, line RG DECISIONS K4i-3-1):
-//! blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, rpstblastn, makeblastdb and
-//! rpsbproc. Each program is a `Tool` (its frozen
+//! blastn, blastp, blastx, tblastn, tblastx, psiblast, deltablast, rpsblast, rpstblastn,
+//! makeblastdb and rpsbproc. Each program is a `Tool` (its frozen
 //! `-help` text; its argument XML is NCBI's), read in NCBI's order by every caller: the command
 //! line's entry (`cli::main_entry`), the library API (`api::search`, `api::run_makeblastdb`) and
 //! LOSAT Web's ABI v2 (`web_adapter`). NCBI's reader writes the help and the argument errors
@@ -67,6 +67,11 @@ static PSIBLAST: Tool = tool!(
     "PSIBLAST",
     include_str!("../algorithm/psiblast/help.txt")
 );
+static DELTABLAST: Tool = tool!(
+    "deltablast",
+    "DELTABLAST",
+    include_str!("../algorithm/deltablast/help.txt")
+);
 static RPSBLAST: Tool = tool!(
     "rpsblast",
     "RPSBLAST",
@@ -104,13 +109,14 @@ static RPSBPROC: Tool = Tool {
 };
 
 /// The programs on this reader, in the order of `Commands`' variants.
-static TOOLS: [&Tool; 10] = [
+static TOOLS: [&Tool; 11] = [
     &BLASTX,
     &BLASTN,
     &BLASTP,
     &TBLASTX,
     &TBLASTN,
     &PSIBLAST,
+    &DELTABLAST,
     &RPSBLAST,
     &RPSTBLASTN,
     &MAKEBLASTDB,
@@ -156,7 +162,7 @@ pub(crate) fn refusal_after_read(tool: &Tool, args: &Args) -> Option<String> {
 /// type does not hold is LOSAT's error (`not_converted`).
 pub(crate) fn options(tool: &Tool, args: &Args) -> Result<Commands, String> {
     use crate::algorithm::{
-        blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
+        blastn, blastp, blastx, deltablast, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
     };
     let options = match tool.program {
         "blastx" => blastx::BlastxArgs::from_args(args).map(Commands::Blastx),
@@ -165,6 +171,7 @@ pub(crate) fn options(tool: &Tool, args: &Args) -> Result<Commands, String> {
         "tblastx" => tblastx::TblastxArgs::from_args(args).map(Commands::Tblastx),
         "tblastn" => tblastn::TblastnArgs::from_args(args).map(Commands::Tblastn),
         "psiblast" => psiblast::PsiblastArgs::from_args(args).map(Commands::Psiblast),
+        "deltablast" => deltablast::DeltablastArgs::from_args(args).map(Commands::Deltablast),
         "rpsblast" => rpsblast::RpsblastArgs::from_args(args).map(Commands::Rpsblast),
         "rpstblastn" => rpstblastn::RpstblastnArgs::from_args(args).map(Commands::Rpstblastn),
         "makeblastdb" => {

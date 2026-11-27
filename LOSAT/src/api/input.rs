@@ -441,6 +441,7 @@ pub fn parse_deflines_of(command: &Commands) -> bool {
         Commands::Blastx(args) => args.parse_deflines,
         Commands::Psiblast(args) => args.parse_deflines,
         Commands::Rpsblast(_)
+        | Commands::Deltablast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => false,

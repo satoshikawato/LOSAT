@@ -289,16 +289,21 @@ fn every_argument_of_the_xml_is_in_its_table() {
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
     // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid),
     // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype), blastdbcheck's 2 (-dbtype,
-    // -verbosity) and blast_formatter's 6 (its counts and sort keys).
-    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2 + 6);
+    // -verbosity), deltablast's 18 (NCBI BLAST+ 2.17.0 `deltablast -xmlhelp`, the file of
+    // `ncbi_xmlhelp`: psiblast's 19 without -msa_master_idx, line PS item PS13a) and
+    // blast_formatter's 6 (its counts and sort keys).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2 + 18 + 6);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
     // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
     // makeprofiledb's 2 (-taxid and -taxid_map exclude each other), blastdb_aliastool's 178
     // (26 requirements, 76 exclusions each in both directions), blastdbcheck's 10 (exclusions:
-    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways) and
-    // blast_formatter's 6 (its 3 exclusions, each in both directions).
+    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways),
+    // deltablast's 147 (the same XML: psiblast's 187 without those of -in_pssm, -in_msa,
+    // -msa_master_idx, -ignore_msa_master, -phi_pattern, -ipglist and -negative_ipglist, with
+    // -show_domain_hits and -remote, and -show_domain_hits and -subject, excluding each other in
+    // both directions) and blast_formatter's 6 (its 3 exclusions, each in both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10 + 6);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10 + 147 + 6);
 }
 
 /// Which class a constraint is.

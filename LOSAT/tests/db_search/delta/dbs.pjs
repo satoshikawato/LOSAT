@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "dbs",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "dbs.faa",
+  "number-of-letters": 341132,
+  "number-of-sequences": 492,
+  "last-updated": "2026-10-25T00:08:00",
+  "number-of-volumes": 1,
+  "bytes-total": 454463,
+  "bytes-to-cache": 345649,
+  "files": [
+    "dbs.pdb",
+    "dbs.phr",
+    "dbs.pin",
+    "dbs.pot",
+    "dbs.psq",
+    "dbs.ptf",
+    "dbs.pto"
+  ]
+}

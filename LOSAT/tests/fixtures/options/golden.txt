@@ -1,4 +1,4 @@
-# The options of the ten programs on NCBI's reader (src/cli/options_tests.rs, `golden`): for each
+# The options of the eleven programs on NCBI's reader (src/cli/options_tests.rs, `golden`): for each
 # program its options at their defaults, `[program]`, one line per value (the path of fields that
 # holds it = its Debug), then for each argument the words given and the lines that they take away
 # (-) and add (+). Frozen from clap's conversion before line RG item K4i-3c; checked by
@@ -656,6 +656,7 @@ first_query_ordinal = 0
 scope_refusal = None
 psiblast_pssm = None
 rps = None
+delta = None
 [blastp -import_search_strategy x]
 - given.list = []
 - import_search_strategy = None
@@ -1605,6 +1606,250 @@ pssm_check = Call
 [psiblast -phi_pattern x]
 - phi_pattern = None
 + phi_pattern = "x"
+[deltablast]
+query = "-"
+subject = None
+db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
+db_filter.seqidlist = None
+db_filter.negative_seqidlist = None
+db_filter.taxids = None
+db_filter.taxidlist = None
+db_filter.negative_taxids = None
+db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
+db_filter.no_taxid_expansion = false
+dbsize = None
+show_gis = false
+parse_deflines = false
+searchsp = None
+sum_stats = None
+evalue = None
+threshold = None
+word_size = None
+num_threads = 1
+out = None
+export_search_strategy = None
+max_target_seqs = None
+num_descriptions = None
+num_alignments = None
+formatting.line_length = None
+formatting.sort_hits = None
+formatting.sort_hsps = None
+formatting.hitlist_start = None
+max_hsps_per_subject = None
+qcov_hsp_perc = None
+culling_limit = None
+best_hit_overhang = None
+best_hit_score_edge = None
+subject_besthit = false
+xdrop_ungap = None
+xdrop_gap = None
+xdrop_gap_final = None
+gap_trigger = 22.0
+window_size = None
+matrix = None
+gap_open = None
+gap_extend = None
+comp_based_stats = "1"
+seg = None
+soft_masking = None
+lcase_masking = false
+use_sw_tback = false
+query_loc = None
+subject_loc = None
+outfmt = "0"
+num_iterations = 1
+pseudocount = 0
+inclusion_ethresh = 0.002
+out_pssm = None
+out_ascii_pssm = None
+save_pssm_after_last_round = false
+save_each_pssm = false
+first_query_ordinal = 0
+scope_refusal = None
+pssm_versions.asn = 1
+pssm_versions.ascii = 1
+pssm_check = Call
+domain_inclusion_ethresh = 0.05
+rpsdb = "cdd_delta"
+show_domain_hits = false
+[deltablast -db x]
+- db = None
++ db = "x"
+[deltablast -dbsize 2]
+- dbsize = None
++ dbsize = 2
+[deltablast -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
+[deltablast -seqidlist x]
+- db_filter.seqidlist = None
++ db_filter.seqidlist = "x"
+[deltablast -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
+[deltablast -negative_seqidlist x]
+- db_filter.negative_seqidlist = None
++ db_filter.negative_seqidlist = "x"
+[deltablast -taxids x]
+- db_filter.taxids = None
++ db_filter.taxids = "x"
+[deltablast -negative_taxids x]
+- db_filter.negative_taxids = None
++ db_filter.negative_taxids = "x"
+[deltablast -taxidlist x]
+- db_filter.taxidlist = None
++ db_filter.taxidlist = "x"
+[deltablast -negative_taxidlist x]
+- db_filter.negative_taxidlist = None
++ db_filter.negative_taxidlist = "x"
+[deltablast -no_taxid_expansion]
+- db_filter.no_taxid_expansion = false
++ db_filter.no_taxid_expansion = true
+[deltablast -subject x]
+- subject = None
++ subject = "x"
+[deltablast -subject_loc x]
+- subject_loc = None
++ subject_loc = "x"
+[deltablast -query x]
+- query = "-"
++ query = "x"
+[deltablast -out x]
+- out = None
++ out = "x"
+[deltablast -evalue 0.5]
+- evalue = None
++ evalue = 0.5
+[deltablast -word_size 2]
+- word_size = None
++ word_size = 2
+[deltablast -gapopen 2]
+- gap_open = None
++ gap_open = 2
+[deltablast -gapextend 2]
+- gap_extend = None
++ gap_extend = 2
+[deltablast -qcov_hsp_perc 0.5]
+- qcov_hsp_perc = None
++ qcov_hsp_perc = 0.5
+[deltablast -max_hsps 2]
+- max_hsps_per_subject = None
++ max_hsps_per_subject = 2
+[deltablast -xdrop_ungap 0.5]
+- xdrop_ungap = None
++ xdrop_ungap = 0.5
+[deltablast -xdrop_gap 0.5]
+- xdrop_gap = None
++ xdrop_gap = 0.5
+[deltablast -xdrop_gap_final 0.5]
+- xdrop_gap_final = None
++ xdrop_gap_final = 0.5
+[deltablast -searchsp 2]
+- searchsp = None
++ searchsp = 2
+[deltablast -sum_stats true]
+- sum_stats = None
++ sum_stats = true
+[deltablast -seg x]
+- seg = None
++ seg = "x"
+[deltablast -soft_masking true]
+- soft_masking = None
++ soft_masking = true
+[deltablast -matrix x]
+- matrix = None
++ matrix = "x"
+[deltablast -threshold 0.5]
+- threshold = None
++ threshold = 0.5
+[deltablast -culling_limit 2]
+- culling_limit = None
++ culling_limit = 2
+[deltablast -best_hit_overhang 1e-5]
+- best_hit_overhang = None
++ best_hit_overhang = 1e-5
+[deltablast -best_hit_score_edge 1e-5]
+- best_hit_score_edge = None
++ best_hit_score_edge = 1e-5
+[deltablast -subject_besthit]
+- subject_besthit = false
++ subject_besthit = true
+[deltablast -window_size 2]
+- window_size = None
++ window_size = 2
+[deltablast -lcase_masking]
+- lcase_masking = false
++ lcase_masking = true
+[deltablast -parse_deflines]
+- parse_deflines = false
++ parse_deflines = true
+[deltablast -outfmt x]
+- outfmt = "0"
++ outfmt = "x"
+[deltablast -show_gis]
+- show_gis = false
++ show_gis = true
+[deltablast -num_descriptions 2]
+- num_descriptions = None
++ num_descriptions = 2
+[deltablast -num_alignments 2]
+- num_alignments = None
++ num_alignments = 2
+[deltablast -line_length 2]
+- formatting.line_length = None
++ formatting.line_length = 2
+[deltablast -sorthits 2]
+- formatting.sort_hits = None
++ formatting.sort_hits = 2
+[deltablast -sorthsps 2]
+- formatting.sort_hsps = None
++ formatting.sort_hsps = 2
+[deltablast -max_target_seqs 2]
+- max_target_seqs = None
++ max_target_seqs = 2
+[deltablast -num_threads 2]
+- num_threads = 1
++ num_threads = 2
+[deltablast -comp_based_stats x]
+- comp_based_stats = "1"
++ comp_based_stats = "x"
+[deltablast -use_sw_tback]
+- use_sw_tback = false
++ use_sw_tback = true
+[deltablast -gap_trigger 0.5]
+- gap_trigger = 22.0
++ gap_trigger = 0.5
+[deltablast -num_iterations 2]
+- num_iterations = 1
++ num_iterations = 2
+[deltablast -out_pssm x]
+- out_pssm = None
++ out_pssm = "x"
+[deltablast -out_ascii_pssm x]
+- out_ascii_pssm = None
++ out_ascii_pssm = "x"
+[deltablast -save_pssm_after_last_round]
+- save_pssm_after_last_round = false
++ save_pssm_after_last_round = true
+[deltablast -save_each_pssm]
+- save_each_pssm = false
++ save_each_pssm = true
+[deltablast -pseudocount 2]
+- pseudocount = 0
++ pseudocount = 2
+[deltablast -domain_inclusion_ethresh 0.5]
+- domain_inclusion_ethresh = 0.05
++ domain_inclusion_ethresh = 0.5
+[deltablast -inclusion_ethresh 0.5]
+- inclusion_ethresh = 0.002
++ inclusion_ethresh = 0.5
+[deltablast -rpsdb x]
+- rpsdb = "cdd_delta"
++ rpsdb = "x"
 [rpsblast]
 query = "-"
 db = None

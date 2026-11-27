@@ -332,7 +332,7 @@ fn collect_masker_inputs<S: AsRef<OsStr>>(program: &str, words: &[S], inputs: &m
 }
 
 /// Collects input files for search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`,
-/// `psiblast`, `rpsblast`, `rpstblastn`) and all remaining tools (`blastdbcmd`,
+/// `psiblast`, `deltablast`, `rpsblast`, `rpstblastn`) and all remaining tools (`blastdbcmd`,
 /// `blastdb_aliastool`, `blastdbcheck`, `convert2blastmask`, `makeprofiledb`, and any future
 /// programs whose input files use `Kind::InputFile` or `-archive`).
 fn collect_general_inputs<S: AsRef<OsStr>>(
@@ -342,7 +342,9 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     inputs: &mut RunInputs,
 ) {
     let is_blastn = program == "blastn";
+    let is_deltablast = program == "deltablast";
     let mut reads_formatter_rc = false;
+    let mut saw_rpsdb = false;
     let mut blastn_dbs: Vec<OsString> = Vec::new();
     scan_argv_kinds(program, words, |name, kind, value| {
         if name == "html" {
@@ -405,6 +407,10 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                     push_db_list(&mut blastn_dbs, value);
                 }
             }
+            "rpsdb" if is_deltablast => {
+                saw_rpsdb = true;
+                inputs.add_db(value);
+            }
             "filtering_db" if is_blastn => {
                 inputs.add_db(value);
             }
@@ -414,6 +420,9 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             _ => {}
         }
     });
+    if is_deltablast && !saw_rpsdb {
+        inputs.add_db(OsStr::new("cdd_delta"));
+    }
     if is_blastn && inputs.mb_indexes.is_empty() {
         for db in blastn_dbs {
             inputs.add_mb_index(&db);
@@ -473,9 +482,8 @@ fn db_seqtypes(program: &str, dbtype: Option<SeqType>) -> &'static [SeqType] {
         "blastn" | "tblastn" | "tblastx" | "dustmasker" | "windowmasker" | "makembindex" => {
             &[SeqType::Nucleotide]
         }
-        "blastp" | "blastx" | "psiblast" | "rpsblast" | "rpstblastn" | "segmasker" => {
-            &[SeqType::Protein]
-        }
+        "blastp" | "blastx" | "psiblast" | "deltablast" | "rpsblast" | "rpstblastn"
+        | "segmasker" => &[SeqType::Protein],
         _ => match dbtype {
             Some(SeqType::Protein) => &[SeqType::Protein],
             Some(SeqType::Nucleotide) => &[SeqType::Nucleotide],

@@ -43,6 +43,7 @@ impl Program {
             "blastx" => Ok(Self::Blastx),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
             "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
+            "deltablast" => Err("deltablast is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -167,6 +168,7 @@ fn outfmt_of(command: &mut Commands) -> &mut std::ffi::OsString {
         Commands::Blastx(a) => &mut a.outfmt,
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -321,6 +323,7 @@ fn names_subjects(command: &Commands) -> bool {
         Commands::Blastx(a) => a.subject.is_some() || a.db.is_some(),
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -485,6 +488,7 @@ fn database_of(command: &Commands) -> Option<&std::ffi::OsStr> {
         Commands::Blastx(args) => args.db.as_deref(),
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => None,
     }
@@ -1384,6 +1388,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         // Rejected by `Program::parse`.
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
     }
@@ -1402,6 +1407,7 @@ fn num_threads(command: &Commands) -> usize {
         // Rejected by `Program::parse`.
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
     }
@@ -1488,6 +1494,7 @@ fn handler_warnings(program: Program, command: &Commands, number: u32) -> Vec<u8
         // Rejected by `Program::parse`.
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => Vec::new(),
     }
@@ -1758,6 +1765,7 @@ fn search(
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
+            | Commands::Deltablast(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
                 unreachable!("converted before search or rejected by Program::parse")

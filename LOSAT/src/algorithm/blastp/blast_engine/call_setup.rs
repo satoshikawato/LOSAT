@@ -22,6 +22,7 @@
 //! modules `database`, `psi_round`, `pssm_hooks`, `rps_hooks`, `x_ih_pool`,
 //! `x_lookup_ahead`, `x_soft_subject` and `x_subject_meta`.
 
+use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -70,12 +71,13 @@ use crate::stats::{
 };
 use crate::utils::threading::SearchPool;
 
-/// What `query_frames_of`, `call_subjects` and `call_lookup` read of `run_call`: each field is
-/// `run_call`'s value of the same name, by reference where it is not `Copy` (`subject_records`
+/// What `query_frames_of`, `call_subjects` and `call_lookup` read of `search_call`: each field is
+/// `search_call`'s value of the same name, by reference where it is not `Copy` (`subject_records`
 /// are those of a FASTA subject set, none for a database; `x_block_inputs` are a query block's
 /// subjects, query frames and subject scan ranges, LOSAT_X_BPQBLOCK). `'a` is the lifetime of
-/// what the query frames and the subjects borrow; `'s` that of `run_call`'s own values (`args`,
-/// `prelim`), whose borrow ends with the last call.
+/// what the query frames and the subjects borrow, which the search hands on (`SearchedCall`); `'s`
+/// that of what the search reads only (`args`, `prelim`, `ranges`, `reports`), whose borrow ends
+/// with the last call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:132-134
 pub(super) struct CallSetup<'s, 'a> {
@@ -96,8 +98,8 @@ pub(super) struct CallSetup<'s, 'a> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(super) blastp_num_threads: usize,
-    pub(super) ranges: &'s BlastpRanges<'a>,
-    pub(super) reports: &'s BlastpReports<'a>,
+    pub(super) ranges: &'s BlastpRanges<'s>,
+    pub(super) reports: &'s BlastpReports<'s>,
 }
 
 /// The reports that the call's output formats ask for, in the formats' order (`BlastpReport`:
@@ -202,10 +204,11 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
     }
 }
 
-/// The call's query frames (encoded, with SEG where it applies), in `x_owned_frames` where the
-/// call makes them: a query block's from the search of all queries (LOSAT_X_BPQBLOCK), those
-/// built ahead of the block (LOSAT_X_BPLKPAHEAD, taken from `x_prebuilt`), psiblast's later
-/// rounds' (`psi_round`), or the queries' own.
+/// The call's query frames (encoded, with SEG where it applies), owned where the call makes them
+/// (so that a call held between its search and its reports keeps them, `SearchedCall`): a query
+/// block's from the search of all queries (LOSAT_X_BPQBLOCK, borrowed), those built ahead of the
+/// block (LOSAT_X_BPLKPAHEAD, taken from `x_prebuilt`), psiblast's later rounds' (`psi_round`), or
+/// the queries' own.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-152
 ///
@@ -215,8 +218,7 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
 pub(super) fn query_frames_of<'a>(
     setup: &CallSetup<'_, 'a>,
     x_prebuilt: &mut Option<XAheadLookup>,
-    x_owned_frames: &'a mut Vec<Vec<QueryFrame>>,
-) -> &'a [Vec<QueryFrame>] {
+) -> Cow<'a, [Vec<QueryFrame>]> {
     let CallSetup {
         args,
         query_records,
@@ -226,24 +228,17 @@ pub(super) fn query_frames_of<'a>(
     match (x_block_inputs, x_prebuilt.as_mut()) {
         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block of the preliminary stage takes its frames from the
         // search of all queries (its records, encoded with the same parameters).
-        (Some((_, frames, _)), _) => frames,
-        (None, Some(prebuilt)) => {
-            *x_owned_frames = prebuilt.take_query_frames();
-            x_owned_frames
-        }
+        (Some((_, frames, _)), _) => Cow::Borrowed(frames),
+        (None, Some(prebuilt)) => Cow::Owned(prebuilt.take_query_frames()),
         // psiblast's later rounds: the query as the rounds before left it
         // (`psi_round::RoundQuery`).
         (None, None) if psi_round::searched_other_letters(args) => {
-            *x_owned_frames = psi_round::round_query_frames(args);
-            x_owned_frames
+            Cow::Owned(psi_round::round_query_frames(args))
         }
         // Diagnostic (LOSAT_TIMING): this call's encoding and SEG go to the common line
         // (utils/xtiming.rs); frames built ahead (LOSAT_X_BPLKPAHEAD) are not marked. No NCBI
         // counterpart.
-        (None, None) => {
-            *x_owned_frames = blastp_query_frames_marked(args, query_records, true);
-            x_owned_frames
-        }
+        (None, None) => Cow::Owned(blastp_query_frames_marked(args, query_records, true)),
     }
 }
 
@@ -253,21 +248,18 @@ pub(super) fn query_frames_of<'a>(
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/setup_factory.hpp:337-338
 pub(super) struct BlastpCallSubjects<'a> {
-    pub(super) subjects: &'a [EncodedProtein],
+    pub(super) subjects: Cow<'a, [EncodedProtein]>,
     pub(super) x_meta: Option<&'a XSubjectMeta>,
     pub(super) subject_titles: std::borrow::Cow<'a, [Arc<[u8]>]>,
 }
 
-/// The subjects of a FASTA subject set encoded once, in `x_owned_subjects` where the call encodes
-/// them (none for a database, whose sequences are read in blocks; the block search's encoded
-/// once for all blocks, LOSAT_X_BPQBLOCK), the block search's subject IDs and titles, and the
-/// subjects' titles (none for a call of the preliminary stage only).
+/// The subjects of a FASTA subject set encoded once, owned where the call encodes them (none for a
+/// database, whose sequences are read in blocks; the block search's encoded once for all blocks,
+/// LOSAT_X_BPQBLOCK, borrowed), the block search's subject IDs and titles, and the subjects'
+/// titles (none for a call of the preliminary stage only).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_query_factory.cpp:101-102
-pub(super) fn call_subjects<'a>(
-    setup: &CallSetup<'_, 'a>,
-    x_owned_subjects: &'a mut Vec<EncodedProtein>,
-) -> Result<BlastpCallSubjects<'a>> {
+pub(super) fn call_subjects<'a>(setup: &CallSetup<'_, 'a>) -> Result<BlastpCallSubjects<'a>> {
     let CallSetup {
         args,
         subject_records,
@@ -285,11 +277,11 @@ pub(super) fn call_subjects<'a>(
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search encodes the subjects once
     // (`x_query_blocks::XBlockSubjects`), and so does the search of all queries whose preliminary
     // stage runs in blocks (`PrelimOnly::Block`); the same values.
-    let subjects: &[EncodedProtein] = if let Some(encoded) = x_block_inputs
+    let subjects: Cow<'a, [EncodedProtein]> = if let Some(encoded) = x_block_inputs
         .map(|(subjects, _, _)| subjects)
         .or_else(|| x_query_blocks::x_block_subjects(blastp_parallel_pool, subject_records))
     {
-        encoded
+        Cow::Borrowed(encoded)
     } else {
         #[cfg(all(
             feature = "parallel",
@@ -307,11 +299,12 @@ pub(super) fn call_subjects<'a>(
         ))]
         let prepared_subjects =
             prepare_blastp_subjects_preserving_order(subject_records, args.num_threads)?;
-        *x_owned_subjects = prepared_subjects
-            .into_iter()
-            .map(|prepared_subject| prepared_subject.encoded)
-            .collect();
-        x_owned_subjects
+        Cow::Owned(
+            prepared_subjects
+                .into_iter()
+                .map(|prepared_subject| prepared_subject.encoded)
+                .collect(),
+        )
     };
     // The subjects' titles by subject index, as the reports write them. EXPERIMENT
     // (LOSAT_X_BPQBLOCK): the block search's titles and tabular IDs, made once for all blocks
@@ -440,7 +433,7 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {
         crate::core::x_drop::check_gapped_x_dropoffs(
-            args.app.name(),
+            args.program_name(),
             x_drop_bits,
             (x_drop_gapped, x_drop_gapped_final),
             (args.scoring.gap_open, args.scoring.gap_extend),
@@ -498,7 +491,15 @@ pub(super) fn call_lookup(
         reports,
         ..
     } = *setup;
-    let batch_size = args.query_batch_size()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+    // deltablast's domain search (`PrelimOnly::Domain`) searches the queries of its call as one
+    // batch: `CLocalBlast` of the deltablast batch's query factory, which no reader cuts and
+    // RPS-BLAST never splits.
+    let batch_size = match prelim {
+        Some(PrelimOnly::Domain(_)) => u32::MAX,
+        _ => args.query_batch_size()?,
+    };
     // The batches count whole records (`seq_range::QueryInput::batches`); the batches
     // here are those that NCBI searches (`read_query_batches`).
     let query_batches = ranges.query_input.batches(batch_size);
@@ -692,12 +693,13 @@ pub(super) fn db_extent<'a>(
     // The total length of a database is the one of its index files, not a sum over
     // sequences read; NCBI's `Int8` on every target (an alias file's `LENGTH` is not bounded by
     // the letters LOSAT holds). A subject set's lengths are in memory (at most `isize::MAX`).
-    let total_db_len = match database {
-        None => subjects
+    let total_db_len = match (database, args.whole_subject_set) {
+        (None, Some((letters, _))) => letters,
+        (None, None) => subjects
             .iter()
             .map(|subject| subject.aa_len as i64)
             .sum::<i64>(),
-        Some(database) => database.total_letters(),
+        (Some(database), _) => database.total_letters(),
     };
     // rpsblast: the search units of the database (`rps_hooks::with_units`, line RG D1a-4), whose
     // first unit's numbers the set-up reads in place of the database's (`rps_hooks::RpsSetup`).
@@ -743,6 +745,9 @@ pub(super) fn db_extent<'a>(
     // NCBI's `Int4`: negative for an alias file's negative `NSEQ` or one of 2^31 or more.
     let num_subjects: i32 = match database {
         None if total_db_len == 0 => 1,
+        None if args.whole_subject_set.is_some() => {
+            args.whole_subject_set.map_or(1, |(_, count)| count)
+        }
         None => i32::try_from(subjects.len().max(1)).unwrap_or(i32::MAX),
         Some(database) => rps_setup.map_or_else(
             || database.statistics_num_sequences(),
@@ -841,7 +846,7 @@ fn check_setup_count(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> Re
         setup_total,
         setup_count,
         args.has_gumbel(),
-        args.app.name(),
+        args.program_name(),
     )
 }
 
@@ -964,7 +969,7 @@ pub(super) fn call_search_spaces<'s>(
                                 num_subjects,
                                 context_block(args, gapped_params, ctx),
                                 options_searchsp,
-                                args.app.name(),
+                                args.program_name(),
                             )?
                             .length_adjustment,
                         )
@@ -985,7 +990,7 @@ pub(super) fn call_search_spaces<'s>(
                 eff_db_length,
                 num_subjects,
                 context_block(args, gapped_params, ctx),
-                args.app.name(),
+                args.program_name(),
             )?;
             exact_search_spaces.push(Some(exact));
             Ok(space)
@@ -1015,7 +1020,7 @@ pub(super) fn call_search_spaces<'s>(
             options_searchsp,
             false,
             context_block(args, gapped_params, ctx),
-            args.app.name(),
+            args.program_name(),
         )
     };
     // A query chunk's search reads the whole batch's option spaces by its own context index
@@ -1058,7 +1063,7 @@ pub(super) fn call_search_spaces<'s>(
                         num_subjects,
                         context_block(args, gapped_params, ctx),
                         option_spaces[ctx_idx],
-                        args.app.name(),
+                        args.program_name(),
                     )?;
                     spaces[ctx_idx] = SearchSpace {
                         effective_space: lengths.eff_searchsp as f64,
@@ -1271,7 +1276,7 @@ fn one_subject<const UNGAPPED: bool>(
             option_spaces[ctx_idx],
             false,
             block_of::<UNGAPPED>(gapped_params, ctx),
-            args.app.name(),
+            args.program_name(),
         )?;
         search_spaces[ctx_idx] = SearchSpace {
             effective_space: lengths.eff_searchsp as f64,

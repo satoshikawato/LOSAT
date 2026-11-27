@@ -66,10 +66,10 @@ from frozen_allowlist import Allowlist  # noqa: E402
 # psiblast (line PS) has no capture case: its fixtures are rows of outfmt0_manifest.tsv and
 # db_search_manifest/psiblast.tsv; rpsblast's (line PS, PS11a) and rpstblastn's (PS12a) are rows of
 # db_search_manifest/rpsblast.tsv and rpstblastn.tsv.
-PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast", "rpstblastn")
+PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "deltablast", "rpsblast", "rpstblastn")
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of fasta_input_fixtures.py
 OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "deltablast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 RANGE_PROGRAMS = ("blastn", "blastp", "blastx", "tblastn", "tblastx")  # the programs of range_regression_manifest.tsv
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
@@ -81,7 +81,7 @@ FAST_TBLASTX = frozenset({
 # A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
 # inputs selects every program (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
-PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)/")
+PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|deltablast|rpsblast|rpstblastn)/")
 
 
 def default_jobs() -> int:
@@ -97,7 +97,7 @@ def program_dependents() -> dict[str, set[str]]:
     for program in PROGRAMS:
         text = "".join(path.read_text(errors="replace")
                        for path in (REPO / "LOSAT/src/algorithm" / program).rglob("*.rs"))
-        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)\b", text)) - {program}
+        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx|psiblast|deltablast|rpsblast|rpstblastn)\b", text)) - {program}
     dependents = {program: {program} for program in PROGRAMS}
     changed = True
     while changed:

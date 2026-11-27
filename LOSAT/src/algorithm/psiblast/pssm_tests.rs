@@ -196,6 +196,7 @@ fn the_msa_has_a_row_per_qualifying_subject_in_seq_align_order() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     assert_eq!(msa.rows.len(), 3);
@@ -240,7 +241,16 @@ fn an_unread_seq_align_makes_its_row_the_query() {
         alignment(3, 1e-7, 2, 1, 3, None),
     ];
     let mut unread = Vec::new();
-    let msa = input_msa(&query, &alignments, &letters, &key, 0.002, &mut unread).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &letters,
+        &key,
+        0.002,
+        &mut unread,
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(unread, vec![1, 2]);
     assert_eq!(msa.rows.len(), 4);
     let whole = query.map(Some).to_vec();
@@ -271,6 +281,7 @@ fn an_alignment_past_the_last_row_is_refused() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap_err();
     assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
@@ -291,6 +302,7 @@ fn an_alignment_past_the_last_row_is_refused() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     assert_eq!(msa.rows.len(), 3);
@@ -337,7 +349,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(1, 1e-9, 1, 1, 3, None),
         alignment(2, 1e-8, 0, 0, 4, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -353,7 +374,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-10, 0, 0, 2, None),
         alignment(3, 1e-9, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 3);
     assert_eq!(
         row_letters(&msa.rows[1]),
@@ -366,7 +396,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(0, 1e-9, 0, 0, 4, None),
         alignment(3, 1e-8, 2, 2, 2, None),
     ];
-    let msa = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap();
+    let msa = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap();
     assert_eq!(msa.rows.len(), 4);
     assert_eq!(
         row_letters(&msa.rows[3]),
@@ -379,7 +418,16 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
         alignment(2, 1e-9, 0, 0, 4, None),
         alignment(1, 1e-8, 0, 0, 4, None),
     ];
-    let error = input_msa(&query, &alignments, &subject, &key, 0.002, &mut Vec::new()).unwrap_err();
+    let error = input_msa(
+        &query,
+        &alignments,
+        &subject,
+        &key,
+        0.002,
+        &mut Vec::new(),
+        BlastpApp::Psiblast,
+    )
+    .unwrap_err();
     assert!(
         error
             .to_string()
@@ -411,6 +459,7 @@ fn an_e_value_from_10_on_counts_as_10() {
             &SetKey::Index,
             threshold,
             &mut Vec::new(),
+            BlastpApp::Psiblast,
         )
         .unwrap();
         assert_eq!(msa.rows.len(), rows, "{e_value} {threshold}");
@@ -623,6 +672,7 @@ fn run_query_pssm_of(
         ANCILLARY,
         &mut Vec::new(),
         false,
+        BlastpApp::Psiblast,
     )
 }
 
@@ -719,6 +769,7 @@ fn an_o_in_the_query_prints_as_x() {
         &SetKey::Index,
         0.002,
         &mut Vec::new(),
+        BlastpApp::Psiblast,
     )
     .unwrap();
     let sbp = score_block(ScoringMatrix::Blosum62, BLOSUM62_11_1).unwrap();
@@ -948,7 +999,7 @@ fn the_runs_numbers_go_on_over_the_calls_that_share_them() {
         );
         assert_eq!(first.versions.next(), [4, 1]);
         let checked = |request: &PssmRequest, queries| {
-            check_pssm_files(request, queries, None).map_err(|error| error.to_string())
+            check_pssm_files(request, queries, None, "psiblast").map_err(|error| error.to_string())
         };
         assert_eq!(checked(&first, 1), Err(refusal.clone()));
         let fresh = asn_request(&file, true);
@@ -1150,7 +1201,8 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
     let out = dir.join("out.txt");
     std::fs::write(&out, b"").unwrap();
     let check = |request: &PssmRequest, queries: usize| {
-        check_pssm_files(request, queries, Some(&out)).map_err(|error| error.to_string())
+        check_pssm_files(request, queries, Some(&out), "psiblast")
+            .map_err(|error| error.to_string())
     };
     assert_eq!(
         check(&asn_request(&out, false), 1),
@@ -1167,12 +1219,23 @@ fn a_pssm_file_that_is_a_report_stream_is_refused() {
     std::fs::write(dir.join("p.asn.2"), b"").unwrap();
     assert!(check(&asn_request(&base, true), 2).is_ok());
     assert!(check(&asn_request(&base, false), 2).is_ok());
-    let numbered = check_pssm_files(&asn_request(&base, true), 2, Some(&dir.join("p.asn.2")));
+    let numbered = check_pssm_files(
+        &asn_request(&base, true),
+        2,
+        Some(&dir.join("p.asn.2")),
+        "psiblast",
+    );
     assert!(numbered
         .unwrap_err()
         .to_string()
         .starts_with("an -out_pssm file that is also the -out file"));
-    assert!(check_pssm_files(&asn_request(&base, true), 1, Some(&dir.join("p.asn.2"))).is_ok());
+    assert!(check_pssm_files(
+        &asn_request(&base, true),
+        1,
+        Some(&dir.join("p.asn.2")),
+        "psiblast"
+    )
+    .is_ok());
     // `/dev/null` shows no order: it is no report stream (`report_stream_of`).
     assert!(check(&asn_request(std::path::Path::new("/dev/null"), false), 1).is_ok());
     #[cfg(target_os = "linux")]
@@ -1314,6 +1377,47 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     assert_eq!(file_posts("psiblast", &replaced).text(), want);
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:598-602
+/// `CFastaReader` stores `NStr::PrintableString` of the raw defline in the `DefLine` user field,
+/// so a non-ASCII byte such as `0xE9` is written as `\351` in the CDD PSSM ASN.1 text.
+#[test]
+fn cdd_fasta_defline_descriptor_escapes_with_printable_string() {
+    use crate::report::serial::pssm::{asn_text_posting, SeqEntry};
+    let value = PssmWithParameters {
+        pssm: Pssm {
+            is_protein: None,
+            identifier: None,
+            num_rows: 1,
+            num_columns: 1,
+            row_labels: None,
+            by_row: None,
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_1".to_vec(),
+                ))],
+                descr: Some(vec![
+                    fasta_defline_descriptor(b">q1 caf\xe9 title"),
+                    Seqdesc::Title(b"q1 caf\xe9 title".to_vec()),
+                ]),
+                inst: SeqInst::new(("raw", 2), ("aa", 3), Some(1), None),
+                annot: None,
+            }))),
+            intermediate_data: None,
+            final_data: None,
+        },
+        params: None,
+    };
+    let (bytes, replaced) = asn_text_posting(&value).unwrap();
+    let text = String::from_utf8(bytes).expect("escaped DefLine and replaced title are ASCII");
+    assert!(
+        text.contains(r#"data str ">q1 caf\351 title""#),
+        "expected NStr::PrintableString octal escape in DefLine:\n{text}"
+    );
+    assert!(text.contains(r#"title "q1 caf# title""#));
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(replaced[0].byte, 0xe9);
+}
+
 #[test]
 fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
     use crate::algorithm::psiblast::rounds::RoundFiles;
@@ -1364,7 +1468,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         versions: Default::default(),
         run_files: run_files.clone(),
     };
-    check_pssm_files(&req, 2, None).unwrap();
+    check_pssm_files(&req, 2, None, "PSIBLAST").unwrap();
     let mut files = PssmFiles::new(&req);
     files
         .add(Some(b"asn-1"), Some(b"ascii-1".to_vec()))
@@ -1391,7 +1495,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         versions: Default::default(),
         run_files: run_files.clone(),
     };
-    let mut round_files = RoundFiles::new(&each_req, None);
+    let mut round_files = RoundFiles::new(&each_req, None, "PSIBLAST");
     round_files.write(Some(b"r1-asn"), Some(b"r1-asc")).unwrap();
     round_files.write(Some(b"r2-asn"), Some(b"r2-asc")).unwrap();
     assert_eq!(
@@ -1413,7 +1517,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         versions: Default::default(),
         run_files,
     };
-    assert!(check_pssm_files(&collision, 1, None).is_err());
+    assert!(check_pssm_files(&collision, 1, None, "PSIBLAST").is_err());
 
     // Host name normalization helper matches RunFiles::log_host_name semantics.
     assert_eq!(

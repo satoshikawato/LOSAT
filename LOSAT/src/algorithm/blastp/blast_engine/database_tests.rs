@@ -2156,6 +2156,7 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
             taxdb: shared::TaxdbRun::default(),
             program: "BLASTP",
             rps_units: None,
+            rps_state: Default::default(),
         };
         assert_eq!(database.taxdb_found(), taxdb.is_some());
         for threads in [1, 4, 8, 16] {

@@ -96,12 +96,12 @@ pub(super) fn phi_karlin(args: &ResolvedBlastpArgs) -> Result<stats::PhiKarlin, 
 }
 
 /// The searches of the call's queries and what the preliminary stage gathers for the traceback.
-pub(super) struct PhiCall<'p> {
+pub(super) struct PhiCall {
     /// Each query's search, by query: `None` for a query without letters (its batch is searched
     /// as its query with letters, `PhiBatch`), and for every query where NCBI's table has no
     /// Karlin block (`no_statistics`). A query whose letters give blastp no Karlin block (all `X`)
     /// is searched: PHI-BLAST's score block is the table's (`s_PHIScoreBlkFill`).
-    pub(super) searches: Vec<Option<PhiSearch<'p>>>,
+    pub(super) searches: Vec<Option<PhiSearch>>,
     /// The call's query batches, each the result set of one report (`PhiBatch`).
     pub(super) batches: Vec<PhiBatch>,
     /// By query, the letters that the reports read for a query whose results NCBI reports under
@@ -177,7 +177,7 @@ fn phi_batches(
         .collect()
 }
 
-impl PhiCall<'_> {
+impl PhiCall {
     /// The batch whose report query `q_idx` heads, `None` for a query that heads none.
     pub(super) fn batch_at(&self, q_idx: usize) -> Option<&PhiBatch> {
         let at = self
@@ -188,7 +188,7 @@ impl PhiCall<'_> {
     }
 
     /// The batch's search, `None` where nothing is searched (`no_statistics`).
-    pub(super) fn search_of(&self, batch: &PhiBatch) -> Option<&PhiSearch<'_>> {
+    pub(super) fn search_of(&self, batch: &PhiBatch) -> Option<&PhiSearch> {
         self.searches.get(batch.searched).and_then(Option::as_ref)
     }
 
@@ -264,9 +264,9 @@ impl PhiCall<'_> {
 }
 
 /// How the call's PHI-BLAST setup ends.
-pub(super) enum PhiStart<'p> {
+pub(super) enum PhiStart {
     /// Every query is set up.
-    Search(PhiCall<'p>),
+    Search(PhiCall),
     /// NCBI's error of a query's setup: the pattern's compilation (`query` 0, the first query that
     /// NCBI sets up) or the query's occurrences; NCBI's engine stops with it after the reports of
     /// the queries before (`BLAST engine error: Warning: <message> `).
@@ -299,15 +299,15 @@ impl<'a> PhiLimits<'a> {
 /// come after NCBI's errors of the first batch's setup (the pattern's, its query's occurrences)
 /// and after the table's lookup, where NCBI would search what LOSAT does not: before an error of a
 /// later batch, whose batches before NCBI searches and reports.
-pub(super) fn phi_call<'p>(
-    args: &'p ResolvedBlastpArgs,
+pub(super) fn phi_call(
+    args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     query_batches: &[seq_range::RangedBatch],
     limits: PhiLimits<'_>,
     db_length: i64,
     db_num_seqs: i64,
     setup_error: impl FnOnce(usize, &str) -> anyhow::Error,
-) -> Result<Option<PhiCall<'p>>> {
+) -> Result<Option<PhiCall>> {
     if args.phi.is_none() {
         return Ok(None);
     }
@@ -417,14 +417,14 @@ pub(super) fn note_handle_sets(handle: &crate::report::archive::OptionsHandle) -
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170-185
 #[cold]
 #[inline(never)]
-pub(super) fn phi_start<'p>(
-    args: &'p ResolvedBlastpArgs,
+pub(super) fn phi_start(
+    args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     batches: Vec<PhiBatch>,
     karlin: Result<stats::PhiKarlin, String>,
     db_length: i64,
     db_num_seqs: i64,
-) -> Result<PhiStart<'p>> {
+) -> Result<PhiStart> {
     let phi = args
         .phi
         .as_deref()
@@ -459,7 +459,7 @@ pub(super) fn phi_start<'p>(
         // Without NCBI's Karlin block the query is set up for its errors alone.
         let set_up = match &karlin {
             Ok(karlin) => engine::setup(&PhiSetup {
-                pattern,
+                pattern: std::sync::Arc::clone(pattern),
                 query: letters,
                 segments: &segments,
                 score: &score,
@@ -536,7 +536,7 @@ fn preliminary_of(hsp: &PhiHsp, q_idx: usize, s_idx: usize, query_length: usize)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn phi_prelim(
-    phi: &PhiCall<'_>,
+    phi: &PhiCall,
     contexts: &[QueryContext],
     window: i32,
     new_scratch: &(dyn Fn() -> BlastpSubjectScratch + Sync),
@@ -683,7 +683,7 @@ fn select_kept_prelim(kept: &[XPrelimHsp], all: Vec<PhiHsp>) -> Vec<PhiHsp> {
 #[cold]
 #[inline(never)]
 pub(super) fn phi_traceback(
-    phi: &mut PhiCall<'_>,
+    phi: &mut PhiCall,
     args: &ResolvedBlastpArgs,
     contexts: &[QueryContext],
     subjects: XRedoSubjects<'_>,
@@ -840,7 +840,7 @@ pub(super) fn split_hit_list_by_occurrence(
 /// query's length (0 for a context that is not valid, as `context0_searched` gives it); `None`
 /// where nothing is searched (`no_statistics`).
 pub(super) fn request_searched(
-    phi: &PhiCall<'_>,
+    phi: &PhiCall,
     contexts: &[QueryContext],
     query_valid: &[bool],
     first: usize,
@@ -867,12 +867,12 @@ pub(super) fn request_searched(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:504-506
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
 pub(super) fn phi_footers(
-    phi: &PhiCall<'_>,
+    phi: &PhiCall,
     queries: &mut [crate::report::BlastpPairwiseQuery],
     report: &mut crate::report::BlastpPairwiseReport,
 ) {
     let karlin =
-        |search: &PhiSearch<'_>, base: crate::stats::KarlinParams| crate::stats::KarlinParams {
+        |search: &PhiSearch, base: crate::stats::KarlinParams| crate::stats::KarlinParams {
             lambda: search.karlin.lambda,
             k: search.karlin.k,
             h: search.karlin.h,

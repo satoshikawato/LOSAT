@@ -126,7 +126,7 @@ pub(super) fn note_handle_sets(
     // volumes up again, `rps_search`), after `x_AdjustDbSize`'s length (`RpsUnits`).
     let db_length = database.rps_units().and_then(RpsUnits::strategy_db_length);
     let volumes = RpsVolumeSet::of(database.seqdb());
-    let costs = RpsVolumeSetup::new("RPSBLAST").costs(volumes.first());
+    let costs = RpsVolumeSetup::new(rps.program()).costs(volumes.first());
     handle.set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
@@ -146,11 +146,15 @@ pub(super) fn with_units(
     args: &ResolvedBlastpArgs,
     database: database::BlastpDatabase,
 ) -> Result<database::BlastpDatabase> {
+    let program = args
+        .rps_search
+        .as_deref()
+        .map_or("RPSBLAST", RpsSearch::program);
     let units = RpsUnits::of(
         database.seqdb(),
         args.searchsp.unwrap_or(0),
         args.dbsize,
-        "RPSBLAST",
+        program,
     )?;
     Ok(database.with_rps_units(units))
 }
@@ -282,8 +286,9 @@ pub(super) fn rps_search(
     pool: &crate::utils::threading::SearchPool<'_>,
     hit_lists: &mut [Option<BlastpHitList>],
 ) -> Result<RpsSearched> {
+    let program = rps.program();
     let (Some(database), Some(units)) = (database, run.units) else {
-        bail!("a search without -db is not supported by LOSAT's RPSBLAST");
+        bail!("a search without -db is not supported by LOSAT's {program}");
     };
     let db = database.seqdb();
     let RpsVolumeSet {
@@ -339,7 +344,7 @@ pub(super) fn rps_search(
     // A query that NCBI's engine would cut into chunks (`s_GetNextSubjectChunk`) is refused.
     if let Some(long) = run.contexts.iter().find(|ctx| ctx.aa_len > MAX_DBSEQ_LEN) {
         bail!(
-            "a query of {} letters (NCBI BLAST+ searches a query above {MAX_DBSEQ_LEN} letters in chunks) is not supported by LOSAT's RPSBLAST",
+            "a query of {} letters (NCBI BLAST+ searches a query above {MAX_DBSEQ_LEN} letters in chunks) is not supported by LOSAT's {program}",
             long.aa_len
         );
     }
@@ -364,9 +369,14 @@ pub(super) fn rps_search(
         }
     }
     let mut gapped_k = Vec::new();
-    let mut setup =
-        RpsVolumeSetup::new("RPSBLAST").with_database(database.name(), db_volumes.len());
-    // The workers' scratch, kept from volume to volume (`RpsWorkers`).
+    // The volumes' set-up kept from search to search of the database (`RpsRunState`); worker
+    // scratches (`RpsWorkers`) live only for this search and are dropped before prefetch/reports
+    // or DELTABLAST's main `-db` rounds.
+    let mut state = database.rps_state();
+    let state = &mut *state;
+    let setup = state.setup.get_or_insert_with(|| {
+        RpsVolumeSetup::new(program).with_database(database.name(), db_volumes.len())
+    });
     let workers = RpsWorkers::new(pool.threads());
     // The first failing batch (its number and error) of the volumes searched so far.
     let spans: Vec<usize> = run.batches.iter().map(|batch| batch.len()).collect();
@@ -393,7 +403,7 @@ pub(super) fn rps_search(
         } else {
             None
         };
-        let files = match setup.open(volume, cbs > 0)? {
+        let files = match setup.open_in_pool(volume, cbs > 0, Some(pool), rps.domain_search)? {
             Ok(files) => files,
             Err(RpsVolumeError::Files(text)) => return Err(RpsEngineError(text).into()),
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
@@ -410,7 +420,7 @@ pub(super) fn rps_search(
         // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
         // query is searched).
         if searches {
-            unit.check_engine_length(args.window_size, "RPSBLAST")?;
+            unit.check_engine_length(args.window_size, program)?;
         }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
@@ -440,7 +450,7 @@ pub(super) fn rps_search(
                                 ctx.aa_len as i64,
                                 run.gapped_params,
                                 searchsp,
-                                "RPSBLAST",
+                                program,
                             )
                         }
                     })
@@ -465,7 +475,7 @@ pub(super) fn rps_search(
                                 count,
                                 run.gapped_params,
                                 0,
-                                "RPSBLAST",
+                                program,
                             )?
                             .eff_searchsp)
                         }
@@ -530,7 +540,7 @@ pub(super) fn rps_search(
             x_drop_final_bits: x_drops.final_,
             gap_trigger_bits: x_drops.gap_trigger,
             options: rps,
-            program: "RPSBLAST",
+            program,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
@@ -542,7 +552,7 @@ pub(super) fn rps_search(
         // after NCBI's errors of the options, the database and its files.
         if rps.sum_stats {
             bail!(
-                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's RPSBLAST"
+                "-sum_stats true (NCBI BLAST+ 2.17.0's rpsblast links HSPs with the profiles' contexts as query indexes and reads past its arrays: its output depends on memory contents or it crashes) is not supported by LOSAT's {program}"
             );
         }
         // The run's query batches (`run.batches`) in NCBI's order: each batch's first refusal of
@@ -556,7 +566,7 @@ pub(super) fn rps_search(
         for (number, batch) in engine
             .search_volume(
                 &files,
-                &ProfileLetters::new(&setup, volume, starts[index]),
+                &ProfileLetters::new(setup, volume, starts[index]),
                 pool,
                 &workers,
             )?
@@ -619,6 +629,7 @@ pub(super) fn rps_search(
             merge_volume(hit_lists, lists);
         }
     }
+    drop(workers);
     // The reports look the profiles up by ordinal id (`report_ordinal_ids`), batch after batch as
     // NCBI's loop reports them, up to a batch whose search failed: a profile that they would not
     // find among those they report (the first `-max_target_seqs` of each query's merged list)
@@ -633,7 +644,7 @@ pub(super) fn rps_search(
             db,
             &mut hit_lists[batch.clone()],
             args.max_target_seqs,
-            "RPSBLAST",
+            program,
             units.searches_volumes_bare(),
         ) {
             Ok(None) => {}
@@ -671,9 +682,13 @@ pub(super) fn request_space(
     ctx: &QueryContext,
     gapped: &KarlinParams,
 ) -> Result<i64> {
+    let program = args
+        .rps_search
+        .as_deref()
+        .map_or("RPSBLAST", RpsSearch::program);
     match args.searchsp.unwrap_or(0) {
         0 if ctx.is_valid && ctx.aa_len > 0 => {
-            units.request_space(ctx.aa_len as i64, gapped, "RPSBLAST")
+            units.request_space(ctx.aa_len as i64, gapped, program)
         }
         0 => Ok(0),
         searchsp => Ok(searchsp),

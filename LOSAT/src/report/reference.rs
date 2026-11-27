@@ -285,8 +285,9 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// first one; `None`: the plain form.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
-/// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. LOSAT has no
-/// deltablast and no domain database: their branches are not taken.)
+/// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. deltablast writes its
+/// own reference first and psiblast's compositionally adjusted matrices, and none for the
+/// composition-based statistics; LOSAT has no domain database report yet, item PS13b.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
     mut html: Option<(&super::formatter_registry::FormatterNcbirc, &mut dyn Write)>,
@@ -295,6 +296,7 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     indexed_megablast: bool,
 ) -> io::Result<()> {
     let psiblast = program.eq_ignore_ascii_case("psiblast");
+    let deltablast = program.eq_ignore_ascii_case("deltablast");
     let primary = if megablast {
         Publication::MegaBlast
     } else {
@@ -313,12 +315,16 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
             None => write_reference(out, false, DEFAULT_PROTOCOL, publication, is_psiblast),
         }
     };
+    if deltablast {
+        write(&mut *out, Publication::DeltaBlast, false)?;
+        crate::cli::insert(out, b"\n")?;
+    }
     write(&mut *out, primary, false)?;
     if megablast && indexed_megablast {
         crate::cli::insert(out, b"\n")?;
         write(&mut *out, Publication::IndexedMegablast, false)?;
     }
-    if psiblast {
+    if psiblast || deltablast {
         crate::cli::insert(out, b"\n")?;
         write(&mut *out, Publication::CompAdjustedMatrices, false)?;
     }

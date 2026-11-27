@@ -17,6 +17,7 @@ use super::in_pssm_files::InPssmRounds;
 use super::pssm::{
     is_regular_file, OutputFileReset, PsiblastPssmOptions, PssmFileCheck, PssmRequest,
 };
+use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::pssm_search::in_pssm::InPssmFile;
 
 /// The rounds of a psiblast run of FASTA queries or of a PSSM query: `-num_iterations` (0: until
@@ -113,12 +114,15 @@ impl SetKey {
     }
 
     /// LOSAT's refusal of the keys `a` and `b`, which differ but which NCBI's handles can take for
-    /// one sequence (`HandleIndex`).
-    pub(crate) fn refuse_pair(a: &SetKey, b: &SetKey) -> anyhow::Error {
+    /// one sequence (`HandleIndex`), in a run of `app` (psiblast, or deltablast's rounds, whose
+    /// inclusion sets and PSSMs are psiblast's).
+    pub(crate) fn refuse_pair(a: &SetKey, b: &SetKey, app: BlastpApp) -> anyhow::Error {
         anyhow::anyhow!(
-            "the Seq-align ids {} and {} of two database sequences that psiblast compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's PSIBLAST",
+            "the Seq-align ids {} and {} of two database sequences that {} compares (in its inclusion sets, the rows of its PSSM or its two-part description table), which NCBI BLAST+'s Seq-id handles can take for one sequence (ids that differ only in letter case, one accession under gb, emb and dbj, and other ids that LOSAT does not tell apart as NCBI's handles do), are not supported by LOSAT's {}",
             a.label(),
-            b.label()
+            b.label(),
+            app.ncbi_name(),
+            app.name()
         )
     }
 
@@ -135,9 +139,12 @@ impl SetKey {
     }
 
     /// LOSAT's refusal of two keys of `keys` that differ but that NCBI's handles can take for
-    /// one sequence, and of a `giim` key (`HandleIndex::new`).
-    pub(crate) fn check_handles<'a>(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<()> {
-        HandleIndex::new(keys).map(|_| ())
+    /// one sequence, and of a `giim` key (`HandleIndex::new`), in a run of `app`.
+    pub(crate) fn check_handles<'a>(
+        keys: impl IntoIterator<Item = &'a SetKey>,
+        app: BlastpApp,
+    ) -> Result<()> {
+        HandleIndex::new(keys, app).map(|_| ())
     }
 }
 
@@ -150,19 +157,22 @@ impl SetKey {
 /// `seqid::defline_set::handle_superset_key`: building it refuses two keys that differ but share
 /// that key (NCBI's handles can be one or two) and a `giim` key (built for the rows of a PSSM, and
 /// for a previous set, which was such rows); `unsure` then names a key of the index that another
-/// key differs from but can be one handle with.
+/// key differs from but can be one handle with. `app`: the run's program (psiblast, or deltablast),
+/// which the refusals name.
 pub(crate) struct HandleIndex<'a> {
     by_superset: std::collections::BTreeMap<Vec<u8>, &'a SetKey>,
 }
 
 impl<'a> HandleIndex<'a> {
-    pub(crate) fn new(keys: impl IntoIterator<Item = &'a SetKey>) -> Result<Self> {
+    pub(crate) fn new(keys: impl IntoIterator<Item = &'a SetKey>, app: BlastpApp) -> Result<Self> {
         let mut by_superset = std::collections::BTreeMap::new();
         for key in keys {
             if let SetKey::Id(crate::seqid::model::ParsedSeqId::Giim(_)) = key {
                 anyhow::bail!(
-                    "the Seq-align id {} of a database sequence in psiblast's PSSM, a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id (it counts each of its alignments as a row of the PSSM's multiple alignment and cannot read its letters), is not supported by LOSAT's PSIBLAST",
-                    key.label()
+                    "the Seq-align id {} of a database sequence in {}'s PSSM, a giim id, which NCBI BLAST+'s Seq-id handles never take for one sequence with an equal id (it counts each of its alignments as a row of the PSSM's multiple alignment and cannot read its letters), is not supported by LOSAT's {}",
+                    key.label(),
+                    app.ncbi_name(),
+                    app.name()
                 );
             }
             match by_superset.entry(key.superset()) {
@@ -170,7 +180,7 @@ impl<'a> HandleIndex<'a> {
                     entry.insert(key);
                 }
                 std::collections::btree_map::Entry::Occupied(entry) if *entry.get() != key => {
-                    return Err(SetKey::refuse_pair(entry.get(), key));
+                    return Err(SetKey::refuse_pair(entry.get(), key, app));
                 }
                 std::collections::btree_map::Entry::Occupied(_) => {}
             }
@@ -259,6 +269,23 @@ pub(crate) struct PsiRoundIo {
     /// The Seq-id of the next PSSM's query: the PSSM query's of `-in_pssm`, `None` for a FASTA
     /// query (`Query_<n>`).
     pub(crate) query_id: Option<crate::seqid::ParsedSeqId>,
+    /// deltablast `-num_iterations 1`: the round writes the report of a search without rounds
+    /// (no "Results from round" line, no `# Iteration:` line), whose PSSM files and next PSSM
+    /// the round driver still makes.
+    pub(crate) silent: bool,
+    /// deltablast's round 1, a result after the batch's first (`CDeltaBlast::Run` makes the
+    /// results of the batch's queries one after another, and `CPsiBl2Seq`'s search of `-subject`
+    /// one for each subject; the round's inclusion set and next PSSM are made of the first,
+    /// `(*results)[0]`): this call reports its query and subject only.
+    pub(crate) extra_result: bool,
+    /// deltablast: the letters of the next PSSM's query, the query of the domains' PSSM (the
+    /// record's with the lower case of `-lcase_masking` as X, `delta_hooks::CddPssm`); `None` for
+    /// psiblast (the record's).
+    pub(crate) pssm_letters: Option<Vec<u8>>,
+    /// deltablast from round 2 on: round 1's ancillary data (of the first query of the batch),
+    /// with which NCBI makes the last PSSM of `-save_pssm_after_last_round`
+    /// (deltablast_app.cpp:569-577 reads the function's round-1 result, `results_1st_query`).
+    pub(crate) first_round_ancillary: Option<super::pssm::PssmAncillary>,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 
@@ -274,12 +301,15 @@ impl PsiRoundIo {
             .is_some_and(|outcome| outcome.next.is_some())
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:384-398,507-524
     /// Whether the round can make a PSSM, whatever its inclusion set: another round can follow it
-    /// (`-num_iterations` 0, or a round before the last) or the last PSSM is saved. Before the
-    /// round's outcome (`makes_next`), a round that cannot reads no letter of its subjects from
-    /// NCBI's scope (`report::query_bioseq`).
+    /// (`-num_iterations` 0, or a round before the last) or the last PSSM is saved, and the call
+    /// is not an extra result of a deltablast batch (`!extra_result`, whose results never build a
+    /// PSSM). Before the round's outcome (`makes_next`), a round that cannot reads no letter of
+    /// its subjects from NCBI's scope (`report::query_bioseq`).
     pub(crate) fn may_make_next(&self) -> bool {
-        self.save_last || self.state.total == 0 || self.state.done + 1 < self.state.total
+        !self.extra_result
+            && (self.save_last || self.state.total == 0 || self.state.done + 1 < self.state.total)
     }
 }
 
@@ -297,6 +327,16 @@ pub(crate) struct RoundOutcome {
     /// come after the round's report, before the PSSM's error.
     pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
+    /// deltablast: the round's ancillary data (`PsiRoundIo::first_round_ancillary` of the later
+    /// rounds, and the data that the ASCII PSSM after the last PSSM prints).
+    pub(crate) ancillary: Option<super::pssm::PssmAncillary>,
+    /// deltablast from round 2 on, where another round follows and the last PSSM is saved: the
+    /// last PSSM that NCBI saves if the next round has no alignments (this round's Seq-aligns
+    /// with round 1's ancillary data), with its messages.
+    pub(crate) last: Option<(
+        Result<super::pssm::QueryPssm>,
+        super::pssm::PssmReadMessages,
+    )>,
 }
 
 /// The PSSM files of a run (`SavePssmToFile`), written between the rounds: each option's
@@ -311,12 +351,17 @@ pub(crate) struct RoundFiles {
 }
 
 impl RoundFiles {
-    pub(crate) fn new(request: &PssmRequest, out: Option<&std::path::Path>) -> Self {
+    /// `app`: the program's name in the refusals (`BlastpApp::ncbi_name`).
+    pub(crate) fn new(
+        request: &PssmRequest,
+        out: Option<&std::path::Path>,
+        app: &'static str,
+    ) -> Self {
         let [asn, ascii] = request.streams();
         Self {
             asn,
             ascii,
-            check: PssmFileCheck::new(out),
+            check: PssmFileCheck::new(out, app),
             run_files: request.run_files.clone(),
         }
     }
@@ -385,6 +430,13 @@ impl RoundFiles {
             if let Err(error) = written {
                 if is_regular_file(&file.path) {
                     let _ = std::fs::remove_file(&file.path);
+                }
+                if self.check.app() != "psiblast" {
+                    anyhow::bail!(
+                        "a -out_pssm file that cannot be written ({}: {error}) is not supported by LOSAT's {}",
+                        file.path.display(),
+                        self.check.app().to_ascii_uppercase()
+                    );
                 }
                 anyhow::bail!(
                     "a -out_pssm file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm or -in_msa before round 1), is not supported by LOSAT's PSIBLAST",

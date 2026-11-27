@@ -1863,7 +1863,10 @@ pub fn write_hsp_info<W: Write>(
     // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
     let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
-    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
+    if matches!(
+        config.program.as_str(),
+        "blastp" | "psiblast" | "deltablast" | "rpsblast"
+    ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
         let method = match hit.comp_adjust_method {
             Some(1) => ", Method: Composition-based stats.",
@@ -2897,14 +2900,14 @@ const HTML_PREFIX: &[u8] = b"<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292
 const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
 
-/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, `phiblastp`
-/// (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), or `blastp` for any
-/// other name (its tasks).
+/// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `deltablast`, `rpsblast`,
+/// `phiblastp` (PHI-BLAST's formatter: its version line and the Gapped BLAST reference), or
+/// `blastp` for any other name (its tasks).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
 pub(crate) fn blastp_family_program(program: &str) -> &str {
     match program {
-        "psiblast" | "rpsblast" | "phiblastp" => program,
+        "psiblast" | "deltablast" | "rpsblast" | "phiblastp" => program,
         _ => "blastp",
     }
 }

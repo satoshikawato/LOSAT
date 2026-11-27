@@ -1,0 +1,57 @@
+# DELTABLAST 2.17.0+
+# Query: XP_000001.1 a
+# Database: tests/db_search/ids/prot_v5
+# Fields: query id, subject id, subject title, subject length, evalue
+# 51 hits found
+ref|XP_000001.1|	ref|XP_000001.1|	N/A	140	3.20e-86
+ref|XP_000001.1|	gi|9002|emb|CAA90002.1|	first defline without a gi	137	4.08e-85
+ref|XP_000001.1|	gi|123456|ref|NP_000002.1|	gi plus ref protein	137	4.08e-85
+ref|XP_000001.1|	ref|XP_910001.1|	long title number 01 with many words so that it is longer than sixty characters in total	137	5.21e-83
+ref|XP_000001.1|	sp|Q00003|ABC_MOUSE	swissprot without version	137	5.21e-83
+ref|XP_000001.1|	emb|CAA00005.1|	emb protein	137	5.88e-82
+ref|XP_000001.1|	ref|XP_920001.1|	has a title	137	2.95e-81
+ref|XP_000001.1|	tr|A0A000|A0A000_YEAST	trembl entry	137	2.95e-81
+ref|XP_000001.1|	pdb|1ABC|A	Chain A, test structure	137	3.40e-80
+ref|XP_000001.1|	dbj|BAA00006.1|	dbj protein	137	3.60e-77
+ref|XP_000001.1|	pir||S00007	pir protein	137	8.10e-76
+ref|XP_000001.1|	prf||0008123A	prf protein	137	6.36e-73
+ref|XP_000001.1|	gnl|mydb|prot10	general id protein	137	3.79e-71
+ref|XP_000001.1|	myprot9	local id protein	137	1.35e-70
+ref|XP_000001.1|	ref|XP_000011.2|	bare refseq accession	137	3.00e-67
+ref|XP_000001.1|	sp|P00012|	bare uniprot-like accession	137	5.53e-66
+ref|XP_000001.1|	gb|AAA00017.1|LOCUS17	gb with a locus name	137	1.37e-65
+ref|XP_000001.1|	myprot_13	bare non-accession word	137	4.20e-65
+ref|XP_000001.1|	gi|1818|gb|AAA00018.1|	N/A	137	1.08e-61
+ref|XP_000001.1|	sp|P00019.3|NAME_HUMAN	with taxid	137	4.10e-57
+ref|XP_000001.1|	tpg|DAA00016.1|	third-party protein	137	4.48e-57
+ref|XP_000001.1|	unnamed	N/A	60	1.53e-37
+ref|XP_000001.1|	pdb|5ABC|D	N/A	60	1.53e-37
+ref|XP_000001.1|	ref|WP_100014.1|	N/A	60	1.53e-37
+ref|XP_000001.1|	ref|NC_100013.1|	N/A	60	1.53e-37
+ref|XP_000001.1|	tpe|BK100012.1|	tpe titled	60	1.53e-37
+ref|XP_000001.1|	pdb|4ABC| 	no chain four	60	1.53e-37
+ref|XP_000001.1|	unnamed	N/A	60	1.53e-37
+ref|XP_000001.1|	pdb|3ABC|C	N/A	60	1.53e-37
+ref|XP_000001.1|	tpg|DAA10008.1|	tpa with subject	60	1.53e-37
+ref|XP_000001.1|	subject	subject seven title	60	1.53e-37
+ref|XP_000001.1|	ref|NP_100006.1|	N/A	60	1.53e-37
+ref|XP_000001.1|	pat|US|7654321|3	N/A	60	1.53e-37
+ref|XP_000001.1|	pdb|2XYY| 	N/A	60	1.53e-37
+ref|XP_000001.1|	pdb|2XYZ|B	N/A	60	1.53e-37
+ref|XP_000001.1|	tpg|DAA10002.1|	N/A	60	1.53e-37
+ref|XP_000001.1|	tpg|DAA10001.1|	tpa titled protein	60	1.53e-37
+ref|XP_000001.1|	sp|P11111.1|ONE_HUMAN	titled first	60	1.53e-37
+ref|XP_000001.1|	unnamed	N/A	60	1.53e-37
+ref|XP_000001.1|	subject	subject seven	60	1.53e-37
+ref|XP_000001.1|	pat|EP|0238993|7	pre-grant patent	60	1.53e-37
+ref|XP_000001.1|	prf|ABC|DEF	prf two fields	60	1.53e-37
+ref|XP_000001.1|	pat|EP|0123456A1|7	patent with letters	60	1.53e-37
+ref|XP_000001.1|	pat|US|RE33188|1	patent reissue	60	1.53e-37
+ref|XP_000001.1|	gnl|ti|123	trace id	60	1.53e-37
+ref|XP_000001.1|	long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	60	1.53e-37
+ref|XP_000001.1|	gi|3000000000|gb|AAA00100.1|	big gi	60	1.53e-37
+ref|XP_000001.1|	bbm|123	gibbmt	60	1.53e-37
+ref|XP_000001.1|	gpp|GPP123|	genome pipeline	60	1.53e-37
+ref|XP_000001.1|	tpd|BK000013.1|	third party ddbj	60	1.53e-37
+ref|XP_000001.1|	tpe|BK000012.1|	third party embl	60	1.53e-37
+# BLAST processed 1 queries

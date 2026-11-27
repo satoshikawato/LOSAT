@@ -3,7 +3,10 @@
 //! table (`.loo`) and the concatenated profile scores (`.rps`). The sequence part of the volume
 //! (the consensus sequences and their deflines) is an ordinary protein volume read by
 //! [`super::SeqDb`]. The `.loo` and `.rps` files are mapped (`utils::mapped_file`), never read
-//! into the heap (but the rows of a 26-column `.rps`, which are widened to 28).
+//! into the heap (but the rows of a 26-column `.rps`, which are widened to 28); `.rps` score-bound
+//! checks read through a small buffer, and `.loo` hit checks either walk the mapping (in parallel
+//! when a search pool is given) so the search reuses the faulted pages, or read the overflow array
+//! through a 1 MiB sliding buffer when a search wants only query-touched `.loo` pages resident.
 //!
 //! The files are opened in NCBI's order, with NCBI's errors (`RpsOpenError::Ncbi`, which a
 //! search reports as `BLAST engine error: <text>` with exit status 3); every inconsistency on
@@ -15,10 +18,14 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::mapped_file::MappedFile;
 
+mod cd_data;
+
+pub(crate) use cd_data::CdProfileFiles;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:549-575
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:355-363
-/// RPS-BLAST profile database file extensions beyond the protein BLAST volume files.
-pub(crate) const RPS_EXTENSIONS: [&str; 4] = ["rps", "loo", "aux", "freq"];
+/// RPS-BLAST and DELTA-BLAST profile database file extensions beyond the protein BLAST volume files.
+pub(crate) const RPS_EXTENSIONS: [&str; 6] = ["rps", "loo", "aux", "freq", "wcounts", "obsr"];
 
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
@@ -171,8 +178,9 @@ pub(crate) fn canonical_volume_path(base: &Path) -> Vec<u8> {
     crate::utils::os_bytes::path_bytes(&path).into_owned()
 }
 
-/// A `.freq` file read at offsets: the file itself where the platform has positioned reads, else
-/// (WASI, which refuses rpsblast anyway) its bytes in the heap.
+/// A file read at offsets (`.freq`, `.wcounts` and `.obsr`, and the `.loo` file's check): the file
+/// itself where the platform has positioned reads, else (WASI, which refuses rpsblast anyway) its
+/// bytes in the heap.
 enum FreqSource {
     #[cfg(any(unix, windows))]
     File(std::fs::File),
@@ -249,9 +257,144 @@ fn cell_hits<'a>(cell: &'a [i32; 4], overflow: &'a [i32]) -> Option<(&'a [i32], 
     if cell[0] <= RPS_HITS_PER_CELL {
         return Some((cell.get(1..=usize::try_from(cell[0]).ok()?)?, &[]));
     }
+    Some((&cell[1..2], &overflow[overflow_run(cell, overflow.len())?]))
+}
+
+/// Source of `.loo` overflow entries for the single cell-validation walk (`check_cell_word`):
+/// either the mapped `.loo` slice (`MappedOverflow`) or a 1 MiB sliding file buffer
+/// (`BufferedOverflow`).
+trait OverflowSource {
+    fn len(&self) -> usize;
+    fn read_run(&mut self, range: std::ops::Range<usize>) -> Result<&[i32], String>;
+}
+
+struct MappedOverflow<'a>(&'a [i32]);
+
+impl OverflowSource for MappedOverflow<'_> {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline(always)]
+    fn read_run(&mut self, range: std::ops::Range<usize>) -> Result<&[i32], String> {
+        Ok(&self.0[range])
+    }
+}
+
+struct BufferedOverflow {
+    source: FreqSource,
+    overflow_start: usize,
+    overflow_len: usize,
+    raw: Vec<u8>,
+    buf: Vec<i32>,
+    win_start: usize,
+    win_end: usize,
+}
+
+impl BufferedOverflow {
+    const WINDOW_WORDS: usize = 256 * 1024;
+
+    fn new(source: FreqSource, overflow_start: usize, overflow_len: usize) -> Self {
+        Self {
+            source,
+            overflow_start,
+            overflow_len,
+            raw: Vec::new(),
+            buf: Vec::new(),
+            win_start: 0,
+            win_end: 0,
+        }
+    }
+}
+
+impl OverflowSource for BufferedOverflow {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.overflow_len
+    }
+
+    fn read_run(&mut self, range: std::ops::Range<usize>) -> Result<&[i32], String> {
+        if range.start < self.win_start || range.end > self.win_end {
+            let count = Self::WINDOW_WORDS
+                .max(range.len())
+                .min(self.overflow_len - range.start);
+            let byte_offset = (self.overflow_start + range.start * 4) as u64;
+            self.raw.resize(count * 4, 0);
+            self.source
+                .read_at(&mut self.raw, byte_offset)
+                .map_err(|_| ".loo file cannot be read".to_string())?;
+            self.buf.clear();
+            // Big-endian hosts are refused before opening; match the mapped slice's native read.
+            self.buf.extend(
+                self.raw
+                    .chunks_exact(4)
+                    .map(|w| i32::from_ne_bytes([w[0], w[1], w[2], w[3]])),
+            );
+            self.win_start = range.start;
+            self.win_end = range.start + count;
+        }
+        Ok(&self.buf[range.start - self.win_start..range.end - self.win_start])
+    }
+}
+
+/// Validates one 64-cell word of `.loo` cells against `rows_limit` and group order, reading
+/// overflow runs from `overflow`. Returns `(presence_bits, ungrouped)`.
+#[inline]
+fn check_cell_word(
+    cells: &[[i32; 4]],
+    word: usize,
+    check_hits: bool,
+    rows_limit: u32,
+    overflow: &mut impl OverflowSource,
+) -> Result<(u64, bool), String> {
+    let base = word * 64;
+    let mut bits = 0u64;
+    let mut ungrouped = false;
+    for offset in 0..64 {
+        let index = base + offset;
+        let cell = &cells[index];
+        let num_used = cell[0];
+        if num_used <= 0 {
+            continue;
+        }
+        bits |= 1u64 << offset;
+        if !check_hits {
+            continue;
+        }
+        if num_used > RPS_MAX_SCAN_HITS {
+            return Err(format!(
+                ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
+            ));
+        }
+        let ok = if num_used <= RPS_HITS_PER_CELL {
+            let head = &cell[1..=num_used as usize];
+            hits_in_rows_and_groups(head, &[], rows_limit, &mut ungrouped)
+        } else {
+            let Some(range) = overflow_run(cell, overflow.len()) else {
+                return Err(format!(
+                    ".loo word {index} names a position outside the profiles' rows"
+                ));
+            };
+            let run = overflow.read_run(range)?;
+            hits_in_rows_and_groups(&cell[1..2], run, rows_limit, &mut ungrouped)
+        };
+        if !ok {
+            return Err(format!(
+                ".loo word {index} names a position outside the profiles' rows"
+            ));
+        }
+    }
+    Ok((bits, ungrouped))
+}
+
+/// The entries of the overflow array (of `overflow_len` entries) that a cell with more hits than
+/// it holds (`cell[0] > RPS_HITS_PER_CELL`) lists after its first (`cell_hits`), `None` when they
+/// are not inside the array.
+fn overflow_run(cell: &[i32; 4], overflow_len: usize) -> Option<std::ops::Range<usize>> {
     let start = usize::try_from(cell[2]).ok()? / std::mem::size_of::<i32>();
-    let run = overflow.get(start..start.checked_add(usize::try_from(cell[0]).ok()? - 1)?)?;
-    Some((&cell[1..2], run))
+    let end = start.checked_add(usize::try_from(cell[0]).ok()? - 1)?;
+    (end <= overflow_len).then_some(start..end)
 }
 
 /// A cell's hits (`cell_hits`) for `check_cells`: whether every entry lies in the rows (`entry - 2
@@ -388,10 +531,10 @@ pub(crate) struct RpsVolumeFiles {
 }
 
 impl RpsVolumeFiles {
-    /// rpsblast's `open_for` with an `.aux` without a token as a refusal (the tests' files).
+    /// rpsblast's `open_for_in_pool` with an `.aux` without a token as a refusal (the tests' files).
     #[cfg(test)]
     pub(crate) fn open(base: &Path, lengths: &[u32]) -> Result<Self, RpsOpenError> {
-        Self::open_for(base, lengths, "RPSBLAST").map_err(|fault| match fault {
+        Self::open_for_in_pool(base, lengths, "RPSBLAST", None, false).map_err(|fault| match fault {
             RpsVolumeFault::Files(error) => error,
             RpsVolumeFault::NoMatrix => RpsOpenError::Refused(
                 "a profile database whose .aux file is not NCBI's text (matrix, gap costs, statistics, scale, then pairs of a length and a K) is not supported by LOSAT's RPSBLAST".to_string(),
@@ -400,19 +543,32 @@ impl RpsVolumeFiles {
     }
 
     /// Opens the RPS files of the volume `base` (its path without extension) whose sequence part
-    /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id).
+    /// holds the profiles' consensus sequences of `lengths` letters (by local ordinal id), running
+    /// the `.loo` hit check either across `pool` over the mapped overflow array or through a 1 MiB
+    /// sliding file buffer (`buffered_loo_check`) so pages not read by subsequent queries do not
+    /// become resident (DELTA-BLAST's single-query iterations on a large domain volume).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:180-188
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:294-306
     /// (The `.rps` file's check, rps_aux.cpp:338-348, is the same.)
     /// `program` is the name in LOSAT's refusals; an `.aux` without a token is
     /// `RpsVolumeFault::NoMatrix`, NCBI's engine error of each query (review A of PS12a, N2).
-    pub(crate) fn open_for(
+    pub(crate) fn open_for_in_pool(
         base: &Path,
         lengths: &[u32],
         program: &str,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        buffered_loo_check: bool,
     ) -> Result<Self, RpsVolumeFault> {
-        Self::open_checking(base, lengths, program, true, false)
+        Self::open_checking(
+            base,
+            lengths,
+            program,
+            true,
+            false,
+            pool,
+            buffered_loo_check,
+        )
     }
 
     /// `open_for` of files that `open_for` has checked in this run (series PR, item PS12s, D6):
@@ -426,7 +582,7 @@ impl RpsVolumeFiles {
         program: &str,
         regroup: bool,
     ) -> Result<Self, RpsVolumeFault> {
-        Self::open_checking(base, lengths, program, false, regroup)
+        Self::open_checking(base, lengths, program, false, regroup, None, false)
     }
 
     /// `open_for`, the table's hits checked (`check_cells`) when `check_hits`; the cells regrouped
@@ -437,6 +593,8 @@ impl RpsVolumeFiles {
         program: &str,
         check_hits: bool,
         regroup: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        buffered_loo_check: bool,
     ) -> Result<Self, RpsVolumeFault> {
         if cfg!(target_endian = "big") {
             return Err(RpsOpenError::Refused(format!(
@@ -607,8 +765,9 @@ impl RpsVolumeFiles {
         if files.cells().is_none() || files.overflow().is_none() {
             return Err(refused(".loo file is shorter than its backbone").into());
         }
+        let loo_path = (check_hits && buffered_loo_check).then(|| with(".loo"));
         let ungrouped = files
-            .check_cells(num_rows, check_hits)
+            .check_cells(num_rows, check_hits, pool, loo_path.as_deref())
             .map_err(|what| refused(&what))?;
         if ungrouped || regroup {
             let (cells, overflow) = (
@@ -775,48 +934,84 @@ impl RpsVolumeFiles {
 
     /// Every hit of the table names a position whose word lies in the concatenated rows
     /// (`entry - 2` from 0, `entry` before the last row), every overflow run lies in the
-    /// overflow array, no cell holds more hits than a scan can take; the presence bits. Returns
-    /// whether some cell lists its hits not in groups of buckets in order (`list_is_grouped`; false when
-    /// `check_hits` is not set).
+    /// overflow array, no cell holds more hits than a scan can take; the presence bits.
+    ///
+    /// When `buffered_path` is `None`, walks the mapped `.loo` directly (in parallel across `pool`
+    /// when available) so `rpsblast` reuses the faulted pages without extra syscalls or copies.
+    /// When `buffered_path` is `Some`, reads the overflow array through a 1 MiB sliding file
+    /// buffer (`BufferedOverflow`) so unused `.loo` pages are not faulted into the resident set
+    /// (`deltablast`). Both modes share the single per-word validation walk (`check_cell_word`).
+    /// Returns whether some cell lists its hits not in groups of buckets in order
+    /// (`list_is_grouped`; false when `check_hits` is false).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
-    fn check_cells(&mut self, num_rows: usize, check_hits: bool) -> Result<bool, String> {
+    fn check_cells(
+        &mut self,
+        num_rows: usize,
+        check_hits: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        buffered_path: Option<&Path>,
+    ) -> Result<bool, String> {
         let cells = self.cells().expect("checked by the caller");
-        let overflow = self.overflow().expect("checked by the caller");
         // `entry >= RPS_WORDSIZE - 1 && entry < num_rows` as one unsigned compare of `entry - 2`
         // (a negative entry wraps above any bound under 2^31 - 2).
         let rows_limit = u32::try_from(num_rows.saturating_sub(RPS_WORDSIZE - 1))
             .unwrap_or(u32::MAX)
             .min(i32::MAX as u32 - 1);
-        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+        let words = RPS_BACKBONE_SIZE / 64;
+        if let Some(loo_path) = buffered_path.filter(|_| check_hits) {
+            if let Ok(source) = FreqSource::open(loo_path) {
+                let overflow_start = self.backbone_start + (RPS_BACKBONE_SIZE + 1) * 16;
+                let overflow_len = self.loo.len().saturating_sub(overflow_start) / 4;
+                let mut reader = BufferedOverflow::new(source, overflow_start, overflow_len);
+                let mut pv = Vec::with_capacity(words);
+                let mut ungrouped = false;
+                for word in 0..words {
+                    let (bits, chunk_ungrouped) =
+                        check_cell_word(cells, word, true, rows_limit, &mut reader)?;
+                    pv.push(bits);
+                    ungrouped |= chunk_ungrouped;
+                }
+                self.pv = pv;
+                return Ok(ungrouped);
+            }
+        }
+        let overflow = self.overflow().expect("checked by the caller");
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if check_hits && pool.is_some_and(|pool| pool.enabled() && pool.threads() > 1) {
+            use rayon::prelude::*;
+            let results: Vec<Result<(u64, bool), String>> =
+                pool.expect("checked above").install(|| {
+                    (0..words)
+                        .into_par_iter()
+                        .map(|word| {
+                            let mut source = MappedOverflow(overflow);
+                            check_cell_word(cells, word, true, rows_limit, &mut source)
+                        })
+                        .collect()
+                });
+            let mut pv = Vec::with_capacity(words);
+            let mut ungrouped = false;
+            for result in results {
+                let (bits, chunk_ungrouped) = result?;
+                pv.push(bits);
+                ungrouped |= chunk_ungrouped;
+            }
+            self.pv = pv;
+            return Ok(ungrouped);
+        }
+        let _ = pool;
+        let mut source = MappedOverflow(overflow);
+        let mut pv = Vec::with_capacity(words);
         let mut ungrouped = false;
-        for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
-            let num_used = cell[0];
-            if num_used <= 0 {
-                continue;
-            }
-            pv[index / 64] |= 1u64 << (index % 64);
-            if !check_hits {
-                continue;
-            }
-            if num_used > RPS_MAX_SCAN_HITS {
-                return Err(format!(
-                    ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
-                ));
-            }
-            // The cell's hits (`cell_hits`), each inside the rows, and whether their groups of
-            // buckets never decrease (`list_is_grouped`; one compare per hit in this walk).
-            let Some((head, run)) = cell_hits(cell, overflow) else {
-                return Err(format!(
-                    ".loo word {index} names a position outside the profiles' rows"
-                ));
-            };
-            let all_in_rows = hits_in_rows_and_groups(head, run, rows_limit, &mut ungrouped);
-            if !all_in_rows {
-                return Err(format!(
-                    ".loo word {index} names a position outside the profiles' rows"
-                ));
-            }
+        for word in 0..words {
+            let (bits, chunk_ungrouped) =
+                check_cell_word(cells, word, check_hits, rows_limit, &mut source)?;
+            pv.push(bits);
+            ungrouped |= chunk_ungrouped;
         }
         self.pv = pv;
         Ok(ungrouped)

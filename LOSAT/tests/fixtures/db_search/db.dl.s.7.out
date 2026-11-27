@@ -1,0 +1,13 @@
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qserp	s1	43.014	365	205	2	2	364	3	366	1.01e-140	393
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qserp	s2	33.241	361	231	7	8	364	2	356	1.08e-79	237
+# BLAST processed 2 queries

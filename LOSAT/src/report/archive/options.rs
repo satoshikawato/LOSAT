@@ -197,7 +197,9 @@ impl RequestKind {
     /// (DECISIONS F1b-2 of line RG). tblastn's `-in_pssm` (PSI-TBLASTN), whose request names
     /// `blastp`, posts as `tblastn` (NCBI 2.17.0, `tblastn -in_pssm` with a `-db` name holding
     /// `é`: `Error: (803.7) [tblastn] Blast4-request.body.queue-search.subject.database`, probe RG
-    /// K/k4b/agent7/probe4 `tbn_dbe_f6`).
+    /// K/k4b/agent7/probe4 `tbn_dbe_f6`). deltablast, whose options handle is psiblast's
+    /// (`BlastpApp::request_kind`), has its name in `BlastpApp::ncbi_name`: no request of
+    /// deltablast is written (LOSAT refuses its archive and search strategy).
     pub fn application(self) -> &'static str {
         match self {
             RequestKind::Psiblast | RequestKind::Phiblastp => "psiblast",

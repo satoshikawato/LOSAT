@@ -1,0 +1,2 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 4
+Warning: [deltablast] Query_1: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 

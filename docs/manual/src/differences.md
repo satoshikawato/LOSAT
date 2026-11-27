@@ -14,6 +14,7 @@ The differences you are most likely to meet in everyday use:
 - [SAM output (`-outfmt 17`) records LOSAT's command line](#sam-output-the-cl-tag).
 - [The version line and the error prefixes name LOSAT](#the-version-line-and-the-error-prefixes-name-losat), where NCBI writes its own version and `BLAST`.
 - [`rpsbproc` keeps hits that tie in E-value and bit score in their input order](#rpsbproc-hits-that-tie); NCBI's order of them can differ.
+- [`deltablast` keeps domain hits of one domain that tie in E-value in their domain-search order](#deltablast-domain-hits-that-tie); NCBI's order of them can differ.
 
 The other items are rare cases in which NCBI BLAST+ crashes, reads outside its memory, or overflows an integer.
 
@@ -144,6 +145,12 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 - **What you see.** Hits of one query with equal E-value and bit score keep their order in the archive or XML. NCBI's `rpsbproc` orders them with its C++ library's unstable sort, so the order of such hits can differ, and so can which of two tied hits is `Specific`: `-m std` then prints the other hit's line, and `-m full` swaps their hit types. A hit whose E-value is not a number (`-nan`) comes after every hit whose E-value is a number; among hits of one E-value, one whose bit score is not a number comes last. NCBI's place for such a hit depends on the steps of its library's sort, and in such a query the representative and `Specific` hits, and their sites and motifs, can differ too.
 - **When.** In the DOMAINS lines of `-m std` and `-m full`. In 74 reports of E. coli K-12 proteins and genome pieces against CDD v3.22, 18 differed, by 1 to 6 lines each; in 7 of them one query's `Specific` hit changed. None of them has a `-nan` value.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
+### `deltablast`: domain hits that tie
+
+- **What you see.** When building a query's round-1 PSSM from conserved domains, hits of one domain with equal E-value keep their order from the domain search, and intersected hit segments with equal domain start keep their intersection order. NCBI's `deltablast` orders both with its C++ library's unstable sort, so their order can differ; where two tied hits of one domain overlap in the query (or a worse hit of that domain overlaps both), or where a segment tie lands at an endpoint of a hit with 17 or more segments that overlaps another hit, the trimming can change the query's round-1 PSSM and every round's alignments, statistics and PSSM files for that query.
+- **When.** `deltablast`, only for a query that gets two hits of the same domain with the same E-value whose trimming depends on their order, or a hit with 17 or more intersected segments whose endpoint ties on domain start and overlaps another hit. In a search of the 4,300 E. coli K-12 MG1655 proteins against `cdd_delta` (3,909 queries with domain hits), at most 10 queries (0.26 %) had overlapping tied hits where the order could change the PSSM, and 0 queries were affected by segment-start ties.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### A taxonomy record past NCBI's mapping of `taxdb.btd`

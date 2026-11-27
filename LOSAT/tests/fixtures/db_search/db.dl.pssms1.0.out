@@ -1,0 +1,196 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: User specified sequence set.
+           3 sequences; 1,458 total letters
+
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 serpin variant a                                                   393     2e-140
+
+
+> s1 serpin variant a
+Length=369
+
+ Score = 393 bits (1010),  Expect = 2e-140, Method: Composition-based stats.
+ Identities = 157/365 (43%), Positives = 204/365 (56%), Gaps = 3/365 (1%)
+
+Query  2    NNDFELDLYNQLAKWEPDERVVFSSLSIAWALALPYLGAKGETRHQLRKALGLPWLDDEG  61
+            NN F   LY  L+K  PD+ +  S L+I+  LA+ YLG +GE   Q     G P LDD+ 
+Sbjct  3    NNIFAFILYKWLSKKSPDQNIFLSPLAISTGLAMRYLGGRGECAEQRLSVRGFPKLDDKE  62
+
+Query  62   VHQAIKSLLWSLKDWEKGVHLKLARRLFVTKGLTAKEDFPDLAKNYYDAHVESVGFANPH  121
+            +H+  ++LL +L   +KG  LK A R FV +GL  K D   L K Y+ A  ESV F++  
+Sbjct  63   IHKGFQALLSALNKVDKGFTLKPANRRFVDQGLKRKPDLLQLRKKYFGAEDESVIFSDVA  122
+
+Query  122  AAAATINNWAEEKTRGKIKGLLSPGALDPGTRLVPVNAIDFKGKCKTPFGPELTVKRPFD  181
+             A   I +W ++KT GKI+ LL  G+ DP  RLV VNA  FK K K PF  ELT + P  
+Sbjct  123  EAYKQITSWVKKKTTGKIQDLLVEGSRDPDCRLVRVNAPYFKMKWKCPFDVELTQEEPLH  182
+
+Query  182  VSEGHSVQVSMMYQYGKFRDAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKP  241
+            V  G + +V  M Q G F  AE E L  +  ELP KG+  SML +LP E   L   E+  
+Sbjct  183  VDTGTTDKVPSMSQKGTFYYAEIEELMCKVRELPFKGNR-SMLPILPIEGGMLEEREKSR  241
+
+Query  242  SAEKPDDLLWNLKEVEV--EVYLPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDE  299
+            +AE+ ++ L + K  +V  ++YL KF  ESS DLK+ L+ L I D  +  A  S   S +
+Sbjct  242  TAERLEEELSSRKPRQVREKLYLVKFKPESSFDLKKVLKQLGICDAFASKAIFSGPSSSK  301
+
+Query  300  PPYVSKAIHKAIIEVNHEGTEEAAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTIL  359
+            P Y SK  HKA+IEV  EG E A AT   IV R P  P +F A RP  FLI D++  +I 
+Sbjct  302  PLYDSKVDHKALIEVTEEGCEAAGATGDVIVVRAPVPPPKFVAIRPFRFLIYDNSCGSIR  361
+
+Query  360  FPGRV  364
+            F G V
+Sbjct  362  FMGYV  366
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.201    0.696    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0615    0.140     1.90     42.6     43.6 
+
+Effective search space used: 435825
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pk unrelated kinase                                                   17.9    1.7  
+
+
+> pk unrelated kinase
+Length=730
+
+ Score = 17.9 bits (36),  Expect = 1.7, Method: Composition-based stats.
+ Identities = 6/29 (21%), Positives = 12/29 (41%), Gaps = 1/29 (3%)
+
+Query  186  HSVQV-SMMYQYGKFRDAEDEHLDAQALE  213
+             + +V   M     + +   E + + ALE
+Sbjct  411  ETGKVIKFMTDKEMYCEFVFETVFSHALE  439
+
+
+ Score = 17.5 bits (35),  Expect = 2.4, Method: Composition-based stats.
+ Identities = 3/41 (7%), Positives = 10/41 (24%), Gaps = 12/41 (29%)
+
+Query  82   LKLARRLFVTKG------LTAKE------DFPDLAKNYYDA  110
+            L +  +++  +                   F D     + +
+Sbjct  679  LSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQS  719
+
+
+ Score = 17.1 bits (34),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 4/26 (15%), Positives = 7/26 (27%), Gaps = 6/26 (23%)
+
+Query  84   LARRLFVTKGLTAKEDFPDLAKNYYD  109
+             A  ++          F  +    YD
+Sbjct  668  SANSIYTNI------PFLSIVSKMYD  687
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.201    0.696    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0615    0.140     1.90     42.6     43.6 
+
+Effective search space used: 435825
+
+
+Query= qserp mutated serpin consensus
+
+Length=364
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s2 serpin variant b                                                   237     2e-79
+
+
+> s2 serpin variant b
+Length=359
+
+ Score = 237 bits (605),  Expect = 2e-79, Method: Composition-based stats.
+ Identities = 120/361 (33%), Positives = 158/361 (44%), Gaps = 10/361 (3%)
+
+Query  8    DLYNQLAKWEPDERVVFSSLSIAWALALPYLGAKGETRHQLRKALGL--PWLDDEGVHQA  65
+            DL+ + AK  P +   F  + I+ AL +  LG KG+T  Q+ +  G           HQ 
+Sbjct  2    DLHKETAKMSPLKNRFFDPVDISDALIMLDLGIKGDTAEQITEVTGFWLTMTSMADRHQP  61
+
+Query  66   IKSLLWSLKDWEKGVHLKLARRLFVTKGLTAKEDFPDLAKNYYDAHVESVGFA-NPHAAA  124
+             + LL  L        L  A  L V   L+ K  F +  K  Y   V SV F+     A+
+Sbjct  62   FQQLLQLLWRPLSQTELSTAWALNVDSSLSLKLSFTEDRKKTYGIEVASVLFSLKAMEAS  121
+
+Query  125  ATINNWAEEKTRGKIKGLLSPGALDPGTRLVPVNAIDFKGKCKTPFGPELTVKRPFDVSE  184
+               N+  E KT GK K  LS   LD  T LV VN I  KG  K PF PE T      V E
+Sbjct  122  KQRNDGVESKTAGKRKDTLS--LLDDDTCLVTVNIIYNKGSWKEPFLPETTRMEDNHVLE  179
+
+Query  185  GHSVQVSMMYQYG-KFRDAEDEHLDAQALELPDKGSDPSMLIMLPKEATGLAHLEEKPSA  243
+              +V V +M   G  F   +DE L+ Q  EL  K  +  ML +L  +  GL  L +  + 
+Sbjct  180  TETVSVPVMSATGCTFWYGQDEMLNKQVTELYYK-PNADMLRIL-YDEPGLMKLMKATTP  237
+
+Query  244  EKPDDLLWNLKEVEVEVYLPKFNIESSPDLKEALQALKITDLISPSAGLSSIWSDEPPYV  303
+                  + +  +  V +Y PK  I  + DL +  +   I DL S SA  S     +   V
+Sbjct  238  MTLSKWVKSTTKCSVMLYTPKNKIMGTHDLSDVTEKTGIEDLNSNSADTSGRSELKDTKV  297
+
+Query  304  SKAIHKAIIEVNHEGTEEAAATEVSIVSRRPSSPVEFNADRPILFLIVDDTTKTILFPGR  363
+             K  HK ++ VN EG E  AA  V  V    S+P  F  +R  L LI D++T  IL  G 
+Sbjct  298  DKVTHKIVLMVNMEGEEAIAAEGVRAV--YRSTPPMFKINRYFLNLICDNSTGDILNMGS  355
+
+Query  364  V  364
+            V
+Sbjct  356  V  356
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.201    0.696    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0615    0.140     1.90     42.6     43.6 
+
+Effective search space used: 435825
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 1,458
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -515,3 +515,47 @@ fn a_cells_hits_are_sorted_by_group_and_keep_their_order_inside_one() {
     assert_eq!(entry_group(2 + 64 * 2048, 64), 1);
     assert_eq!(entry_group(1 + 64 * 2048, 64), 0);
 }
+
+#[test]
+fn buffered_loo_check_matches_mapped_check_for_grouped_ungrouped_and_bad_entries() {
+    const G1: i32 = 2 + 64 * 2048;
+    let dir = scratch("buffered_check");
+    let lengths = [140_000u32, 100];
+    let grouped_cells: [(usize, &[i32]); 2] = [
+        (3, &[10, 20, 30, 40, 50]),
+        (9, &[10, 20, 3000, 2500, 40_000]),
+    ];
+    let base_grouped = write_wide_volume(&dir, &grouped_cells);
+    let mapped =
+        RpsVolumeFiles::open_for_in_pool(&base_grouped, &lengths, "RPSBLAST", None, false).unwrap();
+    let buffered =
+        RpsVolumeFiles::open_for_in_pool(&base_grouped, &lengths, "DELTABLAST", None, true)
+            .unwrap();
+    assert_eq!(buffered.pv(), mapped.pv());
+    assert_eq!(buffered.is_regrouped(), mapped.is_regrouped());
+    assert!(!buffered.is_regrouped());
+
+    let ungrouped_cells: [(usize, &[i32]); 2] =
+        [(5, &[G1 + 5, 10]), (11, &[10, G1 + 5, 20, G1 + 7])];
+    let base_ungrouped = write_wide_volume(&dir, &ungrouped_cells);
+    let mapped_u =
+        RpsVolumeFiles::open_for_in_pool(&base_ungrouped, &lengths, "RPSBLAST", None, false)
+            .unwrap();
+    let buffered_u =
+        RpsVolumeFiles::open_for_in_pool(&base_ungrouped, &lengths, "DELTABLAST", None, true)
+            .unwrap();
+    assert_eq!(buffered_u.pv(), mapped_u.pv());
+    assert!(buffered_u.is_regrouped());
+    assert_eq!(buffered_u.cells(), mapped_u.cells());
+    assert_eq!(buffered_u.overflow(), mapped_u.overflow());
+
+    let bad_cells: [(usize, &[i32]); 1] = [(7, &[10, 20, 30, 300_000])];
+    let base_bad = write_wide_volume(&dir, &bad_cells);
+    let err_m = RpsVolumeFiles::open_for_in_pool(&base_bad, &lengths, "DELTABLAST", None, false)
+        .err()
+        .unwrap();
+    let err_b = RpsVolumeFiles::open_for_in_pool(&base_bad, &lengths, "DELTABLAST", None, true)
+        .err()
+        .unwrap();
+    assert_eq!(err_b, err_m);
+}

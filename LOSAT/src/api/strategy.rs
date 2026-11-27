@@ -46,6 +46,7 @@ pub fn import_name(command: &Commands) -> Option<&Path> {
         Commands::Tblastx(args) => args.import_search_strategy.as_deref(),
         Commands::Blastx(args) => args.import_search_strategy.as_deref(),
         Commands::Psiblast(_)
+        | Commands::Deltablast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)

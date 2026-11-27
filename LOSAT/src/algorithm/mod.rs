@@ -18,6 +18,7 @@ pub mod common;
 // PHI-BLAST (psiblast `-phi_pattern`): the pattern, its scans, statistics, alignments and engine.
 pub mod phi_search;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+pub mod deltablast;
 pub mod psiblast;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:46-47
 // The search of a query given as a PSSM (psiblast `-in_pssm`): its kernels and stages.

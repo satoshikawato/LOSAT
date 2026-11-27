@@ -11,6 +11,7 @@ Commands:
   tblastx      Pairwise 6-frame translated nucleotide alignment (tblastx)
   tblastn      Protein query vs translated nucleotide subject (tblastn)
   psiblast     Position-Specific Iterated BLAST (psiblast)
+  deltablast   Domain Enhanced Lookup Time Accelerated BLAST (deltablast)
   rpsblast     Reverse Position Specific BLAST (rpsblast)
   rpstblastn   Translated Reverse Position Specific BLAST (rpstblastn)
   makeblastdb  makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)

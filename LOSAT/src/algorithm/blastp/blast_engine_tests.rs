@@ -538,6 +538,7 @@ fn make_blastp_args() -> BlastpArgs {
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,
+        delta: None,
     }
 }
 

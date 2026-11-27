@@ -31,20 +31,25 @@ pub(crate) fn setup_messages(
     {
         return Vec::new();
     }
-    pssm_setup_messages(&search.freq_ratios, mode, matrix_name)
+    pssm_setup_messages(&search.freq_ratios, mode, matrix_name, false)
 }
 
 /// `setup_messages` of a PSSM whose frequency ratios are `freq_ratios`: every column of the
 /// PSSM, also those that the search does not read (a later round of a `-query_loc` range reads
 /// the record's PSSM only up to the range's length, `PsiSearch::from_engine`; NCBI's check loops
-/// over `freq_ratios->GetCols()`, the record's columns).
+/// over `freq_ratios->GetCols()`, the record's columns). deltablast (`delta`) never posts the
+/// first message: NCBI's check is skipped for the program `eDeltaBlast`, in every round.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:179-185
 pub(crate) fn pssm_setup_messages(
     freq_ratios: &[[f64; crate::core::blast_util::BLASTAA_SIZE]],
     mode: CompositionMode,
     matrix_name: &str,
+    delta: bool,
 ) -> Vec<String> {
     let mut messages = Vec::new();
-    if mode != CompositionMode::NoCompositionBasedStats
+    if !delta
+        && mode != CompositionMode::NoCompositionBasedStats
         && crate::core::composition_adjustment::compo_scale::freq_ratios_all_zeros(freq_ratios)
     {
         messages.push(format!(

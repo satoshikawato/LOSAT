@@ -29,7 +29,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 
 | Area | v0.1.0 | v0.2.0 |
 |:---|:---|:---|
-| Search programs | `blastn`, `blastp`, `tblastx` | Also `blastx`, `tblastn`, `psiblast`, `rpsblast` and `rpstblastn` |
+| Search programs | `blastn`, `blastp`, `tblastx` | Also `blastx`, `tblastn`, `psiblast`, `deltablast`, `rpsblast` and `rpstblastn` |
 | Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` (profile databases for `rpsblast`, `rpstblastn` and DELTA-BLAST), `blastdb_aliastool` (alias files and binary lists), `blastdbcheck` (database checks), `cleanup-blastdb-volumes.py` (removes orphaned volume files), `blast_formatter` for the reports of a BLAST archive, and `rpsbproc` for domain annotation |
 | Databases | `-query` against a `-subject` FASTA file only | `-db` searches BLAST databases made by `losat makeblastdb` or NCBI's `makeblastdb`, including NCBI's distributed databases |
 | Standard input | not available | `-query -` in every search program |
@@ -58,4 +58,4 @@ If you parsed `-outfmt 6` or `7` output in v0.1.0, nothing changes: the columns 
 
 ## What is still not available
 
-`deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12`, `psiblast -phi_pattern` with more than one round (or `-html`) and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.
+`deltablast -show_domain_hits`, `-query_loc`, `-html`, `-export_search_strategy` and the output formats other than `0`, `6` and `7`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12`, `psiblast -phi_pattern` with more than one round (or `-html`) and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.122
+- Version: 1.124
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -986,7 +986,20 @@
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
-  then 1.118, then 1.120, then 1.121)
+  then 1.118, then 1.120, then 1.121);
+  1.123 2026-11-24 / 2026-11-26 (DELTABLAST, the order of tied domain hits and tied hit segments,
+  psiblast line item PS13a: an approved difference decided by the Owner — Q-DL-TIE=B on 2026-11-24
+  for domain-hit sorting and Q-DL-SEGTIE=A on 2026-11-26 for hit-segment sorting; numbered after
+  dev's 1.122; first 1.95, then 1.109, then 1.110, then 1.111, then 1.113, then 1.114, then 1.115,
+  then 1.116, then 1.117, then 1.118, then 1.120, then 1.121, then 1.122);
+  1.124 2026-11-26 (rule-3 rejections of `losat deltablast` for damaged `.wcounts`/`.obsr` files
+  and a zero-count `.wcounts` column aligned to a non-`X` query residue, psiblast line item PS13a:
+  empty 0-byte files at open where NCBI crashes on a null mapping, truncated headers/offsets/columns
+  on hit where NCBI reads past its mapping, and zero-count `.wcounts` columns aligned to non-`X`
+  residues where NCBI divides 0 by 0 and converts `log(NaN)` to `long` in `BLAST_Nint` with C99
+  6.3.1.4p1 undefined behaviour; 1-to-3-byte files zero-pad to 4 bytes like POSIX mmap so their
+  magic check matches NCBI; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  first 1.116, then 1.117, then 1.118, then 1.119, then 1.121, then 1.122, then 1.123)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2347,6 +2360,57 @@ runs of DOMAINS lines that share one query, E-value and bit score with the same 
 query with a NaN E-value or bit score, with the number of such blocks and lines that
 `tied/CLASSES.tsv` lists. Code: `rpsbproc::domains::e_value_order`, the sorts of
 `rpsbproc::data` (`CddData`'s lookups) and `rpsbproc::data::sort_ties_in_input_order`.
+
+## Approved difference (DELTABLAST, the order of tied domain hits and hit segments, version 1.123)
+
+Decided by the Owner on 2026-11-24 (question Q-DL-TIE, answer B; psiblast line `DECISIONS.md` 103;
+the Owner's words are in [`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): `losat deltablast`
+sorts the domain hits of a query with Rust's standard stable sort, as `losat rpsbproc` does (the
+approved difference of version 1.67). NCBI's order is deterministic for its binary, so rule 2 would
+otherwise reproduce it.
+
+Before it builds the alignment of conserved domains from which a query's first PSSM is made, NCBI's
+DELTA-BLAST sorts the query's domain hits with `std::sort` by the domain's Seq-id, then by E-value,
+and trims each hit by the hits of its domain kept before it, the last kept first
+(`CCddInputData::x_RemoveMultipleCdHits`, NCBI reference (598d8ae6):
+c++/src/algo/blast/api/cdd_pssm_input.cpp:168-219). The C++ standard does not keep the order of
+elements that compare equal in `std::sort`; NCBI's Linux builds leave hits of one domain with one
+E-value in the order that their C++ library's sort gives. LOSAT sorts with Rust's `slice::sort_by`,
+which is stable: such hits keep the order of the domain search's results.
+
+Where it shows: the order of two tied hits changes the alignment, and with it the PSSM, when their
+query ranges overlap (the hit sorted first trims the other) or when a worse hit of their domain
+overlaps the query ranges of both (it is cut by the two in their order, and the two cuts do not
+commute: a cut can drop a segment that follows the subtracted range, and the second cut reads the
+hit as the first left it). Then the query's PSSM scores, and so every round's alignments,
+statistics and PSSM files for that query, can differ from NCBI's. A search of NCBI's `rpsblast` with
+DELTA-BLAST's domain search options (E-value 0.05, no SEG, composition-based statistics 1) against
+cdd_delta (NCBI FTP, 2020-06-30) on the 4,300 proteins of E. coli K-12 MG1655 (2026-11-24) found 3,909
+queries with domain hits. By E-value, which NCBI's sort compares, 27 of them have two hits of one
+domain with one E-value, and 10 (0.26 %) are where the order can change the PSSM: two tied hits
+overlap in the query in all 10, and a worse hit of the domain overlaps two tied ones in 5, all among
+the 10. The counts come from the E-values that search printed (psiblast line `PR/ps13/ties/ties.tsv`)
+and are an upper bound: equal printed E-values include values that are equal only after rounding.
+
+Fixtures: the unit test `hits_of_one_domain_with_one_evalue_keep_the_order_of_the_search`
+(`LOSAT/src/algorithm/rps_search/cdd_input_tests.rs`) holds an example of each case and LOSAT's
+order. No fixture row holds a tie. Code: `rps_search::cdd_input::remove_multiple_cd_hits`.
+
+Extended by the Owner on 2026-11-26 at 21:56 JST (question Q-DL-SEGTIE, answer A;
+`gemini-collab-20261122/DECISIONS.md` 45; the Owner's words are in
+[`OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)): the same approved difference covers the
+segment sort inside `CHit::IntersectWith` (NCBI reference (598d8ae6):
+`c++/src/algo/blast/api/cdd_pssm_input.cpp:592`), which sorts the intersected segments of a hit by
+`subject.from` with `std::sort`. When a kept hit has a gap in the query, adjacent subject ranges
+`[s, x]` and `[x, b]` share `x`, producing two segments starting at `x`; with 17 or more segments
+libstdc++'s `std::sort` can reorder equal starts, and if a tie lands at an endpoint while another
+hit overlaps it in the query, `CHit::Subtract` (which reads only the first and last segment's query
+bounds) and the resulting PSSM could differ. LOSAT keeps Rust's stable `slice::sort_by_key`
+(`rps_search::cdd_input::Hit::intersect_with_ranges`, unit test
+`intersected_segments_with_equal_subject_start_keep_stable_order`). Measured on the 4,300 E. coli
+K-12 MG1655 proteins against `cdd_delta` (9,031 `intersect_with_ranges` calls, 2026-11-26): 1 hit
+(`NP_418205.1`) had 17 or more segments with an endpoint tie, and its two hits did not overlap in
+the query, so 0 queries differed in output.
 
 ## Approved exception 25 (makeblastdb `-gi_mask`, a database of one volume, version 1.81)
 
@@ -4525,6 +4589,36 @@ file would differ, and NCBI's programs still could not open the database).
   punctuation-only Bioseq title that `CDeflineGenerator::x_CleanAndCompress` reads past the end of
   and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
   partial build (`erase_after_refusal`).
+- `losat deltablast` damaged `.wcounts`/`.obsr` files and zero-count `.wcounts` columns (version
+  1.124, 2026-11-26, psiblast line item PS13a, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07):
+  (a) At open (`CRpsFreqsFile` / `CRpsObsrFile`, `rps_aux.cpp:386-449`), NCBI maps the file and
+  reads only the 4-byte `magic_number`. An empty file (0 bytes) crashes NCBI (`SIGSEGV` on a null
+  mapping), so LOSAT refuses a 0-byte file at open. On a 1-to-3-byte file, POSIX mmap zero-fills
+  the remainder of the last 4,096-byte page, so NCBI's 4-byte magic check is defined (reproduced by
+  LOSAT by zero-padding the available bytes to 4, matching the precedent of `taxdb.btd` version
+  1.43): a wrong zero-padded magic number produces NCBI's corrupt-profile error (exit 3), and a
+  valid zero-padded magic number (`0x17 0x1e` or `0x17 0x1e 0x00`, yielding `0x00001e17 =
+  RPS_MAGIC_NUM_28`) opens cleanly so a query with no domain hits exits 0. A 4-byte or longer file
+  behaves the same way, and reading `num_profiles` and the offset table is deferred until a domain
+  hit reads the file (`seqdb::rps::cd_data::CdFile`).
+  (b) On a domain hit, a `.wcounts` or `.obsr` file shorter than its header, offset table, or
+  profile data, or whose profile holds fewer columns than the hit covers, causes NCBI to read past
+  its memory mapping (`cdd_pssm_input.cpp:804-889`, release builds drop `ASSERT`). LOSAT refuses
+  with exit status 1.
+  (c) A `.wcounts` column whose residue counts sum to 0 (`cdd_pssm_input.cpp:837-847`) yields
+  `0.0 / 0.0 = NaN` frequencies, which pass `_PSIValidateCdMSA` (`blast_psi_priv.c:895-903`).
+  When aligned to a query `X` residue (NCBISTDAA 21), `_PSIComputeFreqRatiosFromCDs`
+  (`blast_psi_priv.c:2245-2248`) sets every frequency ratio to 0 without reading `wfreqs`
+  (defined); LOSAT reproduces NCBI there. When aligned to any non-`X` query residue, `NaN`
+  propagates through `_PSIComputeFrequenciesFromCDs` (`blast_psi_priv.c:1709-1734`) and
+  `_PSIComputeFreqRatiosFromCDs` into `_PSIConvertFreqRatiosToPSSM`
+  (`blast_psi_priv.c:2438-2440`), which calls `BLAST_Nint(kPSIScaleFactor * log(NaN) / ideal_lambda)`
+  (`ncbi_math.c:437-441`, `(long)(NaN - 0.5)` — C99 6.3.1.4p1 undefined behaviour; on x86-64
+  `CVTTSD2SI` yields `LONG_MIN`, truncated to `(int)0`). LOSAT validates the CD MSA first (so
+  NCBI's own `BadProfile` errors come first) and then refuses a zero-count `.wcounts` column
+  aligned to a non-`X` query residue with exit status 1 (`blast_engine::delta_hooks::cdd_pssm`,
+  unit and integration tests in `cd_data_tests.rs` and `deltablast_refusals.rs`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

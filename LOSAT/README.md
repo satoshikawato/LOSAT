@@ -16,6 +16,7 @@ LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ comm
 | `tblastn` | Protein query against translated nucleotides; tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm` |
 | `tblastx` | Translated nucleotide query against translated nucleotides |
 | `psiblast` | Iterative protein search from a FASTA query, an alignment (`-in_msa`), or a PSSM (`-in_pssm`); writes PSSMs (`-out_pssm`, `-out_ascii_pssm`) |
+| `deltablast` | Iterative protein search whose first round uses the conserved domains of the query (`-rpsdb`, default `cdd_delta`) |
 | `rpsblast` | Protein queries against a profile database such as CDD |
 | `rpstblastn` | Translated nucleotide queries against a profile database |
 | `rpsbproc` | Conserved-domain annotation of RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 |

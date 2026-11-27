@@ -163,6 +163,22 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("psiblast", "entrez_query", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-120
+    // deltablast (item PS13a): `-show_domain_hits` and `-query_loc` are item PS13b's, the search
+    // strategy file and the archive are PS15b-3's, and the arguments of every program that
+    // LOSAT does not run (`-html`, the remote options, `-import_search_strategy`).
+    ("deltablast", "entrez_query", Refused::Read(None)),
+    ("deltablast", "export_search_strategy", Refused::Read(None)),
+    ("deltablast", "html", Refused::Read(None)),
+    ("deltablast", "import_search_strategy", Refused::Read(None)),
+    ("deltablast", "query_loc", Refused::Read(None)),
+    ("deltablast", "remote", Refused::Read(None)),
+    ("deltablast", "show_domain_hits", Refused::Read(None)),
+    (
+        "deltablast",
+        "use_sw_tback",
+        Refused::Run("the Smith-Waterman traceback"),
+    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
     // blastp's check, `validate_requested_blastp_support`)
     (

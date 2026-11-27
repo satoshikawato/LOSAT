@@ -17,6 +17,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Search | [`tblastn`](programs/tblastn.md) | Protein query against translated nucleotide subjects. Tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm`. |
 | Search | [`tblastx`](programs/tblastx.md) | Translated nucleotide query against translated nucleotide subjects. |
 | Search | [`psiblast`](programs/psiblast.md) | Position-specific iterated search, from a protein query or a PSSM. |
+| Search | [`deltablast`](programs/deltablast.md) | Position-specific iterated search whose first round uses the conserved domains of the protein query (DELTA-BLAST). |
 | Search | [`rpsblast`](programs/rpsblast.md) | Protein queries against a database of profiles such as CDD. |
 | Search | [`rpstblastn`](programs/rpstblastn.md) | Translated nucleotide queries against a database of profiles. |
 | Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database (version 5 by default, or 4) from FASTA, also from a `.gz`, `.bz2` or `.zst` file. |
@@ -47,15 +48,17 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the program `deltablast`, and `makeprofiledb -dbtype cobalt`;
+- `makeprofiledb -dbtype cobalt`;
 - `blast_formatter` output formats other than `8`, `9` and `12`;
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`,
   and in the library and pylosat;
 - the `psiblast` output formats `13` to `16`.
 
+Not yet supported in `deltablast`: `-show_domain_hits`, `-query_loc`, `-html`, `-export_search_strategy`, and output formats other than `0`, `6` and `7` (see [deltablast](programs/deltablast.md)).
+
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.
 
-Options that need NCBI's servers are not available: `-remote` and `-entrez_query` (all programs). `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `rpsblast` and `rpstblastn` refuse it.
+Options that need NCBI's servers are not available: `-remote` and `-entrez_query` (all programs). `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `deltablast`, `rpsblast` and `rpstblastn` refuse it.
 
 ## How this manual is organised
 

@@ -343,3 +343,30 @@ fn missing_parent_directory_is_not_refused() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn deltablast_rpsdb_components_including_wcounts_and_obsr_are_refused() {
+    let dir = fresh_dir("deltablast-rpsdb");
+    let pin = dir.join("cdd_sub.pin");
+    let rps = dir.join("cdd_sub.rps");
+    let wcounts = dir.join("cdd_sub.wcounts");
+    let obsr = dir.join("cdd_sub.obsr");
+    let other = dir.join("cdd_sub.log");
+    for f in [&pin, &rps, &wcounts, &obsr, &other] {
+        std::fs::write(f, b"x").unwrap();
+    }
+    let words: Vec<OsString> = vec![
+        "-rpsdb".into(),
+        dir.join("cdd_sub").as_os_str().to_os_string(),
+    ];
+    let start = ApplicationStart::of_process("deltablast", &words);
+    for refused in [&pin, &rps, &wcounts, &obsr] {
+        assert!(
+            check_disk_logfile("deltablast", &words, &start, Some(refused.as_os_str())).is_err(),
+            "expected deltablast refusal for {}",
+            refused.display()
+        );
+    }
+    assert!(check_disk_logfile("deltablast", &words, &start, Some(other.as_os_str())).is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}

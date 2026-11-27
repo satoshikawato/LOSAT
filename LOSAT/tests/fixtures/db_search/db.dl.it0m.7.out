@@ -1,0 +1,82 @@
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+qserp	s1	43.014	365	205	2	2	364	3	366	4.72e-138	393
+qserp	s2	33.241	361	231	7	8	364	2	356	5.05e-77	237
+qserp	BDT61653.1	22.222	45	29	1	90	134	217	255	0.060	30.2
+qserp	BDT63124.1	20.000	55	28	3	1	47	2730	2776	0.72	27.1
+qserp	BDV50239.1	17.094	117	81	7	29	134	173	284	3.5	24.4
+qserp	BDT63101.1	22.222	36	26	2	283	317	66	100	7.3	23.3
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+YP_009220615.1	BDV50182.1	45.000	640	322	9	90	724	343	957	0.0	552
+YP_009220615.1	BDT63551.1	42.457	643	338	8	96	722	186	812	5.18e-174	515
+YP_009220615.1	BDU62129.1	44.840	562	289	8	166	726	76	617	1.32e-160	473
+YP_009220615.1	BDT63084.1	40.796	603	309	12	139	724	360	931	1.41e-148	452
+YP_009220615.1	BDT61690.1	28.438	320	173	8	388	707	139	402	1.06e-27	111
+YP_009220615.1	BDT63142.1	30.357	56	37	2	485	540	182	235	0.15	30.0
+YP_009220615.1	BDU62219.1	40.909	22	13	0	476	497	280	301	2.1	26.6
+YP_009220615.1	BDT61736.1	30.233	43	28	1	550	592	85	125	3.1	25.8
+YP_009220615.1	BDT63577.1	40.625	32	17	1	100	131	69	98	6.7	25.0
+YP_009220615.1	BDT61661.1	38.889	36	22	0	63	98	276	311	6.8	24.6
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: CDD:29117 cd00172, SERPIN, SERine Proteinase INhibitors (serpins) exhibit conformational polymorphism shifting from native to cleaved, latent, delta, or polymorphic forms. Many serpins, such as antitrypsin and antichymotrypsin, function as serine protease inhibitors which regulate blood coagulation cascades. Non-inhibitory serpins perform many diverse functions such as chaperoning proteins or transporting hormones. Serpins are of medical interest because mutants have been associated with blood clotting disorders, emphysema, cirrhosis, and dementia.
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+CDD:29117	s1	53.552	366	167	2	1	364	2	366	1.91e-138	394
+CDD:29117	s2	42.659	361	197	7	8	364	2	356	3.91e-77	237
+CDD:29117	BDT61653.1	26.667	45	27	1	90	134	217	255	0.087	29.8
+CDD:29117	BDT63124.1	32.000	25	14	1	23	47	2755	2776	1.0	26.4
+CDD:29117	BDT63517.1	19.608	51	36	1	83	133	6	51	3.2	24.4
+CDD:29117	BDV50239.1	20.513	117	77	7	29	134	173	284	5.9	24.0
+CDD:29117	BDT63149.1	21.739	92	54	4	52	129	183	270	7.0	23.3
+CDD:29117	BDT63101.1	30.556	36	23	2	283	317	66	100	7.2	23.3
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: CDD:200983 pfam00079, Serpin, Structure is a multi-domain fold containing a bundle of helices and a beta sandwich.
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+CDD:200983	s1	75.204	367	91	0	2	368	2	368	3.95e-144	408
+CDD:200983	s2	48.219	365	178	7	9	369	2	359	1.73e-77	238
+CDD:200983	BDT61653.1	24.444	45	28	1	91	135	217	255	0.081	29.8
+CDD:200983	BDT63124.1	40.000	25	12	1	24	48	2755	2776	1.0	26.4
+CDD:200983	BDT63517.1	23.529	51	34	1	84	134	6	51	5.7	23.7
+CDD:200983	BDV50239.1	18.803	117	79	7	30	135	173	284	6.1	23.7
+CDD:200983	BDT63101.1	30.556	36	23	2	285	319	66	100	7.5	23.3
+# DELTABLAST 2.17.0+
+# Iteration: 1
+# Query: CDD:197513 smart00093, SERPIN
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+CDD:197513	s1	56.438	365	148	7	1	358	8	368	2.61e-127	365
+CDD:197513	s2	66.760	358	119	0	2	359	2	359	1.40e-88	266
+CDD:197513	BDT61653.1	28.261	46	26	1	86	131	217	255	0.11	29.4
+CDD:197513	BDT63124.1	40.000	25	12	1	17	41	2755	2776	0.97	26.4
+CDD:197513	BDT63149.1	21.429	112	58	5	40	126	164	270	1.5	25.6
+CDD:197513	BDT61698.1	31.818	44	23	2	115	151	325	368	6.2	24.0
+CDD:197513	BDT63101.1	25.000	36	25	2	277	311	66	100	7.0	23.3
+CDD:197513	BDV50167.1	27.273	44	29	1	22	65	883	923	7.7	23.7
+# DELTABLAST 2.17.0+
+# Iteration: 2
+# Query: qserp mutated serpin consensus
+# Database: tests/db_search/delta/dbs
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+qserp	s1	43.014	365	205	2	2	364	3	366	0.0	557
+qserp	s2	33.241	361	231	7	8	364	2	356	2.59e-171	477
+qserp	BDT63503.1	21.311	61	48	0	247	307	1151	1211	0.62	27.0
+qserp	BDT63132.1	19.753	81	58	1	19	92	193	273	3.7	24.7
+
+Search has CONVERGED!
+# BLAST processed 6 queries

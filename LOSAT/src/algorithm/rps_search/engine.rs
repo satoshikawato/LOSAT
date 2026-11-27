@@ -50,12 +50,24 @@ pub struct RpsSearch {
     /// Smith-Waterman redo (`RpsRedoParams::smith_waterman`), of rpstblastn's frames too (series
     /// PR, item PS12c); without them NCBI's traceback does not read it.
     pub(crate) use_sw_tback: bool,
+    /// Whether this RPS search is DELTA-BLAST's domain search (`CDeltaBlast::x_FindDomainHits`):
+    /// refusals name `"DELTABLAST"`, and the one-time `.loo` hit check reads the overflow array
+    /// through a 1 MiB sliding buffer so unused `.loo` pages are not faulted into the resident set.
+    pub(crate) domain_search: bool,
 }
 
 /// The contexts of a translated query.
 pub(crate) const NUM_FRAMES: usize = 6;
 
 impl RpsSearch {
+    /// The program name shown in LOSAT's refusals for this RPS search.
+    pub(crate) fn program(&self) -> &'static str {
+        if self.domain_search {
+            "DELTABLAST"
+        } else {
+            "RPSBLAST"
+        }
+    }
     /// The X-drops in bits, `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` as given or the
     /// RPS options handle's defaults (7, 15 and 25 bits), and the gap trigger (22 bits): the
     /// `RpsRun` fields of both RPS programs.
@@ -749,24 +761,34 @@ impl RpsRun<'_> {
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if pool.enabled() && pool.threads() > 1 {
-            use rayon::prelude::*;
-            pool.install(|| {
-                (0..units.len())
-                    .into_par_iter()
-                    .with_max_len(1)
-                    .for_each(|unit| {
-                        // The worker's index in the run's pool (its scratch, `RpsWorkers`).
-                        let slot = rayon::current_thread_index().unwrap_or(0);
-                        workers.with(slot, |scratch| run_unit(scratch, unit));
+        {
+            let active = pool.threads().min(units.len());
+            if pool.enabled() && active > 1 {
+                use rayon::prelude::*;
+                let next = std::sync::atomic::AtomicUsize::new(0);
+                pool.install(|| {
+                    (0..active).into_par_iter().for_each(|_| {
+                        workers.with(|scratch| loop {
+                            let unit = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if unit >= units.len() {
+                                break;
+                            }
+                            run_unit(scratch, unit);
+                        });
                     });
-            });
-            return Ok(take_results(refused, results));
+                });
+                return Ok(take_results(refused, results));
+            }
         }
         let _ = pool;
-        // Without a pool the units run on the caller's thread, on the first scratch.
-        for unit in 0..units.len() {
-            workers.with(0, |scratch| run_unit(scratch, unit));
+        // Without a pool (or with a single unit) the units run on the caller's thread on one
+        // scratch from the free list.
+        if !units.is_empty() {
+            workers.with(|scratch| {
+                for unit in 0..units.len() {
+                    run_unit(scratch, unit);
+                }
+            });
         }
         Ok(take_results(refused, results))
     }
@@ -893,41 +915,78 @@ impl RpsScratch {
     }
 }
 
-/// The scratch of a run's workers (series PR, item PS12s, D3): one for each thread of the run's
-/// pool (`rayon::current_thread_index` inside the pool; the first for a search without a pool),
-/// kept from volume to volume and from query batch to query batch, where each search of a volume
-/// made its own (whose buckets grew again by doubling). A worker's diagonal table stays where the
-/// next volume's table has the same length (`RpsWordScratch::prepare_for`); the buckets' blocks
-/// come from one pool of the run (`RpsBlockPool`, M2), to which each bucket gives its blocks back
-/// as soon as its hits are read. A search's values do not depend on what its scratch held before
-/// (`wordfinder.rs`), so only the memory and its reuse change.
+/// The scratch of a run's workers (series PR, item PS12s, D3): handed out from a free list so
+/// the number of live diagonal tables never exceeds the peak number of concurrently running units
+/// (e.g. 1 for a single-query batch at any thread count), kept from volume to volume inside one
+/// search where each volume would otherwise allocate and fault in its own tables. A worker's
+/// diagonal table stays where the next volume's table has the same length
+/// (`RpsWordScratch::prepare_for`); the buckets' blocks come from one pool of the run
+/// (`RpsBlockPool`, M2), to which each bucket gives its blocks back as soon as its hits are read.
+/// A search's values do not depend on what its scratch held before (`wordfinder.rs`), so only the
+/// memory and its reuse change.
 pub(crate) struct RpsWorkers {
-    slots: Vec<std::sync::Mutex<RpsScratch>>,
+    free: std::sync::Mutex<Vec<RpsScratch>>,
     pool: std::sync::Arc<RpsBlockPool>,
 }
 
 impl RpsWorkers {
-    /// The scratch of a run of `threads` threads (empty until a worker searches).
-    pub(crate) fn new(threads: usize) -> Self {
-        let pool = std::sync::Arc::new(RpsBlockPool::default());
+    /// An empty free list of worker scratches (allocated lazily up to peak concurrent units).
+    pub(crate) fn new(_threads: usize) -> Self {
         Self {
-            slots: (0..threads.max(1))
-                .map(|_| std::sync::Mutex::new(RpsScratch::new(&pool)))
-                .collect(),
-            pool,
+            free: std::sync::Mutex::new(Vec::new()),
+            pool: std::sync::Arc::new(RpsBlockPool::default()),
         }
     }
 
-    /// `work` on the scratch of the worker `slot` (its index in the run's pool; 0 without a
-    /// pool), or on a scratch of its own where that one is not free (no task of a search waits
-    /// for the pool, so a worker never holds its scratch twice) or the slot is not one of the
-    /// run's.
-    fn with<T>(&self, slot: usize, work: impl FnOnce(&mut RpsScratch) -> T) -> T {
-        match self.slots.get(slot).and_then(|slot| slot.try_lock().ok()) {
-            Some(mut scratch) => work(&mut scratch),
-            None => work(&mut RpsScratch::new(&self.pool)),
-        }
+    fn take(&self) -> RpsScratch {
+        self.free
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pop()
+            .unwrap_or_else(|| RpsScratch::new(&self.pool))
     }
+
+    fn put(&self, scratch: RpsScratch) {
+        self.free
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(scratch);
+    }
+
+    /// Runs `work` on a scratch taken from the free list, returning it when `work` finishes.
+    fn with<T>(&self, work: impl FnOnce(&mut RpsScratch) -> T) -> T {
+        struct ReturnGuard<'a> {
+            workers: &'a RpsWorkers,
+            scratch: Option<RpsScratch>,
+        }
+        impl Drop for ReturnGuard<'_> {
+            fn drop(&mut self) {
+                if let Some(scratch) = self.scratch.take() {
+                    self.workers.put(scratch);
+                }
+            }
+        }
+        let mut guard = ReturnGuard {
+            workers: self,
+            scratch: Some(self.take()),
+        };
+        work(guard.scratch.as_mut().expect("held until drop"))
+    }
+}
+
+/// What the RPS searches of one database keep from search to search (series PR, item PS13a:
+/// deltablast's domain search searches each query batch of its run, `blast_engine::delta_hooks`):
+/// the set-up of the volumes, which checks each volume's files at its first search only
+/// (`RpsVolumeSetup::open`). Worker scratches (`RpsWorkers`) live only for the duration of each
+/// RPS search and are dropped before the main `-db` search or report prefetch, matching NCBI's
+/// `x_FindDomainHits` lifetime. The volumes' mappings are each search's own, as NCBI maps the
+/// files for each search (`CSetupFactory::CreateRpsStructures`): their pages leave the resident
+/// set when the search ends.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-83
+#[derive(Default)]
+pub(crate) struct RpsRunState {
+    pub(crate) setup: Option<super::volumes::RpsVolumeSetup>,
 }
 
 /// The gapped K that the outfmt 0 footer of each query prints: for the first query of a batch,

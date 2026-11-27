@@ -106,6 +106,9 @@ pub(super) struct BlastpDatabase {
     /// rpsblast: the search units of the database and their statistics, built once per run where
     /// the database opens (`rps_hooks::with_units`); `None` for every other search.
     rps_units: Option<crate::algorithm::rps_search::volumes::RpsUnits>,
+    /// rpsblast: what the RPS searches of this database keep from search to search (its
+    /// volumes' set-up and the workers' scratch; `rps_hooks::rps_search`).
+    rps_state: std::sync::Mutex<crate::algorithm::rps_search::engine::RpsRunState>,
 }
 
 impl BlastpDatabase {
@@ -121,6 +124,16 @@ impl BlastpDatabase {
     /// rpsblast's search units (`with_rps_units`), `None` for every other search.
     pub(super) fn rps_units(&self) -> Option<&crate::algorithm::rps_search::volumes::RpsUnits> {
         self.rps_units.as_ref()
+    }
+
+    /// What the RPS searches of this database keep from search to search (`RpsRunState`), held
+    /// by one search at a time.
+    pub(super) fn rps_state(
+        &self,
+    ) -> std::sync::MutexGuard<'_, crate::algorithm::rps_search::engine::RpsRunState> {
+        self.rps_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
@@ -239,6 +252,7 @@ impl BlastpDatabase {
             taxdb: shared::TaxdbRun::default(),
             program,
             rps_units: None,
+            rps_state: Default::default(),
         })
     }
 
@@ -1379,6 +1393,25 @@ impl<'a> CallTitles<'a> {
         self.utf8.read()
     }
 
+    /// The reads' record of that read, which a call held between its search and its prefetch keeps
+    /// (`SearchedCall`; `held_again` makes the reads again of it).
+    pub(super) fn into_held(self) -> shared::CallUtf8 {
+        self.utf8
+    }
+
+    /// The reads of a call whose titles were read before (`into_held`).
+    pub(super) fn held_again(
+        database: Option<&'a BlastpDatabase>,
+        batches: &'a [crate::blastinput::seq_range::RangedBatch],
+        utf8: shared::CallUtf8,
+    ) -> Self {
+        Self {
+            database,
+            batches,
+            utf8,
+        }
+    }
+
     /// NCBI's warning of that read in the first query of the batch whose Seq-aligns read it, with
     /// the posts that follow the reader's messages of the batch (`query_warnings::query_posts`),
     /// where the run has not posted it (a load of the model of the loads may have,
@@ -1859,6 +1892,58 @@ pub(super) struct ListedTitles<'a> {
     seen: crate::report::query_bioseq::QueryBioseqs,
     /// The run's searched query of the call's first query (`refuse_ids_of_queries`).
     seen_first: usize,
+}
+
+/// `ListedTitles` without its borrows of the listed subjects and of the database's OIDs
+/// (`ListedTitles::held`), which a call holds between its search and its reports
+/// (`SearchedCall`): `listed` borrows them again.
+pub(super) struct HeldTitles {
+    shown: ListedShown,
+    replaced_title_bytes: Vec<bool>,
+    sources: Vec<crate::report::defline::SourceTaxname>,
+    parsed: Vec<Option<Arc<ParsedSubject>>>,
+    program: &'static str,
+    utf8: Option<shared::Utf8Read>,
+    seen: crate::report::query_bioseq::QueryBioseqs,
+    seen_first: usize,
+}
+
+impl ListedTitles<'_> {
+    /// The titles without their borrows (`HeldTitles`).
+    pub(super) fn held(self) -> HeldTitles {
+        HeldTitles {
+            shown: self.shown,
+            replaced_title_bytes: self.replaced_title_bytes,
+            sources: self.sources,
+            parsed: self.parsed,
+            program: self.program,
+            utf8: self.utf8,
+            seen: self.seen,
+            seen_first: self.seen_first,
+        }
+    }
+}
+
+impl HeldTitles {
+    /// The titles of the subjects `listed` of `database`, which they were read of.
+    pub(super) fn listed<'a>(
+        self,
+        listed: &'a ListedSubjects,
+        database: &'a BlastpDatabase,
+    ) -> ListedTitles<'a> {
+        ListedTitles {
+            listed,
+            oids: database.oid_map(),
+            shown: self.shown,
+            replaced_title_bytes: self.replaced_title_bytes,
+            sources: self.sources,
+            parsed: self.parsed,
+            program: self.program,
+            utf8: self.utf8,
+            seen: self.seen,
+            seen_first: self.seen_first,
+        }
+    }
 }
 
 /// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.
@@ -3785,7 +3870,11 @@ impl PssmReads {
         match &self.refused {
             Some((oid, reason, program)) => Err(shared::parsed_refusal(
                 *oid,
-                &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
+                // The PSSM of psiblast's rounds, also deltablast's (`program`: the run's name).
+                &format!(
+                    "{reason}, and is in {}'s PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)",
+                    program.to_ascii_lowercase()
+                ),
                 program,
             )),
             None => Ok(()),

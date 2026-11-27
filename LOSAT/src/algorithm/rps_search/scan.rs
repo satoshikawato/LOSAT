@@ -288,6 +288,13 @@ impl RpsBuckets {
         self.fill_group(table, subject, group)
     }
 
+    /// First and one-past-last bucket indices of `group`.
+    pub(crate) fn group_bucket_range(&self, group: usize) -> (usize, usize) {
+        let g0 = group * self.group_buckets;
+        let g1 = (g0 + self.group_buckets).min(self.num_buckets);
+        (g0, g1)
+    }
+
     /// The buckets of `group` filled with the hits of the scan's words, the reading cursor at the
     /// group's first bucket. The pass takes the words of the subject again, in the scan's order
     /// (`scan_subject`'s loop over `scanned`: every word of it with hits was in the scan), and
@@ -357,6 +364,81 @@ impl RpsBuckets {
                 words[next - 1].taken = taken;
             }
         }
+        self.words = words;
+        cursor
+    }
+
+    /// `fill_group` for positions `*s_pos..self.scanned.1` starting at `self.words[*word_pos..]`,
+    /// stopping after the word whose hits into `group`'s buckets reach `max_hits` (cold multipass
+    /// fallback when a query's total hits across all groups exceed `MAX_SCAN_HITS`).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn fill_group_bounded(
+        &mut self,
+        table: &RpsTable<'_>,
+        subject: &[u8],
+        group: usize,
+        s_pos: &mut i32,
+        word_pos: &mut usize,
+        max_hits: i32,
+    ) -> RpsReadCursor {
+        let cursor = self.open_group(group);
+        let (_, end) = self.scanned;
+        let first = *s_pos;
+        if first >= end {
+            return cursor;
+        }
+        let g0_q = (self.g0 as u32) << BUCKET_BITS;
+        let mut words = std::mem::take(&mut self.words);
+        let mut next = *word_pos;
+        let mut index = word_index_start(subject, first);
+        let mut group_hits = 0i32;
+        for s in first..end {
+            index = next_word_index(index, subject, s);
+            let word = index as usize;
+            if table.pv[word / 64] & (1u64 << (word % 64)) == 0 {
+                continue;
+            }
+            let cell = &table.cells[word];
+            let (taken, entry) = if cell[0] > RPS_HITS_PER_CELL {
+                // The words of cells with an overflow run and hits past group 0, in the order of the scan.
+                if words.get(next).is_none_or(|w| w.s_off != s as u32) {
+                    continue;
+                }
+                next += 1;
+                let taken = words[next - 1].taken;
+                let entry = match taken {
+                    0 => Some(cell[1]),
+                    _ if taken as i32 >= cell[0] => None,
+                    _ => {
+                        let start = cell[2] as usize / std::mem::size_of::<i32>();
+                        Some(table.overflow[start + taken as usize - 1])
+                    }
+                };
+                (taken, entry)
+            } else {
+                let entries = &cell[1..=cell[0] as usize];
+                let taken = entries.partition_point(|&entry| entry_q_off(entry) < g0_q);
+                (taken as u32, entries.get(taken).copied())
+            };
+            if entry.is_none_or(|entry| entry_q_off(entry) >= self.g1_q) {
+                continue;
+            }
+            let s_bits = self.entry_bits(s as u32);
+            let (taken_after, _) = self.add_cell_hits(table, cell, taken, s_bits, self.g0);
+            if cell[0] > RPS_HITS_PER_CELL {
+                words[next - 1].taken = taken_after;
+            }
+            group_hits += (taken_after - taken) as i32;
+            if group_hits >= max_hits {
+                *s_pos = s + 1;
+                *word_pos = next;
+                self.words = words;
+                return cursor;
+            }
+        }
+        *s_pos = end;
+        *word_pos = next;
         self.words = words;
         cursor
     }
@@ -737,6 +819,63 @@ pub(crate) fn scan_subject(
     *offset = s;
     buckets.scanned = (s_first, s);
     totalhits
+}
+
+/// `scan_subject` for group-major bucket-sliding mode: places hits into group 0's buckets and
+/// stops early only when group 0's own bucket hits reach `max_hits` (instead of the sum across
+/// all groups), so normal queries finish group 0 in a single pass. When `*offset > 0` (a
+/// subsequent pass of group 0), appends to `buckets.words` and `buckets.reached` so later groups
+/// see the entire subject.
+#[cold]
+#[inline(never)]
+pub(crate) fn scan_group0(
+    table: &RpsTable<'_>,
+    subject: &[u8],
+    offset: &mut i32,
+    buckets: &mut RpsBuckets,
+    max_hits: i32,
+) -> i32 {
+    let first_pass = *offset == 0;
+    buckets.open_group(0);
+    if first_pass {
+        buckets.beyond = false;
+        buckets.words.clear();
+        buckets.reached.iter_mut().for_each(|bits| *bits = 0);
+    }
+    let s_first = *offset;
+    let s_last = subject.len() as i32 - RPS_WORDSIZE as i32;
+    let mut group_hits = 0i32;
+    let mut index = word_index_start(subject, s_first);
+    for s in s_first..=s_last {
+        index = next_word_index(index, subject, s);
+        let word = index as usize;
+        if table.pv[word / 64] & (1u64 << (word % 64)) != 0 {
+            let cell = &table.cells[word];
+            let numhits = cell[0];
+            let s_bits = buckets.entry_bits(s as u32);
+            let (taken, next_q) = buckets.add_cell_hits(table, cell, 0, s_bits, 0);
+            if next_q != u32::MAX {
+                buckets.beyond = true;
+                if numhits > RPS_HITS_PER_CELL {
+                    buckets.words.push(ScanWord {
+                        s_off: s as u32,
+                        taken,
+                    });
+                } else {
+                    buckets.reach_groups(&cell[1 + taken as usize..=numhits as usize]);
+                }
+            }
+            group_hits += taken as i32;
+            if group_hits >= max_hits {
+                *offset = s + 1;
+                buckets.scanned = (0, s + 1);
+                return group_hits;
+            }
+        }
+    }
+    *offset = s_last + 1;
+    buckets.scanned = (0, s_last + 1);
+    group_hits
 }
 
 /// The hits of one scan as NCBI collects them (`RPS_MAX_SCAN_HITS`).

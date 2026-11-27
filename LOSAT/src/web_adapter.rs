@@ -532,7 +532,13 @@ pub fn give_pssm_run_files(args: &mut crate::algorithm::blastp::BlastpArgs, run_
 /// Checks `outfmt` against the output formats that LOSAT's `psiblast` supports
 /// (`PsiblastArgs::check_outfmt`).
 pub fn check_psiblast_outfmt(outfmt: &str, strategy: bool) -> anyhow::Result<()> {
-    crate::algorithm::psiblast::PsiblastArgs::check_outfmt(outfmt, None, strategy, false)
+    crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
+        outfmt,
+        None,
+        strategy,
+        crate::algorithm::blastp::args::BlastpApp::Psiblast,
+        false,
+    )
 }
 
 /// Refuses `-phi_pattern` in LOSAT Web's `psiblast` (PHI-BLAST pattern files are not supported in

@@ -50,13 +50,14 @@ There is one section for each program, and one for the five search programs toge
 | Option or feature | Programs affected | Status in v0.2.0 |
 | :--- | :--- | :--- |
 | `-remote`, `-entrez_query` | All search programs | Out of scope (needs NCBI servers) |
-| `-import_search_strategy` | `psiblast`, `rpsblast`, `rpstblastn`; strategy files in binary or XML form | Not yet supported (text strategy files run in the five search programs) |
-| `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
+| `-import_search_strategy` | `psiblast`, `deltablast`, `rpsblast`, `rpstblastn`; strategy files in binary or XML form | Not yet supported (text strategy files run in the five search programs) |
+| `-html` | `deltablast` | Not yet supported |
+| `-use_sw_tback` | `psiblast`, `deltablast`, `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
 | `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10` and `20`) |
+| `-show_domain_hits`, `-query_loc`, non-listed `-outfmt`, `-export_search_strategy` | `deltablast` | Not yet supported (listed: `0`, `6` and `7`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
-| `deltablast` | Standalone executable | Not yet provided |
 
 ## All five search programs
 
@@ -267,6 +268,26 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 `-matrix IDENTITY` gives NCBI's own error.
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#psiblast).
+
+## deltablast
+
+`deltablast` refuses what `psiblast` refuses for the same options, and a few more. `-remote`, `-entrez_query` and `-import_search_strategy` are refused as in all programs (see the end of this page); `-matrix IDENTITY` gives NCBI's own error.
+
+| Option or value | What happens |
+| :--- | :--- |
+| `-show_domain_hits` | Refused: not yet supported. |
+| `-query_loc` | Refused: not yet supported. |
+| `-outfmt` other than `0`, `6` and `7` | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors, as in `psiblast`. |
+| `-html` | Refused: not yet supported. |
+| `-export_search_strategy` | Refused: not yet supported. |
+| `-use_sw_tback` | Refused, as in `psiblast` (NCBI runs it). |
+| A domain database (`-rpsdb`) of several volumes | Refused before anything is written. NCBI searches it. |
+| `-subject` with more records than the hit-list limit (`-max_target_seqs`, `-num_descriptions`, or `-num_alignments`) | Refused before anything is written. NCBI's first search keeps only the best subjects of the whole set, which LOSAT does not do yet. |
+| A query whose letters give no Karlin-Altschul parameters (a query of `X` alone, for example) read together with other queries (with one round, and with `-num_iterations 0`, NCBI reads queries together up to 10,000 letters; with 2 or more rounds, one query at a time) | Refused. NCBI crashes. Such a query alone, or with 2 or more rounds, gets NCBI's error (`LOSAT engine error: NULL alignments`, exit status 3), as in NCBI. |
+| `-save_pssm_after_last_round` with one round, when the first of the queries read together has no alignments | Refused, after the PSSM files that NCBI writes before it. NCBI stops with a null pointer exception. |
+| A damaged `.wcounts` or `.obsr` file in `-rpsdb` (an empty 0-byte file at open; or, when a domain hit reads it, shorter than its header or profile data, missing the hit profile's offsets, holding fewer columns than the hit covers, or having a zero-count `.wcounts` column aligned to a non-`X` query residue) | Refused. NCBI crashes on an empty file, reads past a short file or profile, or converts NaN to an integer with undefined behaviour. Missing files and wrong magic numbers (including 1-to-3-byte files zero-padded to 4 bytes, as POSIX memory mapping does) give NCBI's own errors. |
+
+For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#deltablast).
 
 ## tblastn with `-in_pssm`
 
@@ -533,13 +554,14 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 
 ## On the list for a later release
 
-- The program `deltablast`.
 - `makeprofiledb -dbtype cobalt`.
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
   the library and pylosat.
 - The `psiblast` output formats `13` to `16`.
 - `blast_formatter`: the output formats other than `8`, `9` and `12`, and the values of an archive's results that it does not yet write.
-- `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
+- `-import_search_strategy` in `psiblast`, `deltablast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
+
+Not yet supported in `deltablast` (see [`deltablast`](#deltablast) above): `-show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
 
 ## Out of scope: they need NCBI's servers
 

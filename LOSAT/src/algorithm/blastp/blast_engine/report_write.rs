@@ -246,7 +246,9 @@ pub(super) fn write_archive(
         .as_deref()
         .map(|psi| pssm_hooks::psi_karlin(psi, contexts, &gapped_params));
     let psi = match args.app {
-        BlastpApp::Psiblast => Some(psi_archive(args, reports, database.is_some(), psi_karlin)?),
+        BlastpApp::Psiblast | BlastpApp::Deltablast => {
+            Some(psi_archive(args, reports, database.is_some(), psi_karlin)?)
+        }
         _ => None,
     };
     // A PSSM search's blocks are its PSI blocks (`GetPsiUngappedKarlinBlk`,
@@ -307,6 +309,20 @@ pub(super) fn write_archive(
     // Flushed when written, as the other reports are.
     writer.flush()?;
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1458
+/// The round that the tabular reports name (`# Iteration:`): psiblast's and deltablast's round, 1
+/// outside the round driver, none for deltablast's one round (`PsiRoundIo::silent`).
+fn report_iteration(args: &ResolvedBlastpArgs, reports: &BlastpReports<'_>) -> Option<u32> {
+    if !args.app.is_psi() {
+        return None;
+    }
+    match reports.psi_round {
+        Some(io) if io.silent => None,
+        Some(io) => Some(io.state.number()),
+        None => Some(1),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-271
@@ -603,7 +619,9 @@ pub(super) fn write_xml(
             app: args.app.ncbi_name(),
             version: &version,
             reference: match args.app {
-                BlastpApp::Psiblast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
+                BlastpApp::Psiblast | BlastpApp::Deltablast => {
+                    crate::report::blast_xml::REFERENCE_COMP_BASED_STATS
+                }
                 _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             },
             db_name: db_name.as_deref().unwrap_or(b""),
@@ -728,7 +746,7 @@ pub(super) fn write_xml(
 /// lists (`rows_of_lists` of `run_call`), which it makes for each occurrence.
 #[derive(Clone, Copy)]
 pub(super) struct PhiPairwise<'a> {
-    pub(super) call: &'a super::phi_hooks::PhiCall<'a>,
+    pub(super) call: &'a super::phi_hooks::PhiCall,
     #[allow(clippy::type_complexity)]
     pub(super) rows_of_lists:
         &'a dyn Fn(&[Option<BlastpHitList>], usize) -> Result<Vec<PairwiseHit>>,
@@ -742,7 +760,7 @@ impl<'a> PhiPairwise<'a> {
     /// messages `result_warnings` (`None` likewise).
     #[allow(clippy::type_complexity)]
     pub(super) fn of(
-        call: Option<&'a super::phi_hooks::PhiCall<'a>>,
+        call: Option<&'a super::phi_hooks::PhiCall>,
         rows_of_lists: &'a dyn Fn(&[Option<BlastpHitList>], usize) -> Result<Vec<PairwiseHit>>,
         result_warnings: Option<&'a [Vec<u8>]>,
     ) -> Option<Self> {
@@ -984,7 +1002,7 @@ pub(super) fn write_pairwise(
     // psiblast's two-part table looks each shown subject up in the previous round's
     // set by its handle: LOSAT refuses one that it cannot place as NCBI does.
     if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
-        found.refuse_unsure_shown(shown.iter().copied())?;
+        found.refuse_unsure_shown(shown.iter().copied(), args.app)?;
     }
     // The results' query masks (`result_query_masks`: none for psiblast's rounds), which the rows
     // show in lower case.
@@ -1187,7 +1205,7 @@ pub(super) fn write_pairwise(
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
         // epilog.
-        if let Some(io) = reports.psi_round {
+        if let Some(io) = reports.psi_round.filter(|io| !io.silent) {
             crate::report::pairwise::psiblast_round::write_psiblast_round_report(
                 &rows,
                 window,
@@ -1373,8 +1391,7 @@ pub(super) fn write_custom_tabular(
         program_version: &program_version,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1458
         // psiblast's round (`psi_round`), 1 outside the rounds.
-        iteration: (args.app == BlastpApp::Psiblast)
-            .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
+        iteration: report_iteration(args, reports),
         matrix: args.scoring.matrix,
         query_ids,
         query_records,
@@ -1577,7 +1594,7 @@ pub(super) fn write_custom_tabular(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2057
 pub(super) fn write_phi_text(
     view: &ReportView<'_>,
-    phi: &super::phi_hooks::PhiCall<'_>,
+    phi: &super::phi_hooks::PhiCall,
     result_warnings: &[Vec<u8>],
     outfmt: OutputFormat,
     format: &mut FormatOutput<'_>,
@@ -1696,8 +1713,7 @@ pub(super) fn write_text(
         reports.epilog,
         reports.x_queries_before,
         // psiblast's round (`psi_round`), 1 outside the rounds.
-        (args.app == BlastpApp::Psiblast)
-            .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
+        report_iteration(args, reports),
         args.psi_search
             .as_ref()
             .and_then(|search| search.query_other_coding),

@@ -68,7 +68,7 @@ All contributions that touch alignment or search code must strictly satisfy thes
 
 When reporting an issue or output discrepancy against NCBI BLAST+, please provide:
 
-1. **Exact command lines** used for both `LOSAT` and the matching NCBI BLAST+ program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `rpsbproc`, `makeblastdb` or `blastdbcmd`).
+1. **Exact command lines** used for both `LOSAT` and the matching NCBI BLAST+ program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, `rpsblast`, `rpstblastn`, `rpsbproc`, `makeblastdb` or `blastdbcmd`).
 2. **Minimal reproducible FASTA inputs** (synthetic or non-sensitive sequences).
 3. **Exact diff of outputs**, highlighting discrepancies in coordinates, scores, or E-values.
 4. **Environment details**: OS, architecture, LOSAT version/commit, and NCBI BLAST+ version.

@@ -239,7 +239,7 @@ MANIFEST = TESTS / "db_search_manifest"  # the directory: <program>.tsv for each
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "deltablast", "rpsblast", "rpstblastn")
 # The caller's variables that `clean_env` drops besides NCBI*, BLAST* and LOSAT_* (each changes NCBI's result).
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
             "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG",
@@ -502,6 +502,11 @@ def inflate_rps(cell: str, token: bool = False) -> Path:
 def rps_dir_token(row: dict[str, str]) -> bool:
     """Whether the row's outputs name the database's directory, frozen as the token `{db_dir}`."""
     return "path: {db_dir}" in row["covers"]
+
+
+def cwd_dir_token(row: dict[str, str]) -> bool:
+    """Whether the row's outputs name its run directory (`row_cwd`), frozen as the token `{cwd}`."""
+    return "path: {cwd}" in row["covers"]
 
 
 def rps_env(row: dict[str, str], env: dict[str, str], db_dir: Path) -> dict[str, str]:
@@ -1331,19 +1336,24 @@ def freeze(args: argparse.Namespace) -> int:
             refuse_valgrind_messages(row, run.stderr)
             refuse_signal(row, run.returncode)
             out = frozen_stdout(row, run.stdout)
+            if cwd_dir_token(row):
+                out = out.replace(str(row_cwd(row).resolve()).encode(), b"{cwd}")
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+        stderr = run.stderr
+        if cwd_dir_token(row):
+            stderr = stderr.replace(str(row_cwd(row).resolve()).encode(), b"{cwd}")
         err = FROZEN / f"{row['row_id']}.err"
-        if run.stderr:
-            err.write_bytes(run.stderr)
+        if stderr:
+            err.write_bytes(stderr)
         else:
             err.unlink(missing_ok=True)
         row.update(rc=str(run.returncode), stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
-                   stderr_sha256=sha256(run.stderr) if run.stderr else "")
+                   stderr_sha256=sha256(stderr) if stderr else "")
         if files:
             row.update(xinclude.observed(written))
         if pssm:
             row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
-        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(run.stderr)}"
+        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     # The rows whose expectation is a near input's NCBI run (`near_row`) take that row's columns, after it is
@@ -1431,7 +1441,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     byte."""
     files = xinclude.wants_files(row)
     pssm = xinclude.wants_pssm(row)
-    # The library API refuses rpsblast and rpstblastn (`api::Program::parse`, line PS items PS11a, PS12a).
+    # The library API refuses rpsblast, rpstblastn and deltablast (`api::Program::parse`, line PS items PS11a,
+    # PS12a, PS13a).
     # Its query is records or a PSSM file (`Inputs::new`, `Inputs::pssm`), never both: a row that gives
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call, nor has
     # a row that gives `-in_msa` with either of them, or the alignment's master options
@@ -1446,7 +1457,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that the argv names
     # (docs/web/abi_v2.md §3), so no Web run has them.
     argv = search_argv(row)
-    if library and (row["program"] in ("rpsblast", "rpstblastn")
+    if library and (row["program"] in ("rpsblast", "rpstblastn", "deltablast")
                     or ("-query" in argv and "-in_pssm" in argv)
                     or ("-in_msa" in argv and ("-query" in argv or "-in_pssm" in argv))
                     or ("-in_msa" not in argv
@@ -1472,10 +1483,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         run's directory in the token's place, as NCBI's run wrote it: the mapping re-wraps an ASN.1 text string
         by its length."""
         words = losat_wording.losat_output_bytes
-        if db_dir is None or not rps_dir_token(row):
-            return words(ncbi)
-        path = str(db_dir).encode()
-        return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+        if db_dir is not None and rps_dir_token(row):
+            path = str(db_dir).encode()
+            return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+        if cwd_dir_token(row):
+            path = str(row_cwd(row).resolve()).encode()
+            return words(ncbi.replace(b"{cwd}", path)).replace(path, b"{cwd}")
+        return words(ncbi)
 
     run_env = row_env(row, env) if db_dir is None else rps_env(row, env, db_dir)
     try:
@@ -1498,6 +1512,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if db_dir is not None and rps_dir_token(row):
         run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
         run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    if cwd_dir_token(row):
+        cwd_bytes = str(row_cwd(row).resolve()).encode()
+        run.stdout = run.stdout.replace(cwd_bytes, b"{cwd}")
+        run.stderr = run.stderr.replace(cwd_bytes, b"{cwd}")
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.

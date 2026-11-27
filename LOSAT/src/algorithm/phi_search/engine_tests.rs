@@ -20,12 +20,12 @@ fn x_dropoffs_use_the_table_lambda() {
 
 #[test]
 fn setup_errors_and_a_self_search() {
-    let pattern = PhiPattern::compile(b"G-K-S").unwrap();
+    let pattern = std::sync::Arc::new(PhiPattern::compile(b"G-K-S").unwrap());
     let score = |q: u8, s: u8| blosum62(q, s);
     let query = encode("MKAGKSTLLW");
     let base = |query: &[u8], segments: &[(usize, usize)]| -> Result<i32, PhiSetupError> {
         let setup_params = PhiSetup {
-            pattern: &pattern,
+            pattern: std::sync::Arc::clone(&pattern),
             query,
             segments,
             score: &score,
@@ -53,7 +53,7 @@ fn setup_errors_and_a_self_search() {
         Err(PhiSetupError::WholeQuery(b"G-K-S".to_vec()))
     );
     let setup_params = PhiSetup {
-        pattern: &pattern,
+        pattern: std::sync::Arc::clone(&pattern),
         query: &query,
         segments: &[(0, 9)],
         score: &score,

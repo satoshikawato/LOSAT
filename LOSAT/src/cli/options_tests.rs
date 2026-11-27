@@ -1,4 +1,4 @@
-//! Every argument of the ten programs on NCBI's reader that LOSAT does not refuse by name is read
+//! Every argument of the eleven programs on NCBI's reader that LOSAT does not refuse by name is read
 //! into the program's options (`options`, each program's `from_args`; line RG item K4i-3c), and
 //! the options read no other argument. The programs are one list. The options of each program
 //! are frozen (`tests/fixtures/options/golden.txt`): at their defaults, and with each argument
@@ -49,6 +49,7 @@ fn program_of(command: &Commands) -> &'static str {
         Commands::Tblastx(_) => "tblastx",
         Commands::Tblastn(_) => "tblastn",
         Commands::Psiblast(_) => "psiblast",
+        Commands::Deltablast(_) => "deltablast",
         Commands::Rpsblast(_) => "rpsblast",
         Commands::Rpstblastn(_) => "rpstblastn",
         Commands::Makedb(_) => "makeblastdb",
@@ -400,7 +401,7 @@ fn the_options_of_each_program_are_frozen() {
 
 /// The golden's first lines.
 const GOLDEN_HEAD: &str = "\
-# The options of the ten programs on NCBI's reader (src/cli/options_tests.rs, `golden`): for each
+# The options of the eleven programs on NCBI's reader (src/cli/options_tests.rs, `golden`): for each
 # program its options at their defaults, `[program]`, one line per value (the path of fields that
 # holds it = its Debug), then for each argument the words given and the lines that they take away
 # (-) and add (+). Frozen from clap's conversion before line RG item K4i-3c; checked by

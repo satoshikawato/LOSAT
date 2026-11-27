@@ -128,6 +128,7 @@ fn batch_sizes(
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:468-468
         Commands::Psiblast(_) => BatchSizes::Fixed(1),
         Commands::Rpsblast(_)
+        | Commands::Deltablast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
@@ -468,6 +469,7 @@ impl Batches<'_> {
             }
             // rpsblast and rpstblastn are refused by `Program::parse`.
             Commands::Rpsblast(_)
+            | Commands::Deltablast(_)
             | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {}

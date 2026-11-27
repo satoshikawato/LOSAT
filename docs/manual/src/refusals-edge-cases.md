@@ -230,6 +230,19 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - With `-out_pssm`, a PSSM in ASN.1 binary or XML form whose author names (`Auth-list` `names`, which NCBI reads again only when it writes them in ASN.1 text) give an error when they are read again, such as a number too large for its type: NCBI writes part of the file and stops with an exception. A byte outside the visible ASCII range there is not one of them: LOSAT gives NCBI's message for it and writes `#`, as NCBI does. Nor is the warning of a UTF8String tag: NCBI gives it once, when it first reads the file, and writes the names.
 - A real number in a PSSM whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`) is read with the exact exponent, the smallest normal double; see [Differences](differences.md). The PSSM's ASN.1 text, ASN.1 binary and XML are read as NCBI reads them.
 
+## deltablast
+
+These inputs are refused where NCBI BLAST+ 2.17.0 crashes, writes outside its alignment, reads past a profile file, converts NaN to an integer with undefined behaviour, or reads a domain database that is not built as it expects.
+
+- A domain database (`-rpsdb`) whose Seq-align ids are not local or general ids.
+- A domain whose header has no Seq-id.
+- A domain database in which the id of a profile finds another profile or none.
+- A query whose domain hit has a segment outside the query or of negative length. NCBI writes outside its alignment.
+- A query whose letters give Karlin-Altschul parameters with the domain search's matrix (BLOSUM62) but not with `-matrix`.
+- An empty (0-byte) `.wcounts` or `.obsr` file (at open; NCBI dereferences a null mapping and crashes). A 1-to-3-byte file is zero-padded to 4 bytes (as POSIX memory mapping zero-fills the rest of the last page) and checked like a 4-byte or longer file: a wrong magic number gets NCBI's corrupt-profile error, and a valid magic number opens cleanly when no domain hit reads it.
+- When a domain hit reads `.wcounts` or `.obsr`: a file shorter than its profile-count header, offset table, or requested profile data; an offset table that does not hold the hit profile's OID or has out-of-order offsets; or a profile holding fewer columns than the hit covers (NCBI reads past the mapping).
+- A `.wcounts` column whose residue counts sum to 0 aligned to a query residue other than `X` (NCBI divides 0 by 0 to get NaN and converts `log(NaN)` to an integer with undefined behaviour). When aligned to `X`, NCBI sets the frequency ratios to 0 without using the column, and LOSAT matches NCBI.
+
 ## tblastn with `-in_pssm`
 
 - Where NCBI stops before the search, as for `psiblast -in_pssm`, the output formats (every format `tblastn` writes, `-outfmt 11` included) and the query's titles are not refused. NCBI's prolog and error are written.

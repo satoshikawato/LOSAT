@@ -269,6 +269,7 @@ impl PsiblastArgs {
             os_str_bytes(&self.outfmt),
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
+            BlastpApp::Psiblast,
             self.phi_pattern.is_some(),
         )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
@@ -375,6 +376,7 @@ impl PsiblastArgs {
             // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
             formatting: self.formatting,
             rps: None,
+            delta: None,
         })
     }
 
@@ -456,13 +458,16 @@ impl PsiblastArgs {
     /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
-    /// `-outfmt`. `phi`: the run has `-phi_pattern`, whose formats 8, 9 and 12 end with NCBI's
-    /// engine error (`blast_engine/phi_hooks.rs`); its refusal of formats 5 and 11 comes after
-    /// NCBI's errors of the pattern's search (`phi_hooks::phi_limits`).
+    /// `-outfmt`. `app`: psiblast, or deltablast (`deltablast::args`), which writes outfmt 0, 6 and
+    /// 7 only (item PS15b-3); the refusal names it (`BlastpApp::name`). `phi`: the run has
+    /// `-phi_pattern`, whose formats 8, 9 and 12 end with NCBI's engine error
+    /// (`blast_engine/phi_hooks.rs`); its refusal of formats 5 and 11 comes after NCBI's errors of
+    /// the pattern's search (`phi_hooks::phi_limits`).
     pub fn check_outfmt(
         outfmt: impl AsRef<[u8]>,
         out: Option<&std::path::Path>,
         strategy: bool,
+        app: BlastpApp,
         phi: bool,
     ) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
@@ -479,16 +484,18 @@ impl PsiblastArgs {
         if ReportFormat::from_number(choice.number).is_some() {
             // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), formats
             // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
-            // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
-            let allowed = if phi {
-                matches!(choice.number, 0 | 5..=12 | 20)
-            } else {
-                writes_outfmt(choice.number)
+            // Without a pattern: deltablast writes 0, 6 and 7 only (item PS15b-3); psiblast writes
+            // `writes_outfmt` (0..=12, 18, 20).
+            let allowed = match app {
+                BlastpApp::Deltablast => matches!(choice.number, 0 | 6 | 7),
+                _ if phi => matches!(choice.number, 0 | 5..=12 | 20),
+                _ => writes_outfmt(choice.number),
             };
             if !allowed {
                 bail!(
-                    "output format {} is not supported by LOSAT's PSIBLAST yet",
-                    choice.number
+                    "output format {} is not supported by LOSAT's {} yet",
+                    choice.number,
+                    app.name()
                 );
             }
         }

@@ -27,6 +27,7 @@ test:
     - losat tblastn -help
     - losat tblastx -help
     - losat psiblast -help
+    - losat deltablast -help
     - losat rpsblast -help
     - losat rpstblastn -help
     - blastn -version
@@ -35,6 +36,7 @@ test:
     - tblastn -version
     - tblastx -version
     - psiblast -version
+    - deltablast -version
     - rpsblast -version
     - rpstblastn -version
     - makeblastdb -version
@@ -63,7 +65,7 @@ about:
   description: |
     LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ 2.17.0 local
     sequence search. It runs NCBI's command lines for blastn, blastp, blastx,
-    tblastn, tblastx and psiblast against FASTA subjects (-subject) or BLAST
+    tblastn, tblastx, psiblast and deltablast against FASTA subjects (-subject) or BLAST
     databases (-db), rpsblast and rpstblastn against profile databases (-db),
     and provides makeblastdb, blastdbcmd,
     dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,

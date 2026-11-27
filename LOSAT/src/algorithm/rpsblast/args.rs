@@ -252,7 +252,9 @@ impl RpsblastArgs {
                 x_drop_final_bits: self.xdrop_gap_final,
                 sum_stats: self.sum_stats == Some(true),
                 use_sw_tback: self.use_sw_tback,
+                domain_search: false,
             }),
+            delta: None,
         })
     }
 

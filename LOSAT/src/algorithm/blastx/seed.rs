@@ -737,7 +737,7 @@ impl Lookup {
     /// [`Lookup::x_new_as`] with another matrix than BLOSUM62 (items SC6 and SC6b of line NP) or the
     /// standard table of another word size than 3 (`-word_size` 2 and 4, item SC9): the compressed
     /// table of `-word_size` 5 to 7 with the matrix's scores (`x_bx_build_compressed_lookup_of`:
-    /// BLOSUM62's builders with the matrix's words, `Int4` hits, in `parts`), the
+    /// BLOSUM62's builders with the matrix's words, in `parts`), the
     /// standard one as BLOSUM62's
     /// (`build_ncbi_lookup_from_prepared_of`: the pool, `parts`, 16-bit hits from `narrow_cutoff`)
     /// with its scores and word length. Not inlined, so that BLOSUM62's builds keep their code.
@@ -750,9 +750,7 @@ impl Lookup {
         parts: usize,
         narrow_cutoff: Option<u64>,
     ) -> Result<BxLookup> {
-        use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-            x_bx_build_compressed_lookup_of, XCompressedLookup,
-        };
+        use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bx_build_compressed_lookup_of;
         let matrix = options.scoring;
         let query = batch.sequence_start[1..].to_vec();
         let word = usize::try_from(options.word_size)?;
@@ -768,12 +766,7 @@ impl Lookup {
                 parts,
             )
             .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
-            .map(|table| {
-                BxLookup::Wide(Lookup::Compressed(match table {
-                    XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
-                    XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
-                }))
-            })
+            .map(|table| BxLookup::Wide(Lookup::Compressed(table)))
             .map_err(|_| x_banks_filled(options.threshold, word));
         }
         ensure!(

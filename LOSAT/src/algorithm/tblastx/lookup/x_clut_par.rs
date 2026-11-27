@@ -241,22 +241,6 @@ const X_MAX_STRIPE_SHIFT: usize = 16;
 /// letter (10^6 cells) for word size 7's 10^7 + 1.
 const X_WAVE_CELLS: usize = 1 << 20;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
-// (`x_takes_overflow_cell`)
-/// The overflow cells that the appends to a cell take in the reference's table when the cell ends
-/// with `n` offsets: the appends that find the counts 0..n, of which the one that finds 5 and each
-/// that finds 3 more than a multiple of 4 past it take one (`x_takes_overflow_cell`): none for at
-/// most 5 offsets, else n / 4.
-#[inline(always)]
-fn x_overflow_cells_of(n: u32) -> usize {
-    const _: () = assert!(COMPRESSED_HITS_PER_BACKBONE_CELL == 4 && COMPRESSED_HITS_CELL_MASK == 3);
-    if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
-        n as usize / (COMPRESSED_HITS_CELL_MASK + 1)
-    } else {
-        0
-    }
-}
-
 // No NCBI counterpart: the overflow cells of the counts so far (`x_overflow_cells_of`), read where a
 // stripe's appends pass from one count range to the next (module header).
 /// The overflow cells that the appends counted in `counts` take.

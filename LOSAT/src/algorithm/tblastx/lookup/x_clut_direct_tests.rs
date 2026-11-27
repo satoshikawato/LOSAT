@@ -688,7 +688,8 @@ fn flat_refusal_is_the_references_at_small_capacities() {
                 capacity,
             )
             .expect("word size 5");
-            // The bucket fill (LOSAT_X_BPFFILL) builds the same table or declines.
+            // The bucket fill (LOSAT_X_BPFFILL) builds the same table, refuses the same table
+            // (a table of all the segments), or declines.
             match x_try_build_flat_by_buckets(
                 5, threshold, &query, &locations, &tables, capacity, 0,
             ) {
@@ -701,8 +702,10 @@ fn flat_refusal_is_the_references_at_small_capacities() {
                     });
                     x_assert_same_compressed_table(&flat, reference);
                 }
+                XBucketBuild::Built(Some(XFlatBuild::Refused(got)))
+                    if reference.as_ref().err() == Some(&got) => {}
                 XBucketBuild::Built(_) => {
-                    panic!("round {round}, capacity {capacity}: buckets refused")
+                    panic!("round {round}, capacity {capacity}: buckets refused otherwise")
                 }
             }
             // Chunks of one append (a test after each query offset with appends, as the
@@ -733,8 +736,9 @@ fn flat_refusal_is_the_references_at_small_capacities() {
 // The bucket fill (LOSAT_X_BPFFILL): on random queries (few letters and low thresholds, so that
 // cells overflow; letters outside the compressed alphabet), SEG-masked runs, NCBI's tables with
 // split batches, threshold 0, and capacities from 1 to NCBI's, it builds the count-and-fill
-// builder's table field by field and slot by slot, or declines where a table's appends pass the
-// capacity (never at NCBI's); a query of 2^22 letters or more does not fit its packed appends.
+// builder's table field by field and slot by slot, refuses the table it refuses (a table of all
+// the segments), or declines where the appends of another table pass `x_appends_fit` (never at
+// NCBI's capacity); a query of 2^22 letters or more does not fit its packed appends.
 #[test]
 fn x_bucket_fill_is_the_count_and_fill_build() {
     let mut rng = XorShift(0x5be0_cd19_137e_2179);
@@ -787,12 +791,18 @@ fn x_bucket_fill_is_the_count_and_fill_build() {
                     overflow_seen |= want.longest_chain > 5;
                     built += 1;
                 }
+                (
+                    XBucketBuild::Built(Some(XFlatBuild::Refused(got))),
+                    Some(XFlatBuild::Refused(want)),
+                ) if got == want => {}
                 (XBucketBuild::Built(_), _) => {
                     panic!("round {round}, capacity {capacity}: another outcome")
                 }
             }
         }
     }
+    // (Refusals here only where a table holds all the segments, if any: see
+    // `the_bucket_fills_refuse_at_a_tables_own_cells`.)
     assert!(built > 0 && declined > 0 && overflow_seen);
     // Offsets up to 2^22 - 1 (bit 31 of the packed append set): a query of 2^22 - 1 letters
     // with one segment at its end; a query of 2^22 letters is declined, and so is word size 6
@@ -827,6 +837,148 @@ fn x_bucket_fill_is_the_count_and_fill_build() {
     let got =
         x_try_build_flat_by_buckets(6, 1100, &query[..1000], &[(0, 999)], &[0..1], capacity, 0);
     assert!(matches!(got, XBucketBuild::Declined), "word size 6");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768 (module header,
+// "The bucket fill")
+// Line RG item X-bxmem: one table of all the segments (a BLASTX or TBLASTN batch's), at capacities
+// around its own cells, which lie between a quarter of its appends (`x_appends_fit`) and its
+// appends (past which the bucket fills declined before): both bucket fills (`i32`, the record
+// fill; `u16`, BLASTX's chunks) and the count-and-fill builder build the reference's table slot for
+// slot, or refuse the table as the reference does. A table of more than `x_appends_fill` appends
+// is refused (capacity 0). A table of 16 million appends takes the `i32` fill's return of the
+// record it has read (`x_return_read_record`) and is the count-and-fill builder's table.
+#[test]
+fn the_bucket_fills_refuse_at_a_tables_own_cells() {
+    let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+    let (mut refused_seen, mut built_seen, mut stopped_seen) = (0usize, 0usize, false);
+    for (length, threshold, letters, masked) in [
+        (400usize, 1100, &LETTERS[..], 0usize),
+        (900, 1600, &FEW_LETTERS[..], 2),
+        (250, 1100, &FEW_LETTERS[..], 0),
+        (1_200, 1100, &LETTERS[..], 3),
+    ] {
+        let (query, locations, _) = queries(&mut rng, &[length], letters, masked);
+        let tables = [0..locations.len()];
+        let unlimited = try_build_compressed_lookup_with_capacity(
+            Blosum62Compressed,
+            5,
+            threshold,
+            &query,
+            &locations,
+            &tables,
+            usize::MAX,
+        )
+        .expect("word size 5")
+        .expect("no limit");
+        let need = unlimited.overflow_cells.len();
+        let appends: usize = unlimited
+            .backbone
+            .iter()
+            .map(|cell| cell.num_used as usize)
+            .sum();
+        assert!(
+            need > 1 && appends / 4 >= need,
+            "{length} letters: {need} cells, {appends} appends"
+        );
+        for capacity in [0, need - 1, need, need + 1, appends - 1] {
+            let what = format!(
+                "{length} letters, capacity {capacity} (own cells {need}, {appends} appends)"
+            );
+            let reference = try_build_compressed_lookup_with_capacity(
+                Blosum62Compressed,
+                5,
+                threshold,
+                &query,
+                &locations,
+                &tables,
+                capacity,
+            )
+            .expect("word size 5");
+            assert_eq!(reference.is_err(), need > capacity, "{what}");
+            let counted = x_try_build_flat_with_capacity(
+                5,
+                threshold,
+                &query,
+                &locations,
+                &tables,
+                capacity,
+                X_COUNT_CHUNK,
+                0,
+            );
+            let record =
+                x_try_build_flat_by_buckets(5, threshold, &query, &locations, &tables, capacity, 0);
+            let chunks =
+                x_bx_buckets_on::<5>(threshold, &query, &locations, &tables, capacity, false, 1);
+            match (&reference, counted, record, chunks) {
+                (
+                    Err(want),
+                    Some(XFlatBuild::Refused(a)),
+                    XBucketBuild::Built(Some(XFlatBuild::Refused(b))),
+                    XBucketBuild::Built(Some(XFlatBuild::Refused(c))),
+                ) if *want == a && a == b && b == c => {
+                    refused_seen += 1;
+                    stopped_seen |= appends > x_appends_fill(capacity, unlimited.backbone.len());
+                }
+                (
+                    Ok(want),
+                    Some(XFlatBuild::Table(a)),
+                    XBucketBuild::Built(Some(XFlatBuild::Table(b))),
+                    XBucketBuild::Built(Some(XFlatBuild::Table(c))),
+                ) => {
+                    x_assert_same_compressed_table(&a, want);
+                    x_assert_same_flat_tables(&b, &a);
+                    assert_eq!(c.starts, a.starts, "{what}: u16 starts");
+                    assert!(
+                        c.hits
+                            .iter()
+                            .map(|&q| q.offset())
+                            .eq(a.hits.iter().map(|&q| q.offset())),
+                        "{what}: u16 hits"
+                    );
+                    assert_eq!(c.pv, a.pv, "{what}: u16 pv");
+                    assert_eq!(c.longest_chain, a.longest_chain, "{what}");
+                    built_seen += 1;
+                }
+                _ => panic!("{what}: the builders' outcomes differ"),
+            }
+        }
+    }
+    assert!(
+        refused_seen > 0 && built_seen > 0 && stopped_seen,
+        "{refused_seen} {built_seen}"
+    );
+    // The record's return: more appends than the record keeps (the mapped arena and the largest
+    // bucket) and `X_RECORD_RETURN` more.
+    let (query, locations, _) = queries(&mut rng, &[4_000], &LETTERS, 0);
+    let tables = [0..locations.len()];
+    let want = flat_table(x_try_build_flat_with_capacity(
+        5,
+        1100,
+        &query,
+        &locations,
+        &tables,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+        X_COUNT_CHUNK,
+        0,
+    ));
+    let hits = *want.starts.last().expect("the number of hits") as usize;
+    assert!(
+        hits > x_mapped_record_entries() + X_RECORD_RETURN + hits / 64,
+        "{hits} appends"
+    );
+    let XBucketBuild::Built(Some(XFlatBuild::Table(got))) = x_try_build_flat_by_buckets(
+        5,
+        1100,
+        &query,
+        &locations,
+        &tables,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+        0,
+    ) else {
+        panic!("the record fill builds this table");
+    };
+    x_assert_same_flat_tables(&got, &want);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:340-404
@@ -1184,8 +1336,8 @@ fn blastx_tables_take_u16_offsets_up_to_their_letters() {
 // table, slot for slot, on a pool of 4 threads: BLOSUM62's (`u16`) and BLOSUM45's (`i32`, which
 // is also the record fill's, `x_buckets_of`), on segments in one table and in two with a gap,
 // low-complexity ones whose cells pass 32 offsets (the scan order), runs cut inside segments,
-// more parts than offsets, and an empty query; a table past the overflow capacity is declined in
-// parts as at one part. The runs (`x_offset_parts`) hold every offset once, in order.
+// more parts than offsets, and an empty query; NCBI's tables are refused or declined in parts as
+// at one part (line RG item X-bxmem). The runs (`x_offset_parts`) hold every offset once, in order.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1206,7 +1358,7 @@ fn blastx_bucket_fill_in_parts_is_the_one_part_fill() {
         .build()
         .expect("test pool");
     let mut rng = XorShift(0x2545_F491_4F6C_DD1D);
-    let mut longest = 0;
+    let (mut longest, mut stopped) = (0, false);
     for (round, (length, segments, tables, repeat)) in [
         (
             4_400,
@@ -1303,23 +1455,56 @@ fn blastx_bucket_fill_in_parts_is_the_one_part_fill() {
             assert_eq!(got.pv, want_wide.pv, "{what}: B45 pv");
             assert_eq!(got.longest_chain, want_wide.longest_chain, "{what}");
         }
-        // Past the overflow capacity: declined in parts as at one part.
-        let total: u32 = *want.starts.last().expect("the number of hits");
-        if total > 1 {
-            let capacity = total as usize / 4;
-            assert!(matches!(narrow(1, capacity), XBucketBuild::Declined));
+        // NCBI's tables, in parts as at one part: a table of all the segments is refused exactly
+        // where its own cells pass the capacity (counted after the appends, or at capacity 0
+        // past `x_appends_fill` when the round has that many appends), another table is declined
+        // past `x_appends_fit`.
+        let total = *want.starts.last().expect("the number of hits") as usize;
+        let need: usize = want
+            .starts
+            .windows(2)
+            .map(|bounds| x_overflow_cells_of(bounds[1] - bounds[0]))
+            .sum();
+        let whole = tables.len() == 1 && tables[0] == (0..segments.len());
+        let outcome = |built: XBucketBuild<u16>| match built {
+            XBucketBuild::Declined => "declined".to_string(),
+            XBucketBuild::Built(Some(XFlatBuild::Refused(filled))) => {
+                format!("refused {}", filled.0)
+            }
+            XBucketBuild::Built(Some(XFlatBuild::Table(table))) => {
+                format!("table {:?}", table.starts.last())
+            }
+            XBucketBuild::Built(_) => "another outcome".to_string(),
+        };
+        for capacity in [0, need.saturating_sub(1), need] {
+            let expected = if !whole {
+                if capacity > 0 {
+                    continue;
+                }
+                "declined".to_string()
+            } else if need > capacity {
+                "refused 0".to_string()
+            } else {
+                format!("table {:?}", Some(total as u32))
+            };
+            let what =
+                format!("round {round}, capacity {capacity} (own cells {need}, {total} hits)");
+            assert_eq!(outcome(narrow(1, capacity)), expected, "{what}");
             for parts in [2, 3] {
-                assert!(
-                    matches!(
-                        pool.install(|| narrow(parts, capacity)),
-                        XBucketBuild::Declined
-                    ),
-                    "round {round}: declined in {parts} parts"
+                assert_eq!(
+                    outcome(pool.install(|| narrow(parts, capacity))),
+                    expected,
+                    "{what} in {parts} parts"
                 );
             }
         }
+        stopped |= whole && total > x_appends_fill(0, want.starts.len() - 1);
     }
     assert!(longest > 32, "a cell passes 32 offsets ({longest})");
+    assert!(
+        stopped,
+        "a round refused at capacity 0 past `x_appends_fill`"
+    );
 }
 
 // Item SC9b (2) of line NP: BLASTX's table of a unit built in parts on a pool (`x_flat_in_parts`,
@@ -1391,13 +1576,7 @@ fn blastx_tables_built_in_parts_are_the_one_part_tables() {
             }
             _ => x_bx_build_compressed_lookup_of(
                 matrix, word, scaled, query, &segments, &tables, parts,
-            )
-            .map(|built| {
-                built.map(|table| match table {
-                    XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
-                    XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
-                })
-            }),
+            ),
         }
     };
     let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
@@ -1409,7 +1588,8 @@ fn blastx_tables_built_in_parts_are_the_one_part_tables() {
     for matrix in [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45] {
         for word in 5..=7 {
             let want = fields(build(matrix, word, &query, 1));
-            assert_eq!(want.1, matrix == ScoringMatrix::Blosum62);
+            // `u16` offsets but for another matrix's count-and-fill builder (word sizes 6, 7).
+            assert_eq!(want.1, matrix == ScoringMatrix::Blosum62 || word == 5);
             for parts in [2, 3, 5, 2] {
                 let got = pool.install(|| fields(build(matrix, word, &query, parts)));
                 assert!(

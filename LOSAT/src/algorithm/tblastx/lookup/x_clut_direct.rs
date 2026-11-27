@@ -89,17 +89,28 @@
 //! unless `=0`) makes the same table with the count pass's random updates of the counts and the fill
 //! pass's random writes replaced by passes within buckets of 2^10 cells:
 //! - appends: the count pass's appends, in its order, recorded as it records them (the cell of each
-//!   append and the appends of each query offset), not counted. An append takes at most one overflow
-//!   cell (one call of `compressed_list_get_new_cell` at most), so a table whose appends do not pass
-//!   the capacity takes no more cells than the capacity, and the count pass's test of it passes; the
-//!   bucket fill declines a table whose appends pass it (the count-and-fill builder then runs, and
-//!   refuses or builds as above). The bound `x_max_appends` is tested after each query offset, as
-//!   the count pass tests it, so `TooLarge` comes at the same offset; no refusal can come before it
-//!   (every table so far stayed within the capacity).
+//!   append and the appends of each query offset), not counted. The reference refuses a table only
+//!   when the table's own cells (`x_overflow_cells_of` of the counts of its own appends, summed)
+//!   pass the capacity ("The refusal": with no words before the table, its cells of the table of all
+//!   batches are its own; with words before it, `x_table_fills_banks` tests its own). A cell of n
+//!   offsets takes at most n / 4 overflow cells and holds at most 4 x (n / 4) + 3 offsets (n >= 6)
+//!   or 5, so a table of at most 4 x the capacity + 3 appends (`x_appends_fit`) is not refused, and
+//!   one of more than that + 5 x `backbone_size` (`x_appends_fill`) is. A table past
+//!   `x_appends_fit` whose segments are all the build's (the build's counts are then its own:
+//!   BLASTX's and TBLASTN's one table per query batch, a BLASTP call of one table) goes on: the fill
+//!   stops and refuses it past `x_appends_fill`, and otherwise, after the appends, counts its own
+//!   cells bucket by bucket (`x_buckets_need`) and refuses it where they pass the capacity. Past
+//!   `x_appends_fit` the bucket fill declines another table (the count-and-fill builder then runs, and
+//!   refuses or builds as above). So the fill refuses exactly the table that the reference refuses
+//!   (no table before it passed `x_appends_fit`). The bound `x_max_appends` is tested after each
+//!   query offset, as the count pass tests it, so `TooLarge` comes at the same offset; the reference
+//!   builder then decides.
 //! - partition: the appends sorted by bucket (the cell's index over 2^10), stably (a counting sort),
 //!   each packed as `query_offset << 10 | index & (2^10 - 1)` (the bucket fill declines a query of
 //!   2^22 letters or more, whose offsets would not fit). A bucket's cells are consecutive, so its
-//!   appends take the slots of `hits` that its cells' slices will take, and they are written there.
+//!   appends take the slots of `hits` that its cells' slices will take, and they are written there:
+//!   from the last append to the first, each bucket's from its last slot back, which is the same
+//!   order, so that the record read is returned as the partition goes (`x_return_read_record`).
 //! - per bucket, in order: each cell's count n (the number of its appends), the starts as the counts'
 //!   prefix sums from the bucket's first slot (the count-and-fill builder's starts, which are the
 //!   prefix sums in index order), the PV bits (shift `PV_ARRAY_BTS` whatever the counts for word
@@ -118,7 +129,8 @@
 //! a slot of `hits`. Its bucket fill (`x_bx_buckets_on`) keeps no record and no partition: each
 //! append goes, as the count pass makes it, to the chunks of its bucket (`XBucketChunks`) as
 //! `query_offset << 16 | index & (2^10 - 1)`, and each bucket is filled from its chunks in the same
-//! order and by the same statements.
+//! order and by the same statements. It tests NCBI's tables as above, a table's own cells counted
+//! from the chunks before the fill.
 //!
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
 //! argument in its header); at one thread (and in builds without threads) the serial builder runs:
@@ -605,6 +617,82 @@ fn x_takes_overflow_cell(c: u32) -> bool {
     c == COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1
         || (c > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1
             && (c - 3) & COMPRESSED_HITS_CELL_MASK as u32 == 0)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
+// (`x_takes_overflow_cell`)
+/// The overflow cells that the appends to a cell take in the reference's table when the cell ends
+/// with `n` offsets: the appends that find the counts 0..n, of which the one that finds 5 and each
+/// that finds 3 more than a multiple of 4 past it take one (`x_takes_overflow_cell`): none for at
+/// most 5 offsets, else n / 4.
+#[inline(always)]
+fn x_overflow_cells_of(n: u32) -> usize {
+    const _: () = assert!(COMPRESSED_HITS_PER_BACKBONE_CELL == 4 && COMPRESSED_HITS_CELL_MASK == 3);
+    if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+        n as usize / (COMPRESSED_HITS_CELL_MASK + 1)
+    } else {
+        0
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768,800-806,825-836
+// (module header, "The refusal" and "The bucket fill")
+/// The most appends of a table that the reference never refuses at `overflow_cell_capacity`: the
+/// reference refuses a table only when its own cells (`x_overflow_cells_of` of its own counts,
+/// summed) pass the capacity, and a cell of n offsets takes at most n / 4 cells, so a table's own
+/// cells are at most a quarter of its appends.
+fn x_appends_fit(overflow_cell_capacity: usize) -> usize {
+    overflow_cell_capacity.saturating_mul(4).saturating_add(3)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768,800-806,825-836
+/// The most appends of a table that the reference may build at `overflow_cell_capacity`: a cell of
+/// n offsets holds at most 4 x (n / 4) + 3 of them when n >= 6, and 5 otherwise, so a table's
+/// appends are at most 4 x its own cells + 5 x `backbone_size`, and a table of more appends than
+/// this has more own cells than the capacity: the reference refuses it.
+fn x_appends_fill(overflow_cell_capacity: usize, backbone_size: usize) -> usize {
+    x_appends_fit(overflow_cell_capacity).saturating_add(backbone_size.saturating_mul(5))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768 (module header,
+// "The bucket fill")
+/// A bucket fill's step where the appends of one of NCBI's tables, `appends`, pass
+/// `x_appends_fit`: a table of all the build's segments (`whole`), whose counts are its own, goes
+/// on to `x_appends_fill` (the new bound returned), past which it is refused (`refused`); another
+/// table's own counts are not the build's, so the fill declines (the count-and-fill builder tests
+/// it). Out of line: it runs at most twice per table.
+#[cold]
+#[inline(never)]
+fn x_past_appends_fit(
+    whole: bool,
+    appends: usize,
+    fill: usize,
+    refused: BanksFilled,
+) -> Result<usize, XBucketStop> {
+    if !whole {
+        Err(XBucketStop::Declined)
+    } else if appends > fill {
+        Err(XBucketStop::Refused(refused))
+    } else {
+        Ok(fill)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768 (module header,
+// "The bucket fill")
+/// The own cells of a table of all the build's segments whose appends lie in `buckets` buckets of
+/// 2^`X_BUCKET_SHIFT` cells: `count(b, slots)` adds one to `slots[c]` per append to cell c of
+/// bucket b (`slots` zeroed, one entry per cell of a bucket); each cell's count n takes
+/// `x_overflow_cells_of(n)` cells.
+fn x_buckets_need(buckets: usize, mut count: impl FnMut(usize, &mut [u32])) -> usize {
+    let mut slots = vec![0u32; 1 << X_BUCKET_SHIFT];
+    let mut need = 0usize;
+    for b in 0..buckets {
+        slots.fill(0);
+        count(b, &mut slots);
+        need += slots.iter().map(|&n| x_overflow_cells_of(n)).sum::<usize>();
+    }
+    need
 }
 
 /// Where `XWords` puts the cells of the appends, in order.
@@ -1986,6 +2074,20 @@ fn x_bpffill_on() -> bool {
 // size 5 (2^8 to 2^14 timed the same or slower, v4-BPF K2-2). Scheduling only.
 const X_BUCKET_SHIFT: u32 = 10;
 
+// No NCBI counterpart: memory only (the pages of the record of the appends returned as the
+// partition reads it, `x_buckets_with`); it changes no value NCBI computes.
+/// How many appends of the record the partition reads between two returns of its pages (16 MiB).
+const X_RECORD_RETURN: usize = 1 << 22;
+
+// No NCBI counterpart: memory only (above).
+/// `record` cut to its first `len` entries, and its capacity past them returned
+/// (`Vec::shrink_to`): glibc moves the end of a mapped block back (`mremap`), which returns the
+/// pages past it and copies nothing.
+fn x_return_read_record(record: &mut Vec<u32>, len: usize) {
+    record.truncate(len);
+    record.shrink_to(len);
+}
+
 // No NCBI counterpart: whether a query of `letters` letters fits the bucket fill's packed append,
 // the query offset above the cell's index in its bucket (offsets below 2^(32 - X_BUCKET_SHIFT)).
 fn x_bucket_packs(letters: usize) -> bool {
@@ -2009,10 +2111,10 @@ enum XBucketBuild<H: XQueryOffset = i32> {
 // `x_for_each_offset`), :787-849 (the appends, module header), :1182-1242 (`finalize`, below)
 /// EXPERIMENT (LOSAT_X_BPFFILL): `x_try_build_flat_with_capacity`'s outcome with the appends sorted
 /// by buckets of 2^`X_BUCKET_SHIFT` cells before they are counted and placed (module header).
-/// Declined where a table's appends pass `overflow_cell_capacity`, where the query has 2^22 letters
-/// or more (the packed append) and where the PV shift depends on the counts (word sizes other than
-/// 5, which `-task blastp-fast` does not take). Out of line, so that the count-and-fill builder
-/// keeps its code.
+/// Declined where the appends of a table that is not all the segments pass `x_appends_fit`, where
+/// the query has 2^22 letters or more (the packed append) and where the PV shift depends on the
+/// counts (word sizes other than 5, which `-task blastp-fast` does not take). Out of line, so that
+/// the count-and-fill builder keeps its code.
 #[inline(never)]
 fn x_try_build_flat_by_buckets(
     word_size: usize,
@@ -2334,10 +2436,16 @@ fn x_buckets_with<S: CompressedScores>(
             drop(refused);
         }
     };
-    for (range, is_table) in ranges {
+    // NCBI's tables: a table's own cells decide its refusal (module header, "The bucket fill").
+    let fit = x_appends_fit(overflow_cell_capacity);
+    let fill = x_appends_fill(overflow_cell_capacity, backbone_size);
+    // The table, if any, past `fit`: its own cells are counted from the buckets below.
+    let mut counted = None;
+    for (range_index, (range, is_table)) in ranges.into_iter().enumerate() {
         let range_start = targets.len();
-        let mut too_large = false;
-        let mut declined = false;
+        let whole = range.start == 0 && range.end == locations.len();
+        let mut limit = if is_table { fit } else { usize::MAX };
+        let mut stop = None;
         x_for_each_offset(word_size, query, &locations[range], |offset, word| {
             let before = targets.len();
             words.for_each_word(word, &mut targets);
@@ -2346,24 +2454,24 @@ fn x_buckets_with<S: CompressedScores>(
                 per_offset.push((offset, appends as u32));
             }
             if targets.len() > max_appends {
-                too_large = true;
+                stop = Some(XBucketStop::TooLarge);
                 return false;
             }
-            // An append takes at most one overflow cell: within the capacity the table's test
-            // passes.
-            if is_table && targets.len() - range_start > overflow_cell_capacity {
-                declined = true;
-                return false;
+            if targets.len() - range_start > limit {
+                let table = x_table_of_range(range_index);
+                match x_past_appends_fit(whole, targets.len() - range_start, fill, table) {
+                    Ok(bound) => (limit, counted) = (bound, Some(table)),
+                    Err(why) => {
+                        stop = Some(why);
+                        return false;
+                    }
+                }
             }
             true
         });
-        if too_large || declined {
+        if let Some(stop) = stop {
             give_back(starts, kept.hits, kept.pv);
-            return if too_large {
-                XBucketBuild::Built(Some(XFlatBuild::TooLarge))
-            } else {
-                XBucketBuild::Declined
-            };
+            return x_bucket_stop(stop);
         }
     }
     let total = targets.len();
@@ -2376,34 +2484,60 @@ fn x_buckets_with<S: CompressedScores>(
     for &index in &targets {
         bucket_starts[(index >> X_BUCKET_SHIFT) as usize + 1] += 1;
     }
+    let mut largest = 0usize;
     for b in 0..buckets {
+        largest = largest.max(bucket_starts[b + 1] as usize);
         bucket_starts[b + 1] += bucket_starts[b];
     }
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
     {
-        let mut cursors = bucket_starts[..buckets].to_vec();
+        // From the last append to the first, each bucket's from its end (the same stable order),
+        // so that the record read is returned as the partition goes (`x_return_read_record`):
+        // the record left and the hits written hold one append each, 4 bytes.
+        let mut cursors = bucket_starts[1..].to_vec();
         let out = hits.as_mut_ptr();
-        let mut at = 0usize;
-        for &(query_offset, appends) in &per_offset {
+        let mut end = total;
+        let mut returned_at = total;
+        // The record keeps the room of the largest bucket's appends, which the fill below copies
+        // into it, and of the arena that glibc always maps (`x_mapped_record_entries`).
+        let keep = largest.max(x_mapped_record_entries());
+        for &(query_offset, appends) in per_offset.iter().rev() {
             debug_assert!((query_offset as u32) < 1 << (u32::BITS - X_BUCKET_SHIFT));
             let high = (query_offset as u32) << X_BUCKET_SHIFT;
-            let end = at + appends as usize;
-            for &index in &targets[at..end] {
+            let start = end - appends as usize;
+            for &index in targets[start..end].iter().rev() {
                 let cursor = &mut cursors[(index >> X_BUCKET_SHIFT) as usize];
+                *cursor -= 1;
                 // SAFETY: the offsets' appends are `targets` in order, and bucket b's cursor starts
-                // at `bucket_starts[b]` and moves on once per append to the bucket, which the
-                // histogram counted, so it stays below `bucket_starts[b + 1] <= total = hits.len()`.
+                // at `bucket_starts[b + 1]` and moves back once per append to the bucket, which
+                // the histogram counted, so it stays at or above `bucket_starts[b]` and below
+                // `bucket_starts[b + 1] <= total = hits.len()`.
                 unsafe {
                     out.add(*cursor as usize)
                         .write((high | (index & mask)) as i32)
                 };
-                *cursor += 1;
             }
-            at = end;
+            end = start;
+            if returned_at - end >= X_RECORD_RETURN && end >= keep {
+                x_return_read_record(&mut targets, end);
+                returned_at = end;
+            }
         }
     }
     drop(per_offset);
+    if let Some(table) = counted {
+        let need = x_buckets_need(buckets, |b, slots| {
+            let (lo, hi) = (bucket_starts[b] as usize, bucket_starts[b + 1] as usize);
+            for &packed in &hits[lo..hi] {
+                slots[(packed as u32 & mask) as usize] += 1;
+            }
+        });
+        if need > overflow_cell_capacity {
+            give_back(starts, hits, pv);
+            return XBucketBuild::Built(Some(XFlatBuild::Refused(table)));
+        }
+    }
 
     // Per bucket: its appends copied into `targets` (read no more), the counts of its cells, their
     // starts, the PV bits and `finalize`'s statistics, the fill, then the scan order of the cells
@@ -2677,13 +2811,18 @@ fn x_offset_parts(
     runs
 }
 
-// No NCBI counterpart: why a run of the bucket fill stopped (`x_bx_buckets_with`).
+// No NCBI counterpart: why a bucket fill (or a run of one, `x_bx_buckets_with`) stopped.
 #[derive(Clone, Copy)]
 enum XBucketStop {
     /// The appends passed the table's most (`x_max_appends`): the serial builders' `TooLarge`.
     TooLarge,
-    /// A table's appends passed the overflow capacity: the bucket fill declines.
+    /// The appends of a table that is not all the segments passed `x_appends_fit`: the bucket
+    /// fill declines.
     Declined,
+    /// A table of all the segments passed `x_appends_fill`: the reference refuses it.
+    Refused(BanksFilled),
+    /// Another run stopped (`x_bx_buckets_with` in parts).
+    Interrupted,
 }
 
 // No NCBI counterpart: one run's appends (`x_bx_buckets_with`).
@@ -2730,7 +2869,9 @@ const X_BUCKET_RANGES_PER_PART: usize = 4;
 /// index in its bucket no longer fits 32 bits of a `u16` table's hits, so there is no packed copy of
 /// the appends in `hits`: each append goes as it is made to its bucket's chunks (`XBucketChunks`),
 /// in place of the record of the appends and its partition, and each bucket's cells are filled from
-/// them. Declined as `x_buckets_on`, and where the query has more than `X_U16_LETTERS` letters.
+/// them. NCBI's tables are tested and declined as by `x_buckets_on` (a table's own cells counted from
+/// the chunks, before `hits` is made), and the fill declines a query of more than `X_U16_LETTERS`
+/// letters.
 ///
 /// In `parts` (line NP, SC9e: a BLASTX unit under the cap, `LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`;
 /// 1: on this thread), the same table slot for slot: the query offsets in order cut into runs
@@ -2739,9 +2880,11 @@ const X_BUCKET_RANGES_PER_PART: usize = 4;
 /// its slots follow those of the buckets before. The buckets, in ranges of whole buckets (whole PV
 /// words: 2^`X_BUCKET_SHIFT` cells), are counted, laid out and filled as on one thread, each range
 /// into its own slices of `starts`, `hits` and `pv`. The work is the serial fill's but for a pass
-/// over each bucket's runs. Where the runs stop (too many appends, or a table's past the overflow
-/// capacity), the serial fill decides at one part (it stops at the first; the runs only show that
-/// it stops). `word_of` gives `scores`' query word type of a word of the word length.
+/// over each bucket's runs. A run whose appends of a table of all the segments pass `x_appends_fill`
+/// refuses it (the table's appends pass that bound too); where the runs stop otherwise (too many
+/// appends, or another table's past `x_appends_fit`), the serial fill decides at one part (it stops
+/// at the first; the runs only show that it stops). `word_of` gives `scores`' query word type of a
+/// word of the word length.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn x_bx_buckets_with<S, H, Q>(
@@ -2782,11 +2925,18 @@ where
     let mask = (1u32 << X_BUCKET_SHIFT) - 1;
     let ranges = x_count_ranges(tables, locations.len());
 
+    // NCBI's tables: a table's own cells decide its refusal (module header, "The bucket fill").
+    let fit = x_appends_fit(overflow_cell_capacity);
+    let fill = x_appends_fill(overflow_cell_capacity, backbone_size);
+    let whole = |range: &std::ops::Range<usize>| range.start == 0 && range.end == locations.len();
+
     // Appends, over the segments before, inside and between NCBI's tables, in the count-and-fill
     // builder's order, into their buckets' chunks; not counted. A run stops where the serial fill
     // would: its appends past `max_appends` (the runs' together, `appended`, at more than one), or
-    // a table's past the overflow capacity.
-    let runs = |parts: usize| -> Result<Vec<XBucketRun>, XBucketStop> {
+    // a table's past `x_appends_fit` (`x_past_appends_fit`). Its outcome: the runs and the table
+    // whose own cells are counted (past `x_appends_fit`), if any.
+    type XRuns = (Vec<XBucketRun>, Option<BanksFilled>);
+    let runs = |parts: usize| -> Result<XRuns, XBucketStop> {
         let cuts = x_offset_parts(word_size, &ranges, locations, parts);
         let parts = cuts.len();
         let appended = std::sync::atomic::AtomicUsize::new(0);
@@ -2801,46 +2951,57 @@ where
                     XBucketChunks::new(buckets, Vec::with_capacity(x_mapped_record_entries()));
                 let mut range_appends = Vec::new();
                 let mut stop = None;
-                // The open count range, the appends at its start, and those not yet added to
-                // `appended`.
-                let (mut open, mut range_start, mut reported) = (usize::MAX, 0usize, 0usize);
+                // The open count range, the appends at its start, the bound of its appends, and
+                // the appends not yet added to `appended`.
+                let (mut open, mut range_start, mut limit, mut reported) =
+                    (usize::MAX, 0usize, usize::MAX, 0usize);
                 for &(index, segment) in &cuts[part] {
                     if index != open {
                         if open != usize::MAX {
                             range_appends.push((open, appends.total - range_start));
                         }
                         (open, range_start) = (index, appends.total);
+                        limit = if ranges[index].1 { fit } else { usize::MAX };
                     }
-                    let is_table = ranges[index].1;
-                    let whole = x_for_each_offset(word_size, query, &[segment], |offset, word| {
-                        appends.high = (offset as u32) << 16;
-                        words.for_each_word(word_of(word), &mut appends);
-                        if appends.total > max_appends {
-                            stop = Some(XBucketStop::TooLarge);
-                            return false;
-                        }
-                        // An append takes at most one overflow cell: within the capacity the
-                        // table's test passes.
-                        if is_table && appends.total - range_start > overflow_cell_capacity {
-                            stop = Some(XBucketStop::Declined);
-                            return false;
-                        }
-                        if parts > 1 && appends.total - reported >= X_COUNT_CHUNK {
-                            let more =
-                                appends.total - std::mem::replace(&mut reported, appends.total);
-                            if appended.fetch_add(more, Ordering::Relaxed) + more > max_appends {
+                    let complete =
+                        x_for_each_offset(word_size, query, &[segment], |offset, word| {
+                            appends.high = (offset as u32) << 16;
+                            words.for_each_word(word_of(word), &mut appends);
+                            if appends.total > max_appends {
                                 stop = Some(XBucketStop::TooLarge);
-                            }
-                            if stop.is_some() || stopped.load(Ordering::Relaxed) {
                                 return false;
                             }
-                        }
-                        true
-                    });
-                    if !whole {
+                            if appends.total - range_start > limit {
+                                match x_past_appends_fit(
+                                    whole(&ranges[index].0),
+                                    appends.total - range_start,
+                                    fill,
+                                    x_table_of_range(index),
+                                ) {
+                                    Ok(bound) => limit = bound,
+                                    Err(why) => {
+                                        stop = Some(why);
+                                        return false;
+                                    }
+                                }
+                            }
+                            if parts > 1 && appends.total - reported >= X_COUNT_CHUNK {
+                                let more =
+                                    appends.total - std::mem::replace(&mut reported, appends.total);
+                                if appended.fetch_add(more, Ordering::Relaxed) + more > max_appends
+                                {
+                                    stop = Some(XBucketStop::TooLarge);
+                                }
+                                if stop.is_some() || stopped.load(Ordering::Relaxed) {
+                                    return false;
+                                }
+                            }
+                            true
+                        });
+                    if !complete {
                         stopped.store(true, Ordering::Relaxed);
                         // Another run's stop: the serial fill decides (below).
-                        stop.get_or_insert(XBucketStop::TooLarge);
+                        stop.get_or_insert(XBucketStop::Interrupted);
                         break;
                     }
                 }
@@ -2854,31 +3015,41 @@ where
                 }
             },
         );
-        if let Some(stop) = runs.iter().find_map(|run| run.stop) {
+        // A refusal is the table's (its appends past `x_appends_fill` in one run); another stop
+        // in parts only shows that the serial fill stops.
+        let stops = runs.iter().filter_map(|run| run.stop);
+        if let Some(stop) = stops
+            .clone()
+            .find(|stop| matches!(stop, XBucketStop::Refused(_)))
+            .or_else(|| stops.clone().next())
+        {
             return Err(stop);
         }
-        if parts > 1 {
-            // The runs' appends together: the serial fill's at its end.
-            let total: usize = runs.iter().map(|run| run.appends.total).sum();
-            let mut table_appends = vec![0usize; ranges.len()];
-            for run in &runs {
-                for &(index, appends) in &run.range_appends {
-                    table_appends[index] += appends;
-                }
-            }
-            let past_capacity = table_appends
-                .iter()
-                .zip(&ranges)
-                .any(|(&appends, (_, is_table))| *is_table && appends > overflow_cell_capacity);
-            if total > max_appends || past_capacity {
-                return Err(XBucketStop::TooLarge);
+        // The runs' appends together: the serial fill's at its end.
+        let total: usize = runs.iter().map(|run| run.appends.total).sum();
+        if total > max_appends {
+            return Err(XBucketStop::TooLarge);
+        }
+        let mut table_appends = vec![0usize; ranges.len()];
+        for run in &runs {
+            for &(index, appends) in &run.range_appends {
+                table_appends[index] += appends;
             }
         }
-        Ok(runs)
+        let mut counted = None;
+        for (index, ((range, is_table), &appends)) in ranges.iter().zip(&table_appends).enumerate()
+        {
+            if *is_table && appends > fit {
+                x_past_appends_fit(whole(range), appends, fill, x_table_of_range(index))?;
+                counted = Some(x_table_of_range(index));
+            }
+        }
+        Ok((runs, counted))
     };
-    let runs = match runs(parts) {
+    let (runs, counted) = match runs(parts) {
         Ok(runs) => runs,
-        // The serial fill stops at the first of the two (more than one part: the runs only show
+        Err(stop @ XBucketStop::Refused(_)) => return x_bucket_stop(stop),
+        // The serial fill stops at the first of the stops (more than one part: the runs only show
         // that it stops).
         Err(_) if parts > 1 => match runs(1) {
             Ok(runs) => runs,
@@ -2886,6 +3057,17 @@ where
         },
         Err(stop) => return x_bucket_stop(stop),
     };
+    if let Some(table) = counted {
+        let need = x_buckets_need(buckets, |b, slots| {
+            for run in &runs {
+                run.appends
+                    .for_each(b, |entry| slots[(entry & mask) as usize] += 1);
+            }
+        });
+        if need > overflow_cell_capacity {
+            return XBucketBuild::Built(Some(XFlatBuild::Refused(table)));
+        }
+    }
 
     // Per bucket: its first slot of `hits`, after those of the buckets before.
     let mut bucket_starts = vec![0u32; buckets + 1];
@@ -3040,8 +3222,11 @@ where
 // No NCBI counterpart: the outcome of a bucket fill that stopped (`XBucketStop`).
 fn x_bucket_stop<H: XQueryOffset>(stop: XBucketStop) -> XBucketBuild<H> {
     match stop {
-        XBucketStop::TooLarge => XBucketBuild::Built(Some(XFlatBuild::TooLarge)),
+        XBucketStop::TooLarge | XBucketStop::Interrupted => {
+            XBucketBuild::Built(Some(XFlatBuild::TooLarge))
+        }
         XBucketStop::Declined => XBucketBuild::Declined,
+        XBucketStop::Refused(filled) => XBucketBuild::Built(Some(XFlatBuild::Refused(filled))),
     }
 }
 
@@ -3859,12 +4044,14 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
 // `x_tbn_build_compressed_lookup_of`)
 /// BLASTX's compressed table of a query batch with the words of the search matrix `matrix`, any but
 /// BLOSUM62 (items SC2b, SC9 of line NP): as `x_bx_build_compressed_lookup`, its bucket fill
-/// (`x_bx_buckets_with`, word size 5) in `parts` and where it declines the count-and-fill builder's
-/// table in `parts` (`x_flat_in_parts`; 1: on this thread), with `Int4` offsets, on fresh vectors as
-/// in dev (line NP SC9e: lent by the pool of BLASTX's tables, BLOSUM45 word size 6's tables of 50
-/// cDNAs x scer_pep at 8 threads took about 5 % more maximum RSS, 2,756 against 2,632-2,646 MB over
-/// 20 runs each, in the same time); `x_tbn_build_compressed_lookup_of` past `X_U16_LETTERS`
-/// letters. Out of line, so that BLOSUM62's build keeps its code.
+/// (`x_bx_buckets_with`, word size 5) in `parts`, with `u16` offsets as BLOSUM62's (line RG item
+/// X-bxmem: with `Int4` ones a table's build held 8 bytes per append against NCBI's 6), and where it
+/// declines (word sizes 6 and 7) the count-and-fill builder's table in `parts` (`x_flat_in_parts`;
+/// 1: on this thread) with `Int4` offsets, on fresh vectors as in dev (line NP SC9e: lent by the
+/// pool of BLASTX's tables, BLOSUM45 word size 6's tables of 50 cDNAs x scer_pep at 8 threads took
+/// about 5 % more maximum RSS, 2,756 against 2,632-2,646 MB over 20 runs each, in the same time);
+/// `x_tbn_build_compressed_lookup_of` past `X_U16_LETTERS` letters. Out of line, so that BLOSUM62's
+/// build keeps its code.
 #[inline(never)]
 pub(crate) fn x_bx_build_compressed_lookup_of(
     matrix: ScoringMatrix,
@@ -3874,9 +4061,17 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<Result<XCompressedLookup, BanksFilled>> {
+) -> Option<Result<XBxCompressedLookup, BanksFilled>> {
+    let wide = |built: Option<Result<XCompressedLookup, BanksFilled>>| {
+        built.map(|built| {
+            built.map(|table| match table {
+                XCompressedLookup::Reference(table) => XBxCompressedLookup::Reference(table),
+                XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
+            })
+        })
+    };
     if query.len() > X_U16_LETTERS || !x_bpclut_on() {
-        return x_tbn_build_compressed_lookup_of(
+        return wide(x_tbn_build_compressed_lookup_of(
             matrix,
             word_size,
             scaled_threshold,
@@ -3884,10 +4079,10 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
             locations,
             tables,
             parts,
-        );
+        ));
     }
     let bucket = if x_bpffill_on() {
-        x_bx_buckets_with::<_, i32, [u8]>(
+        x_bx_buckets_with::<_, u16, [u8]>(
             matrix,
             word_size,
             scaled_threshold,
@@ -3902,8 +4097,27 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
     } else {
         XBucketBuild::Declined
     };
-    let built = match bucket {
-        XBucketBuild::Built(built) => built,
+    let reference = || {
+        wide(
+            try_build_compressed_lookup(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+            )
+            .map(|built| built.map(XCompressedLookup::Reference)),
+        )
+    };
+    let wide_built = match bucket {
+        XBucketBuild::Built(built) => {
+            return match built? {
+                XFlatBuild::Table(table) => Some(Ok(XBxCompressedLookup::Flat(table))),
+                XFlatBuild::Refused(filled) => Some(Err(filled)),
+                XFlatBuild::TooLarge => reference(),
+            };
+        }
         XBucketBuild::Declined => x_flat_in_parts::<i32>(
             matrix,
             word_size,
@@ -3927,18 +4141,10 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
             )
         }),
     };
-    match built? {
-        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+    match wide_built? {
+        XFlatBuild::Table(table) => Some(Ok(XBxCompressedLookup::Wide(table))),
         XFlatBuild::Refused(filled) => Some(Err(filled)),
-        XFlatBuild::TooLarge => try_build_compressed_lookup(
-            matrix,
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-        )
-        .map(|built| built.map(XCompressedLookup::Reference)),
+        XFlatBuild::TooLarge => reference(),
     }
 }
 
@@ -4013,7 +4219,9 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_tbn_build_compressed_lookup`)
 /// BLASTX's compressed lookup table: `x_tbn_build_compressed_lookup`'s with `u16` offsets
-/// (`x_bx_buckets_on`; the count-and-fill builder's table narrowed where the bucket fill declines),
+/// (`x_bx_buckets_on`, whose test of the batch's one table is its own cells, so that word size 5
+/// never declines (line RG item X-bxmem); the count-and-fill builder's table narrowed where the
+/// bucket fill declines, word sizes 6 and 7),
 /// on vectors kept between builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives
 /// them back). A query of more than `X_U16_LETTERS` letters gets `x_tbn_build_compressed_lookup`'s
 /// table, also on kept vectors. One instance per word length `WORD` (`-word_size` 5 to 7, chosen

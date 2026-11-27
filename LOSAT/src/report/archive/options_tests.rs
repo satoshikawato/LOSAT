@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
 
 fn names(inputs: &OptionInputs) -> Vec<String> {
     algorithm_options(inputs)
@@ -313,4 +314,246 @@ fn the_applications_options_take_their_places() {
     let listed = names(&rps);
     assert_eq!(listed[3], "WindowSize");
     assert_eq!(listed[2], "SegFiltering");
+}
+
+/// The options that `CBlastOptionsBuilder` builds of `setters` for `program`, without the
+/// request's lists and masks.
+fn built(program: EProgram, setters: Vec<Setter>) -> BuiltOptions {
+    BuiltOptions {
+        program,
+        setters,
+        entrez_query: None,
+        first_db_seq: None,
+        final_db_seq: None,
+        gi_list: None,
+        negative_gi_list: None,
+        taxid_list: None,
+        negative_taxid_list: None,
+        db_filtering_algorithm_id: None,
+        db_filtering_algorithm_key: None,
+        subject_masking_type: None,
+        query_masks: None,
+        query_range: crate::report::archive::read::options::SeqRange::EMPTY,
+    }
+}
+
+// The remote options of a built handle (`RemoteOptions`: blast_formatter `-outfmt 11` and the
+// import of a search strategy): the factory's, then the setters'.
+#[test]
+fn filter_string_expansion_matches_ncbi_rules() {
+    // Nucleotide `L;m;` -> MaskAtHash TRUE, DustFiltering TRUE + defaults, RepeatFiltering FALSE.
+    let opts = RemoteOptions::built(&built(
+        EProgram::Blastn,
+        vec![Setter::FilterString("L;m;".to_string())],
+    ));
+    let names: Vec<(&str, &ParamValue)> =
+        opts.params().iter().map(|p| (p.name(), &p.value)).collect();
+    assert_eq!(
+        names,
+        vec![
+            ("EvalueThreshold", &ParamValue::Evalue(10.0)),
+            ("DustFiltering", &ParamValue::Boolean(true)),
+            ("RepeatFiltering", &ParamValue::Boolean(false)),
+            ("MaskAtHash", &ParamValue::Boolean(true)),
+            ("DustFilteringLevel", &ParamValue::Integer(20)),
+            ("DustFilteringWindow", &ParamValue::Integer(64)),
+            ("DustFilteringLinker", &ParamValue::Integer(1)),
+        ]
+    );
+
+    // Custom DUST + Repeat DB on blastn.
+    let opts = RemoteOptions::built(&built(
+        EProgram::Blastn,
+        vec![Setter::FilterString(
+            "D 15 32 2; R -d custom.lib".to_string(),
+        )],
+    ));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "DustFilteringLevel" && p.value == ParamValue::Integer(15)));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "RepeatFiltering" && p.value == ParamValue::Boolean(true)));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "RepeatFilteringDB"
+            && p.value == ParamValue::Str(b"custom.lib".to_vec())));
+
+    // Protein `S` -> SegFiltering TRUE + defaults, no Dust/Repeat.
+    let opts = RemoteOptions::built(&built(
+        EProgram::Blastp,
+        vec![Setter::FilterString("S".to_string())],
+    ));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "SegFiltering" && p.value == ParamValue::Boolean(true)));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "SegFilteringWindow" && p.value == ParamValue::Integer(12)));
+    assert!(!opts.params().iter().any(|p| p.name() == "DustFiltering"));
+
+    // Invalid filter string falls back to cleared options.
+    let opts = RemoteOptions::built(&built(
+        EProgram::Blastn,
+        vec![Setter::FilterString("D 15 32".to_string())],
+    ));
+    assert!(opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "DustFiltering" && p.value == ParamValue::Boolean(false)));
+    assert!(!opts
+        .params()
+        .iter()
+        .any(|p| p.name() == "DustFilteringLevel"));
+}
+
+#[test]
+fn vecscreen_keeps_defaults_mode_stuck_except_evalue() {
+    let mut opts = RemoteOptions::built(&built(
+        EProgram::VecScreen,
+        vec![
+            Setter::WordSize(11),
+            Setter::EvalueThreshold(500.0),
+            Setter::HitlistSize(10),
+        ],
+    ));
+    opts.set(fields::HITLIST_SIZE, ParamValue::Integer(25));
+    assert_eq!(opts.program_and_service(), ("blastn", "vecscreen"));
+    assert_eq!(
+        opts.params(),
+        &[Param::new(
+            fields::EVALUE_THRESHOLD,
+            ParamValue::Evalue(500.0)
+        )]
+    );
+}
+
+#[test]
+fn factory_defaults_for_disc_psi_psitblastn_and_delta() {
+    let disc = RemoteOptions::built(&built(EProgram::DiscMegablast, vec![]));
+    let disc_names: Vec<&str> = disc.params().iter().map(Param::name).collect();
+    assert_eq!(
+        disc_names,
+        vec![
+            "EvalueThreshold",
+            "MBTemplateType",
+            "MBTemplateLength",
+            "WordSize",
+            "WindowSize",
+        ]
+    );
+
+    let psi_tbn = RemoteOptions::built(&built(EProgram::PsiTblastn, vec![]));
+    let psi_tbn_names: Vec<&str> = psi_tbn.params().iter().map(Param::name).collect();
+    assert_eq!(
+        psi_tbn_names,
+        vec![
+            "EvalueThreshold",
+            "InclusionThreshold",
+            "PseudoCountWeight",
+            "SmithWatermanMode",
+            "DbGeneticCode",
+            "WordThreshold",
+        ]
+    );
+
+    let delta = RemoteOptions::built(&built(EProgram::DeltaBlast, vec![]));
+    assert_eq!(delta.program_and_service(), ("blastp", "delta_blast"));
+    assert!(delta
+        .params()
+        .iter()
+        .any(|p| p.name() == "InclusionThreshold" && p.value == ParamValue::Real(0.05)));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1352-1364,2619-2634
+// `SetWindowMaskerTaxId` of 0 removes the parameter; `SetUseIndex` records `MbIndexName` only when
+// the name is not empty (NCBI 2.17.0's own strategies: `F/f3/tmp/r6/f2/wm.asn`, `ui.asn`).
+#[test]
+fn a_taxid_of_0_and_an_index_without_a_name_record_what_ncbi_s_setters_do() {
+    let options = RemoteOptions::built(&built(
+        EProgram::Megablast,
+        vec![
+            Setter::WindowMaskerTaxId(9606),
+            Setter::WindowMaskerTaxId(0),
+            Setter::UseIndex {
+                index_name: String::new(),
+            },
+        ],
+    ));
+    assert_eq!(
+        options.params(),
+        &[
+            Param::new(fields::EVALUE_THRESHOLD, ParamValue::Evalue(10.0)),
+            Param::new(fields::FORCE_MB_INDEX, ParamValue::Boolean(true)),
+        ]
+    );
+    let named = RemoteOptions::built(&built(
+        EProgram::Megablast,
+        vec![Setter::UseIndex {
+            index_name: "idx".to_string(),
+        }],
+    ));
+    assert_eq!(
+        named.params()[1..],
+        [
+            Param::new(fields::FORCE_MB_INDEX, ParamValue::Boolean(true)),
+            Param::new(fields::MB_INDEX_NAME, ParamValue::Str(b"idx".to_vec())),
+        ]
+    );
+}
+
+// A `FilterString` number that `sscanf` does not store is undecided where the remote options
+// record it (review R6 M1: `S 10 abc 2.5`, `D abc 64 1`), and decided where they do not.
+#[test]
+fn an_unread_filter_number_is_undecided_where_it_is_recorded() {
+    let filter = |program, text: &str| {
+        RemoteOptions::built(&built(
+            program,
+            vec![Setter::FilterString(text.to_string())],
+        ))
+    };
+    assert_eq!(
+        filter(EProgram::Blastp, "S 10 abc 2.5;").undecided(),
+        Some(UNDECIDED_FILTER_VALUE)
+    );
+    assert_eq!(
+        filter(EProgram::Blastn, "D abc 64 1;").undecided(),
+        Some(UNDECIDED_FILTER_VALUE)
+    );
+    // SEG's values are not recorded for a nucleotide query, DUST's not for a protein one.
+    assert_eq!(filter(EProgram::Blastn, "S 10 abc 2.5;").undecided(), None);
+    assert_eq!(filter(EProgram::Blastp, "D abc 64 1;").undecided(), None);
+    let level = filter(EProgram::Blastn, "D 99999999999999999999 64 1;");
+    assert!(level.params().contains(&Param::new(
+        fields::DUST_FILTERING_LEVEL,
+        ParamValue::Integer(-1)
+    )));
+}
+
+// The search programs' handles are the factory's (`RequestKind::factory_program`): dc-megablast's
+// four parameters, PSI-TBLASTN's, and the request's program and service.
+#[test]
+fn the_search_programs_handles_are_the_factory_s() {
+    let dc = OptionInputs::new(Program::Blastn, "dc-megablast");
+    assert_eq!(
+        names(&dc)[..5],
+        [
+            "EvalueThreshold",
+            "MBTemplateType",
+            "MBTemplateLength",
+            "WordSize",
+            "WindowSize"
+        ]
+    );
+    assert_eq!(service(Program::Blastn, "dc-megablast"), "megablast");
+    assert_eq!(service(Program::Blastn, "blastn-short"), "plain");
+    assert_eq!(service(RequestKind::PsiTblastn, "tblastn"), "psi");
+    assert_eq!(service(RequestKind::Rpstblastn, "rpstblastn"), "rpsblast");
+    assert_eq!(RequestKind::PsiTblastn.program(), "blastp");
+    assert_eq!(RequestKind::Rpstblastn.program(), "tblastn");
 }

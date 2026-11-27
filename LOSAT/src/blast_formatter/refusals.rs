@@ -51,8 +51,10 @@ pub(crate) enum Refusal {
     /// the mapper; NCBI's programs write no such archive (PHI-BLAST's archives end with NCBI's
     /// engine error instead, `search_program::blast_type`).
     Program(&'static str),
-    /// A value in an archive's results that LOSAT's encoder of the output format does not write
-    /// (`report::serial::SerialError`), what it is and the format: a NaN or an infinite real
+    /// A value that LOSAT's encoder of the output format does not write yet
+    /// (`report::serial::SerialError`), in an archive's results (`-outfmt 12`) or in its request
+    /// or results (`-outfmt 11`, which writes the archive again), what it is and the format (a
+    /// limit of LOSAT's writers, not of the input): a NaN or an infinite real
     /// number in `-outfmt 12`, at which NCBI stops with an error of its JSON stream (agent C6 of
     /// line RG item F3, 2026-11-23, `remaining-gaps-20261112/F/f3/tmp/c6/pd`; in 9 NCBI writes
     /// its one special octet, as LOSAT's ASN.1 binary encoder does), and the values the encoders
@@ -107,8 +109,13 @@ impl Refusal {
                 super::PROGRAM
             ),
             Refusal::Unwritable(what, format) => format!(
-                "output format {format} of a BLAST archive with {what} in its results is not \
+                "output format {format} of a BLAST archive with {what} in its {} is not \
                  supported by LOSAT's {}",
+                if *format == 11 {
+                    "request or its results"
+                } else {
+                    "results"
+                },
                 super::PROGRAM
             ),
             Refusal::SeqLocQuery => format!(
@@ -139,7 +146,8 @@ impl Refusal {
             Refusal::FatalMessage => "severity Fatal".to_string(),
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
-            Refusal::Unwritable(..) => "an archive's results".to_string(),
+            Refusal::Unwritable(_, 11) => "`-outfmt` `11` (request or results)".to_string(),
+            Refusal::Unwritable(..) => "`12` (results)".to_string(),
             Refusal::SeqLocQuery => "seq-loc-list".to_string(),
         }
     }
@@ -183,6 +191,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::FatalMessage,
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
+        Refusal::Unwritable("", 11),
         Refusal::Unwritable("", 12),
         Refusal::SeqLocQuery,
     ]);

@@ -902,8 +902,9 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
 // format writes them as they are (outfmt 8, 9, 11, 12) and the first does not prefetch the
 // subjects (8, 9 and 12 prefetch with a PRE_FETCH_SEQS_LIMIT of INT_MAX, which the test process
 // may set), for the five search programs (not psiblast, rpsblast or rpstblastn); a run of one
-// format whose formatter reads it where LOSAT writes NCBI's posts (the tables, SAM, the
-// Seq-annots) and whose batches all prefetch is `TitleReads::Prefetched`; the others read it
+// format whose formatter reads it where LOSAT writes NCBI's posts (the tables, the pairwise
+// reports, SAM, the Seq-annots) and whose batches all prefetch is `TitleReads::Prefetched`; the
+// others read it
 // again (`TitleReads::Reports`, LOSAT's refusal).
 #[test]
 fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
@@ -924,8 +925,6 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
         assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
         for outfmts in [
             &[][..],
-            &[0],
-            &[3],
             &[5],
             &[13],
             &[18],
@@ -933,11 +932,23 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
             &[11, 0],
             &[6, 6],
             &[6, 11],
+            &[0, 0],
         ] {
             assert_eq!(of(outfmts), TitleReads::Reports, "{app:?} {outfmts:?}");
         }
-        // The tables 10 and 20 prefetch as 6 does.
-        for (outfmt, as_outfmt) in [(6, 6), (7, 7), (10, 6), (20, 6), (17, 17)] {
+        // The tables 10 and 20 prefetch as 6 does; the pairwise reports read at their lines.
+        for (outfmt, as_outfmt) in [
+            (6, 6),
+            (7, 7),
+            (10, 6),
+            (20, 6),
+            (17, 17),
+            (0, 0),
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+        ] {
             let expected = if prefetched(as_outfmt) {
                 TitleReads::Prefetched
             } else {
@@ -1207,4 +1218,50 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
     for fmt in ["8", "9", "10", "11", "12", "13", "15", "18", "20"] {
         assert!(!outfmt_prefetches_taxdb(fmt), "{fmt}");
     }
+}
+
+// RG-KB 9b-2: the reports that take NCBI's posts of each read of a reported title
+// (`FormatterTitleReads::takes_decodes`): the pairwise reports, and the tables whose fields read
+// the definition line; no other format, and no value that NCBI's reading refuses.
+#[test]
+fn the_pairwise_reports_and_the_rows_that_read_titles_take_the_decodes() {
+    use crate::blastinput::app::ReportFormat::{self, *};
+    let takes = |format: Option<ReportFormat>, reads: bool| {
+        FormatterTitleReads::takes_decodes(format, reads)
+    };
+    for format in (0..=20).filter_map(ReportFormat::from_number) {
+        let (pairwise, rows) = match FormatterTitleReads::of(format) {
+            FormatterTitleReads::Pairwise { .. } => (true, false),
+            FormatterTitleReads::Rows => (false, true),
+            _ => (false, false),
+        };
+        assert_eq!(takes(Some(format), false), pairwise, "{format:?}");
+        assert_eq!(takes(Some(format), true), pairwise || rows, "{format:?}");
+    }
+    for format in [
+        Pairwise,
+        QueryAnchoredIdentities,
+        QueryAnchoredNoIdentities,
+        FlatQueryAnchoredIdentities,
+        FlatQueryAnchoredNoIdentities,
+    ] {
+        assert!(takes(Some(format), false), "{format:?}");
+    }
+    for format in [
+        Tabular,
+        TabularWithComments,
+        CommaSeparatedValues,
+        CommaSeparatedValuesWithHeader,
+    ] {
+        assert!(
+            takes(Some(format), true) && !takes(Some(format), false),
+            "{format:?}"
+        );
+    }
+    for format in [
+        Xml, Xml2, Json, JsonS, Xml2S, TaxFormat, Sam, AsnText, AsnBinary,
+    ] {
+        assert!(!takes(Some(format), true), "{format:?}");
+    }
+    assert!(!takes(None, true));
 }

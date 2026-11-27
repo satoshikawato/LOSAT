@@ -2825,11 +2825,17 @@ fn search(
             ungapped: args.ungapped,
             html: resolved.html.clone(),
             is_html: args.html,
+            // NCBI's posts of each read of a reported sequence's definition line by the rows or
+            // the pairwise report.
             title_decodes: match (&reported, database) {
                 (Some(reported), Some(database))
-                    if tabular_specs
-                        .iter()
-                        .any(crate::report::tabular::TabularSpec::reads_defline) =>
+                    if outputs.formats.iter().any(|format| {
+                        crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
+                            format.report_format(),
+                            super::tabular::tabular_spec(format.outfmt)
+                                .is_some_and(|spec| spec.reads_defline()),
+                        )
+                    }) =>
                 {
                     database.title_decodes(reported, &results)
                 }

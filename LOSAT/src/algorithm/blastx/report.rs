@@ -388,7 +388,8 @@ impl ShownSubjects<'_> {
     }
 
     /// NCBI's posts of each read of a reported sequence's definition line by a custom table's
-    /// rows, by rank (`ReportedSubjects::title_decodes`); `None` for a subject set.
+    /// rows or the pairwise report, by rank (`ReportedSubjects::title_decodes`); `None` for a
+    /// subject set.
     pub(crate) fn title_decodes(&self) -> Option<&crate::report::query_warnings::TitleDecodes> {
         match self {
             ShownSubjects::Database { reported, .. } => Some(reported.title_decodes()),
@@ -1247,12 +1248,14 @@ fn write_pairwise(
                 .collect()
         });
     // The warnings of each query and the texts of its subjects' reads, at the shared writer's places
-    // (`QueryWarnings::before_query`, `subject_read`).
+    // (`QueryWarnings::before_query`, `subject_read`), and NCBI's posts of each read of a reported
+    // sequence's definition line (`title_read`).
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
             .with_subject_reads(&reads)
             .for_report(report_index)
-            .with_html_posts(html_posts.map(|posts| posts as &mut dyn Write));
+            .with_html_posts(html_posts.map(|posts| posts as &mut dyn Write))
+            .with_title_decodes(shown.title_decodes());
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(

@@ -67,9 +67,11 @@ impl QuerySections for Marks {
     ) -> io::Result<()> {
         let subjects = group.map_or(0, |group| group.subject_order.len());
         writeln!(writer, "head {q_idx} subjects {subjects}")?;
-        // One line per subject, each read before it (as a description line).
+        // One line per subject, each loaded and its title read twice before it (as a
+        // description line).
         for &s_idx in group.map_or(&[][..], |group| group.subject_order.as_slice()) {
             place(ReportPlace::Load(s_idx), writer)?;
+            place(ReportPlace::Titles(s_idx, 2), writer)?;
             writeln!(writer, "line {s_idx}")?;
         }
         Ok(())
@@ -82,9 +84,11 @@ impl QuerySections for Marks {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        _place: ReportHook<'_, W>,
+        place: ReportHook<'_, W>,
     ) -> io::Result<()> {
+        // The heading reads the title once (as `x_PrintDefLine`).
         if part.start == 0 {
+            place(ReportPlace::Titles(s_idx, 1), writer)?;
             writeln!(writer, "subject {s_idx}")?;
         }
         for hsp in part {
@@ -351,6 +355,87 @@ fn the_texts_of_the_reads_come_where_the_serial_writer_reads_the_subjects() {
         "{serial}"
     );
     assert!(serial.ends_with("T6\n"), "{serial}");
+    for chunks in [(1, 1), (1_000, 500), (usize::MAX, 2_000)] {
+        assert_eq!(run(Some(chunks)), serial, "{chunks:?}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:396-397
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
+// The posts of the formatter's reads of a title come where the serial writer reads it (each
+// description line twice, each heading once), in pieces of any size.
+#[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
+fn the_posts_of_the_title_reads_come_where_the_serial_writer_reads_the_titles() {
+    let hits = report_hits();
+    let by_query = by_query(&hits);
+    let titles = titles();
+    let marks = Marks {
+        num_alignments: 10,
+        fail_at: None,
+        joined: None,
+        merged: false,
+    };
+    let mut decodes = crate::report::query_warnings::TitleDecodes::default();
+    decodes.insert(5, b"D5\n".to_vec());
+    decodes.insert(7, b"D7a\nD7b\n".to_vec());
+    let before: Vec<crate::report::diag_log::Posts> = [b"W0\n", b"W1\n", b"W2\n"]
+        .map(|lines| crate::report::diag_log::Posts::of_lines(lines.to_vec()))
+        .into();
+    let run = |parallel: Option<(usize, usize)>| -> String {
+        let log = Log::default();
+        let (mut report, mut sink) = (log.clone(), log.clone());
+        let mut warnings =
+            QueryWarnings::of_posts(&before, None, &mut sink).with_title_decodes(Some(&decodes));
+        match parallel {
+            None => write_serial(
+                &mut report,
+                &marks,
+                0,
+                &by_query,
+                &titles,
+                None,
+                Some(&mut warnings),
+            )
+            .unwrap(),
+            Some((budget, piece_bytes)) => {
+                crate::utils::threading::x_with_search_pool_local(4, "test", |pool| {
+                    write_parallel_with(
+                        &mut report,
+                        &marks,
+                        0,
+                        &by_query,
+                        &titles,
+                        Some(&mut warnings),
+                        pool,
+                        budget,
+                        piece_bytes,
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        warnings.after_last_query(3, &mut report).unwrap();
+        drop(warnings);
+        String::from_utf8(log.0.lock().unwrap().clone()).unwrap()
+    };
+    let serial = run(None);
+    assert!(
+        serial.starts_with(
+            "W0\nhead 0 subjects 3\nD5\nD5\nline 5\nline 2\nD7a\nD7b\nD7a\nD7b\nline 7\n"
+        ),
+        "{serial}"
+    );
+    assert!(serial.contains("D5\nsubject 5\n"), "{serial}");
+    assert!(serial.contains("D7a\nD7b\nsubject 7\n"), "{serial}");
+    assert!(
+        !serial.contains("D2") && serial.contains("\nsubject 2\n"),
+        "{serial}"
+    );
     for chunks in [(1, 1), (1_000, 500), (usize::MAX, 2_000)] {
         assert_eq!(run(Some(chunks)), serial, "{chunks:?}");
     }

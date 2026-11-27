@@ -5918,10 +5918,17 @@ fn post_process_hits_and_write(
         // that NCBI's stream replaces (`seqalign::write_query_to`).
         // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
-        // NCBI's posts of each read of a subject's definition line by a table's rows
-        // (`BlastnDatabase::title_decodes`).
-        let title_decodes = match (report.database_reader, output_format.tabular_spec()) {
-            (Some(database), Some(spec)) if spec.reads_defline() => {
+        // NCBI's posts of each read of a subject's definition line by a table's rows or the
+        // pairwise report (`BlastnDatabase::title_decodes`).
+        let title_decodes = match report.database_reader {
+            Some(database)
+                if crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
+                    format.report_format(),
+                    output_format
+                        .tabular_spec()
+                        .is_some_and(crate::report::tabular::TabularSpec::reads_defline),
+                ) =>
+            {
                 database.title_decodes(&hit_lists)
             }
             _ => Default::default(),

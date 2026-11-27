@@ -4985,9 +4985,30 @@ impl FormatterTitleReads {
     }
 
     /// Whether LOSAT writes NCBI's posts of these reads ([`TitleReads::Prefetched`]): the tables'
-    /// rows, and the formats that read nothing.
+    /// rows, the pairwise reports' description lines and headings, and the formats that read
+    /// nothing.
     pub(crate) fn written(self) -> bool {
-        matches!(self, FormatterTitleReads::None | FormatterTitleReads::Rows)
+        matches!(
+            self,
+            FormatterTitleReads::None
+                | FormatterTitleReads::Rows
+                | FormatterTitleReads::Pairwise { .. }
+        )
+    }
+
+    /// Whether the report of `format` (`None`: a value that NCBI's reading refuses) reads the
+    /// definition lines of the subjects it reports where LOSAT writes NCBI's posts of each read
+    /// ([`title_decodes`]): the pairwise reports, and the tables whose fields read them
+    /// (`reads_defline`: `report::tabular::TabularSpec::reads_defline` of the table's fields).
+    pub(crate) fn takes_decodes(
+        format: Option<crate::blastinput::app::ReportFormat>,
+        reads_defline: bool,
+    ) -> bool {
+        match format.map(Self::of) {
+            Some(FormatterTitleReads::Pairwise { .. }) => true,
+            Some(FormatterTitleReads::Rows) => reads_defline,
+            _ => false,
+        }
     }
 }
 

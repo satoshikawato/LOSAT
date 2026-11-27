@@ -1071,9 +1071,10 @@ impl ReportedSubjects {
                     .collect(),
             );
         }
-        // NCBI's posts of each read of a reported sequence's definition line by a table's rows,
-        // by rank (`shared::title_decodes`, `report::query_warnings::ReadCursor::title_read`).
-        if reports && tabular_reads {
+        // NCBI's posts of each read of a reported sequence's definition line by a table's rows or
+        // the pairwise report, by rank (`shared::title_decodes`,
+        // `report::query_warnings::ReadCursor::title_read`, `QueryWarnings::title_read`).
+        if reports && (tabular_reads || pairwise) {
             reported.title_decodes = shared::title_decodes(
                 &database.db,
                 reported

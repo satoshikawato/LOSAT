@@ -4949,10 +4949,11 @@ impl BatchReports<'_> {
                 .map(|taxdb| taxdb.report_names(self.args.app().ncbi_name())),
             _ => None,
         };
-        // NCBI's posts of each read of a reported sequence's definition line by the rows.
-        let title_decodes = match (&self.subjects, &database, custom_tabular) {
-            (ShownSubjects::Database { database, .. }, Some(shown), Some(spec))
-                if spec.reads_defline() =>
+        // NCBI's posts of each read of a reported sequence's definition line by the rows or the
+        // pairwise report.
+        let title_decodes = match (&self.subjects, &database) {
+            (ShownSubjects::Database { database, .. }, Some(shown))
+                if super::super::database::takes_title_decodes(&outputs.formats) =>
             {
                 database.title_decodes(shown.reported)
             }

@@ -1068,6 +1068,20 @@ pub(crate) fn prefetch_format(
     )
 }
 
+/// Whether a report of `formats` reads the definition lines of the sequences it reports where
+/// LOSAT writes NCBI's posts of each read (`shared::FormatterTitleReads::takes_decodes`).
+pub(crate) fn takes_title_decodes(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
+    formats.iter().any(|format| {
+        shared::FormatterTitleReads::takes_decodes(
+            format.report_format(),
+            matches!(
+                super::report::output_format(format.outfmt),
+                super::report::TblastxOutputFormat::CustomTabular(spec) if spec.reads_defline()
+            ),
+        )
+    })
+}
+
 /// Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of their
 /// titles (`common::database::TitleReads::Prefetched`, `batch_title_posts`), for the reports
 /// `formats`.

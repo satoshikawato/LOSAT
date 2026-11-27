@@ -9,7 +9,7 @@
 // version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
-import type { Coordinator, RunView } from '../application/coordinator';
+import { sessionArchiveOf, type Coordinator, type RunView, type SessionArchiveEntry } from '../application/coordinator';
 import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
 import { commandWords } from '../domain/argv';
@@ -30,6 +30,7 @@ import { useStore } from './useStore';
  * (line WQA's sweep, D15, 2026-11-20), where the results page shows its `-logfile` file and warnings apart (`files` false).
  */
 const props = withDefaults(defineProps<{ coordinator: Coordinator; run: RunView; files?: boolean }>(), { files: true });
+const emit = defineEmits<{ 'format-archive': [entry: SessionArchiveEntry] }>();
 /** The tab of the run's files, after the formats. */
 const FILES = 'run-files';
 /** The tab of the text that the run printed in place of a search, its one output. */
@@ -98,6 +99,9 @@ const tabs = computed(() => [
         },
       ]),
 ]);
+/** The archive that "Format archive…" opens in Format Archive: the `-outfmt 11` output of a completed search, when it is the one shown. */
+const archive = computed(() => (format.value === CUSTOM_OUTPUT ? sessionArchiveOf(props.run) : undefined));
+
 const reader = new OutputReader(props.coordinator);
 /**
  * The query and subject that are files of LOSAT's (pasted text, several files, records left out): the command names them, and the
@@ -159,6 +163,9 @@ watch(
       <p v-if="output.problem" class="results-message error" role="alert" data-testid="outputs-problem" :data-failed="output.failed">{{ output.problem }}</p>
       <button data-testid="export-output" @click="reader.export(run, format)">
         Export outfmt {{ outfmtOf(run.snapshot.argv, format) }}
+      </button>
+      <button v-if="archive" type="button" class="primary-action" data-testid="format-archive-action" @click="emit('format-archive', archive)">
+        Format archive…
       </button>
     </div>
   </div>

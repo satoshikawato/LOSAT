@@ -22,9 +22,9 @@
 // restoration, the Search tab's button, which goes back, scrolled the page down to where the form
 // had been left, and the focused tab out of view.
 
-export type MainTab = 'search' | 'results' | 'windowmasker';
+export type MainTab = 'search' | 'results' | 'windowmasker' | 'blast_formatter';
 
-type FormTab = 'search' | 'windowmasker';
+type FormTab = 'search' | 'windowmasker' | 'blast_formatter';
 
 /** The part of `window.history` that the tabs use. */
 export interface TabHistory {

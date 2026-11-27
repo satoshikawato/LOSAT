@@ -779,12 +779,18 @@ impl<S: AsnSource> Input for BerReader<S> {
         StreamPosition::Byte(self.pos() as u64)
     }
 
-    /// The state of a new stream at the next byte: its positions count from there.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:122-149
+    /// The state of a new stream at the next byte: its positions count from there, or go on from
+    /// the start of the stream when one object stream reads every object of a file
+    /// (`Names::one_stream`).
     fn new_object(&mut self) {
-        self.base = self.at;
+        if !self.names.one_stream {
+            self.base = self.at;
+        }
         self.tag_len = 0;
         self.limit = 0;
         self.limits.clear();
+        self.release();
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597

@@ -3,8 +3,10 @@ import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { engineBuildName, sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway, ToolEngine } from 'losat/ports';
+import { CUSTOM_OUTPUT } from 'losat/domain';
 import { Attention } from './application/attention';
 import { Availability } from './application/availability';
+import { BlastFormatterDraft } from './application/blast-formatter-draft';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
@@ -31,6 +33,8 @@ export interface App {
   readonly draft: SearchDraft;
   /** The WindowMasker job being edited on the WindowMasker tab. */
   readonly toolDraft: ToolDraft;
+  /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
+  readonly blastFormatterDraft: BlastFormatterDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
   /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
@@ -111,7 +115,14 @@ export function createApp(options: AppOptions = {}): App {
     readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
     sessionFiles,
   });
-  const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
+  const blastFormatterDraft = new BlastFormatterDraft({
+    engine,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const tools = [toolDraft, blastFormatterDraft];
+  const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
@@ -131,10 +142,10 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     runs: coordinator.state,
     draft: draft.state,
-    toolDraft: toolDraft.state,
+    tools,
     probe: () => data.storageInfo(),
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, toolDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, toolDraft, blastFormatterDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
 }

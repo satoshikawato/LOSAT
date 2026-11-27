@@ -1190,9 +1190,10 @@ fn subjects_late(dir: &TempDir, name: &str, title: &[u8]) -> PathBuf {
 }
 
 /// A subject whose tabular id LOSAT refuses (`Subject_` and a byte in no encoding NCBI
-/// recognises), which a later batch reaches: both paths (without the switch and with it) write the
-/// rows of the batches before and then the refusal, as NCBI does, the rows of the same search with
-/// the subject titled otherwise. `outfmt` names the format.
+/// recognises), which a later batch reaches: with the switch and without it the refusal comes
+/// after NCBI's bytes before the row's stop (line RG-KB item 18b): the rows of the batches before
+/// and the stopped row's fields before its `saccver` or `sacc`, the beginning of the same
+/// search's report with the subject titled otherwise. `outfmt` names the format.
 fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Path, outfmt: &str) {
     let refused = subjects_late(dir, "refused.fa", b"Subject_\x81 undecodable");
     let titled = subjects_late(dir, "titled.fa", b"LC738874part second");

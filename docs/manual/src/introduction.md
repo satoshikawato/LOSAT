@@ -48,7 +48,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the program `deltablast`, and `makeprofiledb -dbtype cobalt`;
-- `blast_formatter` output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML;
+- `blast_formatter` output formats other than `8`, `9` and `12`;
 - the `psiblast` output formats `13` to `16`.
 
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.

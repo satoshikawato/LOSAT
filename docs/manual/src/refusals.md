@@ -90,7 +90,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
 | `-logfile` with `tblastx`, `rpsblast` or `rpstblastn` in the WASI command-line build | Refused. That build cannot send its standard error to a file. |
 | `-logfile` naming an input file read by the run (such as `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`, `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`, `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`, `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files, or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` / `-filtering_db`; including relative paths, symlinks, hard links, and missing inputs that `-logfile` would create) | Refused (exit status 1) in all programs, before opening or creating the file, leaving existing inputs unchanged. NCBI BLAST+ 2.17.0 appends diagnostics into the input file, which can corrupt it or enter an endless read loop. |
-| `-logfile` naming another existing file of the run's directory (not read by the run) or a missing file the run checks for reading (database lookup candidates of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb` — alias `.nal`/`.pal`, index `.nin`/`.pin`, group alias `index.alx`, alias `DBLIST` targets and local-copy/search-path candidates — `taxdb.bti` or paired `taxdb.btd` when `-outfmt` consults the taxonomy database, `taxonomy4blast.sqlite3` when `-taxids`/`-taxidlist` expands against a file on the search path, or entries read from `windowmasker -fa_list true`), or a `windowmasker` `-out` naming an existing file of the run's directory or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking) in LOSAT Web | Refused (exit status 1). On the command line those files are appended to, created and read back, or overwritten; LOSAT Web reads the run's files and writes none of them. |
+| `-logfile` naming another existing file of the run's directory (not read by the run) or a missing file the run checks for reading (database lookup candidates of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb` — alias `.nal`/`.pal`, index `.nin`/`.pin`, group alias `index.alx`, alias `DBLIST` targets and local-copy/search-path candidates — `taxdb.bti` or paired `taxdb.btd` when `-outfmt` consults the taxonomy database, `taxonomy4blast.sqlite3` when `-taxids`/`-taxidlist` expands against a file on the search path, entries read from `windowmasker -fa_list true`, or `-archive` of `blast_formatter`), or a `windowmasker` or `blast_formatter` `-out` naming an existing file of the run's directory or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking) in LOSAT Web | Refused (exit status 1). On the command line those files are appended to, created and read back, or overwritten; LOSAT Web reads the run's files and writes none of them. |
 | `-remote`, `-entrez_query` | Refused. They need NCBI's servers. See the end of this page. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#all-five-search-programs).
@@ -450,15 +450,14 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## blast_formatter
 
-`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text.
+`blast_formatter` runs every option of its `-help` (`-xmlhelp` on the command line only). It writes `-outfmt` `8`, `9` and `12` from archives in ASN.1 text, ASN.1 binary or XML.
 
 | Input | What happens |
 | :--- | :--- |
 | `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20` | Refused, with LOSAT's own error message. |
-| An archive in ASN.1 binary or XML (`-outfmt 11` with `ARCHIVE_FORMAT=bin` or `xml`) | Refused. |
 | A database named in the archive that cannot be opened here as NCBI opens it (with the archive's taxid list) | Refused. NCBI BLAST+ then asks NCBI's servers for its sequences. |
 | An archive on which NCBI BLAST+ has no defined result: a query or subject sequence without an id, a request without a query or subject, an element stated as `NULL` in a list, values that make NCBI's code abort | Refused. NCBI reads memory the archive does not decide, follows a null pointer or aborts. NCBI's own programs do not write such archives. |
-| An archive in a form of ASN.1 text that LOSAT does not read | Refused, with the form named. |
+| An archive in a form that LOSAT does not read | Refused, with the form named. |
 | A stored message of severity Fatal in the archive | Refused. NCBI BLAST+ posts it with a stack trace of its own binary and stops with exit status 255. |
 | `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12` | Refused. NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one. |
 | An archive of the mapper | Refused. NCBI's programs write none. |
@@ -535,7 +534,7 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - The program `deltablast`.
 - `makeprofiledb -dbtype cobalt`.
 - The `psiblast` output formats `13` to `16`.
-- `blast_formatter`: the output formats other than `8`, `9` and `12`, archives in ASN.1 binary or XML, and the values of an archive's results that it does not yet write.
+- `blast_formatter`: the output formats other than `8`, `9` and `12`, and the values of an archive's results that it does not yet write.
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers

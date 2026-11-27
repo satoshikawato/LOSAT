@@ -826,14 +826,9 @@ impl TabularSpec {
         bioseq_only: bool,
     ) -> Option<crate::report::db_subject::AfterThrow> {
         use crate::report::db_subject::AfterThrow;
-        let rows = if bioseq_only {
-            self.subject_fetch(program)
-        } else {
-            self.throw_rows(program)
-        };
         if self.reads_subject_bioseq() {
             Some(AfterThrow::WritesRow)
-        } else if rows.reads(num_ident) {
+        } else if self.throw_rows_for(program, bioseq_only).reads(num_ident) {
             Some(AfterThrow::EndsRun)
         } else {
             None
@@ -847,7 +842,19 @@ impl TabularSpec {
     /// rows of HSPs with identities (`SubjectFetch::WithIdentities`): a row of no identities reads
     /// nothing of it and prints the 0 of `x_ResetFields`.
     pub fn throw_rows(&self, program: crate::blastinput::app::Program) -> SubjectFetch {
-        if self.reads_subject_bioseq() || self.has(SubjectLength) {
+        self.throw_rows_for(program, false)
+    }
+
+    /// [`TabularSpec::throw_rows`] with `bioseq_only`: where only the build of the subject's
+    /// Bioseq throws (`ParsedSubject::bioseq_load_throws`), `slen` succeeds
+    /// (`GetSequenceLength`, bdbloader.cpp:312-319) and only the rows of `subject_fetch` load the
+    /// Bioseq. The one answer of both kinds (`row_throw_for`, `format_throw`).
+    pub fn throw_rows_for(
+        &self,
+        program: crate::blastinput::app::Program,
+        bioseq_only: bool,
+    ) -> SubjectFetch {
+        if self.reads_subject_bioseq() || (self.has(SubjectLength) && !bioseq_only) {
             SubjectFetch::Every
         } else {
             self.subject_fetch(program)
@@ -889,8 +896,8 @@ impl TabularSpec {
             })
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
-                rows: self.throw_rows(program),
-                bioseq_rows: self.subject_fetch(program),
+                rows: self.throw_rows_for(program, false),
+                bioseq_rows: self.throw_rows_for(program, true),
                 ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         } else {
@@ -1399,7 +1406,12 @@ pub fn failed_database_subject(
 ) -> String {
     match (thrown, parsed) {
         (Some(exception), _) => format!(
-            "database sequence {oid} has a Seq-align id whose lookup throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
+            "database sequence {oid} has a Seq-align id whose {} throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
+            if parsed.is_some_and(crate::report::db_subject::ParsedSubject::bioseq_load_throws) {
+                "Bioseq load"
+            } else {
+                "lookup"
+            },
             String::from_utf8_lossy(exception.get_msg())
         ),
         (None, Some(subject)) if subject.scope_finds_none() => format!(

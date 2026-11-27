@@ -834,8 +834,7 @@ fn run_inner(
     )
     .with_held(held.as_ref());
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
-    let batch_scopes =
-        BatchScopes::new(options.outfmt == 5, args.parse_deflines, database.as_ref());
+    let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
@@ -1445,12 +1444,6 @@ impl BatchPrefetch {
 pub(super) struct BatchScopes<'a> {
     /// The run's database where its reports include outfmt 5.
     database: Option<&'a BlastxDatabase>,
-    /// Whether `-parse_deflines` gives the queries their ids: a record whose Bioseq's build
-    /// throws (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9), which LOSAT knows only
-    /// where it reads the record, stops a later batch's prefetch unless a query kept in the scope
-    /// holds its Seq-align id, which only such an id does (a generated `lcl|Query_N` is never a
-    /// PDB id).
-    parse_deflines: bool,
     before: std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScope>>,
     /// Whether the database's prefetch can stop, asked once.
     keeps: std::cell::OnceCell<bool>,
@@ -1459,14 +1452,9 @@ pub(super) struct BatchScopes<'a> {
 impl<'a> BatchScopes<'a> {
     /// The scopes of a run whose reports include outfmt 5 (`xml`) against `database` (none with
     /// `-subject`).
-    pub(super) fn new(
-        xml: bool,
-        parse_deflines: bool,
-        database: Option<&'a BlastxDatabase>,
-    ) -> Self {
+    pub(super) fn new(xml: bool, database: Option<&'a BlastxDatabase>) -> Self {
         Self {
             database: database.filter(|database| xml && database.parsed_seqids()),
-            parse_deflines,
             before: Default::default(),
             keeps: Default::default(),
         }
@@ -1486,13 +1474,12 @@ impl<'a> BatchScopes<'a> {
     }
 
     /// The batch of the records `queries` was reported: in outfmt 5 its records stay in the scope
-    /// of the batches after it, kept where a prefetch of the run can stop at a lookup that fails
-    /// on a file, or the queries have their own ids (`parse_deflines`).
+    /// of the batches after it, where a prefetch of the run can stop.
     pub(super) fn reported(&self, queries: &[FastaRecord]) {
         let Some(database) = self.database else {
             return;
         };
-        if !self.parse_deflines && !*self.keeps.get_or_init(|| database.prefetch_can_stop()) {
+        if !*self.keeps.get_or_init(|| database.prefetch_can_stop()) {
             return;
         }
         let batch =

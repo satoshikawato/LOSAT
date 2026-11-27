@@ -770,13 +770,11 @@ impl ReportedSubjects {
         // A batch whose prefetch looks up a Seq-align id whose lookup or Bioseq load fails stops
         // the run there (`shared::batch_prefetch`), before any of its reports: none of their
         // checks and reads is made.
-        let mut scope_cache: Option<crate::blastinput::query_batch::QueryScope> = None;
+        let scope = std::cell::OnceCell::new();
         let reports = !(prefetched
-            && parsed.values().any(|subject| {
-                shared::prefetch_stops_in_scope(subject, &mut || {
-                    scope_cache.get_or_insert_with(prefetch_scope).clone()
-                })
-            }));
+            && parsed
+                .values()
+                .any(|subject| subject.prefetch_stops_in(|| scope.get_or_init(prefetch_scope))));
         if reports && joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -912,10 +910,9 @@ impl ReportedSubjects {
                 )?;
             }
             if let Some(subject) = parsed.get(&oid) {
-                let seen_by_scope = subject.bioseq_load_throws()
-                    && scope_cache
-                        .get_or_insert_with(prefetch_scope)
-                        .has_key(&subject.query_scope_keys().own);
+                // A query of the batch's scope takes its place
+                // (`ParsedSubject::hidden_by_query`).
+                let seen_by_scope = subject.hidden_by_query(|| scope.get_or_init(prefetch_scope));
                 if reports && reads {
                     subject
                         .fetched_with_scope(taxonomy, loads.load(oid), seen_by_scope)

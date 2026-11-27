@@ -90,13 +90,17 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
 /// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
 /// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
 /// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
-/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b), and
+/// those of the databases that an imported strategy names (`strategy`: its database, opened as
+/// the type of its program's subjects, and the repeat filter's; line RG-F item F2f).
+#[allow(clippy::too_many_arguments)]
 pub fn search_database_read_files(
     program: crate::api::Program,
     arguments: &[&str],
     registry: &dyn RegistryFiles,
     dbs: &[&str],
     filtering_dbs: &[&str],
+    strategy: Option<&StrategyReads>,
     outfmt: &str,
     expands_taxids: bool,
 ) -> Vec<Vec<u8>> {
@@ -112,9 +116,21 @@ pub fn search_database_read_files(
         crate::api::Program::Tblastx => RequestKind::Tblastx,
         crate::api::Program::Psiblast => RequestKind::Psiblast,
     };
-    let has_db = !dbs.is_empty();
+    let strategy_db = strategy.and_then(|reads| {
+        let seqtype = match reads.subject_is_protein {
+            true => crate::seqdb::SeqType::Protein,
+            false => crate::seqdb::SeqType::Nucleotide,
+        };
+        reads.database.as_deref().map(|db| (db, seqtype))
+    });
+    let strategy_filtering_db = strategy.and_then(|reads| reads.filtering_db.as_deref());
+    let has_db = !dbs.is_empty() || strategy_db.is_some();
     let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
-    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+    if !has_db
+        && filtering_dbs.is_empty()
+        && strategy_filtering_db.is_none()
+        && taxdb_use == OutfmtTaxdbUse::None
+    {
         return Vec::new();
     }
     let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
@@ -146,6 +162,9 @@ pub fn search_database_read_files(
     for db in dbs {
         push_db(&mut out, db, seqtype);
     }
+    if let Some((db, db_type)) = strategy_db {
+        push_db(&mut out, db, db_type);
+    }
     let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
     out.extend(crate::seqdb::taxdb::lookup_files_for_use(
         blastdb.as_deref(),
@@ -159,11 +178,27 @@ pub fn search_database_read_files(
             out.push(tax_file.to_vec());
         }
     }
-    for fdb in filtering_dbs {
+    for fdb in filtering_dbs.iter().copied().chain(strategy_filtering_db) {
         push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
     }
     out
 }
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// What the strategy file `bytes` of a search's `-import_search_strategy` makes the run read
+/// (`report::archive::read::import::strategy_reads`, the command line's reading before it opens
+/// `-logfile`), where the argv gives `-db` or `-subject` (`override_subject`) or not: its
+/// database, the repeat filter's database, the window masker's taxid and its MegaBLAST index.
+/// `None` for bytes that do not read as a strategy (the run's import reports them).
+pub fn strategy_reads(bytes: &[u8], override_subject: bool) -> Option<StrategyReads> {
+    crate::report::archive::read::import::strategy_reads(
+        std::io::Cursor::new(bytes),
+        override_subject,
+    )
+}
+
+pub use crate::report::archive::read::import::StrategyReads;
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
 // before the arguments (`preparse`, NCBI's scan of `-logfile`), the registry files that the host

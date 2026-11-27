@@ -18,6 +18,7 @@ use crate::blastinput::ncbi_environment::{
     log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget, TextPlace,
 };
 use crate::cli::Commands;
+use crate::report::log_inputs::Supplied;
 use crate::report::run_files::RunFiles;
 
 /// A start whose `-logfile` file is open (`open`), before its configuration load (`load`).
@@ -32,15 +33,18 @@ pub(super) struct Opened {
 /// this process (its environment and its registry files), up to the configuration load: the
 /// usage report's messages go to `diagnostics` (NCBI writes them to `cerr` at once), the file of
 /// `-logfile` is opened (appended to) and gets them (`ApplicationStart::write_log_setup`). `Err`
-/// with LOSAT's refusal of the start.
+/// with LOSAT's refusal of the start, which refuses a `-logfile` naming a file that the run reads,
+/// of its argv or of the call's inputs `supplied` (`report::log_inputs`).
 pub(super) fn open<S: AsRef<OsStr> + Clone>(
     program: &str,
     words: &[S],
+    supplied: Supplied<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<Opened, Error> {
     open_with(
         ApplicationStart::of_process(program, words),
         words,
+        supplied,
         &RunFiles::Disk,
         diagnostics,
     )
@@ -51,6 +55,7 @@ pub(super) fn open<S: AsRef<OsStr> + Clone>(
 fn open_with<S: AsRef<OsStr> + Clone>(
     start: ApplicationStart,
     words: &[S],
+    supplied: Supplied<'_>,
     files: &RunFiles,
     diagnostics: &mut dyn Write,
 ) -> Result<Opened, Error> {
@@ -60,18 +65,19 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let (mut target, log_name) = match files.log_target_for(words, &start, log_file(words)) {
-        Ok(opened) => opened,
-        Err(reason) => {
-            let program = crate::cli::reader::tool(start.program()).map_or_else(
-                || start.program().to_ascii_uppercase(),
-                |tool| tool.refusal_name.to_string(),
-            );
-            return Err(Error::Search(
-                crate::seqmasks_io::run::unsupported(&reason, &program).into(),
-            ));
-        }
-    };
+    let (mut target, log_name) =
+        match files.log_target_for(words, supplied, &start, log_file(words)) {
+            Ok(opened) => opened,
+            Err(reason) => {
+                let program = crate::cli::reader::tool(start.program()).map_or_else(
+                    || start.program().to_ascii_uppercase(),
+                    |tool| tool.refusal_name.to_string(),
+                );
+                return Err(Error::Search(
+                    crate::seqmasks_io::run::unsupported(&reason, &program).into(),
+                ));
+            }
+        };
     start.write_log_setup(&mut target, diagnostics);
     Ok(Opened {
         start,
@@ -127,9 +133,10 @@ pub(super) struct Started {
 pub(super) fn begin<S: AsRef<OsStr> + Clone>(
     program: &str,
     words: &[S],
+    supplied: Supplied<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<Started, Error> {
-    open(program, words, diagnostics)?.load(diagnostics)
+    open(program, words, supplied, diagnostics)?.load(diagnostics)
 }
 
 /// The application start of one search call of the library, made at the call's beginning. The
@@ -183,7 +190,7 @@ impl CallStart {
         let diag: std::sync::Arc<crate::ncbi_exception::MainDiag> = Default::default();
         let _run = crate::ncbi_exception::MainDiag::enter(Some(diag.clone()));
         let program = search.program().name();
-        let started = begin(program, search.argv(), diagnostics)?;
+        let started = begin(program, search.argv(), inputs.supplied(), diagnostics)?;
         let command = search.command(inputs, &started.target)?;
         let settings = started
             .settings
@@ -465,8 +472,8 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     // (`ApplicationStart`'s messages), so `Display` replaces no byte of them: the one message that
     // can hold bytes that are not UTF-8, a `-conffile` name's, is made from a name that its host
     // gives as text.
-    let mut opened =
-        open_with(start, words, files, diagnostics).map_err(|error| error.to_string())?;
+    let mut opened = open_with(start, words, Supplied::default(), files, diagnostics)
+        .map_err(|error| error.to_string())?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
     // NCBI's application reads and prints the versions before it loads the configuration.
     let ended = match version {

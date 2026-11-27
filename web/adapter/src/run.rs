@@ -614,9 +614,15 @@ struct SearchRunFiles {
 ///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
 ///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
 ///   `registered` so a missing file does not make its parent folders present.
+///
+/// With `-import_search_strategy NAME`, the registered strategy file (kind 3) adds what it makes
+/// the run read (`losat::web_adapter::strategy_reads`, line RG-F item F2f): its database's and
+/// its repeat filter database's lookup files to `read`, the counts of its window masker taxid to
+/// `registered` where the host registered them.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
-        preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
+        preparse, scan_program_argv, search_database_read_files, strategy_reads, Preparsed,
+        RegistryFiles as _,
     };
     use std::path::Path;
 
@@ -659,6 +665,8 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let mut outfmt: Option<String> = None;
     let mut has_taxids = false;
     let mut no_taxid_expansion = false;
+    let mut strategy: Option<String> = None;
+    let mut override_subject = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
         if name == "no_taxid_expansion" && value.is_none() {
@@ -668,7 +676,11 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         let Some(value) = value else {
             return;
         };
+        if matches!(name, "db" | "subject") {
+            override_subject = true;
+        }
         match name {
+            "import_search_strategy" => strategy = Some(value.to_string()),
             "query" | "subject" => push_input(&mut registered, value),
             "in_pssm" | "in_msa" => push_input(&mut read_always, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
@@ -710,6 +722,12 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
+    let reads = strategy
+        .and_then(|name| crate::files::strategy(Path::new(&name)))
+        .and_then(|bytes| strategy_reads(&bytes, override_subject));
+    if let Some(taxid) = reads.as_ref().and_then(|reads| reads.window_masker_taxid) {
+        push_taxid(&mut registered, &taxid.to_string());
+    }
     let mut read = read_always;
     if !dbs.is_empty() {
         read.extend(list_files);
@@ -722,6 +740,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         registry,
         &db_refs,
         &filtering_db_refs,
+        reads.as_ref(),
         outfmt.as_deref().unwrap_or("0"),
         has_taxids && !no_taxid_expansion,
     ));

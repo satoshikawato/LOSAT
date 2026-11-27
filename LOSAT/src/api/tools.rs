@@ -266,7 +266,12 @@ pub fn run_makeblastdb(
     };
     // NCBI's application start (`cli::main_entry`): the usage report's messages, the `-logfile`
     // file, the versions (`ncbi_version::print`, line RG item E3), then the configuration load.
-    let mut opened = match super::start::open("makeblastdb", argv, &mut recorded) {
+    let mut opened = match super::start::open(
+        "makeblastdb",
+        argv,
+        crate::report::log_inputs::Supplied::default(),
+        &mut recorded,
+    ) {
         Ok(opened) => opened,
         Err(error) => return Err(refused(recorded, error.message())),
     };

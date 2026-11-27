@@ -320,3 +320,78 @@ fn a_run_imports_its_strategy_once() {
     }
     files::release(handle).unwrap();
 }
+
+/// A `-logfile` that names a file which the imported strategy makes the run read is refused at
+/// both `validate` and `run`, as the command line refuses it before it opens the file (line RG-F
+/// item F2f: D23's inputs through the search's file receiver, D19b): the lookup files of the
+/// strategy's database, typed by the strategy's program (BLASTX running a TBLASTX strategy reads a
+/// nucleotide database, so its `.pin` is no file of the run), the taxonomy lookup of `-outfmt 15`
+/// against that database, and the repeat filter's database of a BLASTN strategy. The argv's
+/// `-subject` replaces the strategy's database, and `-logfile run.log` runs.
+#[test]
+fn a_logfile_naming_what_the_strategy_reads_is_refused() {
+    let refusal = |program: &str, name: &str| {
+        format!(
+            "a -logfile file '{name}' that is a file of the run's directory (LOSAT Web reads the \
+             run's files and writes none of them) is not supported by LOSAT's {}",
+            program.to_ascii_uppercase()
+        )
+    };
+    // The databases of the strategies, relative to the test's working directory (`web/adapter`).
+    let root = "../../LOSAT/tests/db_search/";
+    let register = |name: &str, file: &str| {
+        let text = std::fs::read_to_string(format!("{}/ss/{file}", fixtures())).unwrap();
+        assert!(text.contains("\"tests/db_search/"), "{file}");
+        let text = text.replace("\"tests/db_search/", &format!("\"{root}"));
+        register_strategy(name, text.as_bytes())
+    };
+    let handles = [
+        register("f2f_tbx.ss", "tblastx.db.ss"),
+        register("f2f_bp.ss", "blastp.db.ss"),
+        register("f2f_rpt.ss", "bn_rpt.ss"),
+    ];
+    fn words<'a>(program: &'a str, strategy: &'a str, more: &[&'a str]) -> Vec<&'a str> {
+        let mut words = vec![program, "-import_search_strategy", strategy];
+        words.extend_from_slice(more);
+        words
+    }
+    let nin = format!("{root}arch_tbx_snucl.nin");
+    let pin = format!("{root}arch_sprot.pin");
+    let rpt = format!("{root}rpt_d4.nhr");
+    for (program, strategy, more, named) in [
+        ("blastx", "f2f_tbx.ss", vec![], nin.as_str()),
+        ("blastp", "f2f_bp.ss", vec![], pin.as_str()),
+        ("blastp", "f2f_bp.ss", vec!["-outfmt", "15"], "taxdb.bti"),
+        ("blastn", "f2f_rpt.ss", vec![], rpt.as_str()),
+    ] {
+        let mut argv = words(program, strategy, &more);
+        argv.extend(["-logfile", named]);
+        let want = refusal(program, named);
+        assert_eq!(
+            crate::run::validate(&argv).unwrap_err(),
+            want,
+            "{strategy} {more:?}: validate"
+        );
+        assert_eq!(
+            run_imported(&argv, b"", b"").unwrap_err(),
+            want,
+            "{strategy} {more:?}: run"
+        );
+    }
+    // Not files of the run: the protein files of BLASTX's nucleotide database, the strategy's
+    // database where `-subject` replaces it, and a log of its own.
+    let tbx_pin = format!("{root}arch_tbx_snucl.pin");
+    crate::run::validate(&words("blastx", "f2f_tbx.ss", &["-logfile", &tbx_pin])).unwrap();
+    crate::run::validate(&words(
+        "blastp",
+        "f2f_bp.ss",
+        &["-subject", "s.fa", "-logfile", &pin],
+    ))
+    .unwrap();
+    let control = words("blastp", "f2f_bp.ss", &["-logfile", "run.log"]);
+    crate::run::validate(&control).unwrap();
+    run_imported(&control, b"", b"").unwrap();
+    for handle in handles {
+        files::release(handle).unwrap();
+    }
+}

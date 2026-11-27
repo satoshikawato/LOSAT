@@ -530,3 +530,88 @@ fn the_xml_reference_follows_the_options_and_the_pairwise_one_the_application() 
         );
     }
 }
+
+/// Line RG-F item F2f: what a strategy makes the run read, which `-logfile` must not name
+/// (`report::log_inputs`, line WQA D23): the strategy reader's names (`import::strategy_reads`, read
+/// before the file of `-logfile` is opened) equal those that the import keeps for the run
+/// (`ImportRun::reads`, the library API's), and the database's type is that of the strategy's
+/// program, not of the running one.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-579
+#[test]
+fn a_strategy_names_what_its_run_reads() {
+    use super::import::{strategy_reads, StrategyReads};
+    let read = |file: &str, override_subject: bool| {
+        let bytes = std::fs::read(fixtures("strategy/import/ss").join(file)).unwrap();
+        strategy_reads(std::io::Cursor::new(bytes), override_subject)
+    };
+    let database = |name: &str, protein: bool, blastn: bool| StrategyReads {
+        database: Some(format!("tests/db_search/{name}")),
+        subject_is_protein: protein,
+        blastn_task: blastn,
+        ..StrategyReads::default()
+    };
+    assert_eq!(
+        read("blastp.db.ss", false),
+        Some(database("arch_sprot", true, false))
+    );
+    assert_eq!(
+        read("tblastx.db.ss", false),
+        Some(database("arch_tbx_snucl", false, false))
+    );
+    // `-db` or `-subject` of the command line: the strategy's database is not read.
+    assert_eq!(
+        read("blastp.db.ss", true),
+        Some(StrategyReads {
+            subject_is_protein: true,
+            ..StrategyReads::default()
+        })
+    );
+    let repeat = read("bn_rpt.ss", false).unwrap();
+    assert_eq!(
+        repeat.filtering_db.as_deref(),
+        Some("tests/db_search/rpt_d4")
+    );
+    assert!(repeat.blastn_task);
+    let index = read("blastn.useidx_force.ss", false).unwrap();
+    assert_eq!(
+        index.mb_index.as_deref(),
+        Some("tests/db_search/arch_snucl")
+    );
+    assert_eq!(
+        read("s3a.blastn_WindowMaskerTaxId_0.ss", false)
+            .unwrap()
+            .window_masker_taxid,
+        Some(0)
+    );
+    // A strategy's subjects (Bioseqs) name no database.
+    assert_eq!(read("blastp.sub.ss", false).unwrap().database, None);
+    // What does not read as a strategy names nothing.
+    assert_eq!(
+        strategy_reads(std::io::Cursor::new(b"Blast4-request ::= {}\n"), false),
+        None
+    );
+    assert_eq!(strategy_reads(std::io::Cursor::new(b""), false), None);
+    // The import keeps the same names for the run, also where blastx runs a TBLASTX strategy
+    // (whose database is nucleotide).
+    for (running, file) in [
+        ("blastp", "blastp.db.ss"),
+        ("blastx", "tblastx.db.ss"),
+        ("blastn", "bn_rpt.ss"),
+        ("blastn", "blastn.useidx_force.ss"),
+    ] {
+        let command = imported(running, file, &[]);
+        let run = match &command {
+            crate::cli::Commands::Blastp(args) => args.import.as_ref(),
+            crate::cli::Commands::Blastn(args) => args.import.as_ref(),
+            crate::cli::Commands::Tblastx(args) => args.import.as_ref(),
+            _ => panic!("{running} {file}"),
+        }
+        .unwrap();
+        assert_eq!(
+            Some(run.reads.clone()),
+            read(file, false),
+            "{running} {file}"
+        );
+    }
+}

@@ -63,6 +63,14 @@ impl<'a> QueryFile<'a> {
             QueryFile::Pssm(path) | QueryFile::Alignment(path) => path,
         }
     }
+
+    /// The command line's option that names the file.
+    pub(crate) fn option(self) -> &'static str {
+        match self {
+            QueryFile::Pssm(_) => "in_pssm",
+            QueryFile::Alignment(_) => "in_msa",
+        }
+    }
 }
 
 /// The reader configuration of the command line for the input of `role`: the program's flags,
@@ -541,6 +549,27 @@ pub struct Inputs<'a> {
 }
 
 impl<'a> Inputs<'a> {
+    /// The inputs that the call's argv does not name, which the call's start reads as the command
+    /// line's words for them where it refuses a `-logfile` that names a file the run reads
+    /// (`report::log_inputs`, line WQA D23): the database (`-db`), the query's file (`-in_pssm`,
+    /// `-in_msa`) and what the strategy makes the run read (`-import_search_strategy`, whose
+    /// import named the database the inputs show).
+    pub(crate) fn supplied(&self) -> crate::report::log_inputs::Supplied<'a> {
+        match self.strategy {
+            Some(strategy) => crate::report::log_inputs::Supplied {
+                strategy: strategy.reads(),
+                ..Default::default()
+            },
+            None => crate::report::log_inputs::Supplied {
+                database: self
+                    .database
+                    .then_some(std::ffi::OsStr::new(self.subject_name)),
+                query_file: self.query_file.map(|file| (file.option(), file.path())),
+                strategy: None,
+            },
+        }
+    }
+
     /// The query and subject records, shown as `query` and `subject`.
     pub fn new(query: &'a [FastaRecord], subject: &'a [FastaRecord]) -> Self {
         Self {

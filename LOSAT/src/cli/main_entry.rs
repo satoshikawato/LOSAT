@@ -201,6 +201,7 @@ fn run_main_entry() -> Result<()> {
                 .map_or(start.program(), |tool| tool.refusal_name);
             match crate::report::run_files::RunFiles::Disk.log_target_for(
                 &argv[2..],
+                crate::report::log_inputs::Supplied::default(),
                 start,
                 crate::blastinput::ncbi_environment::log_file(&argv[2..]),
             ) {

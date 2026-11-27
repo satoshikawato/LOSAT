@@ -137,15 +137,23 @@ impl RunFiles {
     /// Like [`RunFiles::log_target`], also enforcing the command-line / library self-reference
     /// refusal on [`RunFiles::Disk`] before opening or creating `-logfile` (line WQA D23,
     /// `Q-D23=A`): refuses any `-logfile` pointing to an input file read by `start.program()`
-    /// with `words` and `start` (`report::log_inputs::check_disk_logfile`).
+    /// with `words`, the library call's inputs `supplied` (none on the command line) and `start`
+    /// (`report::log_inputs::check_disk_logfile_with`).
     pub(crate) fn log_target_for<S: AsRef<OsStr>>(
         &self,
         words: &[S],
+        supplied: crate::report::log_inputs::Supplied<'_>,
         start: &crate::blastinput::ncbi_environment::ApplicationStart,
         name: Option<&OsStr>,
     ) -> Result<(DiagTarget, Option<Vec<u8>>), String> {
         if matches!(self, RunFiles::Disk) {
-            crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
+            crate::report::log_inputs::check_disk_logfile_with(
+                start.program(),
+                words,
+                supplied,
+                start,
+                name,
+            )?;
         }
         self.log_target(name)
     }

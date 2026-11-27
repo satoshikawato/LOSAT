@@ -230,6 +230,12 @@ impl Strategy {
         self.database.as_deref()
     }
 
+    /// What the strategy makes a search read (its import's `ImportRun::reads`): the input set of
+    /// a call's refusal of a `-logfile` that names one of them (`Inputs::supplied`).
+    pub(crate) fn reads(&self) -> Option<&crate::report::archive::read::import::StrategyReads> {
+        import_run(&self.applied.0).map(|run| &run.reads)
+    }
+
     /// The arguments of `search`, which must be the search that read this strategy.
     pub(crate) fn command(&self, search: &Search) -> Result<Commands, Error> {
         if search.program() != self.program || search.argv() != self.argv {

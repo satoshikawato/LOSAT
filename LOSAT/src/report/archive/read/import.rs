@@ -96,6 +96,100 @@ impl Imported {
     }
 }
 
+/// The databases and files that a strategy names and that the run of its import then opens, which
+/// its command line does not name (line RG-F item F2f): the input set of LOSAT's refusal of a
+/// `-logfile` that names a file the run reads (`report::log_inputs`, line WQA D23), which NCBI's
+/// application opens before it reads the strategy. The names are the strategy's whether the
+/// import then takes them or refuses the strategy: the file of `-logfile` is open by then, and the
+/// posts of a failed import go into it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StrategyReads {
+    /// The strategy's database (`s_ImportDatabase`), when the command line names neither `-db`
+    /// nor `-subject`: the running program's `-db`.
+    pub database: Option<String>,
+    /// Whether the subject of the strategy's program is protein (`Blast_SubjectIsProtein`), the
+    /// type that its database is opened as.
+    pub subject_is_protein: bool,
+    /// Whether the strategy's program is BLASTN's (blastn, megablast, dc-megablast: a task that
+    /// BLASTN runs, whose database may be searched with its MegaBLAST index).
+    pub blastn_task: bool,
+    /// The repeat filter's database (`RepeatFiltering`, `RepeatFilteringDB`), BLASTN's
+    /// `-filtering_db`: a nucleotide database.
+    pub filtering_db: Option<String>,
+    /// `WindowMaskerTaxId`, BLASTN's `-window_masker_taxid` (0 masks nothing).
+    pub window_masker_taxid: Option<i32>,
+    /// The MegaBLAST index that the strategy forces (`ForceMbIndex` with `MbIndexName`), which
+    /// BLASTN opens as the database of that name (a new-style index) or the old-style index
+    /// files of the name.
+    pub mb_index: Option<String>,
+}
+
+impl StrategyReads {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:565-579
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-756
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:50-51
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-89
+    /// The names of the strategy whose options are `options` and whose subject is the database
+    /// `database` (`None`: its subjects are Bioseqs, or the command line overrides them): the
+    /// setters read as the import reads them (`Collected::take`: the last repeat filter setter
+    /// and the forced index), the subject's type that of the options' program type.
+    pub(crate) fn of(database: Option<&str>, options: &ImportedOptions) -> Self {
+        let mut collected = Collected::default();
+        let mut window_masker_taxid = None;
+        for setter in &options.options.setters {
+            match setter {
+                Setter::WindowMaskerTaxId(taxid) => window_masker_taxid = Some(*taxid),
+                other => {
+                    collected.take(other);
+                }
+            }
+        }
+        let program = options.options.program;
+        Self {
+            database: database.map(str::to_string),
+            subject_is_protein: matches!(
+                program,
+                EProgram::Blastp
+                    | EProgram::Blastx
+                    | EProgram::RpsBlast
+                    | EProgram::RpsTblastn
+                    | EProgram::PsiBlast
+                    | EProgram::DeltaBlast
+                    | EProgram::PhiBlastp
+            ),
+            blastn_task: matches!(
+                program,
+                EProgram::Blastn | EProgram::Megablast | EProgram::DiscMegablast
+            ),
+            filtering_db: collected.repeat.flatten(),
+            window_masker_taxid,
+            mb_index: collected.index,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// The names that the strategy read from `input` makes the run open ([`StrategyReads`]), read as
+/// the import reads the strategy (`extract_request`, the request, its options) but without the
+/// import's queries, subjects and posts, and with `override_subject` where the command line gives
+/// `-db` or `-subject` (`CBlastDatabaseArgs::HasBeenSet`). NCBI's application opens the file of
+/// `-logfile` before its `Run` reads the strategy, so LOSAT reads the names before the file is
+/// opened. `None` where the input does not read as a strategy whose options are built: the import
+/// then fails with its own error, which this reading neither writes nor changes.
+pub(crate) fn strategy_reads<R: IoRead + Seek>(
+    input: R,
+    override_subject: bool,
+) -> Option<StrategyReads> {
+    let request = Request::from_strategy(extract_request(input, "").ok()?).ok()?;
+    let options = import_request(&request).ok()?;
+    let database = match (&request.subject, override_subject) {
+        (Subject::Database(name), false) => Some(String::from_utf8_lossy(name).into_owned()),
+        _ => None,
+    };
+    Some(StrategyReads::of(database.as_deref(), &options))
+}
+
 /// `s_ImportSearchStrategy`'s `CInputException` for a file that does not read as a request
 /// (its message in LOSAT's words is NCBI's).
 fn failed_to_read() -> anyhow::Error {
@@ -573,6 +667,9 @@ pub(crate) struct ImportRun {
     /// The strategy's parameters as its setters record them, in the file's order: the
     /// archive's options (`options::OptionInputs::imported`).
     pub(crate) recorded: Vec<crate::report::archive::options::Param>,
+    /// The databases and files that the strategy makes the run open (the library API's input set
+    /// of `-logfile`'s refusal, `report::log_inputs`).
+    pub(crate) reads: StrategyReads,
 }
 
 impl ImportRun {
@@ -790,6 +887,7 @@ impl Start {
                 .iter()
                 .flat_map(recorded_params)
                 .collect(),
+            reads: StrategyReads::of(self.database(), &self.imported.options),
         })
     }
 
@@ -1517,6 +1615,13 @@ pub(crate) fn apply(
         }
         other => Ok(other),
     }
+}
+
+/// Whether the command line of the program named `name` (NCBI's name) imports the strategy of its
+/// `-import_search_strategy` ([`apply`]'s programs; the parsers of psiblast, rpsblast and
+/// rpstblastn refuse the option).
+pub(crate) fn imports_strategies(name: &str) -> bool {
+    matches!(name, "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx")
 }
 
 /// Whether the arguments `command` give a strategy that is not imported yet ([`apply`] imports

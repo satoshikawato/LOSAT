@@ -855,3 +855,267 @@ fn symlinks_and_hardlinks_to_inputs_are_refused() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Copies NCBI's strategy exports of `tests/fixtures/strategy/import/ss/` and the databases that
+/// they name (`tests/db_search/<name>.*`) into `dir`, at the paths that the strategies name.
+fn strategy_inputs(dir: &Path, strategies: &[&str], databases: &[&str]) {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let db_dir = dir.join("tests/db_search");
+    fs::create_dir_all(&db_dir).unwrap();
+    for entry in fs::read_dir(engine.join("tests/db_search")).unwrap() {
+        let entry = entry.unwrap();
+        let file = entry.file_name();
+        let file_text = file.to_string_lossy();
+        if databases
+            .iter()
+            .any(|name| file_text.starts_with(&format!("{name}.")))
+            && entry.path().is_file()
+        {
+            fs::copy(entry.path(), db_dir.join(&file)).unwrap();
+        }
+    }
+    for strategy in strategies {
+        fs::copy(
+            engine
+                .join("tests/fixtures/strategy/import/ss")
+                .join(strategy),
+            dir.join(strategy),
+        )
+        .unwrap();
+    }
+}
+
+/// Line RG-F item F2f: a `-logfile` naming a file that an imported strategy makes the run read
+/// (its database, opened as the type of its program's subjects; the repeat filter's database; the
+/// window masker's counts of its taxid; its MegaBLAST index, new-style and old-style) is refused
+/// as the command line's inputs are, before the file is opened (NCBI's application opens it before
+/// its run reads the strategy). A strategy whose database the command line overrides, a strategy
+/// read from the standard input (read once, by the import) and a file that is not a strategy (the
+/// import's own error, unchanged) add nothing.
+#[test]
+fn a_logfile_naming_what_an_imported_strategy_reads_is_refused() {
+    let dir = fresh_dir("strategy");
+    strategy_inputs(
+        &dir,
+        &[
+            "blastp.db.ss",
+            "tblastx.db.ss",
+            "bn_rpt.ss",
+            "blastn.useidx_force.ss",
+            "s3a.blastn_WindowMaskerTaxId_0.ss",
+        ],
+        &[
+            "arch_sprot",
+            "arch_tbx_snucl",
+            "arch_snucl",
+            "rpt_d4",
+            "wm_s60k",
+        ],
+    );
+    // Hand-edited strategies: a forced index of another name than the database, and a window
+    // masker taxid whose counts file exists in the run's folder (`[WINDOW_MASKER]` unset: `.`).
+    let edit = |from: &str, to: &str, old: &str, new: &str| {
+        let text = fs::read_to_string(dir.join(from)).unwrap();
+        assert!(text.contains(old), "{from}: {old}");
+        fs::write(dir.join(to), text.replace(old, new)).unwrap();
+    };
+    edit(
+        "blastn.useidx_force.ss",
+        "mbidx.ss",
+        "value string \"tests/db_search/arch_snucl\"",
+        "value string \"tests/db_search/rpt_d4\"",
+    );
+    edit(
+        "s3a.blastn_WindowMaskerTaxId_0.ss",
+        "wm9606.ss",
+        "name \"WindowMaskerTaxId\",\n        value integer 0",
+        "name \"WindowMaskerTaxId\",\n        value integer 9606",
+    );
+    fs::create_dir_all(dir.join("9606")).unwrap();
+    fs::write(dir.join("9606/wmasker.obinary"), b"counts\n").unwrap();
+    fs::write(dir.join("ps.fa"), PROT_FASTA).unwrap();
+    fs::write(dir.join("junk.ss"), b"not a strategy\n").unwrap();
+
+    let refused: &[(&str, &str, &str, &str)] = &[
+        (
+            "db",
+            "blastp",
+            "blastp.db.ss",
+            "tests/db_search/arch_sprot.pin",
+        ),
+        (
+            "db sequences",
+            "blastp",
+            "blastp.db.ss",
+            "tests/db_search/arch_sprot.psq",
+        ),
+        // blastx running a TBLASTX strategy searches its nucleotide database.
+        (
+            "nucleotide db of blastx",
+            "blastx",
+            "tblastx.db.ss",
+            "tests/db_search/arch_tbx_snucl.nin",
+        ),
+        (
+            "nucleotide db of blastn",
+            "blastn",
+            "tblastx.db.ss",
+            "tests/db_search/arch_tbx_snucl.nsq",
+        ),
+        (
+            "repeat filter db",
+            "blastn",
+            "bn_rpt.ss",
+            "tests/db_search/rpt_d4.nhr",
+        ),
+        (
+            "new-style index",
+            "blastn",
+            "mbidx.ss",
+            "tests/db_search/rpt_d4.nin",
+        ),
+        (
+            "old-style index",
+            "blastn",
+            "mbidx.ss",
+            "tests/db_search/rpt_d4.00.idx",
+        ),
+        (
+            "window masker taxid",
+            "blastn",
+            "wm9606.ss",
+            "9606/wmasker.obinary",
+        ),
+    ];
+    for &(label, program, strategy, log_name) in refused {
+        let watched = dir.join(log_name);
+        let before = watched.exists().then(|| snapshot(&watched));
+        let out = run_in(
+            &dir,
+            &[
+                program,
+                "-import_search_strategy",
+                strategy,
+                "-logfile",
+                log_name,
+            ],
+            &[],
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "Error: a -logfile file '{log_name}' that is also an input file"
+            )),
+            "{label}: {stderr}"
+        );
+        match &before {
+            Some(snap) => assert_refused_and_unchanged(&out, &[(&watched, snap)], label),
+            None => {
+                assert_refused_and_unchanged(&out, &[], label);
+                assert!(!watched.exists(), "{label}: {log_name} was made");
+            }
+        }
+    }
+
+    // The command line's `-subject` overrides the strategy's database: not refused, and the
+    // search runs.
+    let out = run_in(
+        &dir,
+        &[
+            "blastp",
+            "-import_search_strategy",
+            "blastp.db.ss",
+            "-subject",
+            "ps.fa",
+            "-outfmt",
+            "6",
+            "-logfile",
+            "tests/db_search/arch_sprot.pin",
+        ],
+        &[],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "override: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // A strategy read from the standard input is read once, by the import: the check does not
+    // read it, and the run equals the one that names the file.
+    let named = run_in(
+        &dir,
+        &[
+            "blastp",
+            "-import_search_strategy",
+            "blastp.db.ss",
+            "-outfmt",
+            "6",
+            "-logfile",
+            "named.log",
+        ],
+        &[],
+    );
+    assert_eq!(
+        named.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    assert!(!named.stdout.is_empty());
+    let mut cmd = Command::new(BIN);
+    cmd.current_dir(&dir)
+        .args([
+            "blastp",
+            "-import_search_strategy",
+            "-",
+            "-outfmt",
+            "6",
+            "-logfile",
+            "stdin.log",
+        ])
+        .env_remove("BLASTDB")
+        .env_remove("BLAST_USAGE_REPORT")
+        .env("HOME", &dir)
+        .stdin(fs::File::open(dir.join("blastp.db.ss")).unwrap());
+    let piped = cmd.output().unwrap();
+    assert_eq!(
+        piped.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&piped.stderr)
+    );
+    assert_eq!(piped.stdout, named.stdout);
+    assert_eq!(
+        fs::read(dir.join("stdin.log")).unwrap(),
+        fs::read(dir.join("named.log")).unwrap()
+    );
+
+    // A file that is not a strategy: the import's error, byte for byte as with another
+    // `-logfile`, which gets it.
+    let pin = dir.join("tests/db_search/arch_sprot.pin");
+    let pin_before = fs::read(&pin).unwrap();
+    let junk = |log_name: &str| {
+        run_in(
+            &dir,
+            &[
+                "blastp",
+                "-import_search_strategy",
+                "junk.ss",
+                "-logfile",
+                log_name,
+            ],
+            &[],
+        )
+    };
+    let other = junk("junk.log");
+    let at_db = junk("tests/db_search/arch_sprot.pin");
+    assert_eq!(at_db.status.code(), other.status.code());
+    assert_ne!(other.status.code(), Some(0));
+    assert_eq!(at_db.stderr, other.stderr);
+    assert_eq!(at_db.stdout, other.stdout);
+    let appended = fs::read(&pin).unwrap()[pin_before.len()..].to_vec();
+    assert_eq!(appended, fs::read(dir.join("junk.log")).unwrap());
+
+    let _ = fs::remove_dir_all(&dir);
+}

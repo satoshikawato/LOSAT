@@ -7,7 +7,11 @@
 //! min -> 10 GiB on NCBI 2.17.0 in probe `s2-query`), or corrupt `.ncbirc` on its second read
 //! (`s2-ncbirc-self`). LOSAT refuses any `-logfile` that would open or create a file read by the
 //! run before writing or creating it, using the same rule on the command line, in the library API,
-//! and in LOSAT Web.
+//! and in LOSAT Web. The files a run reads include those that the strategy of
+//! `-import_search_strategy` names (its database, the repeat filter's database, the window
+//! masker's counts of its taxid and its MegaBLAST index: `import::StrategyReads`, line RG-F item
+//! F2f), which NCBI reads after it has opened the file of `-logfile`, and the library API's inputs
+//! that its argv does not name (`Supplied`).
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -18,6 +22,7 @@ use crate::blastinput::ncbi_environment::{
 };
 use crate::dbindex::format::{volume_name as mb_index_volume_name, SuperHeader};
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
+use crate::report::archive::read::import::{imports_strategies, strategy_reads, StrategyReads};
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
@@ -45,6 +50,35 @@ pub(crate) struct RunInputs {
     pub(crate) mb_indexes: Vec<OsString>,
     /// Explicit `-dbtype` (`prot` or `nucl`) for tools whose database type is not fixed by program.
     pub(crate) dbtype: Option<SeqType>,
+    /// BLAST databases whose type an imported strategy fixes (`add_strategy`), which may not be
+    /// the running program's (blastx running a TBLASTX strategy searches a nucleotide database).
+    pub(crate) typed_databases: Vec<TypedDatabase>,
+}
+
+/// A BLAST database of [`RunInputs::typed_databases`].
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TypedDatabase {
+    /// The name, passed verbatim to `SeqDb::read_paths`.
+    pub(crate) name: OsString,
+    /// The type it is opened as.
+    pub(crate) seqtype: SeqType,
+    /// Whether the files of its volumes' MegaBLAST indexes count (a BLASTN task's database, as
+    /// BLASTN's `-db` and `-filtering_db` on the command line).
+    pub(crate) mb_volumes: bool,
+}
+
+/// The inputs of a library call that its argv does not name, which the call gives as `api::Inputs`
+/// (its argv holds none of `-db`, `-in_pssm`, `-in_msa` and `-import_search_strategy`): the
+/// command line's words for them. The command line gives none (`Supplied::default`).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Supplied<'a> {
+    /// The database (`Inputs::database`), the command line's `-db`.
+    pub(crate) database: Option<&'a OsStr>,
+    /// The query's PSSM or alignment file, with its option (`in_pssm`, `in_msa`).
+    pub(crate) query_file: Option<(&'static str, &'a Path)>,
+    /// What the strategy of `Inputs::strategy` makes the run read (its import's
+    /// `ImportRun::reads`), the command line's `-import_search_strategy FILE`.
+    pub(crate) strategy: Option<&'a StrategyReads>,
 }
 
 /// Checks whether `-logfile` `log_name` on `Disk` would open or create an input file read by the
@@ -59,6 +93,17 @@ pub(crate) fn check_disk_logfile<S: AsRef<OsStr>>(
     start: &ApplicationStart,
     log_name: Option<&OsStr>,
 ) -> Result<(), String> {
+    check_disk_logfile_with(program, words, Supplied::default(), start, log_name)
+}
+
+/// [`check_disk_logfile`] of a run that also reads the inputs `supplied` (a library call's).
+pub(crate) fn check_disk_logfile_with<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    supplied: Supplied<'_>,
+    start: &ApplicationStart,
+    log_name: Option<&OsStr>,
+) -> Result<(), String> {
     if special_log_target(log_name).is_some() {
         return Ok(());
     }
@@ -69,7 +114,7 @@ pub(crate) fn check_disk_logfile<S: AsRef<OsStr>>(
     if candidates.is_empty() {
         return Ok(());
     }
-    let inputs = collect_run_inputs(program, words, start);
+    let inputs = collect_run_inputs(program, words, supplied, start);
     if matches_any_input(program, &candidates, &inputs, start) {
         return Err(format!(
             "a -logfile file '{}' that is also an input file read by this run (appending \
@@ -117,13 +162,14 @@ fn disk_log_candidates(program: &str, raw_name: &OsStr) -> Vec<PathBuf> {
     candidates
 }
 
-/// Collects all direct input file paths and BLAST database names that `program` with `words` and
-/// `start` reads. Version requests (`-version`, `-version-full`, `-version-full-xml`,
-/// `-version-full-json`) exit before reading command-line inputs, so only the registry inputs
-/// recorded by `start` apply.
+/// Collects all direct input file paths and BLAST database names that `program` with `words`,
+/// `supplied` and `start` reads. Version requests (`-version`, `-version-full`,
+/// `-version-full-xml`, `-version-full-json`) exit before reading command-line inputs, so only the
+/// registry inputs recorded by `start` apply.
 pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
+    supplied: Supplied<'_>,
     start: &ApplicationStart,
 ) -> RunInputs {
     let mut inputs = RunInputs::default();
@@ -140,7 +186,7 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
         "rpsbproc" => collect_rpsbproc_inputs(words, &mut inputs),
         "makembindex" => collect_makembindex_inputs(words, &mut inputs),
         "dustmasker" | "segmasker" => collect_masker_inputs(program, words, &mut inputs),
-        _ => collect_general_inputs(program, words, start, &mut inputs),
+        _ => collect_general_inputs(program, words, supplied, start, &mut inputs),
     }
     inputs
 }
@@ -334,17 +380,22 @@ fn collect_masker_inputs<S: AsRef<OsStr>>(program: &str, words: &[S], inputs: &m
 /// Collects input files for search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`,
 /// `psiblast`, `rpsblast`, `rpstblastn`) and all remaining tools (`blastdbcmd`,
 /// `blastdb_aliastool`, `blastdbcheck`, `convert2blastmask`, `makeprofiledb`, and any future
-/// programs whose input files use `Kind::InputFile` or `-archive`).
+/// programs whose input files use `Kind::InputFile` or `-archive`), with the library call's inputs
+/// `supplied` read as the command line's words for them, and the names that the strategy of
+/// `-import_search_strategy` makes the run read (`strategy_names`).
 fn collect_general_inputs<S: AsRef<OsStr>>(
     program: &str,
     words: &[S],
+    supplied: Supplied<'_>,
     start: &ApplicationStart,
     inputs: &mut RunInputs,
 ) {
     let is_blastn = program == "blastn";
     let mut reads_formatter_rc = false;
     let mut blastn_dbs: Vec<OsString> = Vec::new();
-    scan_argv_kinds(program, words, |name, kind, value| {
+    let mut strategy: Option<OsString> = None;
+    let mut override_subject = false;
+    let mut visit = |name: &'static str, kind: Kind, value: Option<&OsStr>| {
         if name == "html" {
             reads_formatter_rc = true;
             return;
@@ -363,6 +414,11 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             }
             return;
         }
+        match name {
+            "import_search_strategy" => strategy = Some(value.to_os_string()),
+            "db" | "subject" => override_subject = true,
+            _ => {}
+        }
         if kind == Kind::InputFile {
             push_non_stdin_file(&mut inputs.files, value);
             return;
@@ -377,23 +433,8 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                 inputs.add_file(value);
             }
             "window_masker_taxid" if is_blastn => {
-                if let Some(taxid) = value
-                    .to_str()
-                    .and_then(|s| s.parse::<i32>().ok())
-                    .filter(|&id| id != 0)
-                {
-                    let base = start
-                        .settings()
-                        .ok()
-                        .and_then(|s| s.window_masker_registry.ok())
-                        .and_then(|r| r.path)
-                        .filter(|p| !p.is_empty())
-                        .map(crate::utils::os_bytes::path_from_bytes)
-                        .unwrap_or_else(|| PathBuf::from("."));
-                    push_file(
-                        &mut inputs.files,
-                        base.join(taxid.to_string()).join("wmasker.obinary"),
-                    );
+                if let Some(taxid) = value.to_str().and_then(|s| s.parse::<i32>().ok()) {
+                    inputs.add_window_masker_taxid(taxid, start);
                 }
             }
             "dbtype" => {
@@ -413,11 +454,25 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             }
             _ => {}
         }
-    });
+    };
+    scan_argv_kinds(program, words, &mut visit);
+    if let Some(database) = supplied.database {
+        visit("db", Kind::Text, Some(database));
+    }
+    if let Some((option, path)) = supplied.query_file {
+        visit(option, Kind::InputFile, Some(path.as_os_str()));
+    }
     if is_blastn && inputs.mb_indexes.is_empty() {
         for db in blastn_dbs {
             inputs.add_mb_index(&db);
         }
+    }
+    if let Some(reads) = supplied.strategy {
+        inputs.add_strategy(reads, start);
+    }
+    if let Some(reads) = strategy.and_then(|path| strategy_names(program, &path, override_subject))
+    {
+        inputs.add_strategy(&reads, start);
     }
     if reads_formatter_rc {
         push_file(&mut inputs.files, PathBuf::from(".ncbirc"));
@@ -428,6 +483,27 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             }
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-879
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// What the strategy file `path` of `program`'s `-import_search_strategy` makes the run read
+/// (`import::strategy_reads`; `override_subject`: the command line gives `-db` or `-subject`),
+/// read before the file of `-logfile` is opened, as NCBI's application opens it before its run
+/// reads the strategy. Only a program whose command line imports strategies reads it, and only a
+/// regular file, which a second reading finds as the import does: the standard input (`-`), a
+/// pipe or a device is read once, by the import, and adds nothing here. A file that does not read
+/// as a strategy adds nothing either (the import reports it).
+fn strategy_names(program: &str, path: &OsStr, override_subject: bool) -> Option<StrategyReads> {
+    if !imports_strategies(program) || path.is_empty() || path == "-" {
+        return None;
+    }
+    let path = Path::new(path);
+    if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    strategy_reads(std::io::BufReader::new(file), override_subject)
 }
 
 /// Whether any path in `candidates` refers to the same file (or missing target) as any input in
@@ -447,13 +523,22 @@ fn matches_any_input(
             return true;
         }
     }
-    if !inputs.databases.is_empty() || !inputs.mb_indexes.is_empty() {
+    if !inputs.databases.is_empty()
+        || !inputs.mb_indexes.is_empty()
+        || !inputs.typed_databases.is_empty()
+    {
         let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
         let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
         let seqtypes = db_seqtypes(program, inputs.dbtype);
         let is_blastn = program == "blastn";
         for db in &inputs.databases {
             if matches_database(candidates, db, seqtypes, &search_path, is_blastn) {
+                return true;
+            }
+        }
+        for db in &inputs.typed_databases {
+            let seqtypes = std::slice::from_ref(&db.seqtype);
+            if matches_database(candidates, &db.name, seqtypes, &search_path, db.mb_volumes) {
                 return true;
             }
         }
@@ -587,6 +672,63 @@ impl RunInputs {
 
     fn add_mb_index(&mut self, value: &OsStr) {
         push_db_list(&mut self.mb_indexes, value);
+    }
+
+    fn add_typed_db(&mut self, name: &str, seqtype: SeqType, mb_volumes: bool) {
+        let entry = TypedDatabase {
+            name: OsString::from(name),
+            seqtype,
+            mb_volumes,
+        };
+        if !name.is_empty() && name != "-" && !self.typed_databases.contains(&entry) {
+            self.typed_databases.push(entry);
+        }
+    }
+
+    /// The counts file of BLASTN's window masker for `taxid` (`-window_masker_taxid`, a strategy's
+    /// `WindowMaskerTaxId`): `<path>/<taxid>/wmasker.obinary` under the registry's
+    /// `[WINDOW_MASKER] WINDOW_MASKER_PATH` (`.` without one); none for 0.
+    fn add_window_masker_taxid(&mut self, taxid: i32, start: &ApplicationStart) {
+        if taxid == 0 {
+            return;
+        }
+        let base = start
+            .settings()
+            .ok()
+            .and_then(|s| s.window_masker_registry.ok())
+            .and_then(|r| r.path)
+            .filter(|p| !p.is_empty())
+            .map(crate::utils::os_bytes::path_from_bytes)
+            .unwrap_or_else(|| PathBuf::from("."));
+        push_file(
+            &mut self.files,
+            base.join(taxid.to_string()).join("wmasker.obinary"),
+        );
+    }
+
+    /// The names that an imported strategy makes the run read (`reads`): its database as the type
+    /// of its program's subjects, the repeat filter's database, the window masker's counts of its
+    /// taxid, and its MegaBLAST index, as both the database of that name (a new-style index) and
+    /// the old-style index files of the name.
+    fn add_strategy(&mut self, reads: &StrategyReads, start: &ApplicationStart) {
+        if let Some(database) = &reads.database {
+            let seqtype = if reads.subject_is_protein {
+                SeqType::Protein
+            } else {
+                SeqType::Nucleotide
+            };
+            self.add_typed_db(database, seqtype, reads.blastn_task);
+        }
+        if let Some(database) = &reads.filtering_db {
+            self.add_typed_db(database, SeqType::Nucleotide, reads.blastn_task);
+        }
+        if let Some(taxid) = reads.window_masker_taxid {
+            self.add_window_masker_taxid(taxid, start);
+        }
+        if let Some(index) = &reads.mb_index {
+            self.add_typed_db(index, SeqType::Nucleotide, true);
+            self.add_mb_index(OsStr::new(index));
+        }
     }
 
     fn set_dbtype(&mut self, value: &OsStr) {

@@ -128,7 +128,8 @@ fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
 /// The bytes of `defline_set`'s record besides its title: at most 77 (eleven tags with indefinite
 /// lengths and their eleven ends, the title's tag and a length of up to 9 bytes, `BL_ORD_ID` with
 /// its tag and length, and two integers of up to 6 bytes), so that the record is written into its
-/// buffer without growing it (LOSAT's speed).
+/// buffer without growing it (LOSAT's speed; NCBI has no such capacity, and the reference is where
+/// it builds the record).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893
 const DEFLINE_SET_OVERHEAD: usize = 80;
@@ -149,10 +150,11 @@ fn title_prefix(out: &mut Vec<u8>, title: &[u8]) {
 /// The bytes of `title` that `defline_set` writes as `#`, with the stream offsets that it reports,
 /// without writing the record. The title is the record's first string, so its offsets do not
 /// depend on the oid or the taxid. `ExtractBioseqDeflines` serializes the definition line only for
-/// these diagnostics (cited at `WriteDb::extract_bioseq_deflines`); computing them alone gives the
-/// same diagnostics (LOSAT's speed).
+/// these diagnostics (cited at `WriteDb::extract_bioseq_deflines`; its record is a local string
+/// that is not kept); computing them alone gives the same diagnostics (LOSAT's speed).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
 pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
     let Some(first) = find_first(title, is_bad_visible) else {
         return;
@@ -230,8 +232,8 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
 
 /// The capacity that `encode_defline_set` gives the record of `set`: 64 bytes, and for each
 /// definition line its title (when writing string bytes) and 64 bytes an id, so that a record of
-/// the usual size is written without growing its buffer (LOSAT's speed); a larger one grows as
-/// before.
+/// the usual size is written without growing its buffer (LOSAT's speed; NCBI has no such
+/// capacity, and the reference is where it builds the record); a larger one grows as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
 fn encoded_capacity(set: &DeflineSet, write_strings: bool) -> usize {
@@ -282,17 +284,19 @@ impl SetWriter<'_> {
         close(&mut self.out);
     }
 
-    /// Enters the member or alternative `name`: the path names one more frame, as the object
-    /// stack does for a member. The record's types make at most `MEMBER_PATH_DEPTH` names; a
-    /// deeper path panics on the index.
+    /// Enters the member, the alternative or the element (`E`) `name`: the path names one more
+    /// frame, as the object stack does for each of them (an element's frame is pushed by the
+    /// container writer). The record's types make at most `MEMBER_PATH_DEPTH` names; a deeper
+    /// path panics on the index.
     ///
-    /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.inl:193-202
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.inl:178-202
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256
     fn push_path(&mut self, name: &'static str) {
         self.path[self.path_len] = name;
         self.path_len += 1;
     }
 
-    /// Leaves the innermost member of the path.
+    /// Leaves the innermost member, alternative or element of the path.
     ///
     /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.inl:205-214
     fn pop_path(&mut self) {
@@ -521,10 +525,12 @@ pub(crate) fn encode_defline_set_checked(
 /// The diagnostics of `encode_defline_set(set, bad)` without its record: the strings' bytes
 /// are searched, not written (`SetWriter::write_strings`). `ExtractBioseqDeflines` serializes the
 /// definition lines it built only for these diagnostics and throws the bytes away (cited at
-/// `WriteDb::post_extracted_deflines`); computing them alone gives the same diagnostics (LOSAT's
-/// speed: the record is written once, for the header).
+/// `WriteDb::post_extracted_deflines`; its record is a local string that is not kept); computing
+/// them alone gives the same diagnostics (LOSAT's speed: the record is written once, for the
+/// header).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
 pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
     SetWriter::new(set, false, bad)
         .set(set, &[])
@@ -532,7 +538,8 @@ pub fn defline_set_bad_chars(set: &DeflineSet, bad: &mut Vec<BadChar>) {
 }
 
 impl<'a> SetWriter<'a> {
-    /// The writer of the record of `set`, with or without the bytes of its strings.
+    /// The writer of the record of `set`, with or without the bytes of its strings (the buffer's
+    /// capacity is LOSAT's, `encoded_capacity`; the reference is where NCBI builds the record).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
     fn new(set: &DeflineSet, write_strings: bool, bad: &'a mut Vec<BadChar>) -> Self {

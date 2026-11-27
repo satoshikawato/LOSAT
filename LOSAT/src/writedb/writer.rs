@@ -316,10 +316,12 @@ impl WriteDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
     // The call serializes the definition line once (writedb_impl.cpp:887-893,
     // with the sequence's own id), which posts the diagnostics of its title;
-    // the bytes are not kept, so only the diagnostics are computed
-    // (`header::bad_title_chars`, the offsets that the serialization reports).
+    // the bytes are not kept (a local string, with the oid -1), so only the
+    // diagnostics are computed (`header::bad_title_chars`, the offsets that the
+    // serialization reports).
     /// `CWriteDB::ExtractBioseqDeflines` as far as it is visible: the
     /// diagnostics of the title.
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
@@ -329,6 +331,7 @@ impl WriteDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
     /// The serialization of `ExtractBioseqDeflines` with `-parse_seqids`: the
     /// diagnostics of the definition lines it built (`writedb::deflines`), before
     /// `FixTaxId` gives them a taxid. The bytes are not kept, so only the diagnostics are
